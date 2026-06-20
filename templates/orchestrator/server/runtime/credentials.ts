@@ -125,7 +125,7 @@ export async function listRuntimeCredentials(): Promise<CredentialKey[]> {
     key: "~/.claude (subscription)",
     present: claudeLoggedIn,
     description:
-      "Local Claude Code OAuth, mounted read-only into a claude-code node's microVM so it reuses your Pro/Max login (not an API key).",
+      "Local Claude Code OAuth, copied into a claude-code node's disposable microVM (the host copy is never modified) so it reuses your Pro/Max login (not an API key).",
     mountedBy: ["claude-code"],
   });
 

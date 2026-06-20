@@ -8,12 +8,15 @@
 // the VM (claude owns its own tools + loop). The host only spawns the process
 // and reads its stdout stream.
 //
-// E2E is DEFERRED to P2c: a live in-VM `claude` needs VM public egress (to reach
-// the Anthropic API) + a read-only `~/.claude` mount for the subscription, and
-// the prebaked image must carry the `claude` CLI — all P2c. This file builds the
-// executor and is unit-tested against a captured stream-json sample
-// (`claude-stream.ts` + its spec). The command construction + stream draining +
-// usage summing are real now; only the live boot is deferred.
+// In-VM E2E landed in P2c: a live in-VM `claude` reaches the Anthropic API via
+// the VM's DIRECT public egress (DNS fix + host NAT, §7.4.9), reusing the host
+// `~/.claude` subscription copied into the disposable VM (host copy untouched,
+// §7.4.7), with the `claude` CLI installed via egress (§7.4.8). PROVEN on a real
+// microVM (2026-06-21): with a valid host login the in-VM `claude --output-format
+// stream-json -p …` returned a real reply + real subscription usage. The command
+// construction + stream draining + usage summing are unit-tested against a
+// captured stream-json sample (`claude-stream.ts` + spec); the live boot is
+// exercised by `claude-vm-e2e.ts` (gated on a fresh host `claude login`).
 
 import { parseClaudeStreamJson } from "./claude-stream.js";
 import type {

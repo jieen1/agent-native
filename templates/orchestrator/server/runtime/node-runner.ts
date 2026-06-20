@@ -210,10 +210,20 @@ export class NodeRunner {
   ): Promise<NodeRunnerResult> {
     // STAGE 1 — PROVISION.
     const vm: VmHandle = await runtime.provision(spec);
+    // Stash the worktree + the claude-want flag on the VM meta so the runtime's
+    // MOUNT/INIT (egress + ~/.claude RO mount + toolchain) know the cwd and
+    // whether to install the claude CLI (DESIGN §7.1a/§7.4.7/§7.4.8).
+    const wantClaude = this.executor.kind === "claude-code";
+    if (vm.meta) vm.meta.workdir = WORKDIR;
+    const mountEnv: Record<string, string> = {
+      ...(spec.env ?? {}),
+      ...(wantClaude ? { ORCHESTRATOR_WANT_CLAUDE: "1" } : {}),
+    };
     let succeeded = false;
     try {
-      // STAGE 2 — MOUNT (dirs + creds; minimal P2a seam). Always create the
-      // node worktree so the acting bridge / claude have a cwd that exists.
+      // STAGE 2 — MOUNT (dirs + egress + creds; DESIGN §7.4.7/§7.4.9). Always
+      // create the node worktree so the acting bridge / claude have a cwd that
+      // exists; the runtime resolves egress + mounts ~/.claude + GITHUB_TOKEN.
       await runtime.mount(vm, {
         repo: spec.mounts?.find((m) => m.path === WORKDIR)?.host,
         folders: [
@@ -221,7 +231,7 @@ export class NodeRunner {
           ...(spec.mounts ?? []),
         ],
         creds: spec.creds,
-        env: spec.env,
+        env: mountEnv,
       });
       const mk = await runtime.exec(vm, `mkdir -p ${WORKDIR}`);
       if (mk.code !== 0) {

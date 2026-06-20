@@ -23,6 +23,41 @@ export { MicrosandboxRuntime, toWslPath } from "./microsandbox-runtime.js";
 export { NoneRuntime } from "./none-runtime.js";
 export { wslMsb, wslMsbStream, msbAvailable, shArg } from "./wsl-msb.js";
 
+// P2c — public egress wiring, in-VM credential mount, base-image ensure, and the
+// thin in-VM git wrapper (DESIGN §7.1/§7.4.7/§7.4.8/§7.4.9).
+export {
+  resolveEgress,
+  ensureHostProxy,
+  parseGateway,
+  buildNoProxy,
+  HOST_PROXY_PORT,
+  type VmEgress,
+} from "./networking.js";
+export {
+  mountVmCredentials,
+  resolveGithubTokenEnv,
+  mountClaudeSubscription,
+  VM_HOME,
+  type VmCredsResult,
+} from "./vm-creds.js";
+export {
+  ensureToolchain,
+  probeTools,
+  type ToolchainNeeds,
+  type ToolchainResult,
+} from "./vm-setup.js";
+export {
+  checkoutRunBranch,
+  addAll,
+  commit,
+  pushBranch,
+  openPr,
+  runBranchName,
+  type GitContext,
+  type PushResult,
+  type OpenPrResult,
+} from "./git-wrapper.js";
+
 // P2b — the 7-stage NodeRunner + the VM-bound acting bridge + executors.
 export { createVmActingBridge } from "./acting-bridge.js";
 export type { VmActingBridgeOptions } from "./acting-bridge.js";

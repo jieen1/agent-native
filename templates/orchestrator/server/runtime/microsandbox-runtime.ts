@@ -33,9 +33,43 @@ import type {
 } from "./node-runtime.js";
 import type { NodeRuntimeSpec } from "../../shared/types.js";
 import { shArg, wslMsb, wslMsbStream, type WslMsbOptions } from "./wsl-msb.js";
+import { resolveEgress } from "./networking.js";
+import { mountVmCredentials, VM_HOME } from "./vm-creds.js";
+import { ensureToolchain, type ToolchainNeeds } from "./vm-setup.js";
+import {
+  checkoutRunBranch,
+  type GitContext,
+} from "./git-wrapper.js";
 
 /** Default node image until the prebaked image lands (DESIGN §7.4.8, P2c). */
 const DEFAULT_IMAGE = "alpine";
+
+/**
+ * Per-VM env the runtime threads into EVERY in-VM `exec`/`spawn` (DESIGN §7.4.7
+ * / §7.4.9): HOME, GITHUB_TOKEN, and the egress env (DNS-fixed VM + any working
+ * forward-proxy). Computed at MOUNT/INIT and stashed on the handle's `meta` so
+ * later executor calls (claude/git) inherit it without re-resolving secrets.
+ */
+const RUNTIME_ENV_META_KEY = "runtimeEnv";
+
+/** Read the persisted per-VM runtime env off a handle's meta (empty if unset). */
+function runtimeEnvOf(vm: VmHandle): Record<string, string> {
+  const env = vm.meta?.[RUNTIME_ENV_META_KEY];
+  return env && typeof env === "object" ? (env as Record<string, string>) : {};
+}
+
+/** Decide which tools a node needs in its VM (§7.4.8). */
+function toolchainNeedsFor(vm: VmHandle): ToolchainNeeds {
+  // Every microvm node may run git (commit/push). The claude CLI + node are only
+  // required for a claude-code node, signalled by `ORCHESTRATOR_WANT_CLAUDE=1`
+  // in the node env (set by the NodeRunner when the executor is claude-code) —
+  // checked in BOTH the spec env and the persisted runtime env so the flag is
+  // honored however it was threaded.
+  const wantClaude =
+    vm.spec.env?.ORCHESTRATOR_WANT_CLAUDE === "1" ||
+    runtimeEnvOf(vm).ORCHESTRATOR_WANT_CLAUDE === "1";
+  return { node: wantClaude, git: true, claude: wantClaude };
+}
 
 /**
  * Build the `sh -lc` argv tail for an in-VM command, applying `cwd` by `cd`-ing
@@ -116,25 +150,33 @@ export class MicrosandboxRuntime implements NodeRuntime {
     }
     // Sanity: the last non-warning stdout line should echo our chosen name.
     const printed = lastNonEmptyLine(res.stdout);
+    // `meta` is a MUTABLE bag (the property ref is readonly, the object is not):
+    // MOUNT/INIT fill `runtimeEnv` (egress + creds + HOME) here so every later
+    // exec/spawn inherits it (DESIGN §7.4.7/§7.4.9).
     return {
       name,
       spec,
-      meta: { image, printedName: printed },
+      meta: { image, printedName: printed, [RUNTIME_ENV_META_KEY]: {} },
     };
   }
 
   /**
-   * STAGE 2 — MOUNT. P2a: applies extra plain `env` (recorded on the handle for
-   * later execs via the executor; msb has no "set persistent env on a running
-   * VM" call, so env is threaded per-exec by the NodeRunner) and records
-   * repo/folders/creds for P2c. Secret VALUES are NOT resolved here and never
-   * written to source. Real `--mount-dir` + `resolveSecret` injection is P2c.
+   * STAGE 2 — MOUNT (DESIGN §7.4.7/§7.4.9, P2c REAL). Creates folder targets,
+   * then:
+   *   • resolves PUBLIC EGRESS for this boot — fixes the VM's dead DNS, probes
+   *     direct NAT egress, falls back to the host forward-proxy only if it truly
+   *     works, and keeps the host vLLM in NO_PROXY (§7.4.9);
+   *   • copies the `~/.claude` subscription into the disposable VM (for a claude
+   *     node; the host copy is never modified — left writable in-VM so claude can
+   *     refresh its OAuth token within the run) and resolves GITHUB_TOKEN from the
+   *     Vault as scoped VM env (§7.4.7).
+   * The combined env (egress + HOME + GITHUB_TOKEN + the node's plain `env`) is
+   * stashed on `vm.meta.runtimeEnv` so EVERY later exec/spawn (claude/git)
+   * inherits it. Secret VALUES live only in that in-process env map — never
+   * written to source or files. `resolveSecret` must run inside the run's
+   * request context, which the NodeRunner/engine establishes.
    */
   async mount(vm: VmHandle, mounts: MountSpec): Promise<void> {
-    // P2a no-op-with-bookkeeping: stash what would be mounted so P2c can wire
-    // the real `--mount-dir` / cred injection. We avoid mutating the readonly
-    // handle; the NodeRunner owns mount state. For folders we *can* already
-    // create their target dirs in the VM so later copies have a destination.
     for (const folder of mounts.folders ?? []) {
       const res = await this.exec(vm, `mkdir -p ${shArg(folder.path)}`);
       if (res.code !== 0) {
@@ -143,17 +185,58 @@ export class MicrosandboxRuntime implements NodeRuntime {
         );
       }
     }
-    // repo / creds are intentionally not acted on in P2a (see method doc).
+
+    const wantClaude =
+      (mounts.creds ?? []).includes("~/.claude") ||
+      mounts.env?.ORCHESTRATOR_WANT_CLAUDE === "1" ||
+      vm.spec.env?.ORCHESTRATOR_WANT_CLAUDE === "1";
+
+    // 1) Egress: fix DNS + decide direct-vs-proxy. Keep the host vLLM direct.
+    const vllmHosts = noProxyHostsFor(vm.spec, mounts.env);
+    const egress = await resolveEgress(this, vm, { noProxyHosts: vllmHosts });
+
+    // 2) Credentials: ~/.claude RO mount (claude nodes) + GITHUB_TOKEN env.
+    const creds = await mountVmCredentials(this, vm, {
+      wantClaude,
+      home: VM_HOME,
+      nodeRunId: (vm.meta?.nodeRunId as string | undefined) ?? null,
+    });
+
+    // Compose the per-VM runtime env: HOME first, then the node's plain env, then
+    // egress, then creds (creds/egress win). Stash on the mutable meta bag.
+    const runtimeEnv: Record<string, string> = {
+      HOME: VM_HOME,
+      ...(mounts.env ?? {}),
+      ...egress.env,
+      ...creds.env,
+    };
+    setRuntimeEnv(vm, runtimeEnv);
+
+    // Record the mount picture on meta for journaling (value-safe booleans).
+    if (vm.meta) {
+      vm.meta.egress = {
+        gateway: egress.gateway,
+        directEgress: egress.directEgress,
+        proxyUrl: egress.proxyUrl,
+      };
+      vm.meta.creds = {
+        claudeMounted: creds.claudeMounted,
+        githubTokenPresent: creds.githubTokenPresent,
+      };
+    }
     void mounts.repo;
-    void mounts.creds;
-    void mounts.env;
   }
 
   /**
-   * STAGE 3 — INIT. P2a: runs the one-time `setup` commands (each via the VM
-   * shell, with `env` applied) so a node can install extra deps. The real git
-   * `checkout -b <branch> <baseRef>` is P2c — this method does NOT assume a git
-   * repo exists, so `branch` is recorded/validated but not acted upon here.
+   * STAGE 3 — INIT (DESIGN §7.4.4/§7.4.8/§7.1a, P2c REAL). In order:
+   *   1. ENSURE TOOLCHAIN (§7.4.8): a prebaked image short-circuits; the bare
+   *      `alpine` base installs node+npm+git (+ the `claude` CLI for a claude
+   *      node) via the egress wired in MOUNT.
+   *   2. CHECKOUT the per-run branch `an/run-<runId>` from `baseRef` (§7.1a) when
+   *      a worktree exists — a fresh `git init` otherwise, so branch+commit work
+   *      even without a remote (the push step is where a remote is required).
+   *   3. run the one-time `setup` commands.
+   * All run with the persisted runtime env (egress + creds + HOME).
    */
   async init(
     vm: VmHandle,
@@ -161,10 +244,36 @@ export class MicrosandboxRuntime implements NodeRuntime {
     env?: Record<string, string>,
     setup?: string[],
   ): Promise<void> {
-    // branch/baseRef checkout is P2c (needs the repo mount). Recorded only.
-    void branch;
+    // Fold any late `env` into the persisted runtime env (creds/egress win).
+    const baseEnv = runtimeEnvOf(vm);
+    const runEnv: Record<string, string> = { ...(env ?? {}), ...baseEnv };
+    setRuntimeEnv(vm, runEnv);
+
+    // 1) Toolchain (§7.4.8). Uses the egress env so installs can reach the net.
+    await ensureToolchain(this, vm, toolchainNeedsFor(vm), runEnv);
+
+    // 2) Branch checkout (§7.1a). Only when a workdir is known; the NodeRunner
+    //    mounts `/work`, so we cut the run branch there.
+    const workdir =
+      (vm.meta?.workdir as string | undefined) ??
+      vm.spec.mounts?.find((m) => m.mode === "rw")?.path ??
+      "/work";
+    if (branch && branch.trim() !== "") {
+      const gitCtx: GitContext = {
+        runtime: this,
+        vm,
+        workdir,
+        env: runEnv,
+      };
+      await checkoutRunBranch(gitCtx, {
+        branch,
+        baseRef: vm.spec.baseRef,
+      });
+    }
+
+    // 3) Setup commands.
     for (const cmd of setup ?? []) {
-      const res = await this.exec(vm, cmd, { env });
+      const res = await this.exec(vm, cmd, { env: runEnv });
       if (res.code !== 0) {
         throw new Error(
           `init: setup command failed (code ${res.code}): ${cmd}\n${res.stderr}`,
@@ -185,12 +294,12 @@ export class MicrosandboxRuntime implements NodeRuntime {
       opts?.timeoutMs && opts.timeoutMs > 0
         ? { ...this.opts, timeoutMs: opts.timeoutMs }
         : this.opts;
-    return wslMsb(execArgs(vm.name, cmd, opts), wslOpts);
+    return wslMsb(execArgs(vm.name, cmd, withRuntimeEnv(vm, opts)), wslOpts);
   }
 
   /** STAGE 4 — streamed command. Backs claude `--output-format stream-json`. */
   spawn(vm: VmHandle, cmd: string, opts?: ExecOptions): SpawnHandle {
-    return wslMsbStream(execArgs(vm.name, cmd, opts));
+    return wslMsbStream(execArgs(vm.name, cmd, withRuntimeEnv(vm, opts)));
   }
 
   /** The VM-bound file surface (the acting bridge + extraction path). */
@@ -304,6 +413,49 @@ export class MicrosandboxRuntime implements NodeRuntime {
       );
     }
   }
+}
+
+/**
+ * Merge the VM's persisted runtime env (egress + creds + HOME) UNDER the
+ * caller's per-command `opts.env`, so explicit overrides win but every command
+ * inherits DNS/proxy/HOME/GITHUB_TOKEN by default (DESIGN §7.4.7/§7.4.9).
+ */
+function withRuntimeEnv(
+  vm: VmHandle,
+  opts: ExecOptions | undefined,
+): ExecOptions | undefined {
+  const base = runtimeEnvOf(vm);
+  if (Object.keys(base).length === 0) return opts;
+  return { ...opts, env: { ...base, ...(opts?.env ?? {}) } };
+}
+
+/** Persist the per-VM runtime env on the handle's mutable meta bag. */
+function setRuntimeEnv(vm: VmHandle, env: Record<string, string>): void {
+  if (vm.meta) vm.meta[RUNTIME_ENV_META_KEY] = env;
+}
+
+/**
+ * The hosts that must bypass the forward-proxy (§7.4.9): the vLLM endpoint stays
+ * DIRECT so a vLLM node reaches the host engine without traversing the proxy.
+ * Extracts the hostname from any OPENAI_BASE_URL/VLLM_BASE_URL in the node env.
+ */
+function noProxyHostsFor(
+  spec: NodeRuntimeSpec,
+  mountEnv?: Record<string, string>,
+): string[] {
+  const env = { ...(spec.env ?? {}), ...(mountEnv ?? {}) };
+  const urls = [env.OPENAI_BASE_URL, env.VLLM_BASE_URL].filter(
+    (u): u is string => typeof u === "string" && u.trim() !== "",
+  );
+  const hosts: string[] = [];
+  for (const u of urls) {
+    try {
+      hosts.push(new URL(u).hostname);
+    } catch {
+      // ignore malformed url
+    }
+  }
+  return hosts;
 }
 
 /** Last non-empty, non-warning line of msb stdout (the printed sandbox name). */
