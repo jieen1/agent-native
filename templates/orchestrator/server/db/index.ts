@@ -1,9 +1,12 @@
 import * as schema from "./schema.js";
-import { createGetDb } from "@agent-native/core/db";
+import { createGetDb, getDbExec } from "@agent-native/core/db";
 import { registerShareableResource } from "@agent-native/core/sharing";
 
 export const getDb = createGetDb(schema);
-export { schema };
+// Re-export the raw db-exec client (used by the queue's portable atomic claim /
+// reap, which need affected-row counts that the Drizzle query builder does not
+// surface) so the rest of the app imports it through one local module.
+export { schema, getDbExec };
 
 registerShareableResource({
   type: "task",

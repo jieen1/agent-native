@@ -8,13 +8,16 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { newId, nowIso } from "./_util.js";
 import { executeRun } from "../server/engine/index.js";
+import { startRunForWorkItem } from "../server/queue/run-work-item.js";
 
-// Instantiate a template into a workflow_runs row and schedule it (DESIGN §4.2 /
-// §0.6). `templateId` and `workItemId` are MUTUALLY EXCLUSIVE and exactly one is
-// required; P1 uses `templateId` (the `workItemId` path arrives in P3 and throws
-// here). `wait` (default true) drives the run to completion in-process so a
-// headless CLI test can assert the final state — echo is fast. A production
-// server-plugin tick may drive runs async, but a headless run MUST be awaitable.
+// Instantiate a template (or a work item) into a workflow_runs row and schedule
+// it (DESIGN §4.2 / §0.6). `templateId` and `workItemId` are MUTUALLY EXCLUSIVE
+// and exactly one is required. The `templateId` path is the P1 path; the
+// `workItemId` path (P3b) resolves the item's EXPLICIT workflowId → template,
+// binds workflow_run.work_item_id, and runs it (no microVM — runs on the engine).
+// `wait` (default true) drives the run to completion in-process so a headless CLI
+// test can assert the final state — echo is fast. A production server-plugin tick
+// may drive runs async, but a headless run MUST be awaitable.
 export default defineAction({
   description:
     "Start a v2 workflow run from a template. Returns { runId }. With wait=true (default) drives the run to completion (echo executor) so the final state is assertable headlessly.",
@@ -39,8 +42,40 @@ export default defineAction({
         "Provide exactly one of templateId or workItemId (mutually exclusive).",
       );
     }
+
+    // ── workItemId path (P3b): resolve the item's explicit workflow → run it,
+    // binding workflow_run.work_item_id. The workflow is resolved INSIDE
+    // startRunForWorkItem (explicit item.workflowId only for P3b; project-default
+    // + dynamic build is P3c). The caller must have write access to the item.
     if (hasWorkItem) {
-      throw new Error("workItemId path is not implemented until P3.");
+      const itemAccess = await resolveAccess("work_item", args.workItemId!);
+      if (!itemAccess) throw new Error(`Work item ${args.workItemId} not found`);
+      if (itemAccess.role === "viewer") throw new Error("Read-only access");
+
+      const ownerEmail = getRequestUserEmail() ?? "local@localhost";
+      const orgId = getRequestOrgId() ?? null;
+      const wait = args.wait ?? true;
+
+      const result = await startRunForWorkItem(args.workItemId!, {
+        ownerEmail,
+        orgId,
+        tokenBudget: args.tokenBudget ?? null,
+        execute: wait,
+        executeOpts: {
+          echoDelayMs: args.echoDelayMs,
+          caps: args.maxConcurrentModelCalls
+            ? { maxConcurrentModelCalls: args.maxConcurrentModelCalls }
+            : undefined,
+        },
+      });
+      return {
+        runId: result.runId,
+        workItemId: args.workItemId,
+        status: result.status,
+        tokensSpent: result.tokensSpent,
+        noWorkflow: result.noWorkflow ?? false,
+        reason: result.reason,
+      };
     }
 
     const access = await resolveAccess("workflow_template", args.templateId!);

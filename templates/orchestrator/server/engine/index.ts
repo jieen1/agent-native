@@ -13,10 +13,6 @@ import { EchoExecutor } from "./echo-executor.js";
 import { Scheduler, type RunOutcome } from "./scheduler.js";
 import { DEFAULT_CAPS, type NodeExecutor, type RunConfig } from "./types.js";
 import { buildResolverMap } from "./control.js";
-import {
-  RoutingNodeExecutor,
-  loadRuntimeConfigRows,
-} from "../runtime/routing-node-executor.js";
 import { reconcileOnTerminal } from "../work-items/watchdog.js";
 
 /** A fixed default seed so a run with no explicit seed is still deterministic. */
@@ -73,6 +69,13 @@ export async function executeRun(
   if (opts.executor) {
     executor = opts.executor;
   } else {
+    // Lazily pull in the routing executor (and its microVM/runtime chain) ONLY
+    // when no executor is injected. This keeps modules that drive the scheduler
+    // with an explicit executor (the headless queue path under test) free of the
+    // heavy runtime import graph.
+    const { RoutingNodeExecutor, loadRuntimeConfigRows } = await import(
+      "../runtime/routing-node-executor.js"
+    );
     const routingCtx = await loadRuntimeConfigRows({
       systemDefault: opts.systemDefault ?? null,
     });
