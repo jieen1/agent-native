@@ -93,14 +93,24 @@ NodeRuntime uses the SDK, not the CLI).
 
 ### Networking
 
-`msb run` networking flags: `-p/--port` (host→guest forward), `--net-default-egress`
-(default **deny**, with an implicit `allow@public` when no rules), `--net-rule`.
-Installed `passt` (`apt-get install -y passt`, via `wsl -u root`).
+**Backend: microsandbox uses libkrun's built-in networking** (`libkrunfw.so`) with its
+own policy engine — **not** passt/gvproxy (no such host process spawns; installing
+passt was a red herring and is irrelevant). The running `msb sandbox` process carries
+a `--network-config` JSON. Its **default policy** is:
+
+```
+default_egress: deny, default_ingress: allow
+allow egress → group "host", udp/tcp, port 53      (DNS only)
+allow egress → group "public", all protocols/ports (public internet allowed by policy)
+```
+
+`msb run` flags: `-p/--port` (host→guest forward), `--net-default-egress`,
+`--net-rule` (`allow@host` / `allow@public` / `allow@<ip>:tcp:<port>`).
 
 | Target | Result |
 |---|---|
-| VM → **host vLLM** at `http://<VM-default-gateway>:8000/v1/models` with `--net-default-egress allow` | ✅ **WORKS** — returned the `qwen3.6` model list (1392 bytes). **This is the D-6 answer: the in-VM reachable address for the host vLLM is the VM's own default-gateway IP at port 8000** (the per-boot gateway, e.g. `172.16.0.x`), with egress allowed. |
-| VM → public internet (`1.1.1.1` raw IP, and `example.com`) | ❌ **fails** even with `--net-default-egress allow --net-rule allow@public` and passt installed. passt under WSL2 mirrored networking reaches the host but not onward to the public internet. **Open config item** — blocks claude-API / remote-API / `git push` executors. |
+| VM → **host vLLM** at `http://<VM-default-gateway>:8000/v1/models` with `--net-default-egress allow` | ✅ **WORKS** — returned the `qwen3.6` model list (1392 bytes). **D-6 answer: the in-VM reachable host-vLLM address is the VM's own default-gateway IP at port 8000** (per-boot, e.g. `172.16.0.x`). Needs egress allowed to the **host group on :8000** (the default policy only opens host:53/DNS, so `--net-default-egress allow` or a scoped `--net-rule allow@host:tcp:8000` is required). |
+| VM → public internet (`1.1.1.1` raw IP; `example.com`) | ❌ **fails** even though the default policy **allows** the `public` group. The block is **below** the policy layer — libkrun's egress routing to the public internet does not function under this WSL2 host. The host group (the WSL gateway) is reachable, the public internet is not. **Open P2 item** — blocks claude-API / remote-API / `git push` executors; the local-vLLM path (host group) is unaffected. Fix is a libkrun-TSI-under-WSL2 routing investigation, not a policy change. |
 
 ### Items still PENDING (blocked on public egress — to finish in P2)
 
@@ -131,9 +141,11 @@ These P0-acceptance items could **not** be completed yet and are **not** faked:
 - **In-VM host vLLM address** = the VM's default-gateway IP (per-boot, `172.16.0.x`)
   at **port 8000** (not 8080), passed as the node's `baseUrl` env; run VMs with
   egress allowed (or a scoped `--net-rule` to the host).
-- **Public egress must be fixed** before claude/remote/git executors work — likely a
-  passt/WSL2 NAT or host-masquerade config; verify with the server+SDK path, not the
-  one-shot CLI.
+- **Public egress must be fixed** before claude/remote/git executors work. It is a
+  libkrun-TSI-under-WSL2 routing issue (the network policy already allows the public
+  group; the host group works, public does not). Investigate libkrun networking in
+  WSL2 + the server/SDK path, not the one-shot CLI. The local-vLLM (host group) path
+  is unaffected.
 - **`maxConcurrentVMs` initial = 8** (24 GB host, ~53 MB/idle-VM overhead).
 - **microVM code runs in WSL2/Linux** (the SDK's win32 binary is absent by design).
 - **Snapshot/fork fast path** = SDK/server, not CLI; (re)measure the ≤300 ms target
