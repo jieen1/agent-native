@@ -1,0 +1,96 @@
+import { defineAction } from "@agent-native/core";
+import {
+  getRequestUserEmail,
+  getRequestOrgId,
+} from "@agent-native/core/server/request-context";
+import { resolveAccess } from "@agent-native/core/sharing";
+import { z } from "zod";
+import { getDb, schema } from "../server/db/index.js";
+import { newId, nowIso } from "./_util.js";
+import { executeRun } from "../server/engine/index.js";
+
+// Instantiate a template into a workflow_runs row and schedule it (DESIGN §4.2 /
+// §0.6). `templateId` and `workItemId` are MUTUALLY EXCLUSIVE and exactly one is
+// required; P1 uses `templateId` (the `workItemId` path arrives in P3 and throws
+// here). `wait` (default true) drives the run to completion in-process so a
+// headless CLI test can assert the final state — echo is fast. A production
+// server-plugin tick may drive runs async, but a headless run MUST be awaitable.
+export default defineAction({
+  description:
+    "Start a v2 workflow run from a template. Returns { runId }. With wait=true (default) drives the run to completion (echo executor) so the final state is assertable headlessly.",
+  schema: z.object({
+    templateId: z.string().optional(),
+    workItemId: z.string().optional(),
+    // z.coerce so headless `--flag value` (string) CLI args validate.
+    tokenBudget: z.coerce.number().int().positive().optional(),
+    seed: z.coerce.number().int().optional(),
+    /** Observable echo delay (ms) so concurrency shows in timestamps. */
+    echoDelayMs: z.coerce.number().int().min(0).optional(),
+    /** Pin the model-call concurrency cap (tests assert overlap/queueing). */
+    maxConcurrentModelCalls: z.coerce.number().int().positive().optional(),
+    /** false = create + schedule but return immediately (no await). */
+    wait: z.coerce.boolean().optional(),
+  }),
+  run: async (args) => {
+    const hasTemplate = !!args.templateId;
+    const hasWorkItem = !!args.workItemId;
+    if (hasTemplate === hasWorkItem) {
+      throw new Error(
+        "Provide exactly one of templateId or workItemId (mutually exclusive).",
+      );
+    }
+    if (hasWorkItem) {
+      throw new Error("workItemId path is not implemented until P3.");
+    }
+
+    const access = await resolveAccess("workflow_template", args.templateId!);
+    if (!access) throw new Error(`Template ${args.templateId} not found`);
+    if (access.role === "viewer") throw new Error("Read-only access");
+
+    const ownerEmail = getRequestUserEmail() ?? "local@localhost";
+    const orgId = getRequestOrgId();
+    const db = getDb();
+    const runId = newId("run");
+    const now = nowIso();
+
+    await db.insert(schema.workflowRuns).values({
+      id: runId,
+      templateId: args.templateId!,
+      workItemId: null,
+      status: "pending",
+      deliverable: null,
+      tokenBudget: args.tokenBudget ?? null,
+      tokensSpent: 0,
+      startedAt: now,
+      completedAt: null,
+      ownerEmail,
+      orgId,
+      visibility: "private",
+    });
+
+    const wait = args.wait ?? true;
+    if (!wait) {
+      // Fire-and-forget: schedule without blocking (production tick model).
+      void executeRun(runId, {
+        echoDelayMs: args.echoDelayMs,
+        caps: args.maxConcurrentModelCalls
+          ? { maxConcurrentModelCalls: args.maxConcurrentModelCalls }
+          : undefined,
+      }).catch(() => undefined);
+      return { runId };
+    }
+
+    const outcome = await executeRun(runId, {
+      echoDelayMs: args.echoDelayMs,
+      caps: args.maxConcurrentModelCalls
+        ? { maxConcurrentModelCalls: args.maxConcurrentModelCalls }
+        : undefined,
+    });
+    return {
+      runId,
+      status: outcome.status,
+      tokensSpent: outcome.tokensSpent,
+      nodeRunCount: outcome.nodeRuns.length,
+    };
+  },
+});

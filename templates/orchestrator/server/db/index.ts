@@ -24,3 +24,25 @@ registerShareableResource({
   getResourcePath: (wf) => `/workflows/${(wf as { id: string }).id}`,
   getDb,
 });
+
+// ── v2 graph engine ownable resources ──────────────────────────────────────
+
+registerShareableResource({
+  type: "workflow_template",
+  resourceTable: schema.workflowTemplates,
+  sharesTable: schema.workflowTemplateShares,
+  displayName: "Workflow Template",
+  titleColumn: "name",
+  getResourcePath: (t) => `/templates/${(t as { id: string }).id}`,
+  getDb,
+});
+
+registerShareableResource({
+  type: "workflow_run",
+  resourceTable: schema.workflowRuns,
+  sharesTable: schema.workflowRunShares,
+  displayName: "Workflow Run",
+  titleColumn: "id",
+  getResourcePath: (r) => `/runs/${(r as { id: string }).id}`,
+  getDb,
+});
