@@ -1,6 +1,6 @@
 import { defineAction } from "@agent-native/core";
 import { accessFilter } from "@agent-native/core/sharing";
-import { desc } from "drizzle-orm";
+import { and, desc, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { parseGraph } from "../shared/types.js";
@@ -16,7 +16,10 @@ export default defineAction({
       .select()
       .from(schema.workflowTemplates)
       .where(
-        accessFilter(schema.workflowTemplates, schema.workflowTemplateShares),
+        and(
+          accessFilter(schema.workflowTemplates, schema.workflowTemplateShares),
+          isNull(schema.workflowTemplates.deletedAt),
+        ),
       )
       .orderBy(desc(schema.workflowTemplates.updatedAt));
     return rows.map((t) => {

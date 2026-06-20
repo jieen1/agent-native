@@ -68,6 +68,13 @@ export interface NodeExecutionInput {
   fanoutIndex: number;
   /** Loop iteration (0 outside a loop). */
   iteration: number;
+  /**
+   * Reasoning-effort hint (DESIGN §1.6) passed through to the executor — a real
+   * executor maps this onto `runAgentLoop`'s reasoning-effort option; the echo
+   * executor surfaces it in its output so node-get can prove the chosen value.
+   * Resolved from the node config (after any per-run node-override).
+   */
+  effort?: "low" | "medium" | "high";
 }
 
 /** What an executor returns. `output` is journaled as the node's artifact. */

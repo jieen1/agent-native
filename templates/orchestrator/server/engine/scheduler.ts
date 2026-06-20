@@ -523,6 +523,22 @@ export class Scheduler {
         dead += 1;
         continue;
       }
+      // ASYNC / fire-and-forget (DESIGN §3.2): an `await:false` dep does NOT
+      // block its downstream barrier. The moment the async node is in flight
+      // (running) its edge counts as a live path, so the successor (and any
+      // join over it) proceeds WITHOUT waiting for it to settle. The async
+      // NodeRun stays in `inFlight`, so the RUN itself still waits for it to
+      // settle before finishing (drive() exits only when inFlight is empty).
+      // A branch edge is never treated as pre-settled this way — a routing
+      // decision is only known once the branch is actually done.
+      if (
+        dep.status === "running" &&
+        dep.node.await === false &&
+        !isBranchEdge
+      ) {
+        live += 1;
+        continue;
+      }
       if (dep.status !== "done") {
         pending += 1;
         continue;
@@ -625,19 +641,33 @@ export class Scheduler {
 
   // ── Join cardinality sealing (DESIGN §4.1a) ────────────────────────────────
 
+  /**
+   * True when a dependency NodeRun satisfies a downstream BARRIER (a join or a
+   * parallel-after). A terminal status (done/failed/skipped) always satisfies.
+   * An `await:false` (fire-and-forget, DESIGN §3.2) dep satisfies the barrier
+   * the moment it is `running` — the barrier does NOT wait for it to settle.
+   * The async NodeRun stays in `inFlight`, so the RUN still waits for it before
+   * finishing; only the topology barrier is released early.
+   */
+  private barrierSatisfied(dep: NodeRunState | undefined): boolean {
+    if (!dep) return false;
+    if (
+      dep.status === "done" ||
+      dep.status === "failed" ||
+      dep.status === "skipped"
+    ) {
+      return true;
+    }
+    return dep.status === "running" && dep.node.await === false;
+  }
+
   private joinReady(state: NodeRunState): boolean {
     const fanoutId = nearestUpstreamFanout(this.g, state.node.id);
     if (!fanoutId) {
       // Plain barrier over direct predecessors.
-      return this.resolveDeps(state).every((d) => {
-        const dep = this.runs.get(keyStr(d.key));
-        return (
-          dep != null &&
-          (dep.status === "done" ||
-            dep.status === "failed" ||
-            dep.status === "skipped")
-        );
-      });
+      return this.resolveDeps(state).every((d) =>
+        this.barrierSatisfied(this.runs.get(keyStr(d.key))),
+      );
     }
     const scope = this.fanoutScopes.get(fanoutId);
     if (!scope) return false; // array not materialized → not sealed yet
@@ -646,7 +676,8 @@ export class Scheduler {
       (e) => enclosingFanout(this.g, e.from) === fanoutId,
     );
     if (feeders.length === 0) return false;
-    // Wait until EVERY index has settled (done|failed|skipped) for every feeder.
+    // Wait until EVERY index has settled (or is an in-flight await:false) for
+    // every feeder.
     for (let i = 0; i < scope.width; i++) {
       for (const f of feeders) {
         const dep = this.runs.get(
@@ -656,14 +687,7 @@ export class Scheduler {
             fanoutIndex: i,
           }),
         );
-        if (!dep) return false;
-        if (
-          dep.status !== "done" &&
-          dep.status !== "failed" &&
-          dep.status !== "skipped"
-        ) {
-          return false;
-        }
+        if (!this.barrierSatisfied(dep)) return false;
       }
     }
     return true;
@@ -1034,6 +1058,7 @@ export class Scheduler {
         deps: {},
         fanoutIndex: 0,
         iteration,
+        effort: bodyNode.effort,
       };
       let output: unknown;
       try {
@@ -1222,6 +1247,7 @@ export class Scheduler {
       item,
       fanoutIndex: state.key.fanoutIndex,
       iteration: state.key.iteration,
+      effort: state.node.effort,
     };
   }
 

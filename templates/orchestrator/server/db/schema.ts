@@ -96,6 +96,9 @@ export const workflowTemplates = table("workflow_templates", {
   version: integer("version").notNull().default(1),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  // Soft-delete marker (mirrors v1 `workflows.deletedAt`). A soft delete keeps
+  // any `workflow_runs` that referenced this template loadable for observation.
+  deletedAt: text("deleted_at"),
   ...ownableColumns(),
 });
 

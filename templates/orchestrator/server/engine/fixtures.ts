@@ -427,6 +427,51 @@ export const subworkflowTwoLevel: WorkflowGraph = {
 };
 
 /**
+ * 8e. ASYNC (await:false, §3.2) — `slow` is fire-and-forget. The barrier `join`
+ *     sits over both `slow` and the fast `quick`. Because `slow.await === false`,
+ *     the join is released the moment `slow` is merely RUNNING (it does NOT wait
+ *     for slow to settle), so `join` (and `end`) complete BEFORE `slow` does.
+ *     The RUN, however, keeps `slow` in flight and only finishes once `slow`
+ *     settles. Provable from node_runs timestamps:
+ *       - join.completed_at  <  slow.completed_at   (barrier released early)
+ *       - run.status === done only after slow.status === done (slow is done)
+ *     `quick` is the downstream non-barrier node that proceeds while slow runs.
+ */
+export const asyncAwaitFalse: WorkflowGraph = {
+  nodes: [
+    { id: "start", type: "start", title: "start" },
+    // Fire-and-forget: slow, and explicitly await:false.
+    {
+      id: "slow",
+      type: "agent",
+      title: "async-slow",
+      prompt: "long background job",
+      await: false,
+      effort: "high",
+      runtime: echo({ echoDelayMs: "120" }),
+    },
+    // The fast downstream non-barrier node — runs immediately, no wait on slow.
+    {
+      id: "quick",
+      type: "agent",
+      title: "quick",
+      prompt: "fast follow-up",
+      runtime: echo({ echoDelayMs: "5" }),
+    },
+    // Barrier over slow + quick; released early because slow is await:false.
+    { id: "join", type: "join", title: "collect", runtime: echo({}) },
+    { id: "end", type: "end", title: "end" },
+  ],
+  edges: [
+    { id: "e1", from: "start", to: "slow" },
+    { id: "e2", from: "start", to: "quick" },
+    { id: "e3", from: "slow", to: "join" },
+    { id: "e4", from: "quick", to: "join" },
+    { id: "e5", from: "join", to: "end" },
+  ],
+};
+
+/**
  * 9. TIMEOUT — a node whose echo delay (1500ms) exceeds its timeoutMs (50ms) is
  *    aborted and marked failed with a DISTINCT timeout error. Proves per-node
  *    timeout enforcement (DESIGN §3.4) headlessly with the echo executor.
@@ -510,6 +555,11 @@ export const FIXTURES: Record<
     name: "fixture: subworkflow-two-level",
     description: "rejected: two-level nesting",
     graph: subworkflowTwoLevel,
+  },
+  "async-await-false": {
+    name: "fixture: async-await-false",
+    description: "await:false node does not block its downstream join barrier",
+    graph: asyncAwaitFalse,
   },
   timeout: {
     name: "fixture: timeout",

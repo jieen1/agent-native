@@ -16,6 +16,13 @@ step to a sub-agent or sibling app, tracking progress, and delivering a result.
   `stop-task`, `save-runtime-config`, `list-runtime-configs`,
   `delete-runtime-config`, `activate-runtime`, `get-runtime-status`,
   `start-claude-code`, `navigate`, `view-screen`.
+- v2 graph engine surface (templates + runs): `save-template`, `list-templates`,
+  `get-template`, `delete-template`, `promote-run-to-template`, `run-start`,
+  `run-pause`, `run-resume`, `run-cancel`, `run-retry-node`, `node-override`,
+  `resolve-human-gate`, `node-report`, and the observers `run-get`, `run-graph`,
+  `node-get`, `run-events`, `list-runs`, plus `seed-fixtures`. Engine internals
+  (item-correlation, pipeline-vs-barrier, two-pass resume, await:false, promote
+  distill) are documented in `DEVELOPING.md` → "Workflow Engine Internals".
 - Use `view-screen` first when the active task/selection is unclear.
 
 ## Executing Tasks
@@ -29,5 +36,7 @@ fabricate step output.
 ## Application State
 
 `navigation` views: `home` (task board), `task` (`id`), `workflows`,
-`workflow` (`id`). `navigate` moves the UI; `view-screen` reports the current
-view and live task progress.
+`workflow` (`id`), `runs` (run list), `run` (`id`, the read-only run console).
+`navigate` moves the UI; `view-screen` reports the current view and live task
+progress. The run console (`/runs/:id`) renders the live NodeRun list + node
+detail off `run-graph`/`node-get` and exposes Run-again/Pause/Resume/Cancel.

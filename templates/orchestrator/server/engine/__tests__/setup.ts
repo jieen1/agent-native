@@ -31,6 +31,7 @@ export async function createEngineTables(): Promise<void> {
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    deleted_at TEXT,
     owner_email TEXT NOT NULL DEFAULT 'local@localhost',
     org_id TEXT,
     visibility TEXT NOT NULL DEFAULT 'private'

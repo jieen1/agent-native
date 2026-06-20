@@ -34,6 +34,7 @@ function routeOwnsToolbar(pathname: string): boolean {
     pathname === "/" ||
     pathname.startsWith("/tasks") ||
     pathname.startsWith("/workflows") ||
+    pathname.startsWith("/runs") ||
     pathname.startsWith("/settings") ||
     pathname === "/database" ||
     pathname.startsWith("/extensions")
@@ -132,10 +133,7 @@ export function Layout({ children }: LayoutProps) {
           browserTabId={TAB_ID}
           onFullscreenRequest={openAskAgentFullscreen}
           emptyStateText={t("task.run")}
-          suggestions={[
-            t("tasks.subtitle"),
-            t("workflows.subtitle"),
-          ]}
+          suggestions={[t("tasks.subtitle"), t("workflows.subtitle")]}
         >
           {contentFrame}
         </AgentSidebar>

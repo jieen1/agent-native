@@ -75,7 +75,11 @@ function buildOutput(input: NodeExecutionInput): unknown {
   if (typeof arrSpec === "string" && arrSpec.trim() !== "") {
     // "echoArray" may be a count "3" or a JSON array literal.
     const asNum = Number(arrSpec);
-    if (Number.isInteger(asNum) && asNum >= 0 && String(asNum) === arrSpec.trim()) {
+    if (
+      Number.isInteger(asNum) &&
+      asNum >= 0 &&
+      String(asNum) === arrSpec.trim()
+    ) {
       return Array.from({ length: asNum }, (_, i) => ({
         id: `${node.id}-item-${i}`,
         index: i,
@@ -94,6 +98,10 @@ function buildOutput(input: NodeExecutionInput): unknown {
     title: node.title,
     prompt: node.prompt ?? null,
   };
+  // Surface the reasoning-effort hint the scheduler passed through so node-get
+  // can prove the chosen value (DESIGN §1.6; a real executor maps it onto
+  // runAgentLoop's reasoning-effort option).
+  if (input.effort !== undefined) base.effort = input.effort;
   // Echo each dep output so downstream nodes can reference it.
   if (Object.keys(deps).length > 0) base.deps = deps;
   // For a fanout child, echo the item it processed (index-preserving chains).

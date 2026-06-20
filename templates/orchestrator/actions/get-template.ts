@@ -12,6 +12,7 @@ export default defineAction({
     const access = await resolveAccess("workflow_template", args.id);
     if (!access) throw new Error(`Template ${args.id} not found`);
     const t = access.resource as Record<string, unknown>;
+    if (t.deletedAt) throw new Error(`Template ${args.id} not found`);
     return {
       id: String(t.id),
       name: String(t.name),

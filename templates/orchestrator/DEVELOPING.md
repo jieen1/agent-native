@@ -183,3 +183,123 @@ The framework provides **Extensions** — mini sandboxed Alpine.js apps that run
 - **Security**: Iframe sandbox + CSP + SSRF protection on the proxy
 
 See the `extensions` skill in `.agents/skills/extensions/SKILL.md` for full implementation details.
+
+## Workflow Engine Internals (v2 graph engine)
+
+The v2 graph engine lives in `server/engine/`. It is a **deterministic scheduler**
+(`scheduler.ts`) that owns all topology, concurrency, journaling and DAG
+advancement, and delegates the only side-effecting work — turning a resolved
+input into an output — to a pluggable `NodeExecutor` (`types.ts`). P1 ships a
+deterministic `EchoExecutor`; P2 plugs real microVM/model executors into the same
+seam. This section is the map a future maintainer (or the orchestrator brain)
+needs before touching the scheduler. Authoritative spec: `docs/DESIGN.md` §3–§4.
+
+### Determinism invariant (hard)
+
+The scheduler makes **no** scheduling decision from `Date.now()`, `Math.random()`,
+or argless `new Date()`. Readiness, fanout width, branch selection, loop
+continuation, ids and artifact keys derive only from the graph, persisted
+NodeRun outputs, and explicit run inputs (`RunConfig.seed`). Timestamps
+(`started_at`/`completed_at`) are written for OBSERVABILITY only and are never
+branched on. Break this and resume/replay (below) silently diverges.
+
+### Item correlation — the load-bearing rule (DESIGN §4.1a)
+
+A NodeRun's identity is the journal key `(nodeId, iteration, fanoutIndex)`
+(`types.ts: NodeRunKey`, persisted as the UNIQUE index on `node_runs`). Two
+consequences the rest of the engine depends on:
+
+- **Inside a `fanout` scope, template edges are index-preserving.** Edge `A→B`
+  under a fanout of width N means `B_i depends on A_i` — N independent chains,
+  not "B waits for all A". This is implemented in `depKeyForEdge`: an edge from a
+  same-scope sibling resolves to the dependency at the SAME `fanoutIndex`; an
+  edge crossing the fanout boundary resolves to the singleton (index 0).
+- **A `join`'s cardinality is sealed when its nearest upstream fanout's item
+  array materializes** (`joinReady` + `nearestUpstreamFanout` in
+  `graph-model.ts`). Before the array-producer finishes the join is not ready;
+  after, it waits for exactly N incoming. A failed `B_i` drops item i (filter
+  Boolean), it does not deadlock or fire early.
+
+### Pipeline vs barrier (DESIGN §1.3) — the subtlest distinction
+
+The default between two dependent agent/tool nodes is a **pipeline (no barrier)**:
+`computeReadiness` advances a downstream NodeRun the moment its own deps are
+done, without waiting for sibling items. A **barrier** is introduced ONLY by a
+`join` node (full-set sync) or a `parallel` container's after-node (waits for all
+children). Choosing a barrier where a pipeline would do blocks the whole fleet on
+the slowest item at every stage boundary — a real throughput regression, so make
+`join` a deliberate node, never default wiring. The validator
+(`shared/graph-validator.ts`) emits an implicit-barrier WARNING for a single-edge
+join.
+
+### `await:false` (fire-and-forget, DESIGN §3.2)
+
+A node with `await: false` does **not** block its downstream barrier until it
+settles — the barrier (a `join` or parallel-after) is released the moment the
+async node is merely `running`. The RUN still waits for it: the async NodeRun
+stays in `inFlight`, and the driver (`drive()`) only exits when `inFlight` is
+empty, so the run cannot finish before its fire-and-forget node settles. The
+single switch is `barrierSatisfied()` (join paths) and the `await === false`
+branch in `evaluate()` (plain-barrier successors): a terminal status always
+satisfies; an `await:false` dep satisfies while `running`. Proof fixture:
+`fixtures.asyncAwaitFalse` (`join.completed_at < slow.completed_at`, run still
+done). `effort` (low/medium/high) flows through `NodeExecutionInput.effort` to the
+executor (a real executor maps it to `runAgentLoop`'s reasoning-effort; the echo
+executor surfaces it in its output so `node-get` can prove the chosen value).
+
+### Resume semantics (DESIGN §1.7) — two-pass, no partial reuse
+
+`scheduler.resume()` re-drives a partially-completed run from its journal:
+
+1. **Pass 1 (compute the dirty set FIRST, before any replay).** Dirty =
+   failed/pending/ready NodeRuns, PLUS the ENTIRE fanout subtree of any dirty
+   array-producer (a re-run array-producer can yield a different width N, so its
+   old `0..N-1` children are invalidated wholesale — never partially reused),
+   PLUS the transitive downstream of every dirty node. Computing the whole dirty
+   set up front is load-bearing: lazily invalidating during the walk would let an
+   already-passed child replay a stale output.
+2. **Pass 2 (replay then re-run).** A done-and-clean NodeRun replays from its
+   journaled output artifact with ZERO executor invocations (a cached prefix at
+   zero token cost); everything dirty re-runs live.
+
+Resume is **resumable but not reproducible** — `tokens_spent` and a fanout's
+exact width can differ on re-run; that is expected. The control verbs in
+`control.ts` (pause/resume/cancel/retry-node/override/resolve-human-gate) all
+funnel through this one mechanism, which is what makes them idempotent.
+
+### Promote a run → template (DESIGN §6.5)
+
+`server/engine/promote.ts` (`distillRun`) collapses a run's ACTUAL executed
+NodeRuns back into a static authored graph: every NodeRun sharing a logical
+`nodeId` (across all iterations/fanoutIndices) folds into ONE distilled node, and
+template edges between executed nodes are kept — so a genuine `fanout` survives as
+a single fanout container while its per-item indices disappear. Re-running the
+distilled template reaches the same shape without dynamic expansion. The
+`promote-run-to-template` action validates the distilled graph through the SAME
+`validateGraph` before saving. Pure + deterministic, so it is testable by
+node/edge set-equality (`__tests__/p1b3.test.ts`).
+
+### Observability (DESIGN §4.4)
+
+`run-graph`, `node-get`, `run-get`, `list-runs`, and `run-events` read the
+journal. `run-events` derives an ordered event log from `node_runs` status
+transitions (a `node-started` event at `started_at`, a `node-settled` event at
+`completed_at`), assigns a monotonic `seq`, and filters by `sinceSeq` so a poller
+appends. The framework's `subscribeToRun(runId, fromSeq)` bridges an AGENT run's
+SSE; the P1 engine is the scheduler, not a run-manager run, so there is no such
+stream to bridge yet — the derived log is the P1 substitute and its `seq`+events
+SHAPE is the bridge target for P2/P3, so the UI contract will not change.
+
+### Where to look
+
+| Concern | File |
+|---|---|
+| Scheduler / DAG advancement / readiness | `server/engine/scheduler.ts` |
+| Journal + artifact persistence | `server/engine/store.ts` |
+| Topology analysis (containment, fanout) | `server/engine/graph-model.ts` |
+| Deterministic ids | `server/engine/ids.ts` |
+| Echo executor (P1 test executor) | `server/engine/echo-executor.ts` |
+| Control verbs (pause/resume/cancel/…) | `server/engine/control.ts` |
+| Promote distill | `server/engine/promote.ts` |
+| Control-flow fixtures | `server/engine/fixtures.ts` |
+| Engine tests | `server/engine/__tests__/*.test.ts` |

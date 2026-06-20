@@ -14,7 +14,8 @@ import { FIXTURES } from "../server/engine/fixtures.js";
 // driven headlessly via run-start. Idempotent: re-running updates the graph of
 // the existing fixture (matched by name) rather than duplicating it.
 export default defineAction({
-  description: "Seed the six P1 control-flow fixture templates (sequential, pipeline, parallel, fanout, branch, loop-until-dry). Returns { fixtures: { <key>: templateId } }.",
+  description:
+    "Seed the six P1 control-flow fixture templates (sequential, pipeline, parallel, fanout, branch, loop-until-dry). Returns { fixtures: { <key>: templateId } }.",
   schema: z.object({
     only: z.string().optional().describe("Seed only this fixture key."),
   }),
@@ -30,13 +31,18 @@ export default defineAction({
       if (!fx) throw new Error(`Unknown fixture: ${key}`);
       const result = validateGraph(fx.graph);
       if (!result.ok) {
-        throw new Error(`Fixture ${key} is invalid: ${result.errors.join("; ")}`);
+        throw new Error(
+          `Fixture ${key} is invalid: ${result.errors.join("; ")}`,
+        );
       }
       const graphJson = JSON.stringify(fx.graph);
       const now = nowIso();
 
       const existing = await db
-        .select({ id: schema.workflowTemplates.id, version: schema.workflowTemplates.version })
+        .select({
+          id: schema.workflowTemplates.id,
+          version: schema.workflowTemplates.version,
+        })
         .from(schema.workflowTemplates)
         .where(
           and(
@@ -54,6 +60,8 @@ export default defineAction({
             graph: graphJson,
             version: (existing[0].version ?? 1) + 1,
             updatedAt: now,
+            // Re-seeding resurrects a previously soft-deleted fixture.
+            deletedAt: null,
           })
           .where(eq(schema.workflowTemplates.id, existing[0].id));
         out[key] = existing[0].id;

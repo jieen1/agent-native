@@ -251,6 +251,13 @@ CREATE INDEX IF NOT EXISTS workflow_run_shares_resource_idx ON workflow_run_shar
       sql: `ALTER TABLE node_runs ADD COLUMN last_heartbeat TEXT;
 CREATE INDEX IF NOT EXISTS node_runs_running_heartbeat_idx ON node_runs (status, last_heartbeat)`,
     },
+    {
+      // P1b-3: soft-delete marker for workflow_templates (DESIGN §10 delete-
+      // template). ADDITIVE — a single ALTER ADD COLUMN; a soft delete keeps any
+      // workflow_runs that referenced the template loadable for observation.
+      version: 12,
+      sql: `ALTER TABLE workflow_templates ADD COLUMN deleted_at TEXT`,
+    },
   ],
   { table: "orchestrator_migrations" },
 );

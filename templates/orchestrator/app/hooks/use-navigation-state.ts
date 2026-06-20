@@ -38,6 +38,7 @@ function pathnameFromPath(path: string): string {
 function viewForPath(pathname: string): string {
   if (pathname.startsWith("/tasks")) return "task";
   if (pathname.startsWith("/workflows")) return "workflows";
+  if (pathname.startsWith("/runs")) return "runs";
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/database")) return "database";
   if (pathname.startsWith("/extensions")) return "extensions";
@@ -53,6 +54,9 @@ function pathForView(view?: string): string {
       return "/";
     case "workflows":
       return "/workflows";
+    case "runs":
+    case "run":
+      return "/runs";
     case "settings":
       return "/settings";
     case "database":

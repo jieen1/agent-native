@@ -11,6 +11,7 @@ import {
   IconLayoutSidebarLeftExpand,
   IconListCheck,
   IconPin,
+  IconPlayerPlay,
   IconPlus,
   IconSettings,
   IconSitemap,
@@ -47,6 +48,12 @@ const navItems = [
     labelKey: "nav.workflows",
     href: "/workflows",
     view: "workflows",
+  },
+  {
+    icon: IconPlayerPlay,
+    labelKey: "nav.runs",
+    href: "/runs",
+    view: "runs",
   },
   {
     icon: IconSettings,
