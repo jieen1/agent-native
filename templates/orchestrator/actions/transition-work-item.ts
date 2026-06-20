@@ -98,6 +98,60 @@ export default defineAction({
       hasDuplicateLink = dup.length > 0;
     }
 
+    // ── overlay-only path (no stage move) ──────────────────────────────────
+    // A blocked/severity/environment toggle at the SAME stage is a legitimate
+    // overlay write (the watchdog explicitly recognizes a from==to log row —
+    // see watchdog.test "a blocked-only log row (from == to)"). The transition
+    // validator correctly rejects no-op stage moves, so we short-circuit the
+    // overlay-only case BEFORE calling it: keep the current stage/category, set
+    // only the overlays, and append the trail row. This is the board's
+    // Block/Unblock path and never changes business status.
+    const now = nowIso();
+    const actor = args.runId ?? getRequestUserEmail() ?? "unknown";
+
+    if (args.toStatus === fromStatus) {
+      const overlayPatch: Record<string, unknown> = { updatedAt: now };
+      if (args.environment !== undefined)
+        overlayPatch.environment = args.environment;
+      if (args.severity !== undefined) overlayPatch.severity = args.severity;
+      if (args.blocked !== undefined) {
+        overlayPatch.blocked = args.blocked ? 1 : 0;
+        if (!args.blocked) {
+          overlayPatch.blockedReason = args.blockedReason ?? null;
+          overlayPatch.blockedBy = args.blockedBy ?? null;
+        }
+      }
+      if (args.blockedReason !== undefined)
+        overlayPatch.blockedReason = args.blockedReason;
+      if (args.blockedBy !== undefined) overlayPatch.blockedBy = args.blockedBy;
+
+      await db
+        .update(schema.workItems)
+        .set(overlayPatch)
+        .where(eq(schema.workItems.id, args.id));
+
+      await db.insert(schema.workItemStatusLog).values({
+        id: newId("wisl"),
+        workItemId: args.id,
+        runId: args.runId ?? null,
+        actor,
+        fromStatus,
+        toStatus: fromStatus,
+        blocked: args.blocked ? 1 : 0,
+        resolution: String(item.resolution ?? "") || null,
+        at: now,
+      });
+
+      return {
+        id: args.id,
+        from: fromStatus,
+        to: fromStatus,
+        kind: "overlay" as const,
+        statusCategory: String(item.statusCategory ?? "todo"),
+        resolution: (item.resolution as string | null) ?? null,
+      };
+    }
+
     const decision = evaluateTransition(scheme, fromStatus, args.toStatus, {
       resolution: (args.resolution as Resolution | undefined) ?? null,
       hasDuplicateLink,
@@ -105,9 +159,6 @@ export default defineAction({
     if (!decision.ok) {
       throw new Error(`Illegal transition: ${decision.error}`);
     }
-
-    const now = nowIso();
-    const actor = args.runId ?? getRequestUserEmail() ?? "unknown";
 
     // Build the patch. status/statusCategory/resolution come from the validated
     // decision; environment/blocked/severity are overlays this writer also owns.

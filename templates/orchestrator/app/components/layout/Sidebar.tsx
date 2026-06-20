@@ -7,9 +7,12 @@ import {
   IconDatabase,
   IconDots,
   IconEdit,
+  IconFolders,
+  IconLayoutKanban,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconListCheck,
+  IconPackages,
   IconPin,
   IconPlayerPlay,
   IconPlus,
@@ -42,12 +45,25 @@ import {
 } from "@/components/ui/tooltip";
 
 const navItems = [
+  { icon: IconLayoutKanban, labelKey: "nav.board", href: "/board", view: "board" },
   { icon: IconListCheck, labelKey: "nav.tasks", href: "/", view: "tasks" },
+  {
+    icon: IconFolders,
+    labelKey: "nav.projects",
+    href: "/projects",
+    view: "projects",
+  },
   {
     icon: IconSitemap,
     labelKey: "nav.workflows",
     href: "/workflows",
     view: "workflows",
+  },
+  {
+    icon: IconPackages,
+    labelKey: "nav.library",
+    href: "/library",
+    view: "library",
   },
   {
     icon: IconPlayerPlay,

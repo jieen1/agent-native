@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { IconPlus, IconSitemap } from "@tabler/icons-react";
+import { IconArrowBigUpLines, IconPlus, IconSitemap } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { APP_TITLE } from "@/lib/app-config";
 import { useSaveWorkflow, useWorkflows } from "@/hooks/use-orchestrator";
 import { Button } from "@/components/ui/button";
+import { PromoteRunDialog } from "@/components/dialogs/PromoteRunDialog";
 
 export function meta() {
   return [{ title: `${APP_TITLE} — Workflows` }];
@@ -42,6 +44,7 @@ export default function WorkflowsRoute() {
   const navigate = useNavigate();
   const { data: workflows = [], isLoading } = useWorkflows();
   const saveWorkflow = useSaveWorkflow();
+  const [promoteOpen, setPromoteOpen] = useState(false);
 
   function createWorkflow() {
     saveWorkflow.mutate(
@@ -72,10 +75,24 @@ export default function WorkflowsRoute() {
             {t("workflows.subtitle")}
           </p>
         </div>
-        <Button size="sm" onClick={createWorkflow} disabled={saveWorkflow.isPending}>
-          <IconPlus className="size-4" />
-          {t("workflows.newWorkflow")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPromoteOpen(true)}
+          >
+            <IconArrowBigUpLines className="size-4" />
+            {t("dialog.promoteTitle")}
+          </Button>
+          <Button
+            size="sm"
+            onClick={createWorkflow}
+            disabled={saveWorkflow.isPending}
+          >
+            <IconPlus className="size-4" />
+            {t("workflows.newWorkflow")}
+          </Button>
+        </div>
       </header>
 
       {isLoading ? (
@@ -109,6 +126,8 @@ export default function WorkflowsRoute() {
           ))}
         </ul>
       )}
+
+      <PromoteRunDialog open={promoteOpen} onOpenChange={setPromoteOpen} />
     </div>
   );
 }

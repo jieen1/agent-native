@@ -32,6 +32,10 @@ const SIDEBAR_COLLAPSE_KEY = "orchestrator.sidebar.collapsed";
 function routeOwnsToolbar(pathname: string): boolean {
   return (
     pathname === "/" ||
+    pathname.startsWith("/board") ||
+    pathname.startsWith("/projects") ||
+    pathname.startsWith("/library") ||
+    pathname.startsWith("/items") ||
     pathname.startsWith("/tasks") ||
     pathname.startsWith("/workflows") ||
     pathname.startsWith("/runs") ||
