@@ -5,7 +5,23 @@
 > **real, measured** results on the target host — no estimates. Every number below
 > came from an actual run on 2026-06-20.
 
-## Verdict: **CONDITIONAL GO**
+## Verdict: **GO** (public egress SOLVED via a host forward-proxy, 2026-06-21)
+
+> **UPDATE (egress resolved).** The earlier "public egress fails" blocker is FIXED
+> with a **host forward-proxy**: run `tinyproxy` on the WSL host (`Listen 0.0.0.0`,
+> `Port 8888`, `Allow 172.16.0.0/12`) and inject `HTTP_PROXY`/`HTTPS_PROXY=http://<vm-default-gateway>:8888`
+> into the node VM env. PROVEN from inside a real microVM: plain HTTP via proxy →
+> 200; `apk add curl` (needs egress) succeeds; `curl https://api.github.com/zen` →
+> a real Zen quote; `curl https://api.anthropic.com/v1/models` → HTTP 401 (the
+> claude API REACHED, auth-gated as expected). The VM→host path already worked
+> (vLLM), so VM→gateway:8888→tinyproxy(host has internet)→public completes it. The
+> earlier busybox-`wget` failure was busybox's poor HTTPS-CONNECT-over-proxy, not a
+> proxy fault — real clients (curl, the `claude` CLI on node, `git`/libcurl) tunnel
+> correctly. **This unblocks the P2c ClaudeCodeExecutor (claude in the VM) + in-VM
+> `git push`.** Host setup: tinyproxy must be running (a host prerequisite, like
+> `msb`); the runtime computes the per-boot gateway IP and sets the proxy env.
+
+## Original verdict: CONDITIONAL GO
 
 The decisive unknowns are resolved **GO**: KVM works, microVMs boot fast, host
 capacity is ample, and the in-VM → host vLLM path (the user's primary model
