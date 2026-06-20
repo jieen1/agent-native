@@ -105,6 +105,41 @@ const en = {
     workflow: "Workflow",
     version: "Version",
     nameRequired: "Name is required.",
+    retry: "Retry",
+  },
+  // Global topbar (FRONTEND §0).
+  topbar: {
+    capacity: "Capacity",
+    tasksLabel: "tasks",
+    vmLabel: "VM",
+    capacityTasks: "{{running}}/{{degree}} tasks",
+    capacityVMs: "{{used}}/{{max}} VM",
+    schedulerAlive: "Scheduler running",
+    schedulerDown: "Scheduler stalled",
+    lastTick: "Last tick",
+    account: "Account",
+    signOut: "Sign out",
+    toggleTheme: "Toggle theme",
+    toggleLanguage: "Toggle language",
+    commandSearch: "Search…",
+  },
+  // ⌘K command palette (FRONTEND §0 / C5).
+  palette: {
+    placeholder: "Search or run a command…",
+    empty: "No results.",
+    groupNavigate: "Navigate",
+    groupActions: "Quick actions",
+    groupPreferences: "Preferences",
+    goBoard: "Go to Board",
+    goProjects: "Go to Projects",
+    goWorkflows: "Go to Workflows",
+    goLibrary: "Go to Library",
+    goRuns: "Go to Runs",
+    goSettings: "Go to Settings",
+    newWorkItem: "New work item",
+    newProject: "New project",
+    newWorkflow: "New workflow",
+    askAgent: "Ask the orchestrator…",
   },
   status: {
     pending: "Pending",
@@ -224,6 +259,7 @@ const en = {
     repoLinked: "Repo linked",
     key: "Key",
     open: "Open",
+    loadError: "Could not load projects.",
   },
   project: {
     settings: "Project settings",
@@ -352,6 +388,8 @@ const en = {
     subtitle: "Reusable DAGs of typed nodes with per-node models.",
     newWorkflow: "New workflow",
     empty: "No workflows yet. Create one to define a node graph.",
+    emptyTitle: "No workflows yet",
+    loadError: "Could not load workflows.",
     steps: "{{count}} steps",
     nameLabel: "Name",
     namePlaceholder: "e.g. Research → Draft → Review",
@@ -471,6 +509,21 @@ const en = {
     columnTemplate: "Template",
     columnStarted: "Started",
     columnNodes: "Nodes",
+    // ── §8 global activity table ──
+    columnRunId: "Run",
+    columnWorkItem: "Work item",
+    columnTokens: "Tokens",
+    columnDeliverable: "Deliverable",
+    columnDuration: "Duration",
+    filterStatus: "Status",
+    filterTemplate: "Template",
+    filterAllStatuses: "All statuses",
+    filterAllTemplates: "All templates",
+    filterEmpty: "No runs match these filters.",
+    emptyFilteredTitle: "No matching runs",
+    deliverablePr: "PR",
+    deliverableFiles: "{{count}} files",
+    deliverableNone: "—",
     back: "All runs",
     runAgain: "Run again",
     pause: "Pause",
@@ -634,6 +687,39 @@ const zh: typeof en = {
     workflow: "工作流",
     version: "版本",
     nameRequired: "名称为必填项。",
+    retry: "重试",
+  },
+  topbar: {
+    capacity: "容量",
+    tasksLabel: "任务",
+    vmLabel: "VM",
+    capacityTasks: "{{running}}/{{degree}} 任务",
+    capacityVMs: "{{used}}/{{max}} VM",
+    schedulerAlive: "调度器运行中",
+    schedulerDown: "调度器已停滞",
+    lastTick: "最近一次心跳",
+    account: "账户",
+    signOut: "退出登录",
+    toggleTheme: "切换主题",
+    toggleLanguage: "切换语言",
+    commandSearch: "搜索…",
+  },
+  palette: {
+    placeholder: "搜索或运行命令…",
+    empty: "无结果。",
+    groupNavigate: "导航",
+    groupActions: "快捷操作",
+    groupPreferences: "偏好设置",
+    goBoard: "前往看板",
+    goProjects: "前往项目",
+    goWorkflows: "前往工作流",
+    goLibrary: "前往节点库",
+    goRuns: "前往运行",
+    goSettings: "前往设置",
+    newWorkItem: "新建工作项",
+    newProject: "新建项目",
+    newWorkflow: "新建工作流",
+    askAgent: "向编排器提问…",
   },
   status: {
     pending: "待处理",
@@ -749,6 +835,7 @@ const zh: typeof en = {
     repoLinked: "已关联仓库",
     key: "前缀",
     open: "打开",
+    loadError: "无法加载项目。",
   },
   project: {
     settings: "项目设置",
@@ -869,6 +956,8 @@ const zh: typeof en = {
     subtitle: "可复用的类型化节点 DAG,每个节点可指定模型。",
     newWorkflow: "新建工作流",
     empty: "还没有工作流,新建一个来定义节点图。",
+    emptyTitle: "还没有工作流",
+    loadError: "无法加载工作流。",
     steps: "{{count}} 个步骤",
     nameLabel: "名称",
     namePlaceholder: "例如:调研 → 起草 → 审阅",
@@ -977,6 +1066,21 @@ const zh: typeof en = {
     columnTemplate: "模板",
     columnStarted: "开始于",
     columnNodes: "节点",
+    // ── §8 全局活动表 ──
+    columnRunId: "运行",
+    columnWorkItem: "工作项",
+    columnTokens: "Tokens",
+    columnDeliverable: "交付物",
+    columnDuration: "耗时",
+    filterStatus: "状态",
+    filterTemplate: "模板",
+    filterAllStatuses: "全部状态",
+    filterAllTemplates: "全部模板",
+    filterEmpty: "没有符合筛选条件的运行。",
+    emptyFilteredTitle: "没有匹配的运行",
+    deliverablePr: "PR",
+    deliverableFiles: "{{count}} 个文件",
+    deliverableNone: "—",
     back: "全部运行",
     runAgain: "重新运行",
     pause: "暂停",
@@ -1057,12 +1161,37 @@ const zh: typeof en = {
   },
 };
 
+// C1 missing-key guard: never render a raw `ns.key` string in the UI. When a key
+// is absent in BOTH trees, fall back to a humanized version of its last segment
+// ("board.fooBar" → "Foo bar") so production never leaks a dotted identifier; in
+// dev we also warn so the gap is caught and the key added to both trees.
+const isDev =
+  typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
+
+function humanizeKey(key: string): string {
+  const last = key.split(".").pop() ?? key;
+  const spaced = last
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!spaced) return key;
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 if (!i18n.isInitialized) {
   void i18n.use(initReactI18next).init({
     resources: { en: { translation: en }, zh: { translation: zh } },
     lng: readStoredLang(),
     fallbackLng: "en",
     interpolation: { escapeValue: false },
+    saveMissing: isDev,
+    parseMissingKeyHandler: (key) => humanizeKey(key),
+    missingKeyHandler: isDev
+      ? (_lngs, _ns, key) => {
+          // eslint-disable-next-line no-console
+          console.warn(`[i18n] missing translation key: ${key}`);
+        }
+      : undefined,
   });
 }
 

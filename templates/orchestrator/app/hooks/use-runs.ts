@@ -27,8 +27,15 @@ export type NodeRunStatus =
 export interface RunListItem {
   id: string;
   templateId: string;
+  /** Resolved template name for the §8 table (null if the template was deleted). */
+  templateName: string | null;
   workItemId: string | null;
+  /** Resolved work-item title for the §8 table (null for template-scoped runs). */
+  workItemTitle: string | null;
+  workItemType: string | null;
   status: RunStatus;
+  /** Parsed deliverable (PR/file list) or null. */
+  deliverable: RunDeliverable | null;
   tokenBudget: number | null;
   tokensSpent: number;
   startedAt: string | null;

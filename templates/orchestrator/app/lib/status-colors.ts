@@ -146,6 +146,39 @@ export const NODE_STATUS_DOT: Record<NodeRunStatus, string> = {
   "awaiting-approval": "bg-orange-500",
 };
 
+// ── Run + NodeRun status badge (the run console + §8 table + node list) ─────
+// The superset of run statuses (pending/running/paused/done/failed/cancelled)
+// and NodeRun statuses (+ ready/skipped/awaiting-approval). One map so the run
+// badge, the node-list badge, and the §8 activity table all tint identically —
+// and identically to the matching execState/category surfaces.
+export type RunOrNodeStatus =
+  | "pending"
+  | "ready"
+  | "running"
+  | "paused"
+  | "done"
+  | "failed"
+  | "cancelled"
+  | "skipped"
+  | "awaiting-approval";
+
+export const RUN_STATUS_BADGE: Record<RunOrNodeStatus, string> = {
+  pending: EXEC_COLORS.idle.badge,
+  ready: EXEC_COLORS.queued.badge,
+  running: EXEC_COLORS.running.badge,
+  paused: EXEC_COLORS.paused.badge,
+  done: EXEC_COLORS.done.badge,
+  failed: EXEC_COLORS.failed.badge,
+  cancelled: CATEGORY_COLORS.cancelled.badge,
+  skipped: CATEGORY_COLORS.cancelled.badge,
+  "awaiting-approval":
+    "bg-orange-500/15 text-orange-600 dark:text-orange-400 ring-1 ring-inset ring-orange-500/30",
+};
+
+export function runStatusBadge(status: string): string {
+  return RUN_STATUS_BADGE[status as RunOrNodeStatus] ?? RUN_STATUS_BADGE.pending;
+}
+
 // ── Incident severity (SEV1..4 chip) ────────────────────────────────────────
 export type Severity = "SEV1" | "SEV2" | "SEV3" | "SEV4";
 

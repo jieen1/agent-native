@@ -28,6 +28,7 @@ import {
   type ChatThreadSummary,
 } from "@agent-native/core/client";
 import { ExtensionsSidebarSection } from "@agent-native/core/client/extensions";
+import { CapacityChip } from "./CapacityChip";
 import { OrgSwitcher } from "@agent-native/core/client/org";
 import { cn } from "@/lib/utils";
 import { APP_TITLE } from "@/lib/app-config";
@@ -515,6 +516,7 @@ export function Sidebar({
           collapsed && "border-t border-sidebar-border py-2",
         )}
       >
+        {!collapsed ? <CapacityChip /> : null}
         {!collapsed ? (
           <div className="border-t border-sidebar-border px-2 py-1">
             <ExtensionsSidebarSection />
