@@ -824,6 +824,8 @@ function startApp(app: TemplateApp): void {
       cwd: ROOT,
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
+      // Windows: `pnpm` resolves to pnpm.cmd, which bare spawn can't find.
+      shell: process.platform === "win32",
       env: devWatcherEnv({
         ...process.env,
         // Children write to a pipe (not a TTY), so vite/pnpm/chalk/picocolors

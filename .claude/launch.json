@@ -2,6 +2,18 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "orchestrator",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "orchestrator", "exec", "agent-native", "dev"],
+      "port": 8080
+    },
+    {
+      "name": "chat",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "chat", "dev"],
+      "port": 8080
+    },
+    {
       "name": "dev",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["dev:lazy", "--", "--all"],

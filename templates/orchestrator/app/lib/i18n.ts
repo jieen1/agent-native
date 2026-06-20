@@ -1,0 +1,272 @@
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
+
+export type Lang = "en" | "zh";
+export const LANGS: Lang[] = ["en", "zh"];
+const STORAGE_KEY = "orchestrator.lang";
+
+export function readStoredLang(): Lang {
+  if (typeof window === "undefined") return "en";
+  try {
+    const v = window.localStorage.getItem(STORAGE_KEY);
+    return v === "zh" ? "zh" : "en";
+  } catch {
+    return "en";
+  }
+}
+
+export function persistLang(lang: Lang): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, lang);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+const en = {
+  app: { title: "Orchestrator", tagline: "Plan tasks. Run agents. Deliver." },
+  nav: {
+    tasks: "Tasks",
+    workflows: "Workflows",
+    settings: "Settings",
+    observability: "Observability",
+    database: "Database",
+  },
+  settings: {
+    title: "Runtime",
+    subtitle: "Pick the models the orchestrator runs on.",
+    activeChat: "Chat engine",
+    activeExec: "Execution runtime",
+    none: "Default (framework engine)",
+    vllmTitle: "Local vLLM / OpenAI-compatible",
+    vllmSubtitle: "Point at any OpenAI-compatible endpoint (vLLM, LM Studio).",
+    vllmName: "Name",
+    vllmBaseUrl: "Base URL",
+    vllmModel: "Model",
+    vllmAdd: "Add endpoint",
+    vllmEmpty: "No endpoints yet.",
+    activate: "Activate",
+    active: "Active",
+    ccTitle: "Claude Code (subscription)",
+    ccSubtitle:
+      "Run execution on your local Claude Code — uses your Pro/Max login, no API key.",
+    ccInstalled: "Harness installed",
+    ccNotInstalled: "Harness not installed",
+    ccInstallHint:
+      "Install: pnpm --filter orchestrator add @ai-sdk/harness@canary @ai-sdk/harness-claude-code@canary",
+    ccUse: "Use Claude Code for execution",
+    ccTest: "Test run",
+    ccTestStarted: "Started a Claude Code run.",
+    ccLoggedIn: "Logged in",
+    ccLoginValidUntil: "valid until",
+    ccExpired: "Login expired",
+    ccNotLoggedIn: "Not logged in",
+    ccLoginHint:
+      "Run `claude login` in a terminal to (re)authorize — the app cannot do the browser OAuth for you; it reuses your CLI login.",
+    ccResult: "Result",
+    ccRunning: "Running…",
+  },
+  common: {
+    create: "Create",
+    cancel: "Cancel",
+    save: "Save",
+    delete: "Delete",
+    edit: "Edit",
+    run: "Run",
+    stop: "Stop",
+    back: "Back",
+    open: "Open",
+    none: "None",
+    loading: "Loading…",
+    confirm: "Confirm",
+    language: "Language",
+    theme: "Theme",
+    untitled: "Untitled",
+  },
+  status: {
+    pending: "Pending",
+    running: "Running",
+    done: "Done",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    skipped: "Skipped",
+  },
+  tasks: {
+    title: "Tasks",
+    subtitle: "Create work, attach a workflow, let the orchestrator run it.",
+    newTask: "New task",
+    empty: "No tasks yet. Create one to get started.",
+    nameLabel: "Title",
+    namePlaceholder: "What needs to get done?",
+    descLabel: "Description",
+    descPlaceholder: "Add context the orchestrator should know…",
+    workflowLabel: "Workflow",
+    workflowNone: "No workflow",
+    columnStatus: "Status",
+    columnWorkflow: "Workflow",
+    columnUpdated: "Updated",
+  },
+  task: {
+    back: "All tasks",
+    run: "Run",
+    rerun: "Re-run",
+    stop: "Stop",
+    delete: "Delete task",
+    steps: "Steps",
+    noSteps: "No steps yet. Attach a workflow and run the task.",
+    noWorkflow: "No workflow attached. Pick one, then run.",
+    result: "Result",
+    noResult: "No result delivered yet.",
+    assignee: "Assignee",
+    engine: "Engine",
+    model: "Model",
+    output: "Output",
+    error: "Error",
+    runStarted: "Handed task to the orchestrator agent.",
+    progress: "Progress",
+  },
+  workflows: {
+    title: "Workflows",
+    subtitle: "Reusable DAGs of sub-agent steps with per-step models.",
+    newWorkflow: "New workflow",
+    empty: "No workflows yet. Create one to define a step DAG.",
+    steps: "{{count}} steps",
+    nameLabel: "Name",
+    namePlaceholder: "e.g. Research → Draft → Review",
+    descLabel: "Description",
+    stepsLabel: "Steps (JSON DAG)",
+    stepsHint:
+      "Array of steps: { key, title, assignee, engine, model, prompt, dependsOn[] }.",
+    invalidJson: "Steps must be valid JSON.",
+    saved: "Workflow saved.",
+  },
+};
+
+const zh: typeof en = {
+  app: { title: "编排器", tagline: "规划任务 · 调度 agent · 交付成果" },
+  nav: {
+    tasks: "任务",
+    workflows: "工作流",
+    settings: "设置",
+    observability: "可观测性",
+    database: "数据库",
+  },
+  settings: {
+    title: "运行时",
+    subtitle: "选择编排器使用的模型。",
+    activeChat: "对话引擎",
+    activeExec: "执行运行时",
+    none: "默认(框架引擎)",
+    vllmTitle: "本地 vLLM / OpenAI 兼容",
+    vllmSubtitle: "指向任意 OpenAI 兼容端点(vLLM、LM Studio)。",
+    vllmName: "名称",
+    vllmBaseUrl: "Base URL",
+    vllmModel: "模型",
+    vllmAdd: "添加端点",
+    vllmEmpty: "还没有端点。",
+    activate: "启用",
+    active: "已启用",
+    ccTitle: "Claude Code(订阅)",
+    ccSubtitle: "在本地 Claude Code 上执行 —— 用你的 Pro/Max 登录,无需 API key。",
+    ccInstalled: "harness 已安装",
+    ccNotInstalled: "harness 未安装",
+    ccInstallHint:
+      "安装:pnpm --filter orchestrator add @ai-sdk/harness@canary @ai-sdk/harness-claude-code@canary",
+    ccUse: "用 Claude Code 执行",
+    ccTest: "测试运行",
+    ccTestStarted: "已启动一个 Claude Code 运行。",
+    ccLoggedIn: "已登录",
+    ccLoginValidUntil: "有效期至",
+    ccExpired: "登录已过期",
+    ccNotLoggedIn: "未登录",
+    ccLoginHint:
+      "在终端运行 `claude login` 重新授权 —— app 替你做不了浏览器 OAuth,它只复用你 CLI 的登录。",
+    ccResult: "结果",
+    ccRunning: "运行中…",
+  },
+  common: {
+    create: "创建",
+    cancel: "取消",
+    save: "保存",
+    delete: "删除",
+    edit: "编辑",
+    run: "运行",
+    stop: "停止",
+    back: "返回",
+    open: "打开",
+    none: "无",
+    loading: "加载中…",
+    confirm: "确认",
+    language: "语言",
+    theme: "主题",
+    untitled: "未命名",
+  },
+  status: {
+    pending: "待处理",
+    running: "运行中",
+    done: "完成",
+    failed: "失败",
+    cancelled: "已取消",
+    skipped: "已跳过",
+  },
+  tasks: {
+    title: "任务",
+    subtitle: "创建工作、挂上工作流,交给编排者执行。",
+    newTask: "新建任务",
+    empty: "还没有任务,新建一个开始吧。",
+    nameLabel: "标题",
+    namePlaceholder: "需要完成什么?",
+    descLabel: "描述",
+    descPlaceholder: "补充编排者需要知道的背景…",
+    workflowLabel: "工作流",
+    workflowNone: "不挂工作流",
+    columnStatus: "状态",
+    columnWorkflow: "工作流",
+    columnUpdated: "更新于",
+  },
+  task: {
+    back: "全部任务",
+    run: "运行",
+    rerun: "重新运行",
+    stop: "停止",
+    delete: "删除任务",
+    steps: "步骤",
+    noSteps: "还没有步骤。挂上工作流并运行任务。",
+    noWorkflow: "未挂工作流。先选一个再运行。",
+    result: "结果",
+    noResult: "尚未交付结果。",
+    assignee: "执行者",
+    engine: "引擎",
+    model: "模型",
+    output: "输出",
+    error: "错误",
+    runStarted: "已把任务交给编排者 agent。",
+    progress: "进度",
+  },
+  workflows: {
+    title: "工作流",
+    subtitle: "可复用的子 agent 步骤 DAG,每步可指定模型。",
+    newWorkflow: "新建工作流",
+    empty: "还没有工作流,新建一个来定义步骤 DAG。",
+    steps: "{{count}} 个步骤",
+    nameLabel: "名称",
+    namePlaceholder: "例如:调研 → 起草 → 审阅",
+    descLabel: "描述",
+    stepsLabel: "步骤(JSON DAG)",
+    stepsHint:
+      "步骤数组:{ key, title, assignee, engine, model, prompt, dependsOn[] }。",
+    invalidJson: "步骤必须是合法 JSON。",
+    saved: "工作流已保存。",
+  },
+};
+
+if (!i18n.isInitialized) {
+  void i18n.use(initReactI18next).init({
+    resources: { en: { translation: en }, zh: { translation: zh } },
+    lng: readStoredLang(),
+    fallbackLng: "en",
+    interpolation: { escapeValue: false },
+  });
+}
+
+export default i18n;
