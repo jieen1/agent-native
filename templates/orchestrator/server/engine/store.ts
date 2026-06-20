@@ -47,6 +47,7 @@ export async function insertNodeRun(
     tokensSpent: state.tokensSpent,
     startedAt: state.startedAt,
     completedAt: state.completedAt,
+    lastHeartbeat: state.lastHeartbeat,
   });
 }
 
@@ -67,6 +68,7 @@ export async function updateNodeRun(
       tokensSpent: state.tokensSpent,
       startedAt: state.startedAt,
       completedAt: state.completedAt,
+      lastHeartbeat: state.lastHeartbeat,
     })
     .where(eq(schema.nodeRuns.id, state.id));
 }
@@ -111,10 +113,7 @@ export async function putArtifact(
 }
 
 /** Read an artifact's inline value back, or undefined if missing. */
-export async function getArtifactValue(
-  db: Db,
-  id: string,
-): Promise<unknown> {
+export async function getArtifactValue(db: Db, id: string): Promise<unknown> {
   const rows = await db
     .select({ ref: schema.artifacts.ref })
     .from(schema.artifacts)
@@ -208,11 +207,7 @@ export async function loadNodeRuns(db: Db, runId: string) {
 }
 
 /** Load a single NodeRun by its journal key, or undefined. */
-export async function loadNodeRunByKey(
-  db: Db,
-  runId: string,
-  key: NodeRunKey,
-) {
+export async function loadNodeRunByKey(db: Db, runId: string, key: NodeRunKey) {
   const id = nodeRunId(runId, key);
   const rows = await db
     .select()
@@ -220,6 +215,54 @@ export async function loadNodeRunByKey(
     .where(and(eq(schema.nodeRuns.runId, runId), eq(schema.nodeRuns.id, id)))
     .limit(1);
   return rows[0];
+}
+
+/** A reaped row, for caller observability. */
+export interface ReapedNodeRun {
+  id: string;
+  runId: string;
+  nodeId: string;
+  lastHeartbeat: string | null;
+}
+
+/**
+ * Stuck-run reap (DESIGN §6.4/§13). Return every `running` NodeRun whose
+ * last_heartbeat is strictly older than `cutoffIso` (or null = never beat) to a
+ * terminal `failed` with a distinct stranded error, so a crashed/redeployed
+ * scheduler does not leave a row wedged at `running` forever. A FRESH heartbeat
+ * (>= cutoff) is NOT reaped — that row is still alive. The cutoff is computed by
+ * the caller from an explicit reapThreshold constant (no clock branching here).
+ */
+export async function reapStrandedNodeRuns(
+  db: Db,
+  cutoffIso: string,
+): Promise<ReapedNodeRun[]> {
+  const candidates = await db
+    .select()
+    .from(schema.nodeRuns)
+    .where(eq(schema.nodeRuns.status, "running"));
+  const stranded = candidates.filter(
+    (r) => r.lastHeartbeat == null || r.lastHeartbeat < cutoffIso,
+  );
+  const now = nowIso();
+  const reaped: ReapedNodeRun[] = [];
+  for (const r of stranded) {
+    await db
+      .update(schema.nodeRuns)
+      .set({
+        status: "failed",
+        error: "stranded: heartbeat expired (reaped)",
+        completedAt: now,
+      })
+      .where(eq(schema.nodeRuns.id, r.id));
+    reaped.push({
+      id: r.id,
+      runId: r.runId,
+      nodeId: r.nodeId,
+      lastHeartbeat: r.lastHeartbeat ?? null,
+    });
+  }
+  return reaped;
 }
 
 export type { Db };

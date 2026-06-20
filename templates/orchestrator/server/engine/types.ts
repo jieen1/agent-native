@@ -52,6 +52,8 @@ export interface NodeRunState {
   tokensSpent: number;
   startedAt: string | null;
   completedAt: string | null;
+  /** Liveness marker for reap (DESIGN §6.4/§13); set while a leaf runs. */
+  lastHeartbeat: string | null;
 }
 
 /** A resolved input handed to a NodeExecutor: dep outputs keyed by node id. */
@@ -131,4 +133,19 @@ export interface RunConfig {
    * per-node via `node.runtime.env.echoDelayMs` or node config.
    */
   echoDelayMs: number;
+  /**
+   * Per-run node-config overrides (DESIGN §4.3 `node-override`). Keyed by
+   * node id; merged onto the template node when the scheduler builds its graph,
+   * so an override is scoped to THIS run and never mutates the shared template.
+   * Only prompt/model/engine/effort are patchable (the §4.3 contract).
+   */
+  nodeOverrides?: Record<string, NodeConfigPatch>;
+}
+
+/** The patchable fields of a node-override (DESIGN §4.3). */
+export interface NodeConfigPatch {
+  prompt?: string;
+  model?: string;
+  engine?: string;
+  effort?: "low" | "medium" | "high";
 }

@@ -243,6 +243,14 @@ CREATE INDEX IF NOT EXISTS workflow_runs_owner_org_idx ON workflow_runs (owner_e
 CREATE INDEX IF NOT EXISTS workflow_template_shares_resource_idx ON workflow_template_shares (resource_id, principal_type, principal_id);
 CREATE INDEX IF NOT EXISTS workflow_run_shares_resource_idx ON workflow_run_shares (resource_id, principal_type, principal_id)`,
     },
+    {
+      // P1b-2: liveness column for stuck-run detection + reap (DESIGN §6.4/§13).
+      // ADDITIVE — a single ALTER ADD COLUMN; never drops or rewrites the table.
+      // The reap loop and the partial index below find stranded `running` rows.
+      version: 11,
+      sql: `ALTER TABLE node_runs ADD COLUMN last_heartbeat TEXT;
+CREATE INDEX IF NOT EXISTS node_runs_running_heartbeat_idx ON node_runs (status, last_heartbeat)`,
+    },
   ],
   { table: "orchestrator_migrations" },
 );

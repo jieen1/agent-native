@@ -155,6 +155,10 @@ export const nodeRuns = table("node_runs", {
   tokensSpent: integer("tokens_spent").notNull().default(0),
   startedAt: text("started_at"),
   completedAt: text("completed_at"),
+  // Liveness for stuck-run detection (DESIGN §6.4/§13 reap). Set when a leaf
+  // NodeRun starts running and refreshed on progress; the reap loop returns a
+  // `running` row whose heartbeat is older than the reapThreshold to failed.
+  lastHeartbeat: text("last_heartbeat"),
 });
 
 // Id-addressable artifact index over the Resources store (one index, one

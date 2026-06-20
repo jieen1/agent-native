@@ -15,7 +15,7 @@
 // resolved input into an output) to a pluggable NodeExecutor (DESIGN §1.1).
 // ===========================================================================
 
-import type { Node } from "../../shared/types.js";
+import type { Edge, Node, WorkflowGraph } from "../../shared/types.js";
 import { nowIso } from "../../actions/_util.js";
 import {
   buildGraphModel,
@@ -38,6 +38,7 @@ import {
 import * as store from "./store.js";
 import type {
   NodeExecutionInput,
+  NodeExecutionResult,
   NodeExecutor,
   NodeRunKey,
   NodeRunState,
@@ -45,12 +46,30 @@ import type {
 } from "./types.js";
 import { keyStr } from "./types.js";
 
+/**
+ * Resolve a subworkflow `templateRef` to its graph for inline expansion
+ * (DESIGN §1.2/§3.1). Returns null/undefined when the ref cannot be resolved.
+ */
+export type SubworkflowResolver = (
+  templateRef: string,
+) => WorkflowGraph | null | undefined;
+
 /** Final run outcome the driver returns. */
 export interface RunOutcome {
   runId: string;
-  status: "done" | "failed" | "cancelled";
+  status: "done" | "failed" | "cancelled" | "paused";
   tokensSpent: number;
   nodeRuns: NodeRunState[];
+  /** True when the run is parked on a human gate (awaiting-approval node). */
+  awaitingApproval?: boolean;
+}
+
+/** A distinct error class so a per-node timeout is reportable as such (§3.4). */
+export class NodeTimeoutError extends Error {
+  constructor(nodeId: string, timeoutMs: number) {
+    super(`node '${nodeId}' exceeded timeoutMs=${timeoutMs}`);
+    this.name = "NodeTimeoutError";
+  }
 }
 
 /** A logical fanout scope materialized at run time. */
@@ -58,6 +77,53 @@ interface FanoutScope {
   fanoutNodeId: string;
   items: unknown[];
   width: number;
+}
+
+/** The decision a resolved human gate carries in its journaled output. */
+export type HumanDecision = "approve" | "reject";
+
+/** Build the journaled output of a resolved human gate (DESIGN §3.1/§11). */
+export function humanGateOutput(
+  decision: HumanDecision,
+  input?: unknown,
+): {
+  node: "human";
+  decision: HumanDecision;
+  input: unknown;
+} {
+  return { node: "human", decision, input: input ?? null };
+}
+
+/** Read the decision a human node's output journals, or null if not a gate. */
+function humanDecisionOf(output: unknown): HumanDecision | null {
+  if (output && typeof output === "object") {
+    const d = (output as Record<string, unknown>).decision;
+    if (d === "approve" || d === "reject") return d;
+  }
+  return null;
+}
+
+/**
+ * Return a graph with per-run node overrides applied (DESIGN §4.3). Pure +
+ * immutable: clones every patched node, never mutating the input graph or the
+ * shared template — the override is scoped to one run.
+ */
+function applyNodeOverrides(
+  graph: WorkflowGraph,
+  overrides: RunConfig["nodeOverrides"],
+): WorkflowGraph {
+  if (!overrides || Object.keys(overrides).length === 0) return graph;
+  const nodes = graph.nodes.map((n) => {
+    const patch = overrides[n.id];
+    if (!patch) return n;
+    const next: Node = { ...n };
+    if (typeof patch.prompt === "string") next.prompt = patch.prompt;
+    if (typeof patch.model === "string") next.model = patch.model;
+    if (typeof patch.engine === "string") next.engine = patch.engine;
+    if (patch.effort) next.effort = patch.effort;
+    return next;
+  });
+  return { nodes, edges: graph.edges };
 }
 
 export class Scheduler {
@@ -73,19 +139,42 @@ export class Scheduler {
   private readonly inFlight = new Map<string, Promise<void>>();
   private running = 0;
   private cancelled = false;
+  private paused = false;
   private readonly abort = new AbortController();
   private tokensSpent = 0;
+  /** Resolves a subworkflow `templateRef` to its graph for inline expansion. */
+  private readonly resolveTemplate: SubworkflowResolver | null;
+  /** Subworkflow nodes already inline-expanded (id → child node ids). */
+  private readonly expandedSubworkflows = new Set<string>();
 
-  constructor(args: { cfg: RunConfig; db: Db; executor: NodeExecutor }) {
+  constructor(args: {
+    cfg: RunConfig;
+    db: Db;
+    executor: NodeExecutor;
+    /** Resolve a subworkflow templateRef → its graph (DESIGN §1.2/§3.1). */
+    resolveTemplate?: SubworkflowResolver;
+  }) {
     this.cfg = args.cfg;
     this.db = args.db;
     this.executor = args.executor;
-    this.g = buildGraphModel(args.cfg.graph);
+    this.resolveTemplate = args.resolveTemplate ?? null;
+    this.g = buildGraphModel(
+      applyNodeOverrides(args.cfg.graph, args.cfg.nodeOverrides),
+    );
   }
 
   cancel(): void {
     this.cancelled = true;
     this.abort.abort();
+  }
+
+  /**
+   * Cooperative pause (DESIGN §4.3): stop scheduling NEW nodes; let running
+   * settle. Unlike cancel it does NOT abort in-flight work — the run quiesces to
+   * `paused` and a later run-resume picks the journal up.
+   */
+  pause(): void {
+    this.paused = true;
   }
 
   /** Drive the run to completion (or cancellation) and return the outcome. */
@@ -97,7 +186,11 @@ export class Scheduler {
     for (const n of this.g.nodes) {
       if (enclosingFanout(this.g, n.id) != null) continue; // fanout body → on expand
       if (this.isLoopBody(n.id)) continue; // loop body → per iteration
-      await this.ensureRun(n, { nodeId: n.id, iteration: 0, fanoutIndex: 0 }, false);
+      await this.ensureRun(
+        n,
+        { nodeId: n.id, iteration: 0, fanoutIndex: 0 },
+        false,
+      );
     }
 
     return this.drive();
@@ -137,6 +230,7 @@ export class Scheduler {
         tokensSpent: r.tokensSpent,
         startedAt: r.startedAt,
         completedAt: r.completedAt,
+        lastHeartbeat: r.lastHeartbeat ?? null,
       };
       this.runs.set(keyStr(key), state);
     }
@@ -144,7 +238,11 @@ export class Scheduler {
     // Pass 1: dirty = failed | pending | ready (not yet completed) ...
     const dirty = new Set<string>();
     for (const s of this.runs.values()) {
-      if (s.status === "failed" || s.status === "pending" || s.status === "ready") {
+      if (
+        s.status === "failed" ||
+        s.status === "pending" ||
+        s.status === "ready"
+      ) {
         dirty.add(keyStr(s.key));
       }
     }
@@ -212,7 +310,11 @@ export class Scheduler {
           };
           const raw = this.outputs.get(keyStr(producerKey));
           const items = Array.isArray(raw) ? raw.slice(0, w) : [];
-          this.fanoutScopes.set(s.node.id, { fanoutNodeId: s.node.id, items, width: w });
+          this.fanoutScopes.set(s.node.id, {
+            fanoutNodeId: s.node.id,
+            items,
+            width: w,
+          });
         }
       } else if (dirty.has(ks)) {
         s.status = "pending";
@@ -225,8 +327,14 @@ export class Scheduler {
     for (const n of this.g.nodes) {
       if (enclosingFanout(this.g, n.id) != null) continue;
       if (this.isLoopBody(n.id)) continue;
-      if (!this.runs.has(keyStr({ nodeId: n.id, iteration: 0, fanoutIndex: 0 }))) {
-        await this.ensureRun(n, { nodeId: n.id, iteration: 0, fanoutIndex: 0 }, false);
+      if (
+        !this.runs.has(keyStr({ nodeId: n.id, iteration: 0, fanoutIndex: 0 }))
+      ) {
+        await this.ensureRun(
+          n,
+          { nodeId: n.id, iteration: 0, fanoutIndex: 0 },
+          false,
+        );
       }
     }
 
@@ -242,18 +350,44 @@ export class Scheduler {
       await Promise.race(this.inFlight.values());
     }
 
-    const anyFailed = [...this.runs.values()].some((r) => r.status === "failed");
-    const status: RunOutcome["status"] = this.cancelled
-      ? "cancelled"
-      : anyFailed
-        ? "failed"
-        : "done";
+    // A run-cancel marks every still-pending/ready/awaiting node skipped so the
+    // run is fully terminal (DESIGN §4.3: pending → skipped).
+    if (this.cancelled) await this.skipUnsettledForCancel();
+
+    const states = [...this.runs.values()];
+    const anyFailed = states.some((r) => r.status === "failed");
+    // A run that quiesced with a node parked on a human gate is `paused`, not
+    // done — downstream of the gate is still pending (DESIGN §3.1/§11).
+    const awaitingApproval = states.some(
+      (r) => r.status === "awaiting-approval",
+    );
+    let status: RunOutcome["status"];
+    if (this.cancelled) status = "cancelled";
+    else if (anyFailed) status = "failed";
+    else if (this.paused || awaitingApproval) status = "paused";
+    else status = "done";
     return {
       runId: this.cfg.runId,
       status,
       tokensSpent: this.tokensSpent,
-      nodeRuns: [...this.runs.values()],
+      nodeRuns: states,
+      awaitingApproval,
     };
+  }
+
+  /** Cancel cooperatively: any not-yet-terminal NodeRun becomes `skipped`. */
+  private async skipUnsettledForCancel(): Promise<void> {
+    for (const s of this.runs.values()) {
+      if (
+        s.status === "pending" ||
+        s.status === "ready" ||
+        s.status === "awaiting-approval"
+      ) {
+        s.status = "skipped";
+        s.completedAt = s.completedAt ?? nowIso();
+        await store.updateNodeRun(this.db, s);
+      }
+    }
   }
 
   /**
@@ -268,6 +402,9 @@ export class Scheduler {
       progressed = false;
       // 1. Resolve readiness / skips for all pending nodes.
       await this.computeReadiness();
+      // When paused we stop scheduling NEW work (no structural settle, no leaf
+      // launch). Already-running leaves keep going and settle via drive().
+      if (this.paused) break;
       // 2. Settle every ready STRUCTURAL node (these do not block on a slot).
       for (const state of this.readySnapshot()) {
         if (state.status !== "ready") continue;
@@ -317,6 +454,7 @@ export class Scheduler {
       tokensSpent: 0,
       startedAt: null,
       completedAt: null,
+      lastHeartbeat: null,
     };
     this.runs.set(ks, state);
     await store.insertNodeRun(this.db, state);
@@ -389,6 +527,16 @@ export class Scheduler {
         pending += 1;
         continue;
       }
+      // A REJECTED human gate is done but kills its out-edge branch (DESIGN
+      // §3.1/§11): its downstream is a dead path, exactly like a not-taken
+      // branch edge. The decision is journaled in the human node's output.
+      if (
+        dep.node.type === "human" &&
+        humanDecisionOf(this.outputs.get(keyStr(depKey))) === "reject"
+      ) {
+        dead += 1;
+        continue;
+      }
       // dep is done. For a branch edge, it only counts as a live path if its
       // `when` selects this node (evaluated against the BRANCH's own deps).
       if (isBranchEdge) {
@@ -438,7 +586,9 @@ export class Scheduler {
    * (A_i depends on B_i); an edge crossing the scope boundary resolves to the
    * singleton (index 0).
    */
-  private resolveDeps(state: NodeRunState): { nodeId: string; key: NodeRunKey }[] {
+  private resolveDeps(
+    state: NodeRunState,
+  ): { nodeId: string; key: NodeRunKey }[] {
     return inEdges(this.g, state.node.id).map((e) => ({
       nodeId: e.from,
       key: this.depKeyForEdge(state, e),
@@ -483,7 +633,9 @@ export class Scheduler {
         const dep = this.runs.get(keyStr(d.key));
         return (
           dep != null &&
-          (dep.status === "done" || dep.status === "failed" || dep.status === "skipped")
+          (dep.status === "done" ||
+            dep.status === "failed" ||
+            dep.status === "skipped")
         );
       });
     }
@@ -498,10 +650,18 @@ export class Scheduler {
     for (let i = 0; i < scope.width; i++) {
       for (const f of feeders) {
         const dep = this.runs.get(
-          keyStr({ nodeId: f.from, iteration: state.key.iteration, fanoutIndex: i }),
+          keyStr({
+            nodeId: f.from,
+            iteration: state.key.iteration,
+            fanoutIndex: i,
+          }),
         );
         if (!dep) return false;
-        if (dep.status !== "done" && dep.status !== "failed" && dep.status !== "skipped") {
+        if (
+          dep.status !== "done" &&
+          dep.status !== "failed" &&
+          dep.status !== "skipped"
+        ) {
           return false;
         }
       }
@@ -523,7 +683,8 @@ export class Scheduler {
       const child = this.g.byId.get(e.to);
       if (!child) continue;
       const sameScope =
-        enclosingFanout(this.g, e.to) === enclosingFanout(this.g, state.node.id);
+        enclosingFanout(this.g, e.to) ===
+        enclosingFanout(this.g, state.node.id);
       const childKey: NodeRunKey = {
         nodeId: e.to,
         iteration: state.key.iteration,
@@ -573,7 +734,11 @@ export class Scheduler {
       await this.runLoop(state);
       return;
     }
-    // start / end / parallel / branch / join / subworkflow: aggregate + done.
+    if (node.type === "subworkflow") {
+      await this.expandSubworkflow(state);
+      return;
+    }
+    // start / end / parallel / branch / join: aggregate + done.
     const output = this.aggregateOutput(state);
     await this.markDone(state, output);
   }
@@ -591,9 +756,14 @@ export class Scheduler {
         for (let i = 0; i < scope.width; i++) {
           for (const f of feeders) {
             const dep = this.runs.get(
-              keyStr({ nodeId: f.from, iteration: state.key.iteration, fanoutIndex: i }),
+              keyStr({
+                nodeId: f.from,
+                iteration: state.key.iteration,
+                fanoutIndex: i,
+              }),
             );
-            if (dep?.status === "done") merged.push(this.outputs.get(keyStr(dep.key)));
+            if (dep?.status === "done")
+              merged.push(this.outputs.get(keyStr(dep.key)));
           }
         }
       }
@@ -610,7 +780,12 @@ export class Scheduler {
     state.status = "done";
     state.completedAt = nowIso();
     this.outputs.set(keyStr(state.key), output);
-    state.outputRef = await putOutputArtifact(this.db, this.cfg.runId, state, output);
+    state.outputRef = await putOutputArtifact(
+      this.db,
+      this.cfg.runId,
+      state,
+      output,
+    );
     await store.updateNodeRun(this.db, state);
   }
 
@@ -636,7 +811,10 @@ export class Scheduler {
       const raw = this.outputs.get(keyStr(producerKey));
       if (Array.isArray(raw)) arr = raw;
     }
-    const cap = node.maxConcurrency && node.maxConcurrency > 0 ? node.maxConcurrency : arr.length;
+    const cap =
+      node.maxConcurrency && node.maxConcurrency > 0
+        ? node.maxConcurrency
+        : arr.length;
     const width = Math.min(arr.length, cap);
     const items = arr.slice(0, width);
     this.fanoutScopes.set(node.id, { fanoutNodeId: node.id, items, width });
@@ -654,6 +832,176 @@ export class Scheduler {
       }
     }
     await this.markDone(state, { node: node.id, width });
+  }
+
+  // ── Subworkflow inline expansion (DESIGN §1.2 / §3.1) ──────────────────────
+
+  /**
+   * Inline-expand a subworkflow node: resolve its referenced template's graph,
+   * namespace every child node/edge, and splice the child subgraph BETWEEN this
+   * node and its successors so the child runs as part of THIS run — sharing the
+   * parent's concurrency caps, token budget and node backstop (no separate
+   * quota). Child tokens accrue to the parent run because every child leaf goes
+   * through the same launchLeaf path (DESIGN §1.2).
+   *
+   * ONE LEVEL ONLY: if the referenced template itself contains a subworkflow
+   * node, the expansion is REJECTED (two-level nesting) and this node fails.
+   */
+  private async expandSubworkflow(state: NodeRunState): Promise<void> {
+    const node = state.node;
+    if (this.expandedSubworkflows.has(node.id)) {
+      // Already expanded on a prior pass (e.g. resume) — just aggregate + done.
+      await this.markDone(state, this.aggregateOutput(state));
+      return;
+    }
+    const ref = node.templateRef;
+    if (!ref) {
+      await this.failStructural(
+        state,
+        `subworkflow '${node.id}' has no templateRef`,
+      );
+      return;
+    }
+    if (!this.resolveTemplate) {
+      await this.failStructural(
+        state,
+        `subworkflow '${node.id}' cannot expand: no template resolver wired`,
+      );
+      return;
+    }
+    const child = this.resolveTemplate(ref);
+    if (!child) {
+      await this.failStructural(
+        state,
+        `subworkflow '${node.id}' references unknown template '${ref}'`,
+      );
+      return;
+    }
+    // Two-level nesting guard (DESIGN §1.2/§3.1): reject AT expansion.
+    if (child.nodes.some((n) => n.type === "subworkflow")) {
+      await this.failStructural(
+        state,
+        `subworkflow '${node.id}' references template '${ref}' which itself ` +
+          `contains a subworkflow node (two-level nesting is not allowed)`,
+      );
+      return;
+    }
+
+    const childStart = child.nodes.find((n) => n.type === "start");
+    const childEnd = child.nodes.find((n) => n.type === "end");
+    if (!childStart || !childEnd) {
+      await this.failStructural(
+        state,
+        `subworkflow '${node.id}' template '${ref}' must have one start and one end`,
+      );
+      return;
+    }
+
+    const ns = (id: string) => `${node.id}::${id}`;
+    // 1. Splice child nodes (namespaced) into the live graph as dynamic runs.
+    for (const cn of child.nodes) {
+      const renamed = this.renameNode(cn, ns);
+      this.addGraphNode(renamed);
+      await this.ensureRun(
+        renamed,
+        { nodeId: renamed.id, iteration: state.key.iteration, fanoutIndex: 0 },
+        true,
+      );
+    }
+    // 2. Child-internal edges (namespaced).
+    for (const ce of child.edges) {
+      this.addGraphEdge({
+        id: ns(ce.id),
+        from: ns(ce.from),
+        to: ns(ce.to),
+        when: ce.when,
+      });
+    }
+    // 3. Splice: this node → child start; child end → each original successor.
+    const originalOut = outEdges(this.g, node.id);
+    this.addGraphEdge({
+      id: `${node.id}::enter`,
+      from: node.id,
+      to: ns(childStart.id),
+    });
+    for (const e of originalOut) {
+      this.removeGraphEdge(e.id);
+      this.addGraphEdge({
+        id: `${node.id}::exit::${e.id}`,
+        from: ns(childEnd.id),
+        to: e.to,
+        when: e.when,
+      });
+    }
+    this.expandedSubworkflows.add(node.id);
+    // The subworkflow node itself settles done (it is a container marker); the
+    // spliced child subgraph carries the actual work.
+    await this.markDone(state, {
+      node: node.id,
+      type: "subworkflow",
+      templateRef: ref,
+      expanded: child.nodes.length,
+    });
+  }
+
+  /** Mark a structural node failed with an error (subworkflow expansion errors). */
+  private async failStructural(
+    state: NodeRunState,
+    message: string,
+  ): Promise<void> {
+    state.status = "failed";
+    state.error = message;
+    state.completedAt = nowIso();
+    await store.updateNodeRun(this.db, state);
+  }
+
+  /** Clone a node under a renamed id, remapping its container `children` refs. */
+  private renameNode(n: Node, ns: (id: string) => string): Node {
+    const copy: Node = { ...n, id: ns(n.id) };
+    if (Array.isArray(n.children)) copy.children = n.children.map(ns);
+    if (typeof n.itemsFrom === "string") copy.itemsFrom = ns(n.itemsFrom);
+    return copy;
+  }
+
+  /** Add a node to the live GraphModel adjacency (idempotent on id). */
+  private addGraphNode(n: Node): void {
+    if (this.g.byId.has(n.id)) return;
+    this.g.nodes.push(n);
+    this.g.byId.set(n.id, n);
+    this.g.out.set(n.id, this.g.out.get(n.id) ?? []);
+    this.g.in.set(n.id, this.g.in.get(n.id) ?? []);
+    this.g.containerOf.set(n.id, this.g.containerOf.get(n.id) ?? null);
+    if (Array.isArray(n.children) && n.children.length > 0) {
+      this.g.childrenOf.set(n.id, n.children.slice());
+      for (const c of n.children) this.g.containerOf.set(c, n.id);
+    }
+  }
+
+  /** Add an edge to the live GraphModel adjacency. */
+  private addGraphEdge(e: Edge): void {
+    this.g.edges.push(e);
+    if (this.g.byId.has(e.from) && this.g.byId.has(e.to)) {
+      this.g.out.get(e.from)!.push(e.to);
+      this.g.in.get(e.to)!.push(e.from);
+    }
+  }
+
+  /** Remove an edge by id from the live GraphModel adjacency. */
+  private removeGraphEdge(edgeId: string): void {
+    const idx = this.g.edges.findIndex((e) => e.id === edgeId);
+    if (idx < 0) return;
+    const e = this.g.edges[idx];
+    this.g.edges.splice(idx, 1);
+    const outs = this.g.out.get(e.from);
+    if (outs) {
+      const i = outs.indexOf(e.to);
+      if (i >= 0) outs.splice(i, 1);
+    }
+    const ins = this.g.in.get(e.to);
+    if (ins) {
+      const i = ins.indexOf(e.from);
+      if (i >= 0) ins.splice(i, 1);
+    }
   }
 
   // ── Loop (loop-until-dry, DESIGN §1.5 / §3.2) ──────────────────────────────
@@ -681,14 +1029,24 @@ export class Scheduler {
       bodyState.startedAt = nowIso();
       bodyState.attempts += 1;
       await store.updateNodeRun(this.db, bodyState);
-      const input: NodeExecutionInput = { node: bodyNode, deps: {}, fanoutIndex: 0, iteration };
+      const input: NodeExecutionInput = {
+        node: bodyNode,
+        deps: {},
+        fanoutIndex: 0,
+        iteration,
+      };
       let output: unknown;
       try {
         const res = await this.executor.invoke(input, this.abort.signal);
         output = res.output;
         bodyState.tokensSpent = res.tokensSpent;
         this.tokensSpent += res.tokensSpent;
-        bodyState.outputRef = await putOutputArtifact(this.db, this.cfg.runId, bodyState, output);
+        bodyState.outputRef = await putOutputArtifact(
+          this.db,
+          this.cfg.runId,
+          bodyState,
+          output,
+        );
         bodyState.status = "done";
         bodyState.completedAt = nowIso();
         this.outputs.set(keyStr(key), output);
@@ -729,7 +1087,11 @@ export class Scheduler {
         dryStreak = 0;
       }
     }
-    await this.markDone(state, { node: node.id, iterations: iteration, seen: [...seen] });
+    await this.markDone(state, {
+      node: node.id,
+      iterations: iteration,
+      seen: [...seen],
+    });
   }
 
   // ── Leaf execution (agent/tool via the pluggable executor) ─────────────────
@@ -759,7 +1121,9 @@ export class Scheduler {
 
   private launchLeaf(state: NodeRunState): void {
     state.status = "running";
-    state.startedAt = nowIso();
+    const now = nowIso();
+    state.startedAt = now;
+    state.lastHeartbeat = now; // liveness for the reap loop (§6.4/§13)
     state.attempts += 1;
     this.running += 1;
     const ks = keyStr(state.key);
@@ -767,15 +1131,25 @@ export class Scheduler {
     const p = (async () => {
       try {
         await store.updateNodeRun(this.db, state);
-        state.inputRef = await putInputArtifact(this.db, this.cfg.runId, state, input.deps);
-        const res = await this.executor.invoke(input, this.abort.signal);
+        state.inputRef = await putInputArtifact(
+          this.db,
+          this.cfg.runId,
+          state,
+          input.deps,
+        );
+        const res = await this.invokeWithTimeout(state, input);
         if (this.cancelled) {
           state.status = "failed";
           state.error = "cancelled";
         } else {
           state.tokensSpent = res.tokensSpent; // capture usage in-closure (§4.2)
           this.tokensSpent += res.tokensSpent;
-          state.outputRef = await putOutputArtifact(this.db, this.cfg.runId, state, res.output);
+          state.outputRef = await putOutputArtifact(
+            this.db,
+            this.cfg.runId,
+            state,
+            res.output,
+          );
           this.outputs.set(ks, res.output);
           state.status = "done";
         }
@@ -784,12 +1158,51 @@ export class Scheduler {
         state.error = err instanceof Error ? err.message : String(err);
       } finally {
         state.completedAt = nowIso();
+        state.lastHeartbeat = null; // settled → no longer a reap candidate
         this.running -= 1;
         this.inFlight.delete(ks);
         await store.updateNodeRun(this.db, state);
       }
     })();
     this.inFlight.set(ks, p);
+  }
+
+  /**
+   * Run a node's executor, enforcing its per-node `timeoutMs` (DESIGN §3.4 /
+   * §12.1 — day-one liveness). A node that exceeds its timeout is aborted via a
+   * node-scoped signal and rejected with a DISTINCT NodeTimeoutError so the
+   * failure is reportable as a timeout (not a generic error). The timeout is an
+   * exception/liveness path only — it never feeds readiness, fanout width,
+   * branch selection or artifact ids, so the determinism invariant holds.
+   */
+  private async invokeWithTimeout(
+    state: NodeRunState,
+    input: NodeExecutionInput,
+  ): Promise<NodeExecutionResult> {
+    const timeoutMs = state.node.timeoutMs;
+    if (timeoutMs == null || timeoutMs <= 0) {
+      return this.executor.invoke(input, this.abort.signal);
+    }
+    // Combine the run-level abort with a node-scoped timeout abort.
+    const nodeAbort = new AbortController();
+    const onRunAbort = () => nodeAbort.abort();
+    this.abort.signal.addEventListener("abort", onRunAbort, { once: true });
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeoutP = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        nodeAbort.abort();
+        reject(new NodeTimeoutError(state.node.id, timeoutMs));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        this.executor.invoke(input, nodeAbort.signal),
+        timeoutP,
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.abort.signal.removeEventListener("abort", onRunAbort);
+    }
   }
 
   private buildExecInput(state: NodeRunState): NodeExecutionInput {

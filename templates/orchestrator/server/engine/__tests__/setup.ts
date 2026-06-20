@@ -69,7 +69,8 @@ export async function createEngineTables(): Promise<void> {
     attempts INTEGER NOT NULL DEFAULT 0,
     tokens_spent INTEGER NOT NULL DEFAULT 0,
     started_at TEXT,
-    completed_at TEXT
+    completed_at TEXT,
+    last_heartbeat TEXT
   )`);
   await c.execute(`CREATE TABLE IF NOT EXISTS artifacts (
     id TEXT PRIMARY KEY,

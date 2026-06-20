@@ -12,6 +12,7 @@ import { parseGraph } from "../../shared/types.js";
 import { EchoExecutor } from "./echo-executor.js";
 import { Scheduler, type RunOutcome } from "./scheduler.js";
 import { DEFAULT_CAPS, type NodeExecutor, type RunConfig } from "./types.js";
+import { buildResolverMap } from "./control.js";
 
 /** A fixed default seed so a run with no explicit seed is still deterministic. */
 export const DEFAULT_SEED = 1;
@@ -53,8 +54,7 @@ export async function executeRun(
   if (!tpl) throw new Error(`template ${runRow.templateId} not found`);
 
   const graph = parseGraph(tpl.graph);
-  const executor =
-    opts.executor ?? new EchoExecutor(opts.echoDelayMs ?? 0);
+  const executor = opts.executor ?? new EchoExecutor(opts.echoDelayMs ?? 0);
 
   const cfg: RunConfig = {
     runId,
@@ -74,23 +74,32 @@ export async function executeRun(
     .set({ status: "running", startedAt: nowIso() })
     .where(eq(schema.workflowRuns.id, runId));
 
+  // Resolve subworkflow refs (DESIGN §1.2/§3.1) so the first run can inline-
+  // expand a subworkflow node, not just resume.
+  const resolveTemplate = await buildResolverMap(cfg.userEmail);
+
   // Re-establish request context inside the detached work (DESIGN §4.2
   // landmine 2) so ownable scoping / secret resolution work for real executors.
   const outcome = await runWithRequestContext(
     { userEmail: cfg.userEmail, orgId: cfg.orgId ?? undefined },
     async () => {
-      const scheduler = new Scheduler({ cfg, db, executor });
+      const scheduler = new Scheduler({ cfg, db, executor, resolveTemplate });
       return scheduler.run();
     },
   );
 
-  // Persist terminal status + totals.
+  // Persist status + totals. A `paused` run (parked on a human gate) is NOT
+  // completed — leave completedAt null so run-resume can pick it back up.
+  const completed =
+    outcome.status === "done" ||
+    outcome.status === "failed" ||
+    outcome.status === "cancelled";
   await db
     .update(schema.workflowRuns)
     .set({
       status: outcome.status,
       tokensSpent: outcome.tokensSpent,
-      completedAt: nowIso(),
+      completedAt: completed ? nowIso() : null,
     })
     .where(eq(schema.workflowRuns.id, runId));
 
