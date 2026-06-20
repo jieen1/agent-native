@@ -44,6 +44,7 @@ export async function createEngineTables(): Promise<void> {
     deliverable TEXT,
     token_budget INTEGER,
     tokens_spent INTEGER NOT NULL DEFAULT 0,
+    dynamic_authored INTEGER NOT NULL DEFAULT 0,
     started_at TEXT,
     completed_at TEXT,
     owner_email TEXT NOT NULL DEFAULT 'local@localhost',
@@ -85,6 +86,19 @@ export async function createEngineTables(): Promise<void> {
   await c.execute(
     `CREATE UNIQUE INDEX IF NOT EXISTS node_runs_journal_key_idx ON node_runs (run_id, node_id, iteration, fanout_index)`,
   );
+  // Shares tables (structure only) so accessFilter joins resolve in tests that
+  // exercise owner-scoped reads (e.g. the node-def reference scan).
+  for (const t of ["workflow_template_shares", "workflow_run_shares"]) {
+    await c.execute(`CREATE TABLE IF NOT EXISTS ${t} (
+      id TEXT PRIMARY KEY,
+      resource_id TEXT NOT NULL,
+      principal_type TEXT NOT NULL,
+      principal_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'viewer',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`);
+  }
 }
 
 /**

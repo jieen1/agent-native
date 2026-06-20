@@ -9,13 +9,16 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { newId, nowIso } from "./_util.js";
 import { parseGraph, validateGraph } from "../shared/types.js";
+import { injectFinalizeStatusGate } from "../shared/finalize-gate.js";
 
 // Create (no id) or update (id given) a v2 workflow template. Validates the
-// graph via the ONE shared `validateGraph` (REJECT on errors — DESIGN §3/§6.3)
-// and bumps `version` on update. Stores the normalized graph JSON.
+// graph via the ONE shared `validateGraph` (REJECT on errors — DESIGN §3/§6.3),
+// AUTO-INJECTS the required finalize-status gate before `end` for delivery graphs
+// (DESIGN §6.2b L1 — the brain cannot omit it, like a git-push gate), and bumps
+// `version` on update. Stores the normalized graph JSON.
 export default defineAction({
   description:
-    "Create or update a v2 workflow template (a graph of typed nodes + edges). Pass `id` to update; validates via validateGraph and rejects an invalid graph.",
+    "Create or update a v2 workflow template (a graph of typed nodes + edges). Pass `id` to update; validates via validateGraph and rejects an invalid graph; auto-injects the finalize-status gate before `end` for delivery graphs.",
   schema: z.object({
     id: z.string().optional(),
     name: z.string(),
@@ -23,11 +26,27 @@ export default defineAction({
     graph: z
       .union([z.string(), z.record(z.string(), z.unknown())])
       .describe("WorkflowGraph or JSON string of the same"),
+    /**
+     * Skip the finalize-status auto-injection. Used for non-delivery utility
+     * templates (e.g. the P1 control-flow fixtures) where a business-status gate
+     * is meaningless. Default false: delivery graphs always get the gate.
+     */
+    skipFinalizeGate: z.coerce.boolean().optional(),
   }),
   run: async (args) => {
-    const graph = parseGraph(
+    const parsed = parseGraph(
       typeof args.graph === "string" ? args.graph : JSON.stringify(args.graph),
     );
+
+    // finalize-status GATE (DESIGN §6.2b L1): auto-inject before `end` for
+    // delivery graphs unless explicitly skipped. injectFinalizeStatusGate is a
+    // no-op for non-delivery graphs (no body, not exactly one start+end) and for
+    // graphs that already have the gate.
+    const injection = args.skipFinalizeGate
+      ? { graph: parsed, injected: false }
+      : injectFinalizeStatusGate(parsed);
+    const graph = injection.graph;
+
     const result = validateGraph(graph);
     if (!result.ok) {
       throw new Error(`Invalid template graph: ${result.errors.join("; ")}`);
@@ -52,7 +71,12 @@ export default defineAction({
           updatedAt: now,
         })
         .where(eq(schema.workflowTemplates.id, args.id));
-      return { id: args.id, ok: true, warnings: result.warnings };
+      return {
+        id: args.id,
+        ok: true,
+        warnings: result.warnings,
+        finalizeGateInjected: injection.injected,
+      };
     }
 
     const ownerEmail = getRequestUserEmail();
@@ -71,6 +95,11 @@ export default defineAction({
       orgId,
       visibility: "private",
     });
-    return { id, ok: true, warnings: result.warnings };
+    return {
+      id,
+      ok: true,
+      warnings: result.warnings,
+      finalizeGateInjected: injection.injected,
+    };
   },
 });

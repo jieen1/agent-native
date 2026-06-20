@@ -11,7 +11,12 @@
 // (§6.4) — that is transition-work-item's job.
 
 import { runWithRequestContext } from "@agent-native/core/server/request-context";
-import { claimNextWorkItem, markRunning, settleWorkItem } from "./claim.js";
+import {
+  claimNextWorkItem,
+  markRunning,
+  releaseToBrain,
+  settleWorkItem,
+} from "./claim.js";
 import { startRunForWorkItem } from "./run-work-item.js";
 import { getConcurrencyDegree } from "./concurrency.js";
 import { executeRun, type ExecuteRunOptions } from "../engine/index.js";
@@ -84,6 +89,22 @@ async function workerLoop(
         status: "failed",
         tokensSpent: 0,
         noWorkflow: true,
+      });
+      continue;
+    }
+
+    // DYNAMIC-AUTHORED (DESIGN §6.3 order 3): no template resolved — the brain
+    // must author the DAG. The worker pool does NOT execute a placeholder run.
+    // Pause the item so the orchestrating agent picks it up (it builds + runs the
+    // graph, then settles), rather than silently failing or double-running.
+    if (started.dynamicAuthored) {
+      await releaseToBrain(claimed.id);
+      out.push({
+        workItemId: claimed.id,
+        workerId,
+        runId: started.runId,
+        status: "dynamic-authored",
+        tokensSpent: 0,
       });
       continue;
     }

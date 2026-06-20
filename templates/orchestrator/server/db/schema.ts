@@ -116,6 +116,11 @@ export const workflowRuns = table("workflow_runs", {
   deliverable: text("deliverable"), // JSON { kind, ref } | null
   tokenBudget: integer("token_budget"),
   tokensSpent: integer("tokens_spent").notNull().default(0),
+  // Set when decomposition resolved this run's workflow via the DYNAMIC path
+  // (DESIGN §6.3 order 3 — neither explicit workflowId nor project default; the
+  // brain must author the DAG). Marks the run so the UI / orchestrating skill
+  // know to build + promote it. 0 = a resolved template run.
+  dynamicAuthored: integer("dynamic_authored").notNull().default(0),
   startedAt: text("started_at"),
   completedAt: text("completed_at"),
   ...ownableColumns(),

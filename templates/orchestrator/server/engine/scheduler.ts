@@ -54,6 +54,20 @@ export type SubworkflowResolver = (
   templateRef: string,
 ) => WorkflowGraph | null | undefined;
 
+/**
+ * An optional per-node pre-execution GATE (DESIGN §6.2b L1). Before a leaf node
+ * runs, the scheduler asks the gate whether it may proceed. Returning `ok:false`
+ * fails the node (and so the run) with `reason` — this is how the finalize-status
+ * library node asserts the agent set a sensible business status before `end`,
+ * without coupling the deterministic scheduler to the work-item DB schema.
+ *
+ * The gate is consulted ONLY for leaf nodes the scheduler would otherwise hand
+ * to the executor; it must be side-effect-free with respect to topology.
+ */
+export type NodeGate = (
+  node: Node,
+) => Promise<{ ok: boolean; reason?: string }>;
+
 /** Final run outcome the driver returns. */
 export interface RunOutcome {
   runId: string;
@@ -146,6 +160,8 @@ export class Scheduler {
   private readonly resolveTemplate: SubworkflowResolver | null;
   /** Subworkflow nodes already inline-expanded (id → child node ids). */
   private readonly expandedSubworkflows = new Set<string>();
+  /** Optional per-node pre-execution gate (DESIGN §6.2b L1 finalize-status). */
+  private readonly nodeGate: NodeGate | null;
 
   constructor(args: {
     cfg: RunConfig;
@@ -153,11 +169,14 @@ export class Scheduler {
     executor: NodeExecutor;
     /** Resolve a subworkflow templateRef → its graph (DESIGN §1.2/§3.1). */
     resolveTemplate?: SubworkflowResolver;
+    /** Pre-execution gate for leaf nodes (DESIGN §6.2b L1). */
+    nodeGate?: NodeGate;
   }) {
     this.cfg = args.cfg;
     this.db = args.db;
     this.executor = args.executor;
     this.resolveTemplate = args.resolveTemplate ?? null;
+    this.nodeGate = args.nodeGate ?? null;
     this.g = buildGraphModel(
       applyNodeOverrides(args.cfg.graph, args.cfg.nodeOverrides),
     );
@@ -1162,6 +1181,17 @@ export class Scheduler {
           state,
           input.deps,
         );
+        // GATE (DESIGN §6.2b L1): a node may carry a pre-execution gate (the
+        // finalize-status library node). If the gate denies, the node fails
+        // BEFORE the executor runs — the run cannot finish unfinalized.
+        if (this.nodeGate) {
+          const gate = await this.nodeGate(state.node);
+          if (!gate.ok) {
+            throw new Error(
+              gate.reason ?? `node '${state.node.id}' gate denied`,
+            );
+          }
+        }
         const res = await this.invokeWithTimeout(state, input);
         if (this.cancelled) {
           state.status = "failed";

@@ -49,7 +49,8 @@ export default defineAction({
     // + dynamic build is P3c). The caller must have write access to the item.
     if (hasWorkItem) {
       const itemAccess = await resolveAccess("work_item", args.workItemId!);
-      if (!itemAccess) throw new Error(`Work item ${args.workItemId} not found`);
+      if (!itemAccess)
+        throw new Error(`Work item ${args.workItemId} not found`);
       if (itemAccess.role === "viewer") throw new Error("Read-only access");
 
       const ownerEmail = getRequestUserEmail() ?? "local@localhost";
@@ -73,6 +74,12 @@ export default defineAction({
         workItemId: args.workItemId,
         status: result.status,
         tokensSpent: result.tokensSpent,
+        // DESIGN §6.3 three-order decomposition: surface WHICH order resolved
+        // the workflow (explicit | default | dynamic) and whether this is a
+        // dynamic-authored placeholder the brain must build.
+        templateId: result.templateId,
+        templateSource: result.templateSource,
+        dynamicAuthored: result.dynamicAuthored,
         noWorkflow: result.noWorkflow ?? false,
         reason: result.reason,
       };

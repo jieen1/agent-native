@@ -170,4 +170,25 @@ export async function settleWorkItem(
   return affectedRows(result) > 0;
 }
 
+/**
+ * Hand a CLAIMED item off to the brain (claimed → paused) instead of running it.
+ * Used when decomposition resolved the DYNAMIC path (DESIGN §6.3 order 3): the
+ * worker pool cannot execute a placeholder run, so it parks the item `paused` for
+ * the orchestrating agent to author + run the DAG. Guarded on claimed/running so
+ * a reaped row is not overwritten. Business `status` is untouched (§6.4).
+ */
+export async function releaseToBrain(itemId: string): Promise<boolean> {
+  const client = getDbExec();
+  const now = new Date().toISOString();
+  const result = await client.execute({
+    sql: `UPDATE work_items
+            SET exec_state = 'paused',
+                updated_at = ?
+          WHERE id = ?
+            AND exec_state IN ('claimed', 'running')`,
+    args: [now, itemId],
+  });
+  return affectedRows(result) > 0;
+}
+
 export { affectedRows };

@@ -420,6 +420,13 @@ CREATE INDEX IF NOT EXISTS project_shares_resource_idx ON project_shares (resour
 CREATE INDEX IF NOT EXISTS work_item_shares_resource_idx ON work_item_shares (resource_id, principal_type, principal_id);
 CREATE INDEX IF NOT EXISTS node_def_shares_resource_idx ON node_def_shares (resource_id, principal_type, principal_id)`,
     },
+    {
+      // P3c: mark runs whose workflow was resolved via the DYNAMIC decomposition
+      // path (DESIGN §6.3 order 3 — the brain authors the DAG). Additive column,
+      // default 0 so every existing run reads as a resolved-template run.
+      version: 16,
+      sql: `ALTER TABLE workflow_runs ADD COLUMN dynamic_authored INTEGER NOT NULL DEFAULT 0`,
+    },
   ],
   { table: "orchestrator_migrations" },
 );

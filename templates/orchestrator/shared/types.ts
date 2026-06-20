@@ -296,6 +296,15 @@ export interface Node {
   type: NodeType;
   title: string;
 
+  // ── library reference (DESIGN §3.7) ─────────────────────────────────────
+  /**
+   * When this node is dropped from the node library, the library entry's `key`.
+   * The node inherits the library config (overridable per-use). The library
+   * (`node_defs`) is referenced FROM a graph by this field, and delete-node-def
+   * blocks a delete when any saved template's graph references the key.
+   */
+  nodeDefKey?: string;
+
   // ── agent / tool nodes ──────────────────────────────────────────────────
   /** "local" sub-agent or an "@app" A2A delegate. */
   assignee?: StepAssignee;
@@ -431,6 +440,7 @@ function parseNode(raw: unknown): Node | null {
     title: typeof n.title === "string" ? n.title : n.id,
   };
 
+  if (typeof n.nodeDefKey === "string") node.nodeDefKey = n.nodeDefKey;
   if (typeof n.assignee === "string") node.assignee = n.assignee;
   if (typeof n.action === "string") node.action = n.action;
   if (typeof n.engine === "string") node.engine = n.engine;

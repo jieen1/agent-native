@@ -10,7 +10,11 @@
 // Setup runs BEFORE importing anything that pulls in getDb / getDbExec.
 
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createEngineTables, createPmTables, useTempDb } from "../../engine/__tests__/setup.js";
+import {
+  createEngineTables,
+  createPmTables,
+  useTempDb,
+} from "../../engine/__tests__/setup.js";
 
 useTempDb();
 
@@ -60,7 +64,9 @@ async function seedTemplate(): Promise<string> {
   return id;
 }
 
-async function seedProject(): Promise<string> {
+async function seedProject(
+  opts: { defaultWorkflowId?: string | null } = {},
+): Promise<string> {
   const db = getDb();
   const id = newId("proj");
   const now = nowIso();
@@ -72,7 +78,7 @@ async function seedProject(): Promise<string> {
     workingDir: "",
     gitRemote: null,
     defaultBranch: null,
-    defaultWorkflowId: null,
+    defaultWorkflowId: opts.defaultWorkflowId ?? null,
     statusSchemes: null,
     environments: null,
     createdAt: now,
@@ -182,7 +188,11 @@ describe("atomic single-flight claim (DESIGN §6.4 / §13)", () => {
     const N = 12;
     const ids: string[] = [];
     for (let i = 0; i < N; i++) {
-      const id = await seedWorkItem(proj, { execState: "queued", priority: i, workflowId: tpl });
+      const id = await seedWorkItem(proj, {
+        execState: "queued",
+        priority: i,
+        workflowId: tpl,
+      });
       ids.push(id);
     }
 
@@ -245,7 +255,11 @@ describe("worker pool — running peak == concurrencyDegree (DESIGN §6.4)", () 
     const N = 9;
     const degree = 3;
     for (let i = 0; i < N; i++) {
-      await seedWorkItem(proj, { execState: "queued", priority: i, workflowId: tpl });
+      await seedWorkItem(proj, {
+        execState: "queued",
+        priority: i,
+        workflowId: tpl,
+      });
     }
 
     // Sample the concurrent-claim count via onClaim/settle bracketing: increment
@@ -277,9 +291,7 @@ describe("worker pool — running peak == concurrencyDegree (DESIGN §6.4)", () 
 
     // All items settled (done — the sequential echo fixture succeeds) and bound
     // to a workflow_run with work_item_id set.
-    const rows = await getDbExec().execute(
-      `SELECT exec_state FROM work_items`,
-    );
+    const rows = await getDbExec().execute(`SELECT exec_state FROM work_items`);
     for (const r of rows.rows) expect(String(r.exec_state)).toBe("done");
     const runs = await getDbExec().execute(
       `SELECT work_item_id, status FROM workflow_runs`,
@@ -296,9 +308,20 @@ describe("worker pool — running peak == concurrencyDegree (DESIGN §6.4)", () 
     const proj = await seedProject();
     const ids: string[] = [];
     for (let i = 0; i < 5; i++)
-      ids.push(await seedWorkItem(proj, { execState: "queued", priority: i, workflowId: tpl }));
+      ids.push(
+        await seedWorkItem(proj, {
+          execState: "queued",
+          priority: i,
+          workflowId: tpl,
+        }),
+      );
 
-    await pool.drainQueue({ concurrency: 3, ownerEmail: OWNER, orgId: null, executeOpts: echoOpts(0) });
+    await pool.drainQueue({
+      concurrency: 3,
+      ownerEmail: OWNER,
+      orgId: null,
+      executeOpts: echoOpts(0),
+    });
 
     for (const id of ids) {
       const runs = await getDbExec().execute({
@@ -356,17 +379,27 @@ describe("set-concurrency changes the pool width (DESIGN §6.4)", () => {
     const tpl = await seedTemplate();
     const proj = await seedProject();
     for (let i = 0; i < 4; i++)
-      await seedWorkItem(proj, { execState: "queued", priority: i, workflowId: tpl });
+      await seedWorkItem(proj, {
+        execState: "queued",
+        priority: i,
+        workflowId: tpl,
+      });
 
     // No explicit concurrency → pool reads the saved degree (2).
-    const r = await pool.drainQueue({ ownerEmail: OWNER, orgId: null, executeOpts: echoOpts(0) });
+    const r = await pool.drainQueue({
+      ownerEmail: OWNER,
+      orgId: null,
+      executeOpts: echoOpts(0),
+    });
     expect(r.concurrency).toBe(2);
     expect(r.processed.length).toBe(4);
   });
 
   it("clamps out-of-range degrees to [1, MAX]", async () => {
     expect(await concurrency.setConcurrencyDegree(0)).toBe(1);
-    expect(await concurrency.setConcurrencyDegree(9999)).toBe(concurrency.MAX_CONCURRENCY_DEGREE);
+    expect(await concurrency.setConcurrencyDegree(9999)).toBe(
+      concurrency.MAX_CONCURRENCY_DEGREE,
+    );
   });
 });
 
@@ -398,7 +431,12 @@ describe("queue-status counts + scheduler health (DESIGN §6.4)", () => {
     const proj = await seedProject();
     // One stranded claimed item (reap returns it) + one fresh queued item (pool runs it).
     const stranded = await seedWorkItem(proj, { workflowId: tpl });
-    await setExec(stranded, "claimed", "dead", new Date(Date.now() - 10 * 60_000).toISOString());
+    await setExec(
+      stranded,
+      "claimed",
+      "dead",
+      new Date(Date.now() - 10 * 60_000).toISOString(),
+    );
     await seedWorkItem(proj, { execState: "queued", workflowId: tpl });
 
     const before = driver.getSchedulerHealth();
@@ -467,9 +505,9 @@ describe("run-start workItemId path (DESIGN §6.4 / §0.6)", () => {
     expect(String((await getItem(id)).workflowRunId)).toBe(r.runId);
   });
 
-  it("no resolvable workflow → run failed with a clear reason, not a crash", async () => {
+  it("a missing explicit template → run failed with a clear reason, not a crash", async () => {
     const proj = await seedProject();
-    const id = await seedWorkItem(proj, { workflowId: null });
+    const id = await seedWorkItem(proj, { workflowId: "tpl_does_not_exist" });
 
     const r = await runWork.startRunForWorkItem(id, {
       ownerEmail: OWNER,
@@ -478,7 +516,8 @@ describe("run-start workItemId path (DESIGN §6.4 / §0.6)", () => {
     });
     expect(r.status).toBe("failed");
     expect(r.noWorkflow).toBe(true);
-    expect(r.reason).toMatch(/no workflow/i);
+    expect(r.templateSource).toBe("explicit");
+    expect(r.reason).toMatch(/not found/i);
 
     const runs = await getDbExec().execute({
       sql: `SELECT work_item_id, status FROM workflow_runs WHERE id = ?`,
@@ -486,5 +525,77 @@ describe("run-start workItemId path (DESIGN §6.4 / §0.6)", () => {
     });
     expect(String(runs.rows[0].work_item_id)).toBe(id);
     expect(String(runs.rows[0].status)).toBe("failed");
+  });
+});
+
+// ── DECOMPOSITION THREE-ORDER (DESIGN §6.3) — assert the SOURCE, not just "ran" ──
+describe("decomposition three-order (DESIGN §6.3)", () => {
+  it("ORDER 1: explicit item.workflowId wins even when the project has a default", async () => {
+    const explicitTpl = await seedTemplate();
+    const defaultTpl = await seedTemplate();
+    const proj = await seedProject({ defaultWorkflowId: defaultTpl });
+    const id = await seedWorkItem(proj, { workflowId: explicitTpl });
+
+    const r = await runWork.startRunForWorkItem(id, {
+      ownerEmail: OWNER,
+      orgId: null,
+      execute: false,
+    });
+    expect(r.templateSource).toBe("explicit");
+    expect(r.templateId).toBe(explicitTpl);
+    expect(r.dynamicAuthored).toBe(false);
+
+    // The persisted run's template_id is the EXPLICIT one (not the default).
+    const runs = await getDbExec().execute({
+      sql: `SELECT template_id, dynamic_authored FROM workflow_runs WHERE id = ?`,
+      args: [r.runId],
+    });
+    expect(String(runs.rows[0].template_id)).toBe(explicitTpl);
+    expect(Number(runs.rows[0].dynamic_authored)).toBe(0);
+  });
+
+  it("ORDER 2: no workflowId → project.defaultWorkflowId is used", async () => {
+    const defaultTpl = await seedTemplate();
+    const proj = await seedProject({ defaultWorkflowId: defaultTpl });
+    const id = await seedWorkItem(proj, { workflowId: null });
+
+    const r = await runWork.startRunForWorkItem(id, {
+      ownerEmail: OWNER,
+      orgId: null,
+      execute: false,
+    });
+    expect(r.templateSource).toBe("default");
+    expect(r.templateId).toBe(defaultTpl);
+    expect(r.dynamicAuthored).toBe(false);
+
+    const runs = await getDbExec().execute({
+      sql: `SELECT template_id FROM workflow_runs WHERE id = ?`,
+      args: [r.runId],
+    });
+    expect(String(runs.rows[0].template_id)).toBe(defaultTpl);
+  });
+
+  it("ORDER 3: neither set → DYNAMIC, run marked dynamic_authored, no template", async () => {
+    const proj = await seedProject({ defaultWorkflowId: null });
+    const id = await seedWorkItem(proj, { workflowId: null });
+
+    const r = await runWork.startRunForWorkItem(id, {
+      ownerEmail: OWNER,
+      orgId: null,
+      execute: true, // even with execute:true, the dynamic path does NOT run an LLM
+    });
+    expect(r.templateSource).toBe("dynamic");
+    expect(r.dynamicAuthored).toBe(true);
+    expect(r.status).toBe("pending");
+    expect(r.templateId).toBe("");
+    expect(r.reason).toMatch(/dynamic/i);
+
+    const runs = await getDbExec().execute({
+      sql: `SELECT template_id, status, dynamic_authored FROM workflow_runs WHERE id = ?`,
+      args: [r.runId],
+    });
+    expect(String(runs.rows[0].template_id)).toBe("");
+    expect(String(runs.rows[0].status)).toBe("pending");
+    expect(Number(runs.rows[0].dynamic_authored)).toBe(1);
   });
 });
