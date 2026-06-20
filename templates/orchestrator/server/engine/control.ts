@@ -27,6 +27,7 @@ import {
 } from "./types.js";
 import { outputArtifactId } from "./ids.js";
 import { putArtifact } from "./store.js";
+import { reconcileOnTerminal } from "../work-items/watchdog.js";
 
 /** Options shared by the re-drive helpers (test executor injection, caps). */
 export interface ControlOptions {
@@ -129,6 +130,17 @@ async function persistRunStatus(
       completedAt: completed ? nowIso() : null,
     })
     .where(eq(schema.workflowRuns.id, runId));
+
+  // STATUS WATCHDOG (DESIGN §6.2b L2): same reconcile the initial executeRun
+  // runs, so resume/override that drive a run to done/failed also reconcile a
+  // work-item-bound run. Best-effort; never fails the run.
+  if (outcome.status === "done" || outcome.status === "failed") {
+    try {
+      await reconcileOnTerminal(runId);
+    } catch {
+      // advisory — the run already finalized.
+    }
+  }
 }
 
 /** Run a freshly-built scheduler's resume() inside the run's request context. */

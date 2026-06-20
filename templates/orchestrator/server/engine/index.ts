@@ -17,6 +17,7 @@ import {
   RoutingNodeExecutor,
   loadRuntimeConfigRows,
 } from "../runtime/routing-node-executor.js";
+import { reconcileOnTerminal } from "../work-items/watchdog.js";
 
 /** A fixed default seed so a run with no explicit seed is still deterministic. */
 export const DEFAULT_SEED = 1;
@@ -127,6 +128,18 @@ export async function executeRun(
       completedAt: completed ? nowIso() : null,
     })
     .where(eq(schema.workflowRuns.id, runId));
+
+  // STATUS WATCHDOG (DESIGN §4.1 / §6.2b L2): a run bound to a work item that
+  // reached done/failed without a logged status change is flagged stale. A run
+  // with no work item is exempt (the watchdog returns early). Best-effort: a
+  // reconcile failure must never fail the run itself.
+  if (outcome.status === "done" || outcome.status === "failed") {
+    try {
+      await reconcileOnTerminal(runId);
+    } catch {
+      // swallow — the run already finalized; the watchdog is advisory.
+    }
+  }
 
   return outcome;
 }

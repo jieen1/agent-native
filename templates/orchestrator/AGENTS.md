@@ -23,6 +23,20 @@ step to a sub-agent or sibling app, tracking progress, and delivering a result.
   `node-get`, `run-events`, `list-runs`, plus `seed-fixtures`. Engine internals
   (item-correlation, pipeline-vs-barrier, two-pass resume, await:false, promote
   distill) are documented in `DEVELOPING.md` → "Workflow Engine Internals".
+- v2 project-management surface (P3a — projects + work items + the six-dimension
+  business-status model): `create-project`, `list-projects`, `get-project`,
+  `update-project`; `create-work-item`, `list-work-items`, `get-work-item`,
+  `update-work-item`, `delete-work-item`; `link-work-items`, `unlink-work-items`;
+  `backfill-work-items`, `reconcile-on-terminal`; and the SOLE writer of business
+  status/environment/blocked/resolution/severity, **`transition-work-item`**.
+  Hard rules: business `status`/`environment`/`blocked`/`resolution`/`severity`
+  move ONLY through `transition-work-item` (validated against the project's
+  per-type scheme; `update-work-item` REJECTS those fields); every transition
+  appends one `work_item_status_log` row; entering a completed/cancelled stage
+  requires a resolution; reopen clears it; the engine watchdog
+  (`reconcile-on-terminal`) flags `status_stale` when a work-item-bound run
+  finishes with no logged status change. Status schemes + the transition
+  validator live in `shared/status-schemes.ts`.
 - Use `view-screen` first when the active task/selection is unclear.
 
 ## Executing Tasks

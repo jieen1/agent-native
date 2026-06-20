@@ -529,3 +529,155 @@ export {
   type GraphValidationResult,
   type TemplateResolver,
 } from "./graph-validator.js";
+
+// ===========================================================================
+// v2 PROJECT-MANAGEMENT LAYER (DESIGN §6 / §9) — P3a. Projects, work items
+// (the six-dimension business status model), links, and the status-log row.
+// The status SCHEMES + transition validator live in `status-schemes.ts`; these
+// are the row shapes the DB tables and CRUD actions use.
+// ===========================================================================
+
+export type {
+  StatusCategory,
+  WorkItemType,
+  Resolution,
+  TransitionKind,
+  StatusScheme,
+  SchemeSet,
+  StageDef,
+  TransitionDef,
+} from "./status-schemes.js";
+
+/** The automation overlay state (DESIGN §6.2 / §6.4) — orthogonal to business status. */
+export type ExecState =
+  | "idle"
+  | "queued"
+  | "claimed"
+  | "running"
+  | "paused"
+  | "failed"
+  | "done";
+
+export const EXEC_STATES: ExecState[] = [
+  "idle",
+  "queued",
+  "claimed",
+  "running",
+  "paused",
+  "failed",
+  "done",
+];
+
+/** Severity (DESIGN §6.2a) — nullable, used mainly by prod-issue. */
+export type Severity = "SEV1" | "SEV2" | "SEV3" | "SEV4";
+
+export const SEVERITIES: Severity[] = ["SEV1", "SEV2", "SEV3", "SEV4"];
+
+/** Work-item link kinds (DESIGN §9 `work_item_links`). */
+export type WorkItemLinkKind =
+  | "duplicate-of"
+  | "blocks"
+  | "blocked-by"
+  | "relates-to";
+
+export const WORK_ITEM_LINK_KINDS: WorkItemLinkKind[] = [
+  "duplicate-of",
+  "blocks",
+  "blocked-by",
+  "relates-to",
+];
+
+/** A project's environment list default (DESIGN §6.2a). */
+export const DEFAULT_ENVIRONMENTS: string[] = ["dev", "SIT", "UAT", "prod"];
+
+/**
+ * A project: a named container for work items with an id prefix (`key`) and a
+ * `workingDir` deliverable root. It has NO "type"; a linked git repo
+ * (`gitRemote`/`defaultBranch`) is the only thing distinguishing code work
+ * (DESIGN §6.1). `statusSchemes`/`environments` are JSON overrides.
+ */
+export interface Project {
+  id: string;
+  name: string;
+  key: string;
+  description: string;
+  workingDir: string;
+  gitRemote: string | null;
+  defaultBranch: string | null;
+  defaultWorkflowId: string | null;
+  /** JSON SchemeSet override; null/empty → the default schemes apply. */
+  statusSchemes: import("./status-schemes.js").SchemeSet | null;
+  environments: string[] | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A work item — the requirement/bug/incident/task you create and assign. The
+ * six business-status dimensions (§6.2a) are written ONLY by
+ * `transition-work-item`; the automation overlay (execState/claimed_*) is the
+ * queue's. `status_category` is derived from `status` via the scheme.
+ */
+export interface WorkItem {
+  id: string;
+  projectId: string;
+  type: import("./status-schemes.js").WorkItemType;
+  title: string;
+  description: string;
+  priority: number;
+  assignee: string | null;
+  // ── business status (six dimensions, §6.2a/§6.2b) ──
+  status: string;
+  statusCategory: import("./status-schemes.js").StatusCategory;
+  environment: string | null;
+  severity: Severity | null;
+  blocked: boolean;
+  blockedReason: string | null;
+  blockedBy: string | null;
+  resolution: import("./status-schemes.js").Resolution | null;
+  statusStale: boolean;
+  // ── automation overlay (§6.4) ──
+  execState: ExecState;
+  claimedAt: string | null;
+  claimedBy: string | null;
+  workflowId: string | null;
+  workflowRunId: string | null;
+  deliverable: { kind: string; ref: unknown } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A directed link between two work items (DESIGN §9 `work_item_links`). */
+export interface WorkItemLink {
+  id: string;
+  fromItem: string;
+  toItem: string;
+  kind: WorkItemLinkKind;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** One append-only transition trail row (DESIGN §9 `work_item_status_log`). */
+export interface WorkItemStatusLogEntry {
+  id: string;
+  workItemId: string;
+  runId: string | null;
+  actor: string;
+  fromStatus: string | null;
+  toStatus: string;
+  blocked: boolean;
+  resolution: string | null;
+  at: string;
+}
+
+/** A reusable node-library entry (DESIGN §3.7 / §9 `node_defs`). */
+export interface NodeDef {
+  id: string;
+  key: string;
+  kind: string;
+  title: string;
+  config: unknown;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}

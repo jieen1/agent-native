@@ -180,3 +180,120 @@ export const workflowTemplateShares = createSharesTable(
   "workflow_template_shares",
 );
 export const workflowRunShares = createSharesTable("workflow_run_shares");
+
+// ─── v2 project-management tables (DESIGN §6 / §9) — additive (P3a) ──────────
+
+// A project: a named container for work items with an id prefix (`key`) and a
+// `working_dir` deliverable root (always set). `git_remote`/`default_branch`
+// are set only when the project links a code repo (DESIGN §6.1). `status_schemes`
+// / `environments` are JSON overrides of the default schemes / env list.
+export const projects = table("projects", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  key: text("key").notNull(),
+  description: text("description").notNull().default(""),
+  workingDir: text("working_dir").notNull().default(""),
+  gitRemote: text("git_remote"),
+  defaultBranch: text("default_branch"),
+  defaultWorkflowId: text("default_workflow_id"),
+  // JSON SchemeSet override; null/'' → the default per-type schemes apply.
+  statusSchemes: text("status_schemes"),
+  // JSON string[] env list; null → DEFAULT_ENVIRONMENTS (dev/SIT/UAT/prod).
+  environments: text("environments"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  ...ownableColumns(),
+});
+
+// A work item — requirement/bug/prod-issue/task. The six business-status
+// dimensions (§6.2a) are written ONLY by transition-work-item; the automation
+// overlay (exec_state/claimed_*) is the queue's. `status_category` is derived.
+export const workItems = table("work_items", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  type: text("type", {
+    enum: ["requirement", "bug", "prod-issue", "task"],
+  })
+    .notNull()
+    .default("task"),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  priority: integer("priority").notNull().default(0),
+  assignee: text("assignee"),
+  // ── business status (six dimensions — sole writer: transition-work-item) ──
+  status: text("status").notNull().default(""),
+  statusCategory: text("status_category", {
+    enum: ["todo", "in-progress", "completed", "cancelled"],
+  })
+    .notNull()
+    .default("todo"),
+  environment: text("environment"),
+  severity: text("severity"),
+  blocked: integer("blocked").notNull().default(0),
+  blockedReason: text("blocked_reason"),
+  blockedBy: text("blocked_by"),
+  resolution: text("resolution"),
+  statusStale: integer("status_stale").notNull().default(0),
+  // ── automation overlay (§6.4) ──
+  execState: text("exec_state", {
+    enum: ["idle", "queued", "claimed", "running", "paused", "failed", "done"],
+  })
+    .notNull()
+    .default("idle"),
+  claimedAt: text("claimed_at"),
+  claimedBy: text("claimed_by"),
+  workflowId: text("workflow_id"),
+  workflowRunId: text("workflow_run_id"),
+  deliverable: text("deliverable"), // JSON { kind, ref } | null
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  ...ownableColumns(),
+});
+
+// A directed link between two work items (DESIGN §9). `kind` = duplicate-of |
+// blocks | blocked-by | relates-to. Scoped through its work items (no own
+// ownableColumns) — link CRUD asserts access on both endpoints.
+export const workItemLinks = table("work_item_links", {
+  id: text("id").primaryKey(),
+  fromItem: text("from_item").notNull(),
+  toItem: text("to_item").notNull(),
+  kind: text("kind", {
+    enum: ["duplicate-of", "blocks", "blocked-by", "relates-to"],
+  }).notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+// The append-only transition trail (DESIGN §6.2b / §9). Every
+// transition-work-item call writes one row; the watchdog reconciles "did status
+// change during this run" against it. Scoped via work_item_id → work_items.
+export const workItemStatusLog = table("work_item_status_log", {
+  id: text("id").primaryKey(),
+  workItemId: text("work_item_id").notNull(),
+  runId: text("run_id"),
+  actor: text("actor").notNull(),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status").notNull(),
+  blocked: integer("blocked").notNull().default(0),
+  resolution: text("resolution"),
+  at: text("at").notNull(),
+});
+
+// Reusable library nodes (DESIGN §3.7 / §9). `key` is referenced from a graph
+// by `nodeDefKey`; `config` is the pinned node config JSON; `version` lets a
+// workflow pin a known-good gate. Ownable.
+export const nodeDefs = table("node_defs", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull(),
+  kind: text("kind").notNull(),
+  title: text("title").notNull().default(""),
+  config: text("config").notNull().default("{}"),
+  version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  ...ownableColumns(),
+});
+
+export const projectShares = createSharesTable("project_shares");
+export const workItemShares = createSharesTable("work_item_shares");
+export const nodeDefShares = createSharesTable("node_def_shares");

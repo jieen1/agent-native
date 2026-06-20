@@ -258,6 +258,168 @@ CREATE INDEX IF NOT EXISTS node_runs_running_heartbeat_idx ON node_runs (status,
       version: 12,
       sql: `ALTER TABLE workflow_templates ADD COLUMN deleted_at TEXT`,
     },
+    {
+      // P3a: project-management tables (DESIGN §6 / §9) — additive, CREATE-only.
+      // The five PM tables: projects, work_items (six business-status dims +
+      // automation overlay), work_item_links, work_item_status_log, node_defs.
+      version: 13,
+      sql: `CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    key TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    working_dir TEXT NOT NULL DEFAULT '',
+    git_remote TEXT,
+    default_branch TEXT,
+    default_workflow_id TEXT,
+    status_schemes TEXT,
+    environments TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private'
+  );
+CREATE TABLE IF NOT EXISTS work_items (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'task' CHECK(type IN ('requirement','bug','prod-issue','task')),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    priority INTEGER NOT NULL DEFAULT 0,
+    assignee TEXT,
+    status TEXT NOT NULL DEFAULT '',
+    status_category TEXT NOT NULL DEFAULT 'todo' CHECK(status_category IN ('todo','in-progress','completed','cancelled')),
+    environment TEXT,
+    severity TEXT,
+    blocked INTEGER NOT NULL DEFAULT 0,
+    blocked_reason TEXT,
+    blocked_by TEXT,
+    resolution TEXT,
+    status_stale INTEGER NOT NULL DEFAULT 0,
+    exec_state TEXT NOT NULL DEFAULT 'idle' CHECK(exec_state IN ('idle','queued','claimed','running','paused','failed','done')),
+    claimed_at TEXT,
+    claimed_by TEXT,
+    workflow_id TEXT,
+    workflow_run_id TEXT,
+    deliverable TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private'
+  );
+CREATE TABLE IF NOT EXISTS work_item_links (
+    id TEXT PRIMARY KEY,
+    from_item TEXT NOT NULL,
+    to_item TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('duplicate-of','blocks','blocked-by','relates-to')),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+CREATE TABLE IF NOT EXISTS work_item_status_log (
+    id TEXT PRIMARY KEY,
+    work_item_id TEXT NOT NULL,
+    run_id TEXT,
+    actor TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    blocked INTEGER NOT NULL DEFAULT 0,
+    resolution TEXT,
+    at TEXT NOT NULL
+  );
+CREATE TABLE IF NOT EXISTS node_defs (
+    id TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    config TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private'
+  )`,
+    },
+    {
+      // P3a: shares tables for the three ownable PM tables (structure only;
+      // sharing UI deferred — §9/§12). Mirrors v4/v9 postgres/sqlite split.
+      version: 14,
+      sql: {
+        postgres: `CREATE TABLE IF NOT EXISTS project_shares (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL,
+  principal_type TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (now())
+);
+CREATE TABLE IF NOT EXISTS work_item_shares (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL,
+  principal_type TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (now())
+);
+CREATE TABLE IF NOT EXISTS node_def_shares (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL,
+  principal_type TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (now())
+)`,
+        sqlite: `CREATE TABLE IF NOT EXISTS project_shares (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL,
+  principal_type TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS work_item_shares (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL,
+  principal_type TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS node_def_shares (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL,
+  principal_type TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`,
+      },
+    },
+    {
+      // P3a: indexes (DESIGN §9). The queue-claim hot path work_items(exec_state,
+      // priority); project scoping; the status-log + link lookups; node_defs(key).
+      version: 15,
+      sql: `CREATE INDEX IF NOT EXISTS work_items_exec_priority_idx ON work_items (exec_state, priority);
+CREATE INDEX IF NOT EXISTS work_items_project_idx ON work_items (project_id);
+CREATE INDEX IF NOT EXISTS work_items_owner_org_updated_idx ON work_items (owner_email, org_id, updated_at);
+CREATE INDEX IF NOT EXISTS work_item_status_log_item_idx ON work_item_status_log (work_item_id);
+CREATE INDEX IF NOT EXISTS work_item_status_log_run_idx ON work_item_status_log (run_id);
+CREATE INDEX IF NOT EXISTS work_item_links_from_idx ON work_item_links (from_item);
+CREATE INDEX IF NOT EXISTS work_item_links_to_idx ON work_item_links (to_item);
+CREATE INDEX IF NOT EXISTS node_defs_key_idx ON node_defs (key);
+CREATE INDEX IF NOT EXISTS projects_owner_org_updated_idx ON projects (owner_email, org_id, updated_at);
+CREATE INDEX IF NOT EXISTS project_shares_resource_idx ON project_shares (resource_id, principal_type, principal_id);
+CREATE INDEX IF NOT EXISTS work_item_shares_resource_idx ON work_item_shares (resource_id, principal_type, principal_id);
+CREATE INDEX IF NOT EXISTS node_def_shares_resource_idx ON node_def_shares (resource_id, principal_type, principal_id)`,
+    },
   ],
   { table: "orchestrator_migrations" },
 );

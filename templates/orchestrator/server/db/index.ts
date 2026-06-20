@@ -46,3 +46,35 @@ registerShareableResource({
   getResourcePath: (r) => `/runs/${(r as { id: string }).id}`,
   getDb,
 });
+
+// ── v2 project-management ownable resources (P3a) ───────────────────────────
+
+registerShareableResource({
+  type: "project",
+  resourceTable: schema.projects,
+  sharesTable: schema.projectShares,
+  displayName: "Project",
+  titleColumn: "name",
+  getResourcePath: (p) => `/projects/${(p as { id: string }).id}`,
+  getDb,
+});
+
+registerShareableResource({
+  type: "work_item",
+  resourceTable: schema.workItems,
+  sharesTable: schema.workItemShares,
+  displayName: "Work Item",
+  titleColumn: "title",
+  getResourcePath: (w) => `/work-items/${(w as { id: string }).id}`,
+  getDb,
+});
+
+registerShareableResource({
+  type: "node_def",
+  resourceTable: schema.nodeDefs,
+  sharesTable: schema.nodeDefShares,
+  displayName: "Node Definition",
+  titleColumn: "title",
+  getResourcePath: (n) => `/library/${(n as { id: string }).id}`,
+  getDb,
+});

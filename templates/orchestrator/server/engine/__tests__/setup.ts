@@ -86,3 +86,111 @@ export async function createEngineTables(): Promise<void> {
     `CREATE UNIQUE INDEX IF NOT EXISTS node_runs_journal_key_idx ON node_runs (run_id, node_id, iteration, fanout_index)`,
   );
 }
+
+/**
+ * Create the P3a project-management tables (subset of server/plugins/db.ts v13,
+ * verbatim DDL) + the v1 `tasks` table the backfill reads. Used by the work-item
+ * + watchdog + backfill tests.
+ */
+export async function createPmTables(): Promise<void> {
+  if (!dbUrl) throw new Error("call useTempDb() first");
+  const c = createClient({ url: dbUrl });
+  await c.execute(`CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','done','failed','cancelled')),
+    workflow_id TEXT,
+    result TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private'
+  )`);
+  await c.execute(`CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    key TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    working_dir TEXT NOT NULL DEFAULT '',
+    git_remote TEXT,
+    default_branch TEXT,
+    default_workflow_id TEXT,
+    status_schemes TEXT,
+    environments TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private'
+  )`);
+  await c.execute(`CREATE TABLE IF NOT EXISTS work_items (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'task' CHECK(type IN ('requirement','bug','prod-issue','task')),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    priority INTEGER NOT NULL DEFAULT 0,
+    assignee TEXT,
+    status TEXT NOT NULL DEFAULT '',
+    status_category TEXT NOT NULL DEFAULT 'todo' CHECK(status_category IN ('todo','in-progress','completed','cancelled')),
+    environment TEXT,
+    severity TEXT,
+    blocked INTEGER NOT NULL DEFAULT 0,
+    blocked_reason TEXT,
+    blocked_by TEXT,
+    resolution TEXT,
+    status_stale INTEGER NOT NULL DEFAULT 0,
+    exec_state TEXT NOT NULL DEFAULT 'idle' CHECK(exec_state IN ('idle','queued','claimed','running','paused','failed','done')),
+    claimed_at TEXT,
+    claimed_by TEXT,
+    workflow_id TEXT,
+    workflow_run_id TEXT,
+    deliverable TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private'
+  )`);
+  await c.execute(`CREATE TABLE IF NOT EXISTS work_item_links (
+    id TEXT PRIMARY KEY,
+    from_item TEXT NOT NULL,
+    to_item TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('duplicate-of','blocks','blocked-by','relates-to')),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+  await c.execute(`CREATE TABLE IF NOT EXISTS work_item_status_log (
+    id TEXT PRIMARY KEY,
+    work_item_id TEXT NOT NULL,
+    run_id TEXT,
+    actor TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    blocked INTEGER NOT NULL DEFAULT 0,
+    resolution TEXT,
+    at TEXT NOT NULL
+  )`);
+  await c.execute(`CREATE TABLE IF NOT EXISTS node_defs (
+    id TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    config TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private'
+  )`);
+  await c.execute(
+    `CREATE INDEX IF NOT EXISTS work_items_exec_priority_idx ON work_items (exec_state, priority)`,
+  );
+  await c.execute(
+    `CREATE INDEX IF NOT EXISTS work_item_status_log_run_idx ON work_item_status_log (run_id)`,
+  );
+}
