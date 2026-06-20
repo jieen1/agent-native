@@ -150,6 +150,7 @@
     "./styles/agent-native.css": "./dist/styles/agent-native.css",
     "./agent/engine": "./dist/agent/engine/index.js",
     "./agent/harness": "./dist/agent/harness/index.js",
+    "./coding-tools": "./dist/coding-tools/index.js",
     "./eval": "./dist/eval/index.js",
     "./tsconfig.base.json": "./tsconfig.base.json"
   },
