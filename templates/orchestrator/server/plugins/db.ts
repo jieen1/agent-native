@@ -427,6 +427,13 @@ CREATE INDEX IF NOT EXISTS node_def_shares_resource_idx ON node_def_shares (reso
       version: 16,
       sql: `ALTER TABLE workflow_runs ADD COLUMN dynamic_authored INTEGER NOT NULL DEFAULT 0`,
     },
+    {
+      // P5 §8.3 item4: optional JSON model-list per runtime_config (a single
+      // endpoint can serve several models). Additive; null = use the single
+      // `model`. The schema reads this column, so a fresh DB needs it created.
+      version: 17,
+      sql: `ALTER TABLE runtime_configs ADD COLUMN models TEXT`,
+    },
   ],
   { table: "orchestrator_migrations" },
 );

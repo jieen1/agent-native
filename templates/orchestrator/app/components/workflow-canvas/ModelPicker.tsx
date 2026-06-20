@@ -15,6 +15,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { useRuntimeConfigs } from "@/hooks/use-orchestrator";
+import { pickerModelsFor } from "../../../shared/model-list";
 import { cn } from "@/lib/utils";
 
 // The §8.5 engine/model picker — a CUSTOM dropdown (popover + command), NOT the
@@ -70,17 +71,38 @@ export function ModelPicker({ engine, model, onChange }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
   const { data: runtimes = [] } = useRuntimeConfigs();
 
+  // Each runtime's per-node options come straight from the SAVED runtime_configs
+  // row — its `model` plus any extra `models` it serves (DESIGN §8.3 item4) — NOT
+  // a re-registered template engine (the dual-registry pitfall, §8.5.1). A vLLM /
+  // OpenAI-compatible runtime maps to the built-in `ai-sdk:openai` engine; a
+  // single endpoint serving several models yields one option per model.
   const runtimeOptions: EngineOption[] = useMemo(
     () =>
-      runtimes.map((r) => ({
-        engine:
+      runtimes.flatMap((r) => {
+        const engineId =
           r.kind === "claude-code"
             ? "ai-sdk-harness:claude-code"
-            : "ai-sdk:openai",
-        model: r.model ?? "",
-        label: `${r.name}${r.model ? ` · ${r.model}` : ""}`,
-        source: "runtime" as const,
-      })),
+            : "ai-sdk:openai";
+        // Union of the activation default `model` + the extra `models` list,
+        // de-duped, order-preserving. Empty → a single label-only option.
+        const models = pickerModelsFor(r.model, r.models);
+        if (models.length === 0) {
+          return [
+            {
+              engine: engineId,
+              model: "",
+              label: r.name,
+              source: "runtime" as const,
+            },
+          ];
+        }
+        return models.map((m) => ({
+          engine: engineId,
+          model: m,
+          label: `${r.name} · ${m}`,
+          source: "runtime" as const,
+        }));
+      }),
     [runtimes],
   );
 

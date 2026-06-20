@@ -69,6 +69,47 @@ const en = {
       "Run `claude login` in a terminal to (re)authorize — the app cannot do the browser OAuth for you; it reuses your CLI login.",
     ccResult: "Result",
     ccRunning: "Running…",
+    // Tabs (FRONTEND §9).
+    tabRuntime: "Runtime",
+    tabImages: "Images",
+    tabCredentials: "Credentials",
+    // vLLM Test button (DESIGN §8.3 item2 — parity with the Claude Code test).
+    vllmTest: "Test",
+    vllmTesting: "Testing…",
+    vllmTestResult: "Test result",
+    vllmModels: "Extra models (comma-separated)",
+    vllmModelsHint:
+      "Optional. If this endpoint serves several models, list them so each is pickable per node.",
+    // Concurrency (DESIGN §6.4).
+    concurrencyTitle: "Concurrency",
+    concurrencySubtitle:
+      "How many work items run at once, and the microVM ceiling each run is bounded by.",
+    concurrencyDegree: "Concurrency degree",
+    concurrencyDegreeHint: "Work items the orchestrator runs at once.",
+    maxConcurrentVMs: "Max concurrent microVMs",
+    maxConcurrentVMsHint:
+      "Each running node is one microVM; bounded by the KVM host. Read-only here.",
+    concurrencyRunning: "Running",
+    concurrencyQueued: "Queued",
+    concurrencyVmsInUse: "microVMs in use",
+    concurrencySaved: "Concurrency updated.",
+    // Images tab (DESIGN §7.4.8).
+    imagesTitle: "Base microVM images",
+    imagesSubtitle:
+      "Prebaked base images each node forks from. Read-only — images are baked by the CLI, not in-app.",
+    imagesEmpty: "No images registered.",
+    imagesDefault: "Default",
+    imagesStatusPrebaked: "Prebaked",
+    imagesStatusMissing: "Not baked",
+    imagesRuntime: "Runtime",
+    // Credentials tab (DESIGN §7.4.7).
+    credsTitle: "Credentials",
+    credsSubtitle:
+      "Which credential keys the runtime mounts, and whether each is registered. Values are never shown.",
+    credsEmpty: "No credential keys.",
+    credsRegistered: "Registered",
+    credsMissing: "Not set",
+    credsMountedBy: "Mounted by",
   },
   common: {
     create: "Create",
@@ -651,6 +692,47 @@ const zh: typeof en = {
       "在终端运行 `claude login` 重新授权 —— app 替你做不了浏览器 OAuth,它只复用你 CLI 的登录。",
     ccResult: "结果",
     ccRunning: "运行中…",
+    // Tabs (FRONTEND §9).
+    tabRuntime: "运行时",
+    tabImages: "镜像",
+    tabCredentials: "凭据",
+    // vLLM 测试按钮(DESIGN §8.3 item2 —— 与 Claude Code 测试对齐)。
+    vllmTest: "测试",
+    vllmTesting: "测试中…",
+    vllmTestResult: "测试结果",
+    vllmModels: "额外模型(逗号分隔)",
+    vllmModelsHint:
+      "可选。若该端点提供多个模型,在此列出,使每个模型都能在节点上选择。",
+    // 并发(DESIGN §6.4)。
+    concurrencyTitle: "并发",
+    concurrencySubtitle:
+      "同时运行多少个工作项,以及每次运行受限的 microVM 上限。",
+    concurrencyDegree: "并发度",
+    concurrencyDegreeHint: "编排器同时运行的工作项数。",
+    maxConcurrentVMs: "microVM 并发上限",
+    maxConcurrentVMsHint:
+      "每个运行中的节点占一个 microVM,受 KVM 宿主限制。此处只读。",
+    concurrencyRunning: "运行中",
+    concurrencyQueued: "排队中",
+    concurrencyVmsInUse: "使用中的 microVM",
+    concurrencySaved: "并发已更新。",
+    // 镜像页(DESIGN §7.4.8)。
+    imagesTitle: "基础 microVM 镜像",
+    imagesSubtitle:
+      "每个节点 fork 的预构建基础镜像。只读 —— 镜像由 CLI 预构建,不在应用内构建。",
+    imagesEmpty: "未注册镜像。",
+    imagesDefault: "默认",
+    imagesStatusPrebaked: "已预构建",
+    imagesStatusMissing: "未构建",
+    imagesRuntime: "运行时",
+    // 凭据页(DESIGN §7.4.7)。
+    credsTitle: "凭据",
+    credsSubtitle:
+      "运行时挂载哪些凭据 key,以及每个是否已注册。从不展示具体值。",
+    credsEmpty: "无凭据 key。",
+    credsRegistered: "已注册",
+    credsMissing: "未设置",
+    credsMountedBy: "挂载方",
   },
   common: {
     create: "创建",

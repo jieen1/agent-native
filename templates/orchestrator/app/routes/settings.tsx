@@ -6,23 +6,35 @@ import {
   IconCheck,
   IconCircleCheck,
   IconCopy,
+  IconKey,
+  IconPhoto,
   IconPlayerPlay,
   IconPlus,
   IconRefresh,
+  IconServer2,
   IconSparkles,
+  IconStack2,
   IconTrash,
 } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { APP_TITLE } from "@/lib/app-config";
 import {
   useActivateRuntime,
   useDeleteRuntimeConfig,
+  useQueueStatus,
   useRuntimeConfigs,
+  useRuntimeCredentials,
+  useRuntimeImages,
   useRuntimeStatus,
   useSaveRuntimeConfig,
+  useSetConcurrency,
   useStartClaudeCode,
+  useTestRuntimeConfig,
 } from "@/hooks/use-orchestrator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +44,52 @@ export function meta() {
 }
 
 export default function SettingsRoute() {
+  const { t } = useTranslation();
+
+  return (
+    <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
+      <header className="mb-6">
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+          {t("settings.title")}
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t("settings.subtitle")}
+        </p>
+      </header>
+
+      <Tabs defaultValue="runtime">
+        <TabsList className="mb-6">
+          <TabsTrigger value="runtime" className="gap-1.5">
+            <IconServer2 className="size-4" />
+            {t("settings.tabRuntime")}
+          </TabsTrigger>
+          <TabsTrigger value="images" className="gap-1.5">
+            <IconPhoto className="size-4" />
+            {t("settings.tabImages")}
+          </TabsTrigger>
+          <TabsTrigger value="credentials" className="gap-1.5">
+            <IconKey className="size-4" />
+            {t("settings.tabCredentials")}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="runtime">
+          <RuntimeTab />
+        </TabsContent>
+        <TabsContent value="images">
+          <ImagesTab />
+        </TabsContent>
+        <TabsContent value="credentials">
+          <CredentialsTab />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+// ── Runtime tab: status, vLLM table + add form + Test, Claude Code, concurrency ─
+
+function RuntimeTab() {
   const { t } = useTranslation();
   const {
     data: status,
@@ -43,11 +101,18 @@ export default function SettingsRoute() {
   const activate = useActivateRuntime();
   const deleteRuntime = useDeleteRuntimeConfig();
   const startClaudeCode = useStartClaudeCode();
+  const testRuntime = useTestRuntimeConfig();
 
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("http://localhost:8000/v1");
   const [model, setModel] = useState("");
+  const [models, setModels] = useState("");
   const [ccResult, setCcResult] = useState<{
+    output?: string | null;
+    error?: string | null;
+  } | null>(null);
+  const [vllmResult, setVllmResult] = useState<{
+    id: string;
     output?: string | null;
     error?: string | null;
   } | null>(null);
@@ -60,12 +125,23 @@ export default function SettingsRoute() {
 
   function addVllm() {
     if (!name.trim() || !baseUrl.trim()) return;
+    const extraModels = models
+      .split(",")
+      .map((m) => m.trim())
+      .filter((m) => m !== "");
     saveRuntime.mutate(
-      { name: name.trim(), kind: "vllm", baseUrl: baseUrl.trim(), model: model.trim() },
+      {
+        name: name.trim(),
+        kind: "vllm",
+        baseUrl: baseUrl.trim(),
+        model: model.trim(),
+        ...(extraModels.length > 0 ? { models: extraModels } : {}),
+      },
       {
         onSuccess: () => {
           setName("");
           setModel("");
+          setModels("");
           toast.success(t("common.save"));
         },
         onError: (e: unknown) =>
@@ -85,8 +161,37 @@ export default function SettingsRoute() {
     );
   }
 
+  function testVllm(id: string) {
+    setVllmResult(null);
+    testRuntime.mutate(
+      { id },
+      {
+        onSuccess: (res: unknown) => {
+          const r = res as {
+            ok?: boolean;
+            output?: string | null;
+            error?: string | null;
+          } | null;
+          if (r?.error) {
+            setVllmResult({ id, error: r.error });
+            toast.error(r.error);
+          } else if (r?.output) {
+            setVllmResult({ id, output: r.output });
+            toast.success(t("settings.vllmTestResult"));
+          } else {
+            setVllmResult({ id, error: "No response." });
+          }
+        },
+        onError: (e: unknown) => {
+          const msg = e instanceof Error ? e.message : "Failed";
+          setVllmResult({ id, error: msg });
+          toast.error(msg);
+        },
+      },
+    );
+  }
+
   function useClaudeCodeExecution() {
-    // Create (idempotent-ish) a claude-code runtime row, then activate it.
     saveRuntime.mutate(
       { name: "Claude Code", kind: "claude-code" },
       {
@@ -142,16 +247,7 @@ export default function SettingsRoute() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-          {t("settings.title")}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("settings.subtitle")}
-        </p>
-      </header>
-
+    <div>
       {/* Current status */}
       <div className="mb-6 grid gap-2 rounded-lg border border-border bg-card p-4 sm:grid-cols-2">
         <div>
@@ -173,7 +269,9 @@ export default function SettingsRoute() {
           <p className="text-xs text-muted-foreground">
             {t("settings.activeExec")}
           </p>
-          <p className="text-sm font-medium">{status?.executionRuntime ?? "local"}</p>
+          <p className="text-sm font-medium">
+            {status?.executionRuntime ?? "local"}
+          </p>
         </div>
       </div>
 
@@ -192,36 +290,68 @@ export default function SettingsRoute() {
             {vllmRuntimes.map((r) => (
               <li
                 key={r.id}
-                className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3"
+                className="rounded-lg border border-border bg-card px-4 py-3"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{r.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {r.baseUrl}
-                    {r.model ? ` · ${r.model}` : ""}
-                  </p>
-                </div>
-                {r.active ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                    <IconCheck className="size-3" />
-                    {t("settings.active")}
-                  </span>
-                ) : (
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{r.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {r.baseUrl}
+                      {r.model ? ` · ${r.model}` : ""}
+                      {r.models && r.models.length > 0
+                        ? ` (+${r.models.length})`
+                        : ""}
+                    </p>
+                  </div>
+                  {r.active ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                      <IconCheck className="size-3" />
+                      {t("settings.active")}
+                    </span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => activateRuntime(r.id)}
+                    >
+                      {t("settings.activate")}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => activateRuntime(r.id)}
+                    disabled={testRuntime.isPending}
+                    onClick={() => testVllm(r.id)}
                   >
-                    {t("settings.activate")}
+                    <IconPlayerPlay className="size-4" />
+                    {testRuntime.isPending && vllmResult?.id !== r.id
+                      ? t("settings.vllmTesting")
+                      : t("settings.vllmTest")}
                   </Button>
-                )}
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => deleteRuntime.mutate({ id: r.id })}
-                >
-                  <IconTrash className="size-4 text-muted-foreground" />
-                </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => deleteRuntime.mutate({ id: r.id })}
+                  >
+                    <IconTrash className="size-4 text-muted-foreground" />
+                  </Button>
+                </div>
+                {vllmResult && vllmResult.id === r.id ? (
+                  <div className="mt-2">
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">
+                      {t("settings.vllmTestResult")}
+                    </p>
+                    <pre
+                      className={`max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border px-3 py-2 text-xs leading-relaxed ${
+                        vllmResult.error
+                          ? "border-red-500/30 bg-red-500/5 text-red-600 dark:text-red-400"
+                          : "border-emerald-500/30 bg-emerald-500/5 text-foreground/90"
+                      }`}
+                    >
+                      {vllmResult.error ?? vllmResult.output}
+                    </pre>
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -249,11 +379,21 @@ export default function SettingsRoute() {
               onChange={(e) => setBaseUrl(e.target.value)}
             />
           </div>
+          <Input
+            placeholder={t("settings.vllmModels")}
+            value={models}
+            onChange={(e) => setModels(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("settings.vllmModelsHint")}
+          </p>
           <div className="flex justify-end">
             <Button
               size="sm"
               onClick={addVllm}
-              disabled={!name.trim() || !baseUrl.trim() || saveRuntime.isPending}
+              disabled={
+                !name.trim() || !baseUrl.trim() || saveRuntime.isPending
+              }
             >
               <IconPlus className="size-4" />
               {t("settings.vllmAdd")}
@@ -263,7 +403,7 @@ export default function SettingsRoute() {
       </section>
 
       {/* Claude Code */}
-      <section>
+      <section className="mb-8">
         <div className="mb-1 flex items-center gap-2">
           <IconSparkles className="size-5 text-muted-foreground" />
           <h2 className="text-sm font-semibold">{t("settings.ccTitle")}</h2>
@@ -273,7 +413,6 @@ export default function SettingsRoute() {
         </p>
 
         <div className="overflow-hidden rounded-xl border border-border bg-card">
-          {/* Header: install state + login badge */}
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
             <div className="flex items-center gap-2 text-sm">
               <span
@@ -316,7 +455,6 @@ export default function SettingsRoute() {
           </div>
 
           <div className="space-y-4 p-4">
-            {/* Install hint */}
             {!ccInstalled ? (
               <Alert>
                 <IconAlertTriangle className="size-4" />
@@ -326,7 +464,6 @@ export default function SettingsRoute() {
               </Alert>
             ) : null}
 
-            {/* Login: confirmation when good, a proper notice when not */}
             {ccLoggedIn ? (
               <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
                 <IconCircleCheck className="size-4 shrink-0" />
@@ -380,7 +517,6 @@ export default function SettingsRoute() {
               </Alert>
             )}
 
-            {/* Actions */}
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
@@ -404,7 +540,6 @@ export default function SettingsRoute() {
               </Button>
             </div>
 
-            {/* Real test result */}
             {ccResult ? (
               <div>
                 <p className="mb-1.5 text-xs font-medium text-muted-foreground">
@@ -424,6 +559,253 @@ export default function SettingsRoute() {
           </div>
         </div>
       </section>
+
+      <ConcurrencySection />
     </div>
+  );
+}
+
+// ── Concurrency: degree slider (writable) + VM ceiling (read-only) + live counts ─
+
+function ConcurrencySection() {
+  const { t } = useTranslation();
+  const { data: queue, refetch } = useQueueStatus();
+  const setConcurrency = useSetConcurrency();
+  const [pending, setPending] = useState<number | null>(null);
+
+  const degree = pending ?? queue?.concurrencyDegree ?? 3;
+  const maxVMs = queue?.maxConcurrentVMs ?? 0;
+
+  function commit(value: number) {
+    setConcurrency.mutate(
+      { degree: value },
+      {
+        onSuccess: () => {
+          setPending(null);
+          toast.success(t("settings.concurrencySaved"));
+          refetch();
+        },
+        onError: (e: unknown) => {
+          setPending(null);
+          toast.error(e instanceof Error ? e.message : "Failed");
+        },
+      },
+    );
+  }
+
+  return (
+    <section>
+      <div className="mb-1 flex items-center gap-2">
+        <IconStack2 className="size-5 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">
+          {t("settings.concurrencyTitle")}
+        </h2>
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        {t("settings.concurrencySubtitle")}
+      </p>
+
+      <div className="grid gap-5 rounded-lg border border-border bg-card p-4">
+        {/* Concurrency degree — writable slider */}
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <Label className="text-sm">{t("settings.concurrencyDegree")}</Label>
+            <span className="text-sm font-medium tabular-nums">{degree}</span>
+          </div>
+          <Slider
+            min={1}
+            max={16}
+            step={1}
+            value={[degree]}
+            onValueChange={(v) => setPending(v[0])}
+            onValueCommit={(v) => commit(v[0])}
+            disabled={setConcurrency.isPending}
+          />
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {t("settings.concurrencyDegreeHint")}
+          </p>
+        </div>
+
+        {/* maxConcurrentVMs — read-only ceiling */}
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <Label className="text-sm text-muted-foreground">
+              {t("settings.maxConcurrentVMs")}
+            </Label>
+            <span className="text-sm font-medium tabular-nums">{maxVMs}</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("settings.maxConcurrentVMsHint")}
+          </p>
+        </div>
+
+        {/* Live queue counts */}
+        <div className="grid grid-cols-3 gap-3 border-t border-border pt-3">
+          <Stat
+            label={t("settings.concurrencyRunning")}
+            value={queue?.running ?? 0}
+          />
+          <Stat
+            label={t("settings.concurrencyQueued")}
+            value={queue?.queued ?? 0}
+          />
+          <Stat
+            label={t("settings.concurrencyVmsInUse")}
+            value={queue?.vmsInUse ?? 0}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-lg font-semibold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+// ── Images tab (read-only) ──────────────────────────────────────────────────
+
+function ImagesTab() {
+  const { t } = useTranslation();
+  const { data } = useRuntimeImages();
+  const images = data?.images ?? [];
+
+  return (
+    <section>
+      <div className="mb-1 flex items-center gap-2">
+        <IconPhoto className="size-5 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">{t("settings.imagesTitle")}</h2>
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        {t("settings.imagesSubtitle")}
+      </p>
+
+      {images.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {t("settings.imagesEmpty")}
+        </p>
+      ) : (
+        <ul className="grid gap-2">
+          {images.map((img) => (
+            <li
+              key={img.ref}
+              className="rounded-lg border border-border bg-card px-4 py-3"
+            >
+              <div className="flex items-center gap-2">
+                <code className="truncate text-sm font-medium">{img.ref}</code>
+                {img.default ? (
+                  <Badge variant="secondary" className="text-xs">
+                    {t("settings.imagesDefault")}
+                  </Badge>
+                ) : null}
+                <Badge
+                  className={
+                    img.status === "prebaked"
+                      ? "ml-auto gap-1 border-transparent bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : "ml-auto gap-1 border-transparent bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  }
+                >
+                  {img.status === "prebaked"
+                    ? t("settings.imagesStatusPrebaked")
+                    : t("settings.imagesStatusMissing")}
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("settings.imagesRuntime")}: {img.runtime}
+                {img.description ? ` — ${img.description}` : ""}
+              </p>
+              {img.tools.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {img.tools.map((tool) => (
+                    <Badge key={tool} variant="outline" className="text-xs">
+                      {tool}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {data?.note ? (
+        <p className="mt-3 text-xs text-muted-foreground">{data.note}</p>
+      ) : null}
+    </section>
+  );
+}
+
+// ── Credentials tab (key presence only — never a value) ─────────────────────
+
+function CredentialsTab() {
+  const { t } = useTranslation();
+  const { data } = useRuntimeCredentials();
+  const creds = data?.credentials ?? [];
+
+  return (
+    <section>
+      <div className="mb-1 flex items-center gap-2">
+        <IconKey className="size-5 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">{t("settings.credsTitle")}</h2>
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        {t("settings.credsSubtitle")}
+      </p>
+
+      {creds.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {t("settings.credsEmpty")}
+        </p>
+      ) : (
+        <ul className="grid gap-2">
+          {creds.map((c) => (
+            <li
+              key={c.key}
+              className="rounded-lg border border-border bg-card px-4 py-3"
+            >
+              <div className="flex items-center gap-2">
+                <code className="truncate text-sm font-medium">{c.key}</code>
+                <Badge
+                  className={
+                    c.present
+                      ? "ml-auto gap-1 border-transparent bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : "ml-auto gap-1 border-transparent bg-muted text-muted-foreground"
+                  }
+                >
+                  {c.present ? (
+                    <IconCircleCheck className="size-3" />
+                  ) : (
+                    <IconAlertTriangle className="size-3" />
+                  )}
+                  {c.present
+                    ? t("settings.credsRegistered")
+                    : t("settings.credsMissing")}
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {c.description}
+              </p>
+              {c.mountedBy.length > 0 ? (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {t("settings.credsMountedBy")}:{" "}
+                  {c.mountedBy.map((m) => (
+                    <Badge key={m} variant="outline" className="ml-1 text-xs">
+                      {m}
+                    </Badge>
+                  ))}
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {data?.note ? (
+        <p className="mt-3 text-xs text-muted-foreground">{data.note}</p>
+      ) : null}
+    </section>
   );
 }

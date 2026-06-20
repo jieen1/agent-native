@@ -73,6 +73,14 @@ export const runtimeConfigs = table("runtime_configs", {
     .default("vllm"),
   baseUrl: text("base_url"),
   model: text("model"),
+  // Optional additive model LIST (DESIGN §8.3 item4): a single OpenAI-compatible
+  // endpoint (vLLM, LM Studio) can serve several models. Stored as a JSON string
+  // array of model ids; null/empty means "just use `model`". The per-node
+  // ModelPicker expands each runtime into one option per listed model so a node
+  // can target any model the endpoint serves — WITHOUT registering a custom
+  // engine (the dual-registry pitfall, §8.5.1). `model` stays the activation
+  // default; `models` only widens the picker.
+  models: text("models"),
   active: integer("active").notNull().default(0),
   ownerEmail: text("owner_email").notNull().default("local@localhost"),
   orgId: text("org_id"),

@@ -1,7 +1,4 @@
-import {
-  useActionMutation,
-  useActionQuery,
-} from "@agent-native/core/client";
+import { useActionMutation, useActionQuery } from "@agent-native/core/client";
 import { useQueryClient } from "@tanstack/react-query";
 import type { StepRun, Task, Workflow } from "../../shared/types";
 
@@ -32,18 +29,17 @@ export interface TaskDetail {
 }
 
 export function useTasks(status?: Task["status"]) {
-  return useActionQuery(
-    "list-tasks",
-    status ? { status } : {},
-  ) as { data?: TaskListItem[]; isLoading: boolean; error?: unknown };
+  return useActionQuery("list-tasks", status ? { status } : {}) as {
+    data?: TaskListItem[];
+    isLoading: boolean;
+    error?: unknown;
+  };
 }
 
 export function useTask(id: string | undefined) {
-  return useActionQuery(
-    "get-task",
-    id ? { id } : { id: "" },
-    { enabled: !!id },
-  ) as { data?: TaskDetail; isLoading: boolean; error?: unknown };
+  return useActionQuery("get-task", id ? { id } : { id: "" }, {
+    enabled: !!id,
+  }) as { data?: TaskDetail; isLoading: boolean; error?: unknown };
 }
 
 export function useWorkflows() {
@@ -54,11 +50,9 @@ export function useWorkflows() {
 }
 
 export function useWorkflow(id: string | undefined) {
-  return useActionQuery(
-    "get-workflow",
-    id ? { id } : { id: "" },
-    { enabled: !!id },
-  ) as { data?: { workflow: Workflow; role: string }; isLoading: boolean };
+  return useActionQuery("get-workflow", id ? { id } : { id: "" }, {
+    enabled: !!id,
+  }) as { data?: { workflow: Workflow; role: string }; isLoading: boolean };
 }
 
 function invalidateTasks(qc: ReturnType<typeof useQueryClient>) {
@@ -127,6 +121,8 @@ export interface RuntimeConfigItem {
   kind: "vllm" | "openai-compatible" | "claude-code";
   baseUrl: string | null;
   model: string | null;
+  /** Extra model ids this endpoint serves (DESIGN §8.3 item4); widens the picker. */
+  models: string[];
   active: boolean;
 }
 
@@ -187,4 +183,73 @@ export function useDeleteRuntimeConfig() {
 
 export function useStartClaudeCode() {
   return useActionMutation("start-claude-code", {});
+}
+
+export function useTestRuntimeConfig() {
+  return useActionMutation("test-runtime-config", {});
+}
+
+// ── Queue / concurrency (Settings → Runtime, DESIGN §6.4) ───────────────────
+
+export interface QueueStatus {
+  concurrencyDegree: number;
+  running: number;
+  queued: number;
+  claimed: number;
+  maxConcurrentVMs: number;
+  vmsInUse: number;
+  schedulerAlive: boolean;
+  lastTickAt: string | null;
+  reapsFired: number;
+}
+
+export function useQueueStatus() {
+  return useActionQuery("queue-status", {}) as {
+    data?: QueueStatus;
+    isLoading: boolean;
+    isFetching: boolean;
+    refetch: () => void;
+  };
+}
+
+export function useSetConcurrency() {
+  const qc = useQueryClient();
+  return useActionMutation("set-concurrency", {
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["action", "queue-status"] }),
+  });
+}
+
+// ── microVM images (Settings → Images, read-only, DESIGN §7.4.8) ────────────
+
+export interface RuntimeImage {
+  ref: string;
+  runtime: string;
+  description: string;
+  tools: string[];
+  status: "prebaked" | "missing";
+  default: boolean;
+}
+
+export function useRuntimeImages() {
+  return useActionQuery("list-runtime-images", {}) as {
+    data?: { images: RuntimeImage[]; note: string };
+    isLoading: boolean;
+  };
+}
+
+// ── Credentials (Settings → Credentials, key presence only, DESIGN §7.4.7) ──
+
+export interface CredentialKey {
+  key: string;
+  present: boolean;
+  description: string;
+  mountedBy: string[];
+}
+
+export function useRuntimeCredentials() {
+  return useActionQuery("list-runtime-credentials", {}) as {
+    data?: { credentials: CredentialKey[]; note: string };
+    isLoading: boolean;
+  };
 }

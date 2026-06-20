@@ -6,6 +6,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
+import { serializeModelList } from "../shared/model-list.js";
 import { newId, nowIso } from "./_util.js";
 
 // Create or update a saved runtime (vLLM / OpenAI-compatible / Claude Code).
@@ -18,6 +19,11 @@ export default defineAction({
     kind: z.enum(["vllm", "openai-compatible", "claude-code"]).default("vllm"),
     baseUrl: z.string().optional(),
     model: z.string().optional(),
+    // Optional extra model ids this endpoint serves (DESIGN §8.3 item4). A single
+    // vLLM/OpenAI-compatible endpoint can host several models; this widens the
+    // per-node ModelPicker without registering a custom engine (§8.5.1). `model`
+    // remains the activation default.
+    models: z.array(z.string()).optional(),
   }),
   run: async (args) => {
     const ownerEmail = getRequestUserEmail();
@@ -25,6 +31,10 @@ export default defineAction({
     const orgId = getRequestOrgId();
     const db = getDb();
     const now = nowIso();
+
+    // Persist the model list as a JSON string array (additive `models` column).
+    // Empty → null so the picker falls back to `model` (DESIGN §8.3 item4).
+    const modelsJson = serializeModelList(args.models);
 
     if (args.id) {
       await db
@@ -34,6 +44,7 @@ export default defineAction({
           kind: args.kind,
           baseUrl: args.baseUrl ?? null,
           model: args.model ?? null,
+          models: modelsJson,
           updatedAt: now,
         })
         .where(
@@ -52,6 +63,7 @@ export default defineAction({
       kind: args.kind,
       baseUrl: args.baseUrl ?? null,
       model: args.model ?? null,
+      models: modelsJson,
       active: 0,
       ownerEmail,
       orgId,
