@@ -13,6 +13,10 @@ import { EchoExecutor } from "./echo-executor.js";
 import { Scheduler, type RunOutcome } from "./scheduler.js";
 import { DEFAULT_CAPS, type NodeExecutor, type RunConfig } from "./types.js";
 import { buildResolverMap } from "./control.js";
+import {
+  RoutingNodeExecutor,
+  loadRuntimeConfigRows,
+} from "../runtime/routing-node-executor.js";
 
 /** A fixed default seed so a run with no explicit seed is still deterministic. */
 export const DEFAULT_SEED = 1;
@@ -24,6 +28,11 @@ export interface ExecuteRunOptions {
   echoDelayMs?: number;
   /** Concurrency caps override (tests pin maxConcurrentModelCalls). */
   caps?: Partial<RunConfig["caps"]>;
+  /**
+   * Final fallback executor choice when a microvm node resolves no engine
+   * (DESIGN §0.6 SYSTEM_DEFAULT). Passed through to the routing executor.
+   */
+  systemDefault?: string | null;
 }
 
 /**
@@ -54,7 +63,23 @@ export async function executeRun(
   if (!tpl) throw new Error(`template ${runRow.templateId} not found`);
 
   const graph = parseGraph(tpl.graph);
-  const executor = opts.executor ?? new EchoExecutor(opts.echoDelayMs ?? 0);
+  // P2b: by default, route each node to its real executor + the 7-stage
+  // NodeRunner for microvm nodes, falling back to the deterministic echo
+  // executor for non-microVM (pure-reasoning / fixture) nodes. Tests inject an
+  // explicit `executor` (the echo spy) to keep the non-microVM suites
+  // deterministic and VM-free.
+  let executor: NodeExecutor;
+  if (opts.executor) {
+    executor = opts.executor;
+  } else {
+    const routingCtx = await loadRuntimeConfigRows({
+      systemDefault: opts.systemDefault ?? null,
+    });
+    executor = new RoutingNodeExecutor({
+      fallback: new EchoExecutor(opts.echoDelayMs ?? 0),
+      ctx: routingCtx,
+    });
+  }
 
   const cfg: RunConfig = {
     runId,

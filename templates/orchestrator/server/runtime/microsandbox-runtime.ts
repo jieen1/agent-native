@@ -179,7 +179,13 @@ export class MicrosandboxRuntime implements NodeRuntime {
     cmd: string,
     opts?: ExecOptions,
   ): Promise<ExecResult> {
-    return wslMsb(execArgs(vm.name, cmd, opts), this.opts);
+    // Forward a per-command timeout to the WSL→msb driver so the bash tool's
+    // advertised timeoutMs actually kills a runaway in-VM command.
+    const wslOpts =
+      opts?.timeoutMs && opts.timeoutMs > 0
+        ? { ...this.opts, timeoutMs: opts.timeoutMs }
+        : this.opts;
+    return wslMsb(execArgs(vm.name, cmd, opts), wslOpts);
   }
 
   /** STAGE 4 — streamed command. Backs claude `--output-format stream-json`. */

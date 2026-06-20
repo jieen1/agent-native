@@ -48,6 +48,13 @@ export interface ExecOptions {
   cwd?: string;
   /** Extra environment variables, merged over the VM/host env for this command. */
   env?: Record<string, string>;
+  /**
+   * Hard wall-clock cap for this command in milliseconds. The runtime kills the
+   * command (and its host-side driver) when exceeded — backs the acting-bridge
+   * bash tool's advertised per-command timeout so a runaway in-VM command does
+   * not hang a node. Omitted = the runtime's generous default.
+   */
+  timeoutMs?: number;
 }
 
 /**

@@ -23,6 +23,35 @@ export { MicrosandboxRuntime, toWslPath } from "./microsandbox-runtime.js";
 export { NoneRuntime } from "./none-runtime.js";
 export { wslMsb, wslMsbStream, msbAvailable, shArg } from "./wsl-msb.js";
 
+// P2b — the 7-stage NodeRunner + the VM-bound acting bridge + executors.
+export { createVmActingBridge } from "./acting-bridge.js";
+export type { VmActingBridgeOptions } from "./acting-bridge.js";
+export {
+  NodeRunner,
+  NodeRunnerExecutor,
+  type NodeRunnerInput,
+  type NodeRunnerResult,
+} from "./node-runner.js";
+export {
+  VllmExecutor,
+  RemoteApiExecutor,
+  ClaudeCodeExecutor,
+  executorForNode,
+  executorForChoice,
+  parseClaudeStreamJson,
+  buildClaudeCommand,
+  DEFAULT_VLLM_BASE_URL,
+  DEFAULT_VLLM_MODEL,
+  type RuntimeExecutor,
+  type RuntimeExecCtx,
+  type RuntimeExecResult,
+  type RuntimeConfigRow,
+} from "./executors/index.js";
+export {
+  RoutingNodeExecutor,
+  loadRuntimeConfigRows,
+} from "./routing-node-executor.js";
+
 // Process-wide singletons: the backends are stateless drivers (all state lives
 // on the per-node VmHandle), so one instance each is enough and avoids
 // re-allocating the CLI bridge per node.
