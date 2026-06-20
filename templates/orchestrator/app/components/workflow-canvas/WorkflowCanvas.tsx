@@ -68,6 +68,12 @@ export interface WorkflowCanvasProps {
   saving?: boolean;
   /** run-mode seam: status tints keyed by graph node id (P4b fills this). */
   runStatusByNodeId?: Record<string, string>;
+  /** run-mode seam: loop iteration counter per node id (0 outside loops). */
+  iterationByNodeId?: Record<string, number>;
+  /** run-mode seam: true when a node was dynamically added at run time. */
+  dynamicByNodeId?: Record<string, boolean>;
+  /** run-mode: notified when a node is clicked (writes application_state). */
+  onSelectNode?: (nodeId: string | null) => void;
 }
 
 function CanvasInner({
@@ -80,6 +86,9 @@ function CanvasInner({
   onRunOnce,
   saving,
   runStatusByNodeId,
+  iterationByNodeId,
+  dynamicByNodeId,
+  onSelectNode,
 }: WorkflowCanvasProps) {
   const { t } = useTranslation();
   const editable = mode === "edit";
@@ -97,12 +106,26 @@ function CanvasInner({
   // Derive React Flow nodes/edges from the in-memory model on every render.
   const flowNodes = useMemo<FlowNode[]>(() => {
     const base = toFlowNodes(model, { selectedId: selectedNodeId, editable });
-    if (!runStatusByNodeId) return base;
+    if (!runStatusByNodeId && !iterationByNodeId && !dynamicByNodeId) {
+      return base;
+    }
     return base.map((n) => ({
       ...n,
-      data: { ...n.data, runStatus: runStatusByNodeId[n.id] },
+      data: {
+        ...n.data,
+        runStatus: runStatusByNodeId?.[n.id],
+        iteration: iterationByNodeId?.[n.id],
+        dynamic: dynamicByNodeId?.[n.id],
+      },
     }));
-  }, [model, selectedNodeId, editable, runStatusByNodeId]);
+  }, [
+    model,
+    selectedNodeId,
+    editable,
+    runStatusByNodeId,
+    iterationByNodeId,
+    dynamicByNodeId,
+  ]);
 
   const flowEdges = useMemo(
     () => toFlowEdges(model, { editable }),
@@ -147,8 +170,9 @@ function CanvasInner({
       const edge = edges[0];
       setSelectedNodeId(node ? node.id : null);
       setSelectedEdgeId(!node && edge ? edge.id : null);
+      onSelectNode?.(node ? node.id : null);
     },
-    [],
+    [onSelectNode],
   );
 
   const onDragOver = useCallback((e: React.DragEvent) => {
