@@ -1,57 +1,54 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { IconArrowBigUpLines, IconPlus, IconSitemap } from "@tabler/icons-react";
+import { useActionMutation } from "@agent-native/core/client";
+import {
+  IconArrowBigUpLines,
+  IconPlus,
+  IconSitemap,
+} from "@tabler/icons-react";
 import { toast } from "sonner";
 import { APP_TITLE } from "@/lib/app-config";
-import { useSaveWorkflow, useWorkflows } from "@/hooks/use-orchestrator";
+import { useTemplates } from "@/hooks/use-templates";
+import { useSaveTemplate } from "@/hooks/use-template";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PromoteRunDialog } from "@/components/dialogs/PromoteRunDialog";
+import { graphForSave } from "@/components/workflow-canvas/WorkflowCanvas";
+import { starterModel } from "@/lib/workflow-graph-model";
 
 export function meta() {
   return [{ title: `${APP_TITLE} — Workflows` }];
 }
 
-const STARTER_STEPS = [
-  {
-    key: "research",
-    title: "Research",
-    assignee: "local",
-    model: "claude-opus-4-8",
-    prompt: "Gather the key facts and context for the task.",
-    dependsOn: [],
-  },
-  {
-    key: "draft",
-    title: "Draft",
-    assignee: "local",
-    model: "claude-opus-4-8",
-    prompt: "Produce a first draft using the research output.",
-    dependsOn: ["research"],
-  },
-  {
-    key: "review",
-    title: "Review",
-    assignee: "local",
-    model: "claude-opus-4-8",
-    prompt: "Critique and refine the draft into the final deliverable.",
-    dependsOn: ["draft"],
-  },
-];
-
+// Workflow / template catalog (FRONTEND §5). Lists v2 templates (list-templates);
+// "New workflow" creates a minimal start→end v2 template via save-template and
+// jumps into the React-Flow editor. The legacy v1 list-workflows surface is
+// retained elsewhere but the editor flow is fully v2 now (P4a).
 export default function WorkflowsRoute() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data: workflows = [], isLoading } = useWorkflows();
-  const saveWorkflow = useSaveWorkflow();
+  const { data: templates = [], isLoading } = useTemplates();
+  const saveTemplate = useSaveTemplate();
+  const navAction = useActionMutation("navigate", {});
   const [promoteOpen, setPromoteOpen] = useState(false);
 
+  useEffect(() => {
+    navAction.mutate({ view: "workflows" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function createWorkflow() {
-    saveWorkflow.mutate(
+    // A minimal valid starter graph (start → end); the editor opens on it.
+    // skipFinalizeGate keeps the blank starter from getting the delivery gate
+    // auto-injected before the user has authored anything.
+    const graph = graphForSave(starterModel());
+    saveTemplate.mutate(
       {
         name: t("workflows.namePlaceholder"),
         description: "",
-        steps: STARTER_STEPS,
+        graph,
+        skipFinalizeGate: true,
       },
       {
         onSuccess: (res: unknown) => {
@@ -59,7 +56,9 @@ export default function WorkflowsRoute() {
           if (id) navigate(`/workflows/${id}`);
         },
         onError: (e: unknown) =>
-          toast.error(e instanceof Error ? e.message : "Failed"),
+          toast.error(
+            e instanceof Error ? e.message : t("common.actionFailed"),
+          ),
       },
     );
   }
@@ -87,7 +86,7 @@ export default function WorkflowsRoute() {
           <Button
             size="sm"
             onClick={createWorkflow}
-            disabled={saveWorkflow.isPending}
+            disabled={saveTemplate.isPending}
           >
             <IconPlus className="size-4" />
             {t("workflows.newWorkflow")}
@@ -96,14 +95,20 @@ export default function WorkflowsRoute() {
       </header>
 
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
-      ) : workflows.length === 0 ? (
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {[0, 1, 2, 3].map((i) => (
+            <li key={i}>
+              <Skeleton className="h-20 w-full rounded-lg" />
+            </li>
+          ))}
+        </ul>
+      ) : templates.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
           {t("workflows.empty")}
         </div>
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
-          {workflows.map((wf) => (
+          {templates.map((wf) => (
             <li key={wf.id}>
               <Link
                 to={`/workflows/${wf.id}`}
@@ -117,8 +122,10 @@ export default function WorkflowsRoute() {
                       {wf.description}
                     </p>
                   ) : null}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("workflows.steps", { count: wf.stepCount })}
+                  <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{t("flow.nodeCount", { count: wf.nodeCount })}</span>
+                    <span>·</span>
+                    <span>v{wf.version}</span>
                   </p>
                 </div>
               </Link>
