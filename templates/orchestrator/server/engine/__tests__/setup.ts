@@ -86,6 +86,19 @@ export async function createEngineTables(): Promise<void> {
   await c.execute(
     `CREATE UNIQUE INDEX IF NOT EXISTS node_runs_journal_key_idx ON node_runs (run_id, node_id, iteration, fanout_index)`,
   );
+  // P6 audit_log (v18) — control verbs + transition + credential resolution
+  // write here, so any engine/queue test that drives a control verb needs it.
+  await c.execute(`CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    detail TEXT,
+    at TEXT NOT NULL,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT
+  )`);
   // Shares tables (structure only) so accessFilter joins resolve in tests that
   // exercise owner-scoped reads (e.g. the node-def reference scan).
   for (const t of ["workflow_template_shares", "workflow_run_shares"]) {

@@ -52,6 +52,18 @@ export {
   loadRuntimeConfigRows,
 } from "./routing-node-executor.js";
 
+// P6 — VM-capacity backpressure (DESIGN §4.1): the distinct error types + the
+// real semaphore that bounds live microVM provisions to maxConcurrentVMs.
+export {
+  VMCapacityExhaustedError,
+  TokenBudgetExceededError,
+  isVMCapacityExhausted,
+  isTokenBudgetExceeded,
+  VmSemaphore,
+  getVmSemaphore,
+  setVmSemaphore,
+} from "./backpressure.js";
+
 // Process-wide singletons: the backends are stateless drivers (all state lives
 // on the per-node VmHandle), so one instance each is enough and avoids
 // re-allocating the CLI bridge per node.

@@ -361,6 +361,16 @@ export function initialStage(scheme: StatusScheme): string {
   return first?.key ?? scheme.stages[0]?.key ?? "";
 }
 
+/**
+ * The scheme's terminal SHIPPED stage = the first `completed`-category stage
+ * (DESIGN §6.2b terminal closure: 已上线 / 已关闭 / 已完成 / 定稿). This is where the
+ * PR-merge / deploy webhook moves an item with resolution:shipped. Returns null
+ * if the scheme has no completed stage (a misconfiguration).
+ */
+export function terminalShippedStage(scheme: StatusScheme): string | null {
+  return scheme.stages.find((s) => s.category === "completed")?.key ?? null;
+}
+
 /** Resolve the scheme for a type from a (possibly project-overridden) set. */
 export function resolveScheme(
   schemes: SchemeSet,

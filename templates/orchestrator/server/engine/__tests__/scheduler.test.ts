@@ -192,6 +192,29 @@ describe("scheduler — budget", () => {
     const work = o.nodeRuns.filter((n) => n.key.nodeId === "work");
     expect(work.length).toBe(4);
     expect(work.every((w) => w.status === "skipped")).toBe(true);
+
+    // P6 (c): the budget breach surfaces a DISTINCT typed signal — budgetExceeded
+    // true, vmCapacityExhausted false (a budget stop is NOT a VM-capacity hit),
+    // and the skipped dynamic nodes carry the typed TokenBudgetExceeded reason.
+    expect(o.budgetExceeded).toBe(true);
+    expect(o.vmCapacityExhausted).toBe(false);
+    expect(work.every((w) => /token budget/i.test(w.error ?? ""))).toBe(true);
+  });
+
+  it("budget EDGE CASE: spend exactly == budget refuses the NEXT new dynamic node (exact stop)", async () => {
+    const graph = fixtures.fanout;
+    const t = await seedTemplate(graph);
+    const r = await seedRun(t, 7);
+    const e = new SpyExecutor();
+    e.tokensPerCall = 7; // disc spends EXACTLY the budget (spent == budget, not >)
+    const o = await new Scheduler({ cfg: makeCfg(r, t, graph, { tokenBudget: 7 }), db: getDb(), executor: e }).run();
+    // The EXACT-stop boundary: spent (7) >= budget (7) → every dynamic child skipped.
+    const work = o.nodeRuns.filter((n) => n.key.nodeId === "work");
+    expect(work.length).toBe(4);
+    expect(work.every((w) => w.status === "skipped")).toBe(true);
+    expect(o.budgetExceeded).toBe(true);
+    // disc itself (a STATIC node) still ran — only NEW dynamic nodes are gated.
+    expect(o.nodeRuns.find((n) => n.key.nodeId === "disc")?.status).toBe("done");
   });
 });
 

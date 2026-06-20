@@ -644,6 +644,27 @@ const en = {
     noEvents: "No events yet.",
     filterByNode: "Filter by node",
   },
+  // P6 audit log (DESIGN §7.4.7) + crash-recovery + terminal-closure labels.
+  audit: {
+    title: "Audit log",
+    subtitle:
+      "Append-only trail of run control, status transitions, and credential resolution.",
+    empty: "No audit entries yet.",
+    columnAt: "When",
+    columnActor: "Actor",
+    columnAction: "Action",
+    columnTarget: "Target",
+    columnDetail: "Detail",
+    actorSystem: "System",
+  },
+  recovery: {
+    reconciled: "Recovered {{runs}} run(s), re-queued {{items}} item(s).",
+    runRecovered: "Run re-driven after restart.",
+    itemRequeued: "Item returned to the queue after a worker crash.",
+    markShipped: "Mark shipped",
+    shipped: "Shipped — moved to the terminal stage.",
+    shippedFailed: "Could not close out the item.",
+  },
 };
 
 const zh: typeof en = {
@@ -1240,6 +1261,26 @@ const zh: typeof en = {
     openDeliverable: "打开交付物",
     noEvents: "还没有事件。",
     filterByNode: "按节点过滤",
+  },
+  // P6 审计日志(DESIGN §7.4.7)+ 崩溃恢复 + 终态闭环 文案。
+  audit: {
+    title: "审计日志",
+    subtitle: "运行控制、状态流转、凭据解析的只追加审计轨迹。",
+    empty: "还没有审计记录。",
+    columnAt: "时间",
+    columnActor: "操作者",
+    columnAction: "动作",
+    columnTarget: "目标",
+    columnDetail: "详情",
+    actorSystem: "系统",
+  },
+  recovery: {
+    reconciled: "已恢复 {{runs}} 个运行,重新入队 {{items}} 个工作项。",
+    runRecovered: "重启后已重新驱动该运行。",
+    itemRequeued: "worker 崩溃后,工作项已退回队列。",
+    markShipped: "标记已上线",
+    shipped: "已上线 —— 已移动到终态阶段。",
+    shippedFailed: "无法闭环该工作项。",
   },
 };
 

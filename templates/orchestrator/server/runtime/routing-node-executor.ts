@@ -24,6 +24,7 @@ import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
 import { NodeRunnerExecutor } from "./node-runner.js";
 import { executorForNode, type RuntimeConfigRow } from "./executors/index.js";
 import type { NodeRuntime } from "./node-runtime.js";
+import type { VmSemaphore } from "./backpressure.js";
 
 /** Live routing context, gathered once per run. */
 export interface RoutingContext {
@@ -52,6 +53,8 @@ export class RoutingNodeExecutor implements NodeExecutor {
   private readonly fallback: NodeExecutor;
   private readonly ctx: RoutingContext;
   private readonly runtimeFor?: (spec: NodeRuntimeSpec) => NodeRuntime;
+  private readonly vmSemaphore?: VmSemaphore;
+  private readonly acquireTimeoutMs?: number;
 
   constructor(args: {
     /** Executor for non-microVM nodes (P1 EchoExecutor in tests/fixtures). */
@@ -59,10 +62,19 @@ export class RoutingNodeExecutor implements NodeExecutor {
     ctx: RoutingContext;
     /** Inject a fake runtime backend in tests; production uses runtimeForSpec. */
     runtimeFor?: (spec: NodeRuntimeSpec) => NodeRuntime;
+    /**
+     * VM-capacity semaphore (DESIGN §4.1) bounding live microVM provisions to
+     * maxConcurrentVMs. Defaults to the process-wide one inside NodeRunner.
+     */
+    vmSemaphore?: VmSemaphore;
+    /** Provision wait bound before VMCapacityExhaustedError (DESIGN §4.1). */
+    acquireTimeoutMs?: number;
   }) {
     this.fallback = args.fallback;
     this.ctx = args.ctx;
     this.runtimeFor = args.runtimeFor;
+    this.vmSemaphore = args.vmSemaphore;
+    this.acquireTimeoutMs = args.acquireTimeoutMs;
   }
 
   async invoke(
@@ -82,6 +94,8 @@ export class RoutingNodeExecutor implements NodeExecutor {
     const runner = new NodeRunnerExecutor({
       executor,
       runtimeFor: this.runtimeFor,
+      vmSemaphore: this.vmSemaphore,
+      acquireTimeoutMs: this.acquireTimeoutMs,
     });
 
     const result = await runner.invoke(

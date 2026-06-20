@@ -6,6 +6,7 @@
 import { getDbExec } from "../db/index.js";
 import { getConcurrencyDegree, getMaxConcurrentVMs } from "./concurrency.js";
 import { getSchedulerHealth } from "./driver.js";
+import { getVmSemaphore } from "../runtime/backpressure.js";
 
 export interface QueueStatus {
   /** Worker-pool width — how many work items run at once (§6.4 ceiling 1). */
@@ -55,9 +56,10 @@ export async function getQueueStatus(): Promise<QueueStatus> {
     queued: counts.queued ?? 0,
     claimed: counts.claimed ?? 0,
     maxConcurrentVMs: getMaxConcurrentVMs(),
-    // P3b runs entirely on the existing engine (no microVM) — vmsInUse is 0
-    // until P2 microVM execution is wired through the queue.
-    vmsInUse: 0,
+    // Live microVM slots held by the VM-capacity semaphore (DESIGN §4.1). On the
+    // engine-only path no VMs are provisioned, so this reads 0; once a microVM
+    // node is running it reflects the real in-use count the cap bounds.
+    vmsInUse: getVmSemaphore().inUse,
     schedulerAlive: health.schedulerAlive,
     lastTickAt: health.lastTickAt,
     reapsFired: health.reapsFired,

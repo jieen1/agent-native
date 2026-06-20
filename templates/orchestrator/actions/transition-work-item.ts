@@ -1,15 +1,9 @@
 import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { resolveAccess } from "@agent-native/core/sharing";
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getDb, schema } from "../server/db/index.js";
-import { newId, nowIso } from "./_util.js";
-import { schemeForType } from "../server/work-items/schemes.js";
-import {
-  evaluateTransition,
-  type Resolution,
-} from "../shared/status-schemes.js";
+import { type Resolution } from "../shared/status-schemes.js";
+import { applyTransition } from "../server/work-items/transition.js";
 
 // transition-work-item — the SOLE writer of business status / environment /
 // blocked / resolution / severity (DESIGN §6.2b). Validates from→to against the
@@ -66,147 +60,27 @@ export default defineAction({
     if (access.role === "viewer") throw new Error("Read-only access");
     const item = access.resource as Record<string, unknown>;
 
-    const db = getDb();
-
-    // Load the project's scheme for this item's type.
-    const projRows = await db
-      .select({ statusSchemes: schema.projects.statusSchemes })
-      .from(schema.projects)
-      .where(eq(schema.projects.id, String(item.projectId)))
-      .limit(1);
-    if (projRows.length === 0) {
-      throw new Error(`Project ${item.projectId} not found`);
-    }
-    const scheme = schemeForType(projRows[0].statusSchemes, String(item.type));
-
-    const fromStatus = String(item.status ?? "");
-
-    // For a duplicate resolution we must confirm a duplicate-of link exists FROM
-    // this item, BEFORE validating (the validator only needs the boolean).
-    let hasDuplicateLink = false;
-    if (args.resolution === "duplicate") {
-      const dup = await db
-        .select({ id: schema.workItemLinks.id })
-        .from(schema.workItemLinks)
-        .where(
-          and(
-            eq(schema.workItemLinks.fromItem, args.id),
-            eq(schema.workItemLinks.kind, "duplicate-of"),
-          ),
-        )
-        .limit(1);
-      hasDuplicateLink = dup.length > 0;
-    }
-
-    // ── overlay-only path (no stage move) ──────────────────────────────────
-    // A blocked/severity/environment toggle at the SAME stage is a legitimate
-    // overlay write (the watchdog explicitly recognizes a from==to log row —
-    // see watchdog.test "a blocked-only log row (from == to)"). The transition
-    // validator correctly rejects no-op stage moves, so we short-circuit the
-    // overlay-only case BEFORE calling it: keep the current stage/category, set
-    // only the overlays, and append the trail row. This is the board's
-    // Block/Unblock path and never changes business status.
-    const now = nowIso();
+    // The actor is the automation run id when this move is made during a run,
+    // else the request user (so the watchdog + audit attribute correctly).
     const actor = args.runId ?? getRequestUserEmail() ?? "unknown";
 
-    if (args.toStatus === fromStatus) {
-      const overlayPatch: Record<string, unknown> = { updatedAt: now };
-      if (args.environment !== undefined)
-        overlayPatch.environment = args.environment;
-      if (args.severity !== undefined) overlayPatch.severity = args.severity;
-      if (args.blocked !== undefined) {
-        overlayPatch.blocked = args.blocked ? 1 : 0;
-        if (!args.blocked) {
-          overlayPatch.blockedReason = args.blockedReason ?? null;
-          overlayPatch.blockedBy = args.blockedBy ?? null;
-        }
-      }
-      if (args.blockedReason !== undefined)
-        overlayPatch.blockedReason = args.blockedReason;
-      if (args.blockedBy !== undefined) overlayPatch.blockedBy = args.blockedBy;
-
-      await db
-        .update(schema.workItems)
-        .set(overlayPatch)
-        .where(eq(schema.workItems.id, args.id));
-
-      await db.insert(schema.workItemStatusLog).values({
-        id: newId("wisl"),
-        workItemId: args.id,
-        runId: args.runId ?? null,
-        actor,
-        fromStatus,
-        toStatus: fromStatus,
-        blocked: args.blocked ? 1 : 0,
-        resolution: String(item.resolution ?? "") || null,
-        at: now,
-      });
-
-      return {
-        id: args.id,
-        from: fromStatus,
-        to: fromStatus,
-        kind: "overlay" as const,
-        statusCategory: String(item.statusCategory ?? "todo"),
-        resolution: (item.resolution as string | null) ?? null,
-      };
-    }
-
-    const decision = evaluateTransition(scheme, fromStatus, args.toStatus, {
-      resolution: (args.resolution as Resolution | undefined) ?? null,
-      hasDuplicateLink,
-    });
-    if (!decision.ok) {
-      throw new Error(`Illegal transition: ${decision.error}`);
-    }
-
-    // Build the patch. status/statusCategory/resolution come from the validated
-    // decision; environment/blocked/severity are overlays this writer also owns.
-    const patch: Record<string, unknown> = {
-      status: decision.toStatus,
-      statusCategory: decision.statusCategory,
-      resolution: decision.resolution,
-      updatedAt: now,
-    };
-    if (args.environment !== undefined) patch.environment = args.environment;
-    if (args.severity !== undefined) patch.severity = args.severity;
-    if (args.blocked !== undefined) {
-      patch.blocked = args.blocked ? 1 : 0;
-      // Clearing blocked clears its reason/link unless a new one is given.
-      if (!args.blocked) {
-        patch.blockedReason = args.blockedReason ?? null;
-        patch.blockedBy = args.blockedBy ?? null;
-      }
-    }
-    if (args.blockedReason !== undefined)
-      patch.blockedReason = args.blockedReason;
-    if (args.blockedBy !== undefined) patch.blockedBy = args.blockedBy;
-
-    await db
-      .update(schema.workItems)
-      .set(patch)
-      .where(eq(schema.workItems.id, args.id));
-
-    // Append the trail row (DESIGN §6.2b) — one per call, always.
-    await db.insert(schema.workItemStatusLog).values({
-      id: newId("wisl"),
-      workItemId: args.id,
-      runId: args.runId ?? null,
+    // Delegate to the shared §6.2b helper (the single writer + trail + audit).
+    // Same validation, statusCategory derivation, resolution enforcement, log
+    // row, and audit row the PR-merge webhook reuses.
+    const outcome = await applyTransition({
+      item,
       actor,
-      fromStatus,
-      toStatus: decision.toStatus,
-      blocked: args.blocked ? 1 : 0,
-      resolution: decision.resolution,
-      at: now,
+      input: {
+        toStatus: args.toStatus,
+        environment: args.environment,
+        resolution: (args.resolution as Resolution | undefined) ?? null,
+        blocked: args.blocked,
+        blockedReason: args.blockedReason,
+        blockedBy: args.blockedBy,
+        severity: args.severity,
+        runId: args.runId ?? null,
+      },
     });
-
-    return {
-      id: args.id,
-      from: fromStatus,
-      to: decision.toStatus,
-      kind: decision.kind,
-      statusCategory: decision.statusCategory,
-      resolution: decision.resolution,
-    };
+    return outcome;
   },
 });

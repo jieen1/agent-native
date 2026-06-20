@@ -45,6 +45,10 @@ import type {
   RunConfig,
 } from "./types.js";
 import { keyStr } from "./types.js";
+import {
+  TokenBudgetExceededError,
+  isVMCapacityExhausted,
+} from "../runtime/backpressure.js";
 
 /**
  * Resolve a subworkflow `templateRef` to its graph for inline expansion
@@ -76,6 +80,19 @@ export interface RunOutcome {
   nodeRuns: NodeRunState[];
   /** True when the run is parked on a human gate (awaiting-approval node). */
   awaitingApproval?: boolean;
+  /**
+   * True when the run hit its token-budget ceiling and refused to schedule new
+   * dynamic nodes (DESIGN §1.8). DISTINCT from `vmCapacityExhausted` — a budget
+   * stop is economic, not a capacity backpressure (§4.1).
+   */
+  budgetExceeded?: boolean;
+  /**
+   * True when at least one node failed because the maxConcurrentVMs ceiling was
+   * exhausted (DESIGN §4.1 VMCapacityExhaustedError). Reported SEPARATELY from
+   * `budgetExceeded` so a VM-bound run hitting the VM cap is never mislabeled a
+   * budget overrun.
+   */
+  vmCapacityExhausted?: boolean;
 }
 
 /** A distinct error class so a per-node timeout is reportable as such (§3.4). */
@@ -156,6 +173,10 @@ export class Scheduler {
   private paused = false;
   private readonly abort = new AbortController();
   private tokensSpent = 0;
+  /** Set once the token-budget ceiling refused a new dynamic node (§1.8). */
+  private budgetExceeded = false;
+  /** Set once a node failed on VM-capacity exhaustion (§4.1) — kept DISTINCT. */
+  private vmCapacityExhausted = false;
   /** Resolves a subworkflow `templateRef` to its graph for inline expansion. */
   private readonly resolveTemplate: SubworkflowResolver | null;
   /** Subworkflow nodes already inline-expanded (id → child node ids). */
@@ -391,6 +412,8 @@ export class Scheduler {
       tokensSpent: this.tokensSpent,
       nodeRuns: states,
       awaitingApproval,
+      budgetExceeded: this.budgetExceeded,
+      vmCapacityExhausted: this.vmCapacityExhausted,
     };
   }
 
@@ -714,10 +737,13 @@ export class Scheduler {
 
   // ── Skip propagation ───────────────────────────────────────────────────────
 
-  private async skip(state: NodeRunState): Promise<void> {
+  private async skip(state: NodeRunState, reason?: string): Promise<void> {
     if (state.status === "skipped") return;
     state.status = "skipped";
     state.completedAt = nowIso();
+    // A reason (e.g. the token-budget stop, §1.8) is journaled on the row so the
+    // run/node observers can distinguish a budget-skip from a dead-branch skip.
+    if (reason) state.error = reason;
     await store.updateNodeRun(this.db, state);
     // Eagerly create the exclusive downstream so a skipped branch terminates;
     // each downstream is re-evaluated in computeReadiness (it may still have a
@@ -1148,13 +1174,25 @@ export class Scheduler {
       const node = state.node;
       if (this.isStructural(node) || node.type === "human") continue; // settled elsewhere
       if (this.running >= cap) break; // cap reached this pass
-      // Budget gate (DESIGN §1.8): no NEW dynamic nodes past the ceiling.
+      // Budget gate (DESIGN §1.8 — the EXACT stop): once spend ≥ budget, refuse
+      // any NEW dynamic node. This is an economic stop surfaced as
+      // `budgetExceeded` (a TokenBudgetExceededError type), kept DISTINCT from
+      // the VM-capacity backpressure (§4.1). A static (template) node is NOT
+      // gated — only the brain's runtime-added dynamic nodes are budget-bound.
       if (
         this.cfg.tokenBudget != null &&
         this.tokensSpent >= this.cfg.tokenBudget &&
         state.dynamic
       ) {
-        void this.skip(state);
+        // Record the budget breach as the distinct typed reason on the skipped
+        // node so node-get/run-get can show "stopped: token budget exhausted"
+        // rather than a generic skip, and flag the run outcome.
+        this.budgetExceeded = true;
+        const err = new TokenBudgetExceededError(
+          this.cfg.tokenBudget,
+          this.tokensSpent,
+        );
+        void this.skip(state, err.message);
         continue;
       }
       this.launchLeaf(state);
@@ -1211,6 +1249,10 @@ export class Scheduler {
       } catch (err) {
         state.status = "failed";
         state.error = err instanceof Error ? err.message : String(err);
+        // VM-capacity exhaustion (§4.1) is recorded as a DISTINCT outcome flag —
+        // a VM-bound run hitting the maxConcurrentVMs cap must never be reported
+        // as a token-budget overrun. The node row keeps the typed error message.
+        if (isVMCapacityExhausted(err)) this.vmCapacityExhausted = true;
       } finally {
         state.completedAt = nowIso();
         state.lastHeartbeat = null; // settled → no longer a reap candidate

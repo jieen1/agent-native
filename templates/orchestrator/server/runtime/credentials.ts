@@ -13,6 +13,7 @@
 
 import { resolveSecret } from "@agent-native/core/server";
 import { getClaudeCodeAuthStatus } from "../claude-code-status.js";
+import { writeAudit } from "../audit/write-audit.js";
 
 /** A credential key the runtime mounts, with its presence + which nodes use it. */
 export interface CredentialKey {
@@ -52,6 +53,38 @@ const KEY_SPECS: KeySpec[] = [
     mountedBy: ["remote-api"],
   },
 ];
+
+/**
+ * Resolve a credential VALUE for injection into a node's microVM (DESIGN
+ * §7.4.7), writing an AUDIT row for the resolution. This is the audited seam the
+ * VM mount/inject path uses so every credential resolution leaves a trail —
+ * with the KEY name and a `present` boolean ONLY, never the decrypted value
+ * (mirrors the value-safe presence list). Returns the resolved value, or null.
+ *
+ * Best-effort audit: an audit failure never blocks the resolution. A resolution
+ * THROW is recorded as `present:false` then rethrown so the caller still fails.
+ */
+export async function resolveCredentialForVm(
+  key: string,
+  opts: { nodeRunId?: string | null } = {},
+): Promise<string | null> {
+  let value: string | null = null;
+  let present = false;
+  try {
+    const resolved = await resolveSecret(key);
+    value = (resolved as string | null) ?? null;
+    present = value != null;
+    return value;
+  } finally {
+    // Audit the resolution attempt regardless of outcome (key + present only).
+    await writeAudit({
+      action: "credential.resolve",
+      targetType: "credential",
+      targetId: key,
+      detail: { present, nodeRunId: opts.nodeRunId ?? null },
+    });
+  }
+}
 
 /** A short note rendered under the read-only Credentials list. */
 export const CREDENTIALS_NOTE =

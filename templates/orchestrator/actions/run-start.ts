@@ -9,6 +9,7 @@ import { getDb, schema } from "../server/db/index.js";
 import { newId, nowIso } from "./_util.js";
 import { executeRun } from "../server/engine/index.js";
 import { startRunForWorkItem } from "../server/queue/run-work-item.js";
+import { writeAudit } from "../server/audit/write-audit.js";
 
 // Instantiate a template (or a work item) into a workflow_runs row and schedule
 // it (DESIGN §4.2 / §0.6). `templateId` and `workItemId` are MUTUALLY EXCLUSIVE
@@ -69,6 +70,15 @@ export default defineAction({
             : undefined,
         },
       });
+      await writeAudit({
+        action: "run.start",
+        targetType: "workflow_run",
+        targetId: result.runId,
+        detail: {
+          workItemId: args.workItemId,
+          templateSource: result.templateSource,
+        },
+      });
       return {
         runId: result.runId,
         workItemId: args.workItemId,
@@ -108,6 +118,13 @@ export default defineAction({
       ownerEmail,
       orgId,
       visibility: "private",
+    });
+
+    await writeAudit({
+      action: "run.start",
+      targetType: "workflow_run",
+      targetId: runId,
+      detail: { templateId: args.templateId },
     });
 
     const wait = args.wait ?? true;

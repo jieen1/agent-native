@@ -29,9 +29,9 @@ import {
 } from "@agent-native/core/server/request-context";
 
 import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
-import { runtimeForSpec } from "./index.js";
 import type { NodeRuntime, TeardownPolicy, VmHandle } from "./node-runtime.js";
-import { DEFAULT_WORKDIR } from "./executors/engine-loop.js";
+import { DEFAULT_WORKDIR } from "./executors/workdir.js";
+import { getVmSemaphore, type VmSemaphore } from "./backpressure.js";
 import type {
   RuntimeExecCtx,
   RuntimeExecResult,
@@ -97,14 +97,50 @@ function failurePolicy(spec: NodeRuntimeSpec): TeardownPolicy {
  */
 export class NodeRunner {
   private readonly executor: RuntimeExecutor;
-  private readonly runtimeFor: (spec: NodeRuntimeSpec) => NodeRuntime;
+  /**
+   * Injected backend selector, or null to lazily resolve the production one.
+   * Kept LAZY (a dynamic import in {@link resolveRuntimeFor}) so importing this
+   * module — e.g. from a unit test that injects a fake backend — does NOT pull
+   * in the microsandbox/executor chain (and its OpenTelemetry deps the vitest
+   * ESM runner cannot load). Mirrors the lazy import in engine/index.ts.
+   */
+  private readonly injectedRuntimeFor:
+    | ((spec: NodeRuntimeSpec) => NodeRuntime)
+    | null;
+  private readonly vmSemaphore: VmSemaphore;
+  private readonly acquireTimeoutMs?: number;
 
   constructor(args: {
     executor: RuntimeExecutor;
     runtimeFor?: (spec: NodeRuntimeSpec) => NodeRuntime;
+    /**
+     * The VM-capacity semaphore (DESIGN §4.1). Defaults to the process-wide one
+     * sized to `maxConcurrentVMs`; tests inject a small one to prove the cap +
+     * the distinct VMCapacityExhaustedError. Only `microvm` provisions take a
+     * slot — `none` runs on the host and consumes no VM.
+     */
+    vmSemaphore?: VmSemaphore;
+    /**
+     * How long a provision waits for a free VM slot before surfacing
+     * VMCapacityExhaustedError (DESIGN §4.1 backpressure). Default: wait
+     * indefinitely (queue behind the cap). Tests pass 0 to fail fast and assert
+     * the distinct error type.
+     */
+    acquireTimeoutMs?: number;
   }) {
     this.executor = args.executor;
-    this.runtimeFor = args.runtimeFor ?? runtimeForSpec;
+    this.injectedRuntimeFor = args.runtimeFor ?? null;
+    this.vmSemaphore = args.vmSemaphore ?? getVmSemaphore();
+    this.acquireTimeoutMs = args.acquireTimeoutMs;
+  }
+
+  /** Resolve the backend selector, lazily loading the production one. */
+  private async resolveRuntimeFor(): Promise<
+    (spec: NodeRuntimeSpec) => NodeRuntime
+  > {
+    if (this.injectedRuntimeFor) return this.injectedRuntimeFor;
+    const { runtimeForSpec } = await import("./index.js");
+    return runtimeForSpec;
   }
 
   /** Run one node through all 7 stages, with §7.4.5 recovery. */
@@ -113,7 +149,8 @@ export class NodeRunner {
     signal: AbortSignal,
   ): Promise<NodeRunnerResult> {
     const spec = effectiveSpec(input.node);
-    const runtime = this.runtimeFor(spec);
+    const runtimeFor = await this.resolveRuntimeFor();
+    const runtime = runtimeFor(spec);
     const maxAttempts = Math.max(1, (input.node.retry?.max ?? 0) + 1);
 
     let lastErr: unknown;
@@ -137,6 +174,34 @@ export class NodeRunner {
 
   /** One full provision→teardown pass (stages 1–7) for a single attempt. */
   private async runOnce(
+    runtime: NodeRuntime,
+    spec: NodeRuntimeSpec,
+    input: NodeRunnerInput,
+    signal: AbortSignal,
+    attempt: number,
+  ): Promise<NodeRunnerResult> {
+    // BACKPRESSURE (DESIGN §4.1): a microVM provision must hold a VM slot for
+    // the WHOLE 7-stage pass (the VM is live until TEARDOWN). When the
+    // maxConcurrentVMs ceiling is full this WAITS for a slot, or surfaces a
+    // DISTINCT VMCapacityExhaustedError on timeout — never a budget error. The
+    // `none` runtime runs on the host (no microVM) so it takes no slot.
+    const needsVmSlot = spec.kind !== "none";
+    if (needsVmSlot) {
+      await this.vmSemaphore.acquire(this.acquireTimeoutMs);
+    }
+    let slotHeld = needsVmSlot;
+    try {
+      return await this.provisionAndRun(runtime, spec, input, signal, attempt);
+    } finally {
+      if (slotHeld) {
+        slotHeld = false;
+        this.vmSemaphore.release();
+      }
+    }
+  }
+
+  /** Stages 1–7 with the VM slot already held (or not needed). */
+  private async provisionAndRun(
     runtime: NodeRuntime,
     spec: NodeRuntimeSpec,
     input: NodeRunnerInput,
@@ -225,6 +290,10 @@ export class NodeRunnerExecutor {
   constructor(args: {
     executor: RuntimeExecutor;
     runtimeFor?: (spec: NodeRuntimeSpec) => NodeRuntime;
+    /** VM-capacity semaphore (DESIGN §4.1). Forwarded to the NodeRunner. */
+    vmSemaphore?: VmSemaphore;
+    /** Provision wait bound before VMCapacityExhaustedError (DESIGN §4.1). */
+    acquireTimeoutMs?: number;
   }) {
     this.runner = new NodeRunner(args);
     this.kind = args.executor.kind;

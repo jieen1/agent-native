@@ -28,6 +28,7 @@ import {
 import { outputArtifactId } from "./ids.js";
 import { putArtifact } from "./store.js";
 import { reconcileOnTerminal } from "../work-items/watchdog.js";
+import { writeAudit } from "../audit/write-audit.js";
 
 /** Options shared by the re-drive helpers (test executor injection, caps). */
 export interface ControlOptions {
@@ -189,6 +190,11 @@ export async function pauseRun(runId: string): Promise<{ status: string }> {
     .update(schema.workflowRuns)
     .set({ status: "paused" })
     .where(eq(schema.workflowRuns.id, runId));
+  await writeAudit({
+    action: "run.pause",
+    targetType: "workflow_run",
+    targetId: runId,
+  });
   return { status: "paused" };
 }
 
@@ -207,6 +213,11 @@ export async function resumeRun(
     .update(schema.workflowRuns)
     .set({ status: "running" })
     .where(eq(schema.workflowRuns.id, runId));
+  await writeAudit({
+    action: "run.resume",
+    targetType: "workflow_run",
+    targetId: runId,
+  });
   const outcome = await driveResume(load, opts);
   await persistRunStatus(runId, outcome);
   return outcome;
@@ -255,6 +266,12 @@ export async function cancelRun(
     .update(schema.workflowRuns)
     .set({ status: "cancelled", completedAt: now })
     .where(eq(schema.workflowRuns.id, runId));
+  await writeAudit({
+    action: "run.cancel",
+    targetType: "workflow_run",
+    targetId: runId,
+    detail: { skipped },
+  });
   return { status: "cancelled", skipped };
 }
 
@@ -291,6 +308,12 @@ export async function retryNode(
       lastHeartbeat: null,
     })
     .where(eq(schema.nodeRuns.id, nodeRunId));
+  await writeAudit({
+    action: "run.retry-node",
+    targetType: "node_run",
+    targetId: nodeRunId,
+    detail: { runId, nodeId: nr.nodeId },
+  });
   return resumeRun(runId, opts);
 }
 
@@ -331,6 +354,20 @@ export async function overrideNode(
       ...(patch.model ? { model: patch.model } : {}),
     })
     .where(eq(schema.nodeRuns.id, nodeRunId));
+
+  await writeAudit({
+    action: "run.override-node",
+    targetType: "node_run",
+    targetId: nodeRunId,
+    detail: {
+      runId,
+      nodeId: nr.nodeId,
+      // Record WHICH fields were patched (not full prompt content) for the trail.
+      patched: Object.keys(patch).filter(
+        (k) => (patch as Record<string, unknown>)[k] !== undefined,
+      ),
+    },
+  });
 
   const load = await loadRun(runId, {
     ...opts,
@@ -410,6 +447,13 @@ export async function resolveHumanGate(
     .update(schema.nodeRuns)
     .set({ status: "done", outputRef: outId, completedAt: nowIso() })
     .where(eq(schema.nodeRuns.id, nr.id));
+
+  await writeAudit({
+    action: "run.resolve-human-gate",
+    targetType: "node_run",
+    targetId: nr.id,
+    detail: { runId, nodeId: nr.nodeId, decision },
+  });
 
   // Re-drive: approve releases downstream; reject's dead-path skip cascades.
   return resumeRun(runId, opts);

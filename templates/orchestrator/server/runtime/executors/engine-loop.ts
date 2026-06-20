@@ -21,9 +21,11 @@ import type { AgentEngine } from "@agent-native/core/agent/engine";
 
 import { createVmActingBridge } from "../acting-bridge.js";
 import type { RuntimeExecCtx, RuntimeExecResult } from "./types.js";
+import { DEFAULT_WORKDIR } from "./workdir.js";
 
-/** Default node working dir inside the VM (its worktree). */
-export const DEFAULT_WORKDIR = "/work";
+// Re-exported from its own light module (executors/workdir.ts) so light
+// consumers don't pull in this heavy engine-loop just for the constant.
+export { DEFAULT_WORKDIR };
 
 /** Build the user-turn instruction from the node prompt + resolved deps/item. */
 export function buildPrompt(ctx: RuntimeExecCtx): string {

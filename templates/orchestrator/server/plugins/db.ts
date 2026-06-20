@@ -434,6 +434,28 @@ CREATE INDEX IF NOT EXISTS node_def_shares_resource_idx ON node_def_shares (reso
       version: 17,
       sql: `ALTER TABLE runtime_configs ADD COLUMN models TEXT`,
     },
+    {
+      // P6 §7.4.7: append-only AUDIT LOG. Captures the security/control-relevant
+      // actions — run control (start/pause/resume/cancel/retry/override), every
+      // transition-work-item, and credential resolution — with actor + action +
+      // target + detail + at. CREATE-only, additive; a fresh DB needs this table
+      // or writeAudit fails. Never updated or deleted from app code (append-only).
+      version: 18,
+      sql: `CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    detail TEXT,
+    at TEXT NOT NULL,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT
+  );
+CREATE INDEX IF NOT EXISTS audit_log_at_idx ON audit_log (at);
+CREATE INDEX IF NOT EXISTS audit_log_target_idx ON audit_log (target_type, target_id);
+CREATE INDEX IF NOT EXISTS audit_log_owner_idx ON audit_log (owner_email, org_id, at)`,
+    },
   ],
   { table: "orchestrator_migrations" },
 );

@@ -310,3 +310,27 @@ export const nodeDefs = table("node_defs", {
 export const projectShares = createSharesTable("project_shares");
 export const workItemShares = createSharesTable("work_item_shares");
 export const nodeDefShares = createSharesTable("node_def_shares");
+
+// ─── P6 audit log (DESIGN §7.4.7) — append-only ──────────────────────────────
+
+// One row per security/control-relevant action: run control (start/pause/
+// resume/cancel/retry/override), every transition-work-item, and credential
+// resolution. Append-only — written by `writeAudit`, never updated or deleted
+// from app code. Scoped by owner_email/org_id (hand-rolled, like step_runs)
+// rather than ownableColumns: an audit trail is not a shareable resource.
+export const auditLog = table("audit_log", {
+  id: text("id").primaryKey(),
+  /** Who did it: a user email, a run id (automation), or a webhook source. */
+  actor: text("actor").notNull(),
+  /** The action key, e.g. "run.cancel", "transition-work-item", "credential.resolve". */
+  action: text("action").notNull(),
+  /** What it targeted: "workflow_run" | "work_item" | "credential" | … (or null). */
+  targetType: text("target_type"),
+  /** The target's id (run id, item id, credential key, …), or null. */
+  targetId: text("target_id"),
+  /** Optional JSON detail bag (never a secret VALUE — keys/booleans only). */
+  detail: text("detail"),
+  at: text("at").notNull(),
+  ownerEmail: text("owner_email").notNull().default("local@localhost"),
+  orgId: text("org_id"),
+});
