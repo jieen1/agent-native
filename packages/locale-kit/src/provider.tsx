@@ -46,7 +46,7 @@ export function I18nProvider({ initialLocale, children }: I18nProviderProps) {
     setLocale(
       pseudoRequested
         ? PSEUDO_LOCALE
-        : (initialLocale ?? readLocaleCookie() ?? "en"),
+        : (initialLocale ?? readLocaleCookie() ?? "zh-CN"),
     );
     return null;
   });
