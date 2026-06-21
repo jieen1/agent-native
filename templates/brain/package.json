@@ -24,6 +24,7 @@
     "drizzle-orm": "^0.45.2",
     "h3": "^2.0.1-rc.22",
     "isbot": "^5.1.40",
+    "locale-kit": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "^4.4.3"

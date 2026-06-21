@@ -24,6 +24,7 @@ import {
   getThemeInitScript,
   useCommandMenuShortcut,
 } from "@agent-native/core/client";
+import { I18nProvider } from "locale-kit";
 import { useDbSync } from "./hooks/use-db-sync";
 import { useNavigationState } from "./hooks/use-navigation-state";
 import type { LinksFunction } from "react-router";
@@ -231,10 +232,15 @@ export default function Root() {
         disableThemeTransitions={false}
         toaster={contentToaster}
       >
-        <Toaster />
-        <PublicAgentShell>
-          <Outlet />
-        </PublicAgentShell>
+        {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+            shared react-query client. Initial locale is read client-side from the
+            `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+        <I18nProvider>
+          <Toaster />
+          <PublicAgentShell>
+            <Outlet />
+          </PublicAgentShell>
+        </I18nProvider>
       </AppProviders>
     );
   }
@@ -245,19 +251,24 @@ export default function Root() {
       disableThemeTransitions={false}
       toaster={contentToaster}
     >
-      <AppSetup />
-      <Toaster />
-      <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
-        <CommandMenu.Group heading="Content">
-          <CommandMenu.Item onSelect={() => {}}>
-            Search documents
-          </CommandMenu.Item>
-        </CommandMenu.Group>
-        <CommandMenu.Group heading="Appearance">
-          <ThemeToggleItem />
-        </CommandMenu.Group>
-      </CommandMenu>
-      <Outlet />
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <AppSetup />
+        <Toaster />
+        <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
+          <CommandMenu.Group heading="Content">
+            <CommandMenu.Item onSelect={() => {}}>
+              Search documents
+            </CommandMenu.Item>
+          </CommandMenu.Group>
+          <CommandMenu.Group heading="Appearance">
+            <ThemeToggleItem />
+          </CommandMenu.Group>
+        </CommandMenu>
+        <Outlet />
+      </I18nProvider>
     </AppProviders>
   );
 }

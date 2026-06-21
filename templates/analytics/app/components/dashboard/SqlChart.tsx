@@ -56,6 +56,11 @@ import type {
 } from "@/pages/adhoc/sql-dashboard/types";
 import { pivotRows } from "@/pages/adhoc/sql-dashboard/pivot";
 import { serializePanelSql } from "@/pages/adhoc/sql-dashboard/panel-sql";
+import {
+  formatCurrency as formatCurrencyLocale,
+  formatDate as formatDateLocale,
+  formatNumber as formatNumberLocale,
+} from "locale-kit/format";
 
 const DEFAULT_COLORS = [
   "var(--brand-blue)",
@@ -92,13 +97,13 @@ function formatYValue(
   value: number,
   formatter?: "number" | "currency" | "percent",
 ): string {
-  if (formatter === "currency") return `$${value.toLocaleString()}`;
+  if (formatter === "currency") return formatCurrencyLocale(value);
   if (formatter === "percent") {
     // SQL typically returns rate as 0..1
     const pct = value <= 1 && value >= -1 ? value * 100 : value;
     return `${pct.toFixed(2)}%`;
   }
-  return value.toLocaleString();
+  return formatNumberLocale(value);
 }
 
 function parsePrometheusSeriesLabel(label: string): {
@@ -200,7 +205,7 @@ function formatXLabel(value: string, panel: SqlPanel): string {
       : s;
     const d = new Date(normalized);
     if (!isNaN(d.getTime()) && s.length >= 8) {
-      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return formatDateLocale(d, { month: "short", day: "numeric" });
     }
   } catch {}
   return formatSeriesLabelForPanel(panel, String(value));
@@ -642,10 +647,10 @@ function MetricRenderer({
 function formatCell(value: unknown, format: ColumnFormat | undefined): string {
   if (value == null) return "";
   if (format === "number" && typeof value === "number") {
-    return value.toLocaleString();
+    return formatNumberLocale(value);
   }
   if (format === "currency" && typeof value === "number") {
-    return `$${value.toLocaleString()}`;
+    return formatCurrencyLocale(value);
   }
   if (format === "percent" && typeof value === "number") {
     const pct = value <= 1 && value >= -1 ? value * 100 : value;
@@ -658,7 +663,7 @@ function formatCell(value: unknown, format: ColumnFormat | undefined): string {
   if (format === "date") {
     const d = new Date(String(value));
     if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString("en-US", {
+      return formatDateLocale(d, {
         year: "numeric",
         month: "short",
         day: "numeric",

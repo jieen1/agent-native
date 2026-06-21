@@ -6,6 +6,7 @@ import {
   IconDatabase,
   IconDots,
   IconEdit,
+  IconLanguage,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconMessageCircle,
@@ -14,10 +15,19 @@ import {
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import {
+  setLocale,
+  t,
+  useLocale,
+  writeLocaleCookie,
+  type Locale,
+} from "locale-kit";
+import {
   appPath,
+  callAction,
   FeedbackButton,
   navigateWithAgentChatViewTransition,
   useChatThreads,
+  writeClientAppState,
   type ChatThreadSummary,
 } from "@agent-native/core/client";
 import { ExtensionsSidebarSection } from "@agent-native/core/client/extensions";
@@ -28,6 +38,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -226,7 +239,7 @@ function ChatThreadsSection() {
     <div className="mt-2 border-l border-sidebar-border/70 pl-3">
       <div className="mb-1 flex h-7 items-center gap-2 pr-1">
         <div className="min-w-0 flex-1 text-xs font-medium text-sidebar-foreground/70">
-          Chats
+          {t("Chats")}
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -234,12 +247,12 @@ function ChatThreadsSection() {
               type="button"
               onClick={handleNewChat}
               className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              aria-label="New chat"
+              aria-label={t("New chat")}
             >
               <IconPlus className="size-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>New chat</TooltipContent>
+          <TooltipContent>{t("New chat")}</TooltipContent>
         </Tooltip>
       </div>
       <div className="grid gap-0.5">
@@ -311,7 +324,7 @@ function ChatThreadsSection() {
                           onSelect={() => startRenameThread(thread)}
                         >
                           <IconEdit className="size-4" />
-                          Rename chat
+                          {t("Rename chat")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onSelect={() =>
@@ -319,14 +332,14 @@ function ChatThreadsSection() {
                           }
                         >
                           <IconPin className="size-4" />
-                          {thread.pinnedAt ? "Unpin chat" : "Pin chat"}
+                          {thread.pinnedAt ? t("Unpin chat") : t("Pin chat")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
                           onSelect={() => void handleArchiveThread(thread.id)}
                         >
                           <IconArchive className="size-4" />
-                          Archive chat
+                          {t("Archive chat")}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -338,6 +351,78 @@ function ChatThreadsSection() {
         })}
       </div>
     </div>
+  );
+}
+
+const LANGUAGE_OPTIONS: ReadonlyArray<{ value: Locale; label: string }> = [
+  { value: "en", label: "English" },
+  { value: "zh-CN", label: "Simplified Chinese" },
+];
+
+function LanguageSwitcher({ collapsed }: { collapsed: boolean }) {
+  const locale = useLocale();
+
+  function selectLanguage(next: string) {
+    const value = next as Locale;
+    if (value !== "en" && value !== "zh-CN") return;
+    // Mirror the appearance flow: optimistic client update + persistence, then
+    // write the session app-state so the agent and other tabs observe it.
+    setLocale(value);
+    writeLocaleCookie(value);
+    void writeClientAppState("locale", { locale: value });
+    // Also invoke the change-language ACTION so the server-side per-user locale
+    // map and the durable `u:<email>:locale` setting update, keeping server
+    // action messages and the agent in parity with the UI. Fire-and-forget: the
+    // optimistic client update above already reflects the change, so an action
+    // failure must not block or revert the switcher — just log it.
+    void callAction("change-language", { locale: value }).catch(
+      (error: unknown) => {
+        console.error("change-language action failed", error);
+      },
+    );
+  }
+
+  const trigger = (
+    <button
+      type="button"
+      aria-label={t("Language")}
+      className={cn(
+        "flex items-center rounded-md text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent/65 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        collapsed ? "size-8 justify-center" : "h-8 w-full gap-2 px-2 text-sm",
+      )}
+    >
+      <IconLanguage className="size-4 shrink-0" />
+      {!collapsed ? (
+        <span className="min-w-0 flex-1 truncate text-left">
+          {t("Language")}
+        </span>
+      ) : null}
+    </button>
+  );
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+            <TooltipContent side="right">{t("Language")}</TooltipContent>
+          </Tooltip>
+        ) : (
+          trigger
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top" sideOffset={6}>
+        <DropdownMenuLabel>{t("Language")}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={locale} onValueChange={selectLanguage}>
+          {LANGUAGE_OPTIONS.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value}>
+              {t(option.label)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -376,13 +461,13 @@ export function Sidebar({
             "flex shrink-0 items-center justify-center rounded-md text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             collapsed ? "size-8" : "size-7",
           )}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
         >
           <ToggleIcon className="size-4" />
         </button>
       </TooltipTrigger>
       <TooltipContent side="right">
-        {collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        {collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
       </TooltipContent>
     </Tooltip>
   ) : null;
@@ -460,11 +545,11 @@ export function Sidebar({
                 }}
                 className={navClass({ isActive })}
                 aria-current={isActive ? "page" : undefined}
-                aria-label={collapsed ? item.label : undefined}
+                aria-label={collapsed ? t(item.label) : undefined}
               >
                 <Icon className="size-4 shrink-0" />
                 <span className={collapsed ? "sr-only" : "truncate"}>
-                  {item.label}
+                  {t(item.label)}
                 </span>
               </Link>
             );
@@ -473,7 +558,9 @@ export function Sidebar({
                 {collapsed ? (
                   <Tooltip>
                     <TooltipTrigger asChild>{link}</TooltipTrigger>
-                    <TooltipContent side="right">{item.label}</TooltipContent>
+                    <TooltipContent side="right">
+                      {t(item.label)}
+                    </TooltipContent>
                   </Tooltip>
                 ) : (
                   link
@@ -514,6 +601,16 @@ export function Sidebar({
                 : undefined
             }
           />
+        </div>
+
+        <div
+          className={cn(
+            collapsed
+              ? "flex justify-center px-1 py-1"
+              : "border-t border-sidebar-border px-3 py-2",
+          )}
+        >
+          <LanguageSwitcher collapsed={collapsed} />
         </div>
 
         <div

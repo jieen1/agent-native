@@ -41,6 +41,7 @@
     "h3": "^2.0.1-rc.20",
     "input-otp": "^1.4.2",
     "isbot": "^5",
+    "locale-kit": "workspace:*",
     "nanoid": "^5.1.9",
     "react-day-picker": "^9.14.0",
     "react-hook-form": "^7.71.2",

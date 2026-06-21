@@ -8,6 +8,7 @@ import {
   startOfWeek,
 } from "date-fns";
 import { useActionQuery } from "@agent-native/core/client";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 import {
   IconAlertCircle,
   IconCalendarTime,
@@ -87,11 +88,11 @@ function dateTimePartsInTimezone(value: string, timezone: string) {
 }
 
 function timeLabel(value: string, timezone: string) {
-  return new Intl.DateTimeFormat("en-US", {
+  return formatDateLocale(new Date(value), {
     timeZone: timezone,
     hour: "numeric",
     minute: "2-digit",
-  }).format(new Date(value));
+  });
 }
 
 function sameMinute(a?: string, b?: string) {

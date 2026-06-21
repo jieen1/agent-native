@@ -10,6 +10,7 @@ import {
   useCommandMenuShortcut,
   useDbSync,
 } from "@agent-native/core/client";
+import { I18nProvider } from "locale-kit";
 import { Layout as AppLayout } from "@/components/layout/Layout";
 import { IconSun, IconMoon } from "@tabler/icons-react";
 import { useTheme } from "next-themes";
@@ -110,7 +111,12 @@ export default function Root() {
   const [queryClient] = useState(() => createAgentNativeQueryClient());
   return (
     <AppProviders queryClient={queryClient} defaultTheme="dark">
-      <AppContent />
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <AppContent />
+      </I18nProvider>
     </AppProviders>
   );
 }

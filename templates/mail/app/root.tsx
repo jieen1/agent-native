@@ -20,6 +20,7 @@ import {
   createAgentNativeQueryClient,
   getThemeInitScript,
 } from "@agent-native/core/client";
+import { I18nProvider } from "locale-kit";
 import { TAB_ID } from "@/lib/tab-id";
 import { isMcpEmbedSurface } from "@/lib/mcp-embed";
 import { markExternalEmailRefresh } from "@/hooks/use-emails";
@@ -264,13 +265,18 @@ export default function Root() {
       toaster={MAIL_TOASTER}
     >
       <RequireSession bypass={isMcpEmbedSurface()}>
-        <AutoFocus />
-        <AutomationTrigger />
-        <VisibilityRefresh />
-        <DbSyncSetup />
-        <AppLayout>
-          <Outlet />
-        </AppLayout>
+        {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+            shared react-query client. Initial locale is read client-side from the
+            `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+        <I18nProvider>
+          <AutoFocus />
+          <AutomationTrigger />
+          <VisibilityRefresh />
+          <DbSyncSetup />
+          <AppLayout>
+            <Outlet />
+          </AppLayout>
+        </I18nProvider>
       </RequireSession>
     </AppProviders>
   );

@@ -2,6 +2,7 @@ import { reactRouter } from "@react-router/dev/vite";
 import fs from "node:fs";
 import path from "node:path";
 import { defineConfig } from "@agent-native/core/vite";
+import { localeKitPlugin } from "locale-kit/vite";
 import {
   findAgentNativeManifest,
   getLocalArtifactApp,
@@ -347,7 +348,22 @@ const dynamicLocalComponentDirs = (() => {
 })();
 
 export default defineConfig({
-  plugins: [contentLocalComponentsPlugin(), reactRouter()],
+  plugins: [
+    // Auto-wrap hardcoded English UI literals into runtime t()/tx() calls and
+    // extract them into the shared en catalog. enforce:'pre' so it sees core's
+    // .tsx source (aliased to packages/core/src in the monorepo).
+    localeKitPlugin({
+      include: [
+        "/packages/core/src/client/",
+        "/templates/content/app/",
+        "/templates/content/components/",
+        "/templates/content/actions/",
+        "/templates/content/server/plugins/auth",
+      ],
+    }),
+    contentLocalComponentsPlugin(),
+    reactRouter(),
+  ],
   fsAllow: [
     ...(localWorkspaceRoot ? [localWorkspaceRoot] : []),
     ...dynamicLocalComponentDirs,

@@ -8,6 +8,7 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatCurrency as formatCurrencyLocale } from "locale-kit/format";
 
 const data = [
   { name: "Jan", total: 1200 },
@@ -55,7 +56,11 @@ export function RevenueChart() {
                 fontSize={12}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={(value) => `$${value}`}
+                tickFormatter={(value) =>
+                  formatCurrencyLocale(Number(value), "USD", {
+                    maximumFractionDigits: 0,
+                  })
+                }
               />
               <CartesianGrid
                 strokeDasharray="3 3"

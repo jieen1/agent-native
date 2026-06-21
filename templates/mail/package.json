@@ -27,6 +27,7 @@
     "input-otp": "^1.4.2",
     "isbot": "^5",
     "jose": "^6.2.2",
+    "locale-kit": "workspace:*",
     "marked": "^18.0.0",
     "nanoid": "^5.1.9",
     "react-day-picker": "^9.14.0",

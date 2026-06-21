@@ -26,6 +26,7 @@ import {
   navigateWithAgentChatViewTransition,
   setClientAppState,
 } from "@agent-native/core/client";
+import { I18nProvider } from "locale-kit";
 import type { LinksFunction } from "react-router";
 import stylesheet from "./global.css?url";
 import { TAB_ID } from "@/lib/tab-id";
@@ -194,19 +195,26 @@ export default function Root() {
   useCommandMenuShortcut(useCallback(() => setCmdkOpen(true), []));
   return (
     <AppProviders queryClient={queryClient}>
-      <DbSyncSetup />
-      <NavigationStateSync />
-      <UrlStateSync />
-      <OpenLinkInterceptor />
-      <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
-        <CommandMenu.Group heading="Forms">
-          <CommandMenu.Item onSelect={() => {}}>Search forms</CommandMenu.Item>
-        </CommandMenu.Group>
-        <CommandMenu.Group heading="Appearance">
-          <ThemeToggleItem />
-        </CommandMenu.Group>
-      </CommandMenu>
-      <Outlet />
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <DbSyncSetup />
+        <NavigationStateSync />
+        <UrlStateSync />
+        <OpenLinkInterceptor />
+        <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
+          <CommandMenu.Group heading="Forms">
+            <CommandMenu.Item onSelect={() => {}}>
+              Search forms
+            </CommandMenu.Item>
+          </CommandMenu.Group>
+          <CommandMenu.Group heading="Appearance">
+            <ThemeToggleItem />
+          </CommandMenu.Group>
+        </CommandMenu>
+        <Outlet />
+      </I18nProvider>
     </AppProviders>
   );
 }

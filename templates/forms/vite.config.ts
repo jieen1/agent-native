@@ -1,8 +1,23 @@
 import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig } from "@agent-native/core/vite";
+import { localeKitPlugin } from "locale-kit/vite";
 
 export default defineConfig({
-  plugins: [reactRouter()],
+  plugins: [
+    // Auto-wrap hardcoded English UI literals into runtime t()/tx() calls and
+    // extract them into the en catalog. enforce:'pre' so it sees core's .tsx
+    // source (aliased to packages/core/src in the monorepo).
+    localeKitPlugin({
+      include: [
+        "/packages/core/src/client/",
+        "/templates/forms/app/",
+        "/templates/forms/components/",
+        "/templates/forms/actions/",
+        "/templates/forms/server/plugins/auth",
+      ],
+    }),
+    reactRouter(),
+  ],
   optimizeDeps: {
     include: [
       "@hookform/resolvers",

@@ -22,6 +22,7 @@ import {
   useDbSync,
 } from "@agent-native/core/client";
 import { Layout as AppLayout } from "@/components/layout/Layout";
+import { I18nProvider } from "locale-kit";
 import { IconSun, IconMoon } from "@tabler/icons-react";
 import { useTheme } from "next-themes";
 import { useQueryClient } from "@tanstack/react-query";
@@ -195,11 +196,16 @@ export default function Root() {
 
   return (
     <AppProviders queryClient={queryClient} defaultTheme="dark">
-      <AppContent />
-      {/* useToast-based Toaster — separate from AppProviders' sonner Toaster.
-          Components throughout the app call toast() from @/hooks/use-toast,
-          which requires this Toaster to be mounted. */}
-      <Toaster />
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <AppContent />
+        {/* useToast-based Toaster — separate from AppProviders' sonner Toaster.
+            Components throughout the app call toast() from @/hooks/use-toast,
+            which requires this Toaster to be mounted. */}
+        <Toaster />
+      </I18nProvider>
     </AppProviders>
   );
 }

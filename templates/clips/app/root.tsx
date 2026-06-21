@@ -20,6 +20,7 @@ import {
   useCommandMenuShortcut,
 } from "@agent-native/core/client";
 import { IconSun, IconMoon } from "@tabler/icons-react";
+import { I18nProvider } from "locale-kit";
 import { useTheme } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import type { LinksFunction } from "react-router";
@@ -170,7 +171,12 @@ export default function Root() {
       queryClient={queryClient}
       isPublicPath={isStandalonePublicPath(location.pathname)}
     >
-      <AppContent />
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <AppContent />
+      </I18nProvider>
     </AppProviders>
   );
 }

@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { IconSend, IconChevronDown, IconCalendar } from "@tabler/icons-react";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 
 interface SendLaterButtonProps {
   onSend: () => void;
@@ -39,7 +40,7 @@ function getPresets(): Array<{ label: string; date: Date }> {
 }
 
 function formatDate(date: Date): string {
-  return date.toLocaleString("en-US", {
+  return formatDateLocale(date, {
     weekday: "short",
     month: "short",
     day: "numeric",

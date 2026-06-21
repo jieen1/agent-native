@@ -16,6 +16,7 @@ import {
   IconPlus,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import {
@@ -342,7 +343,7 @@ export function ComposeModal({
       // Job created successfully — now discard the draft
       onDiscard(activeId);
 
-      const scheduledDate = new Date(runAt).toLocaleString("en-US", {
+      const scheduledDate = formatDateLocale(new Date(runAt), {
         weekday: "short",
         month: "short",
         day: "numeric",

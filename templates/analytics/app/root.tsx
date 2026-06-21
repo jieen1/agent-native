@@ -10,6 +10,7 @@ import {
   getThemeInitScript,
   useDbSync,
 } from "@agent-native/core/client";
+import { I18nProvider } from "locale-kit";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { ProviderCorpusJobNotifier } from "@/components/ProviderCorpusJobNotifier";
 import { CommandPalette } from "./components/layout/CommandPalette";
@@ -84,16 +85,21 @@ export default function Root() {
     // toaster={null}: suppress AppProviders' built-in sonner; analytics renders
     // both its styled Sonner and the legacy shadcn Toaster explicitly below.
     <AppProviders queryClient={queryClient} defaultTheme="dark" toaster={null}>
-      <DbSyncBridge />
-      <Toaster />
-      <Sonner position="bottom-left" />
-      <AuthProvider>
-        <ProviderCorpusJobNotifier />
-        <CommandPalette />
-        <AppLayout>
-          <Outlet />
-        </AppLayout>
-      </AuthProvider>
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <DbSyncBridge />
+        <Toaster />
+        <Sonner position="bottom-left" />
+        <AuthProvider>
+          <ProviderCorpusJobNotifier />
+          <CommandPalette />
+          <AppLayout>
+            <Outlet />
+          </AppLayout>
+        </AuthProvider>
+      </I18nProvider>
     </AppProviders>
   );
 }

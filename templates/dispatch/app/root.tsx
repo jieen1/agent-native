@@ -22,6 +22,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { IconSun, IconMoon } from "@tabler/icons-react";
 import { useTheme } from "next-themes";
+import { I18nProvider } from "locale-kit";
 import { Layout as AppLayout } from "@agent-native/dispatch/components";
 import type { LinksFunction } from "react-router";
 import { dispatchExtensions } from "./dispatch-extensions";
@@ -188,7 +189,12 @@ export default function Root() {
       queryClient={queryClient}
       toaster={<Toaster richColors position="bottom-left" closeButton />}
     >
-      <AppContent />
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <AppContent />
+      </I18nProvider>
     </AppProviders>
   );
 }

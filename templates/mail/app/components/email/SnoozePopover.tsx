@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useParseDate, useSnoozeEmail } from "@/hooks/use-scheduled-jobs";
 import { IconAlarm } from "@tabler/icons-react";
 import { toast } from "sonner";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 
 interface SnoozePopoverProps {
   emailId: string;
@@ -53,7 +54,7 @@ function getPresets(): Array<{ label: string; date: Date }> {
 }
 
 function formatDate(date: Date): string {
-  return date.toLocaleString("en-US", {
+  return formatDateLocale(date, {
     weekday: "short",
     month: "short",
     day: "numeric",

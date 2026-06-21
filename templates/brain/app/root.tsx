@@ -20,6 +20,7 @@ import {
   useCommandMenuShortcut,
 } from "@agent-native/core/client";
 import { configureTracking } from "@agent-native/core/client";
+import { I18nProvider } from "locale-kit";
 import { Layout as AppLayout } from "@/components/layout/Layout";
 import { useDistillationBridge } from "@/hooks/use-distillation-bridge";
 import { useNavigationState } from "@/hooks/use-navigation-state";
@@ -196,8 +197,13 @@ export default function Root() {
 
   return (
     <AppProviders queryClient={queryClient} tooltipDelayDuration={250}>
-      <DbSyncSetup />
-      <AppContent />
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <DbSyncSetup />
+        <AppContent />
+      </I18nProvider>
     </AppProviders>
   );
 }

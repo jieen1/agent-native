@@ -26,6 +26,7 @@
     "drizzle-orm": "^0.45.2",
     "h3": "^2.0.1-rc.20",
     "isbot": "^5",
+    "locale-kit": "workspace:*",
     "nanoid": "^5.1.9",
     "zod": "^4.3.6"
   },

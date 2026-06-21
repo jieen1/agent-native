@@ -1,3 +1,5 @@
+import { formatCurrency as formatCurrencyLocale } from "locale-kit/format";
+
 // BigQuery on-demand pricing: $6.25 per TB
 const COST_PER_BYTE = 6.25 / 1_000_000_000_000;
 const STORAGE_KEY = "analytics_query_cost";
@@ -63,8 +65,13 @@ export function getSessionAge(): number {
 }
 
 export function formatCost(cost: number): string {
-  if (cost < 0.01) return `$${cost.toFixed(4)}`;
-  return `$${cost.toFixed(2)}`;
+  if (cost < 0.01) {
+    return formatCurrencyLocale(cost, "USD", {
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4,
+    });
+  }
+  return formatCurrencyLocale(cost, "USD");
 }
 
 export function formatBytes(bytes: number): string {

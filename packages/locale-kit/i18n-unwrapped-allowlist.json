@@ -1,0 +1,10 @@
+{
+  "$schema": "Reviewed, intentional bare strings excluded from `audit --unwrapped`. Each entry: { text, file?, reason }. `file` is a repo-relative path suffix; omit it to suppress the text everywhere. Keep `reason` filled so reviewers know why a string is intentionally not wrapped in t().",
+  "entries": [
+    {
+      "file": "templates/slides/app/components/editor/GoogleDocImportHint.tsx",
+      "text": "Choose a Google Doc",
+      "reason": "Google Picker SDK PickerBuilder().setTitle() — rendered by Google's hosted iframe, not an app surface; cannot use app t()."
+    }
+  ]
+}

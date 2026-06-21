@@ -14,6 +14,7 @@ import {
   useCommandMenuShortcut,
 } from "@agent-native/core/client";
 import { IconSun, IconMoon } from "@tabler/icons-react";
+import { I18nProvider } from "locale-kit";
 import { TAB_ID } from "@/lib/tab-id";
 import { AppLayout } from "@/components/layout/AppLayout";
 import type { LinksFunction } from "react-router";
@@ -123,18 +124,23 @@ export default function Root() {
       tooltipDelayDuration={300}
       toaster={<Toaster richColors position="bottom-left" />}
     >
-      <DbSyncSetup />
-      <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
-        <CommandMenu.Group heading="Actions">
-          <CommandMenu.Item onSelect={() => {}}>Search</CommandMenu.Item>
-        </CommandMenu.Group>
-        <CommandMenu.Group heading="Appearance">
-          <ThemeToggleItem />
-        </CommandMenu.Group>
-      </CommandMenu>
-      <AppLayout>
-        <Outlet />
-      </AppLayout>
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <DbSyncSetup />
+        <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
+          <CommandMenu.Group heading="Actions">
+            <CommandMenu.Item onSelect={() => {}}>Search</CommandMenu.Item>
+          </CommandMenu.Group>
+          <CommandMenu.Group heading="Appearance">
+            <ThemeToggleItem />
+          </CommandMenu.Group>
+        </CommandMenu>
+        <AppLayout>
+          <Outlet />
+        </AppLayout>
+      </I18nProvider>
     </AppProviders>
   );
 }
