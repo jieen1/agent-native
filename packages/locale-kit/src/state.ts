@@ -68,7 +68,7 @@ type GlobalWithLocaleKitState = typeof globalThis & {
 
 function createInitialState(): LocaleKitState {
   return {
-    currentLocale: "en",
+    currentLocale: "zh-CN",
     catalogs: { en: {}, "zh-CN": {} },
     listeners: new Set<() => void>(),
     serverLocaleByEmail: new Map<string, Locale>(),

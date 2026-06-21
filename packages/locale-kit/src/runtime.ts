@@ -186,8 +186,9 @@ export function tx(key: string, vars: Record<string, string | number>): string {
 
 /**
  * React hook returning the current locale and re-rendering on change. Uses a
- * stable server snapshot of `"en"` so it is safe under SSR.
+ * stable server snapshot of `"zh-CN"` (this deployment's default) so SSR and the
+ * first client paint agree for users without a saved locale cookie.
  */
 export function useLocale(): Locale {
-  return useSyncExternalStore(subscribe, getLocale, () => "en");
+  return useSyncExternalStore(subscribe, getLocale, () => "zh-CN");
 }
