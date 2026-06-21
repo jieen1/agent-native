@@ -22,8 +22,10 @@ import {
   resolveEngine,
 } from "../agent/engine/index.js";
 import { createThread } from "../chat-threads/store.js";
+import { insertRoutineRun, finishRoutineRun } from "../routine-runs/store.js";
 import type { AgentChatEvent } from "../agent/types.js";
 import { evaluateCondition } from "./condition-evaluator.js";
+import { runDeterministicStep } from "./deterministic.js";
 import type { TriggerFrontmatter } from "./types.js";
 
 // Re-use the job frontmatter parser — triggers extend the same format.
@@ -82,6 +84,9 @@ export function parseTriggerFrontmatter(content: string): {
       case "event":
         meta.event = value;
         break;
+      case "sourceApp":
+        meta.sourceApp = value;
+        break;
       case "condition":
         meta.condition = value;
         break;
@@ -129,6 +134,7 @@ export function buildTriggerContent(
   lines.push(`enabled: ${meta.enabled}`);
   lines.push(`triggerType: ${meta.triggerType}`);
   if (meta.event) lines.push(`event: ${meta.event}`);
+  if (meta.sourceApp) lines.push(`sourceApp: ${meta.sourceApp}`);
   if (meta.condition)
     lines.push(`condition: "${meta.condition.replace(/"/g, '\\"')}"`);
   lines.push(`mode: ${meta.mode}`);
@@ -226,6 +232,44 @@ async function handleEvent(
   payload: unknown,
   eventMeta: EventMeta,
 ): Promise<void> {
+  // Same-process events: only triggers WITHOUT a `sourceApp` (self) match here.
+  // Cross-app triggers (with a `sourceApp`) are delivered by the event-bridge
+  // poller via `dispatchBridgedEvent`, never by this in-process handler.
+  return dispatchMatchingTriggers(eventName, payload, eventMeta, undefined);
+}
+
+/**
+ * Cross-process event-bridge entry point (Phase A3 §1.5.23).
+ *
+ * The Routines event-bridge poller pulls a sibling app's `event_log` over HTTP
+ * and, for each new event, calls this with `sourceApp` set to the emitting app
+ * id. It runs the SAME matching + condition-evaluation + `dispatchAgentic`
+ * path as same-process `handleEvent`, except a trigger matches only when its
+ * `sourceApp` frontmatter equals the given `sourceApp`. This keeps cross-app
+ * and same-process dispatch on one code path — only the entry and the
+ * sourceApp filter differ.
+ */
+export async function dispatchBridgedEvent(
+  eventName: string,
+  payload: unknown,
+  eventMeta: EventMeta,
+  sourceApp: string,
+): Promise<void> {
+  return dispatchMatchingTriggers(eventName, payload, eventMeta, sourceApp);
+}
+
+/**
+ * Shared dispatch core for both same-process (`sourceApp === undefined`) and
+ * cross-app (`sourceApp === "<appId>"`) events. Loads matching `jobs/*.md`
+ * triggers, owner-scopes them, evaluates each condition, and dispatches the
+ * agentic ones with the TOCTOU in-flight guard.
+ */
+async function dispatchMatchingTriggers(
+  eventName: string,
+  payload: unknown,
+  eventMeta: EventMeta,
+  sourceApp: string | undefined,
+): Promise<void> {
   if (!_deps) return;
 
   try {
@@ -242,6 +286,12 @@ async function handleEvent(
       ) {
         return false;
       }
+      // Source match: same-process events (sourceApp undefined) require the
+      // trigger to carry NO sourceApp; cross-app events require an exact match.
+      const triggerSource = meta.sourceApp || undefined;
+      if (triggerSource !== sourceApp) {
+        return false;
+      }
       return (
         meta.triggerType === "event" &&
         meta.event === eventName &&
@@ -254,45 +304,59 @@ async function handleEvent(
       const { meta, body } = parseTriggerFrontmatter(resource.content);
       if (!body.trim()) continue;
 
-      // Resolve API key for condition evaluation
+      // An LLM API key is required for agentic dispatch and for evaluating a
+      // natural-language condition. A deterministic trigger with NO condition
+      // needs no key at all — it must dispatch even on a key-less runtime.
+      const needsApiKey =
+        meta.mode !== "deterministic" || Boolean(meta.condition);
+
+      // Resolve API key for condition evaluation / agentic dispatch.
       const owner = meta.createdBy || resource.owner;
       const userApiKey = await getOwnerActiveApiKey(owner);
       const apiKey =
         userApiKey || _deps.apiKey || process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) {
+      if (!apiKey && needsApiKey) {
         console.warn(
           `[triggers] No API key for trigger "${resource.path}" — skipping`,
         );
         continue;
       }
 
-      // Evaluate condition
-      const matches = await evaluateCondition(meta.condition, payload, apiKey);
+      // Evaluate condition (a no-op `true` when no condition is set — see
+      // evaluateCondition). The empty-key case only reaches here for
+      // deterministic + no-condition triggers, where evaluateCondition returns
+      // true without touching the classifier.
+      const matches = await evaluateCondition(
+        meta.condition,
+        payload,
+        apiKey ?? "",
+      );
       if (!matches) continue;
 
       // Dispatch. Guard against concurrent duplicate dispatch of the same
       // trigger (TOCTOU on lastStatus) with an in-process lock keyed on the
-      // trigger's identity.
+      // trigger's identity. The lock wraps BOTH modes so a deterministic
+      // trigger gets the same duplicate-dispatch protection as an agentic one.
       const dispatchKey = `${resource.owner}:${resource.path}`;
       if (_dispatchingTriggers.has(dispatchKey)) continue;
-      if (meta.mode === "agentic") {
-        _dispatchingTriggers.add(dispatchKey);
-        try {
+      _dispatchingTriggers.add(dispatchKey);
+      try {
+        if (meta.mode === "deterministic") {
+          await dispatchDeterministic(resource, meta, body);
+        } else {
+          // The agentic branch only runs when `needsApiKey` was true and we did
+          // not `continue` above, so `apiKey` is guaranteed present here.
           await dispatchAgentic(
             resource,
             meta,
             body,
             payload,
             eventMeta,
-            apiKey,
+            apiKey as string,
           );
-        } finally {
-          _dispatchingTriggers.delete(dispatchKey);
         }
-      } else {
-        console.warn(
-          `[triggers] Deterministic mode not yet implemented for "${resource.path}" — skipping`,
-        );
+      } finally {
+        _dispatchingTriggers.delete(dispatchKey);
       }
     }
   } catch (err) {
@@ -398,6 +462,11 @@ async function dispatchAgentic(
     buildTriggerContent(meta, body),
   );
 
+  // routine_runs history row id, declared outside the try so the catch branch
+  // can mark it errored. Stays undefined if the run failed before the row was
+  // inserted (e.g. createThread threw), in which case the finish call no-ops.
+  let runRowId: string | undefined;
+
   await runWithRequestContext(
     { userEmail: jobUserEmail, orgId: jobOrgId },
     async () => {
@@ -415,8 +484,21 @@ async function dispatchAgentic(
           (await getStoredModelForEngine(engine, { appId: _deps!.appId })) ??
           engine.defaultModel;
         const model = normalizeModelForEngine(engine, modelCandidate);
-        await createThread(jobUserEmail, {
+        const thread = await createThread(jobUserEmail, {
           title: `Trigger: ${triggerName} — ${now.toLocaleDateString()}`,
+        });
+
+        // Record a `running` routine_runs history row (best-effort; never
+        // throws). Terminal status is written in the success/catch branches.
+        runRowId = await insertRoutineRun({
+          ownerEmail: jobUserEmail,
+          orgId: jobOrgId,
+          routineName: triggerName,
+          kind: "event",
+          trigger: meta.event,
+          threadId: thread.id,
+          status: "running",
+          startedAt: now.getTime(),
         });
 
         let payloadStr: string;
@@ -472,6 +554,13 @@ ${body}`;
           buildTriggerContent(meta, body),
         );
 
+        if (runRowId) {
+          await finishRoutineRun(runRowId, {
+            status: "success",
+            finishedAt: Date.now(),
+          });
+        }
+
         console.log(`[triggers] "${triggerName}" completed successfully`);
       } catch (err: any) {
         meta.lastStatus = "error";
@@ -481,7 +570,147 @@ ${body}`;
           resource.path,
           buildTriggerContent(meta, body),
         );
+
+        if (runRowId) {
+          await finishRoutineRun(runRowId, {
+            status: "error",
+            error: meta.lastError,
+            finishedAt: Date.now(),
+          });
+        }
+
         console.error(`[triggers] "${triggerName}" failed:`, err?.message);
+      }
+    },
+  );
+}
+
+/**
+ * Deterministic event-trigger dispatch (Phase A4 §1.5.10). Mirrors
+ * `dispatchAgentic`'s run-as validation, `lastStatus` state machine, and
+ * `routine_runs` bookkeeping, but runs a single fixed step via
+ * `runDeterministicStep` instead of the agent loop — no engine/model resolution,
+ * no system prompt, no LLM. The condition gate (`evaluateCondition`) ran in the
+ * caller, identical to the agentic path, so deterministic event triggers honour
+ * the same condition門 (§1.5.10 「两触发都支持」).
+ *
+ * Identity flows through `runWithRequestContext`, so the step's action /
+ * web-request executes under the trigger's run-as user with no per-call context
+ * threading (parity with the agentic tool path).
+ */
+async function dispatchDeterministic(
+  resource: { path: string; owner: string; content: string },
+  meta: TriggerFrontmatter,
+  body: string,
+): Promise<void> {
+  if (!_deps) return;
+
+  const triggerName = resource.path.replace(/^jobs\//, "").replace(/\.md$/, "");
+  const now = new Date();
+
+  const jobUserEmail = meta.createdBy || resource.owner;
+  const jobOrgId = meta.orgId ?? undefined;
+
+  // SECURITY (audit 12 #10): re-validate the run-as user/membership on every
+  // dispatch, same as the agentic path.
+  const validity = await isTriggerRunAsStillValid(jobUserEmail, jobOrgId);
+  if (!validity.ok) {
+    console.warn(
+      `[triggers] Skipping deterministic trigger "${triggerName}": ${validity.reason}. ` +
+        `User/membership no longer valid — leaving entry for admin review.`,
+    );
+    meta.lastRun = now.toISOString();
+    meta.lastStatus = "skipped";
+    meta.lastError = validity.reason;
+    await resourcePut(
+      resource.owner,
+      resource.path,
+      buildTriggerContent(meta, body),
+    );
+    return;
+  }
+
+  // Mark as running
+  meta.lastRun = now.toISOString();
+  meta.lastStatus = "running";
+  meta.lastError = undefined;
+  await resourcePut(
+    resource.owner,
+    resource.path,
+    buildTriggerContent(meta, body),
+  );
+
+  // routine_runs history row id, declared outside the try so the catch branch
+  // can mark it errored. Stays undefined if the run failed before the row was
+  // inserted (e.g. createThread threw), in which case the finish call no-ops.
+  let runRowId: string | undefined;
+
+  await runWithRequestContext(
+    { userEmail: jobUserEmail, orgId: jobOrgId },
+    async () => {
+      try {
+        const actions = _deps!.getActions();
+        const thread = await createThread(jobUserEmail, {
+          title: `Trigger: ${triggerName} — ${now.toLocaleDateString()}`,
+        });
+
+        // Record a `running` routine_runs history row (best-effort; never
+        // throws). Terminal status is written in the success/catch branches.
+        runRowId = await insertRoutineRun({
+          ownerEmail: jobUserEmail,
+          orgId: jobOrgId,
+          routineName: triggerName,
+          kind: "event",
+          trigger: meta.event,
+          threadId: thread.id,
+          status: "running",
+          startedAt: now.getTime(),
+        });
+
+        // Run the single fixed step with NO agent loop / LLM.
+        await runDeterministicStep(body, {
+          actions,
+          threadId: thread.id,
+        });
+
+        meta.lastStatus = "success";
+        await resourcePut(
+          resource.owner,
+          resource.path,
+          buildTriggerContent(meta, body),
+        );
+
+        if (runRowId) {
+          await finishRoutineRun(runRowId, {
+            status: "success",
+            finishedAt: Date.now(),
+          });
+        }
+
+        console.log(
+          `[triggers] "${triggerName}" (deterministic) completed successfully`,
+        );
+      } catch (err: any) {
+        meta.lastStatus = "error";
+        meta.lastError = err?.message?.slice(0, 200) || "Unknown error";
+        await resourcePut(
+          resource.owner,
+          resource.path,
+          buildTriggerContent(meta, body),
+        );
+
+        if (runRowId) {
+          await finishRoutineRun(runRowId, {
+            status: "error",
+            error: meta.lastError,
+            finishedAt: Date.now(),
+          });
+        }
+
+        console.error(
+          `[triggers] "${triggerName}" (deterministic) failed:`,
+          err?.message,
+        );
       }
     },
   );

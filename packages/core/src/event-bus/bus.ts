@@ -117,6 +117,36 @@ export function emit(
       console.error(`[event-bus] Handler for "${event}" threw:`, err);
     }
   }
+
+  // Durable sink (Phase A3 §1.5.23): append to event_log AFTER in-process
+  // dispatch. Best-effort, fire-and-forget, fully swallowed — it must never
+  // block, delay, or break the synchronous dispatch above. `emit` stays
+  // synchronous and `void`. The store import is dynamic to avoid an
+  // event-bus → db → … module-load cycle (same pattern as scheduler.ts's
+  // dynamic `import("../resources/emitter.js")`).
+  try {
+    let payloadJson: string;
+    try {
+      payloadJson = JSON.stringify(validated);
+      if (typeof payloadJson !== "string") payloadJson = "null";
+    } catch {
+      payloadJson = "null";
+    }
+    const emittedAtMs = Date.parse(fullMeta.emittedAt) || Date.now();
+    void import("../event-log/store.js")
+      .then(({ appendEventLog }) =>
+        appendEventLog({
+          id: fullMeta.eventId,
+          name: event,
+          ownerEmail: fullMeta.owner,
+          payloadJson,
+          emittedAt: emittedAtMs,
+        }),
+      )
+      .catch(() => {});
+  } catch {
+    // Never let the durable sink perturb dispatch.
+  }
 }
 
 export function listSubscriptions(

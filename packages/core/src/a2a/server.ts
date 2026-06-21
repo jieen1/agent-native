@@ -79,7 +79,7 @@ function expectedJwtAudience(event: any | undefined): string | undefined {
   return undefined;
 }
 
-async function verifyA2AToken(
+export async function verifyA2AToken(
   token: string,
   event: any | undefined,
 ): Promise<A2ATokenPayload> {

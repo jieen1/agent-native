@@ -1,0 +1,15 @@
+build
+.output/
+
+.generated/
+
+# Vitest v8 coverage report output
+coverage/
+
+# Stray SQLite files at the template root (real DB lives under data/)
+/app.db
+/app.db-shm
+/app.db-wal
+/local.db
+
+.vercel/

@@ -19,6 +19,8 @@ import {
 import type { AgentEngine } from "../agent/engine/types.js";
 import { createThread } from "../chat-threads/store.js";
 import { startRun, resolveRunSoftTimeoutMs } from "../agent/run-manager.js";
+import { insertRoutineRun, finishRoutineRun } from "../routine-runs/store.js";
+import { runDeterministicStep } from "../triggers/deterministic.js";
 
 // ─── Frontmatter parsing ────────────────────────────────────────────────────
 
@@ -32,6 +34,14 @@ export interface JobFrontmatter {
   lastStatus?: "success" | "error" | "running" | "skipped";
   lastError?: string;
   nextRun?: string;
+  /**
+   * Execution mode. "agentic" (default) runs the full agent loop; "deterministic"
+   * runs a single fixed action (web-request / action) via `runDeterministicStep`
+   * with no LLM in the loop (Phase A4 §1.5.10). The trigger dispatcher writes this
+   * field too (`buildTriggerContent`), so schedule-kind routines persist it and the
+   * scheduler must round-trip it.
+   */
+  mode?: "agentic" | "deterministic";
 }
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
@@ -43,7 +53,7 @@ export function parseJobFrontmatter(content: string): {
   const match = content.match(FRONTMATTER_RE);
   if (!match) {
     return {
-      meta: { schedule: "", enabled: false },
+      meta: { schedule: "", enabled: false, mode: "agentic" },
       body: content,
     };
   }
@@ -51,7 +61,7 @@ export function parseJobFrontmatter(content: string): {
   const yamlBlock = match[1];
   const body = match[2].trim();
 
-  const meta: JobFrontmatter = { schedule: "", enabled: true };
+  const meta: JobFrontmatter = { schedule: "", enabled: true, mode: "agentic" };
 
   for (const line of yamlBlock.split("\n")) {
     const colonIdx = line.indexOf(":");
@@ -101,6 +111,9 @@ export function parseJobFrontmatter(content: string): {
       case "nextRun":
         meta.nextRun = value;
         break;
+      case "mode":
+        meta.mode = value === "deterministic" ? "deterministic" : "agentic";
+        break;
     }
   }
 
@@ -128,6 +141,9 @@ export function buildJobContent(meta: JobFrontmatter, body: string): string {
     lines.push(`lastError: "${escaped}"`);
   }
   if (meta.nextRun) lines.push(`nextRun: ${meta.nextRun}`);
+  // Always persist mode so a scheduler write-back (e.g. lastStatus update on a
+  // deterministic schedule routine) never silently reverts it to agentic.
+  lines.push(`mode: ${meta.mode ?? "agentic"}`);
   lines.push(`---`);
   lines.push("");
   lines.push(body);
@@ -389,125 +405,56 @@ async function executeJob(
   meta.lastError = undefined;
   await updateResource(resource, meta, body);
 
+  // routine_runs history row id, declared outside the try so the catch branch
+  // can mark it errored. Stays undefined if the run failed before the row was
+  // inserted (e.g. createThread threw), in which case the finish call no-ops.
+  let runRowId: string | undefined;
+
   await runWithRequestContext(
     { userEmail: jobUserEmail, orgId: jobOrgId },
     async () => {
       try {
         const actions = deps.getActions();
-        const systemPrompt = await deps.getSystemPrompt(jobUserEmail);
-        const tools = actionsToEngineTools(actions);
 
-        // Prefer the job runner's saved Anthropic key so recurring jobs
-        // don't silently bill the shared platform key once a user has
-        // brought their own. Falls back to the platform key when absent.
-        const userApiKey = await getOwnerActiveApiKey(jobUserEmail);
-        const engine =
-          deps.engine ??
-          (await resolveEngine({
-            apiKey: userApiKey ?? deps.apiKey,
-            appId: deps.appId,
-          }));
-        const modelCandidate =
-          deps.model ??
-          (await getStoredModelForEngine(engine, { appId: deps.appId })) ??
-          engine.defaultModel;
-        const model = normalizeModelForEngine(engine, modelCandidate);
-
-        // Create a chat thread for this run
+        // Create a chat thread for this run. Done before the mode fork because
+        // the routine_runs history row needs a threadId for both modes.
         const threadTitle = `Job: ${jobName} — ${now.toLocaleDateString()}`;
         const thread = await createThread(jobUserEmail, { title: threadTitle });
 
-        const jobText = `[Recurring Job: ${jobName}]\nSchedule: ${describeCron(meta.schedule)}\n\nExecute the following job instructions:\n\n${body}`;
-        const messages = [
-          {
-            role: "user" as const,
-            content: [{ type: "text" as const, text: jobText }],
-          },
-        ];
-
-        // Route through startRun (from run-manager) instead of calling
-        // runAgentLoop directly. This adds:
-        //   1. A heartbeat row in agent_runs so a serverless kill is detected
-        //      by reapAllStaleRuns on the next startup and the row is flipped
-        //      to 'errored' — no more stranded lastStatus:"running" in the job
-        //      frontmatter after the next tick resets it via the stuck-guard.
-        //   2. The soft-timeout infrastructure so the job checkpoints cleanly
-        //      before serverless hard-kill rather than dying mid-flight.
-        //   3. SQL abort checks so a displaced/reaped run self-aborts instead
-        //      of completing invisibly and potentially overwriting newer state.
-        const runId = `job-${jobName.replace(/[^a-zA-Z0-9._-]/g, "-")}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-        // Use the same soft-timeout logic as interactive runs. On hosted
-        // runtimes this clamps to 40s (under the gateway wall); locally it
-        // defaults to 0 (no framework timeout). The 5-minute hard-abort
-        // below is still provided as a backstop via the startRun signal.
-        const softTimeoutMs = resolveRunSoftTimeoutMs(undefined, {
-          useHostedDefault: true,
+        // Record a `running` routine_runs history row (best-effort; never
+        // throws). Terminal status is written in the success/catch branches.
+        runRowId = await insertRoutineRun({
+          ownerEmail: jobUserEmail,
+          orgId: jobOrgId,
+          routineName: jobName,
+          kind: "schedule",
+          trigger: meta.schedule,
+          threadId: thread.id,
+          status: "running",
+          startedAt: now.getTime(),
         });
 
-        // Hard-abort backstop: 5 minutes. On hosted runtimes the soft-timeout
-        // will fire first; locally this is the only guard.
-        const hardAbortTimer = setTimeout(
-          () => {
-            // startRun's abort controller handles this below, but we still need
-            // the handle to clear it in the finally block.
-          },
-          5 * 60 * 1000,
-        );
-
-        let jobError: Error | null = null;
-        await new Promise<void>((resolve, reject) => {
-          const activeRun = startRun(
-            runId,
-            thread.id,
-            async (send, signal) => {
-              try {
-                await runAgentLoop({
-                  engine,
-                  model,
-                  systemPrompt,
-                  tools,
-                  messages,
-                  actions,
-                  send,
-                  signal,
-                  threadId: thread.id,
-                });
-              } catch (err) {
-                throw err;
-              }
-            },
-            // onComplete: run finished (completed or aborted)
-            async (run) => {
-              if (run.status === "completed") {
-                resolve();
-              } else {
-                reject(new Error(`Job run ended with status: ${run.status}`));
-              }
-            },
-            {
-              softTimeoutMs,
-              // turnId defaults to runId — fine for single-turn jobs
-            },
-          );
-
-          // Hard-abort backstop: abort the run-manager's own controller after
-          // 5 minutes if it hasn't finished naturally.
-          clearTimeout(hardAbortTimer);
-          setTimeout(
-            () => {
-              if (activeRun.status === "running") {
-                activeRun.abort.abort("job_hard_timeout");
-                reject(new Error("Job timed out after 5 minutes"));
-              }
-            },
-            5 * 60 * 1000,
-          );
-        }).catch((err: any) => {
-          jobError = err;
-        });
-
-        if (jobError) throw jobError;
+        if (meta.mode === "deterministic") {
+          // Deterministic: run the single fixed step with NO agent loop / LLM.
+          // Identity is already established by the surrounding
+          // runWithRequestContext, so the step's web-request / action runs
+          // under the routine's run-as user. Errors fall through to the shared
+          // catch below (→ routine_runs error).
+          await runDeterministicStep(body, {
+            actions,
+            threadId: thread.id,
+          });
+        } else {
+          await runAgenticJob({
+            jobName,
+            body,
+            meta,
+            thread,
+            actions,
+            jobUserEmail,
+            deps,
+          });
+        }
 
         // Success — update status. Compute the next run from completion time,
         // not the job's start time `now`: a long run could otherwise schedule a
@@ -516,6 +463,13 @@ async function executeJob(
         meta.lastStatus = "success";
         meta.nextRun = next.toISOString();
         await updateResource(resource, meta, body);
+
+        if (runRowId) {
+          await finishRoutineRun(runRowId, {
+            status: "success",
+            finishedAt: Date.now(),
+          });
+        }
 
         console.log(
           `[recurring-jobs] Job "${jobName}" completed. Next run: ${meta.nextRun}`,
@@ -528,6 +482,14 @@ async function executeJob(
         meta.nextRun = next.toISOString();
         await updateResource(resource, meta, body);
 
+        if (runRowId) {
+          await finishRoutineRun(runRowId, {
+            status: "error",
+            error: meta.lastError,
+            finishedAt: Date.now(),
+          });
+        }
+
         console.error(
           `[recurring-jobs] Job "${jobName}" failed:`,
           err?.message,
@@ -535,6 +497,134 @@ async function executeJob(
       }
     },
   ); // end runWithRequestContext
+}
+
+/**
+ * Run the agentic (full agent-loop) path for a scheduled job. Extracted so the
+ * deterministic fork in `executeJob` reads cleanly; behaviour is unchanged from
+ * the prior inline implementation. Throws on failure so the caller's shared
+ * catch records the routine_runs error and updates frontmatter.
+ */
+async function runAgenticJob(args: {
+  jobName: string;
+  body: string;
+  meta: JobFrontmatter;
+  thread: { id: string };
+  actions: Record<string, ActionEntry>;
+  jobUserEmail: string;
+  deps: SchedulerDeps;
+}): Promise<void> {
+  const { jobName, body, meta, thread, actions, jobUserEmail, deps } = args;
+  const systemPrompt = await deps.getSystemPrompt(jobUserEmail);
+  const tools = actionsToEngineTools(actions);
+
+  // Prefer the job runner's saved Anthropic key so recurring jobs
+  // don't silently bill the shared platform key once a user has
+  // brought their own. Falls back to the platform key when absent.
+  const userApiKey = await getOwnerActiveApiKey(jobUserEmail);
+  const engine =
+    deps.engine ??
+    (await resolveEngine({
+      apiKey: userApiKey ?? deps.apiKey,
+      appId: deps.appId,
+    }));
+  const modelCandidate =
+    deps.model ??
+    (await getStoredModelForEngine(engine, { appId: deps.appId })) ??
+    engine.defaultModel;
+  const model = normalizeModelForEngine(engine, modelCandidate);
+
+  const jobText = `[Recurring Job: ${jobName}]\nSchedule: ${describeCron(meta.schedule)}\n\nExecute the following job instructions:\n\n${body}`;
+  const messages = [
+    {
+      role: "user" as const,
+      content: [{ type: "text" as const, text: jobText }],
+    },
+  ];
+
+  // Route through startRun (from run-manager) instead of calling
+  // runAgentLoop directly. This adds:
+  //   1. A heartbeat row in agent_runs so a serverless kill is detected
+  //      by reapAllStaleRuns on the next startup and the row is flipped
+  //      to 'errored' — no more stranded lastStatus:"running" in the job
+  //      frontmatter after the next tick resets it via the stuck-guard.
+  //   2. The soft-timeout infrastructure so the job checkpoints cleanly
+  //      before serverless hard-kill rather than dying mid-flight.
+  //   3. SQL abort checks so a displaced/reaped run self-aborts instead
+  //      of completing invisibly and potentially overwriting newer state.
+  const runId = `job-${jobName.replace(/[^a-zA-Z0-9._-]/g, "-")}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+  // Use the same soft-timeout logic as interactive runs. On hosted
+  // runtimes this clamps to 40s (under the gateway wall); locally it
+  // defaults to 0 (no framework timeout). The 5-minute hard-abort
+  // below is still provided as a backstop via the startRun signal.
+  const softTimeoutMs = resolveRunSoftTimeoutMs(undefined, {
+    useHostedDefault: true,
+  });
+
+  // Hard-abort backstop: 5 minutes. On hosted runtimes the soft-timeout
+  // will fire first; locally this is the only guard.
+  const hardAbortTimer = setTimeout(
+    () => {
+      // startRun's abort controller handles this below, but we still need
+      // the handle to clear it in the finally block.
+    },
+    5 * 60 * 1000,
+  );
+
+  let jobError: Error | null = null;
+  await new Promise<void>((resolve, reject) => {
+    const activeRun = startRun(
+      runId,
+      thread.id,
+      async (send, signal) => {
+        try {
+          await runAgentLoop({
+            engine,
+            model,
+            systemPrompt,
+            tools,
+            messages,
+            actions,
+            send,
+            signal,
+            threadId: thread.id,
+          });
+        } catch (err) {
+          throw err;
+        }
+      },
+      // onComplete: run finished (completed or aborted)
+      async (run) => {
+        if (run.status === "completed") {
+          resolve();
+        } else {
+          reject(new Error(`Job run ended with status: ${run.status}`));
+        }
+      },
+      {
+        softTimeoutMs,
+        // turnId defaults to runId — fine for single-turn jobs
+      },
+    );
+
+    // Hard-abort backstop: abort the run-manager's own controller after
+    // 5 minutes if it hasn't finished naturally.
+    clearTimeout(hardAbortTimer);
+    setTimeout(
+      () => {
+        if (activeRun.status === "running") {
+          activeRun.abort.abort("job_hard_timeout");
+          reject(new Error("Job timed out after 5 minutes"));
+        }
+      },
+      5 * 60 * 1000,
+    );
+  }).catch((err: any) => {
+    jobError = err;
+  });
+
+  if (jobError) throw jobError;
 }
 
 async function updateResource(

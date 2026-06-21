@@ -7671,6 +7671,9 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
             ...fetchTool,
             ...webSearchTool,
             ...toolActions,
+            // A2A: scheduled agentic routines must be able to call other apps'
+            // agents (e.g. the auto-briefing routine invoking chief-of-staff).
+            ...callAgentScript,
           }),
           getSystemPrompt: async (owner: string) => {
             const resources = await loadResourcesForPrompt(
@@ -7770,6 +7773,9 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
             ...fetchTool,
             ...webSearchTool,
             ...toolActions,
+            // A2A: event-triggered agentic routines must be able to call other
+            // apps' agents (cross-app event reactions over A2A).
+            ...callAgentScript,
           }),
           getSystemPrompt: async (owner: string) => {
             const resources = await loadResourcesForPrompt(

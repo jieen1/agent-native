@@ -114,6 +114,10 @@ import { registerBuiltinNotificationChannels } from "../notifications/channels.j
 import { createNotificationsHandler } from "../notifications/routes.js";
 import { createProgressHandler } from "../progress/routes.js";
 import { createAutomationsHandler } from "../triggers/routes.js";
+import {
+  createEventLogHandler,
+  createEventsCatalogHandler,
+} from "../event-log/routes.js";
 import { createGoogleRealtimeSessionHandler } from "./google-realtime-session.js";
 import { createTranscribeVoiceHandler } from "./transcribe-voice.js";
 import { runWithRequestContext } from "./request-context.js";
@@ -2680,6 +2684,20 @@ export function createCoreRoutesPlugin(
       getH3App(nitroApp).use(
         `${P}/notifications`,
         createNotificationsHandler(),
+      );
+
+      // ─── Cross-process event bridge (Phase A3 §1.5.23) ─────────────────
+      // GET /_agent-native/event-log?since=&names=  — owner-scoped durable
+      //     event pull for a sibling app's bridge poller.
+      // GET /_agent-native/events/catalog            — in-process event
+      //     registry (name + description) for the cross-app event dropdown.
+      // `events/catalog` mounts as a fully-specific path so it matches before
+      // the broader configurable `/events` SSE route ("specific before
+      // general", mirroring the secrets/adhoc note above).
+      getH3App(nitroApp).use(`${P}/event-log`, createEventLogHandler());
+      getH3App(nitroApp).use(
+        `${P}/events/catalog`,
+        createEventsCatalogHandler(),
       );
 
       // ─── Extensions (sandboxed mini-app runtime + proxy) ────────────────

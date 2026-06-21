@@ -20,6 +20,18 @@
       "port": 8080
     },
     {
+      "name": "routines",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "routines", "exec", "agent-native", "dev"],
+      "env": {
+        "NODE_ENV": "development",
+        "APP_NAME": "routines",
+        "AGENT_USER_EMAIL": "dev@local.test"
+      },
+      "port": 8080,
+      "autoPort": true
+    },
+    {
       "name": "content-sqlite",
       "runtimeExecutable": "bash",
       "runtimeArgs": [

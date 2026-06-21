@@ -13,6 +13,14 @@ export interface TriggerFrontmatter {
   triggerType: "schedule" | "event";
   /** For event triggers: the event name to subscribe to. */
   event?: string;
+  /**
+   * For cross-app event triggers (Phase A3 §1.5.23): the app id that emits the
+   * event (e.g. "plan", "mail"). Empty/undefined = a same-process event
+   * dispatched directly by this process's `handleEvent`. When set, the event is
+   * delivered by the cross-process event-bridge poller pulling that app's
+   * `event_log`.
+   */
+  sourceApp?: string;
   /** Natural-language condition evaluated by Haiku before dispatch. */
   condition?: string;
   /** "agentic" = full runAgentLoop. "deterministic" = fixed action set. */

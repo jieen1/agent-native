@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "routines",
+  "displayName": "Routines",
+  "description": "Personal automation engine: schedule, event-triggered, and deterministic routines that orchestrate other apps.",
+  "mcp": { "serverName": "routines" },
+  "local": {
+    "template": "routines",
+    "sourcePath": ".",
+    "defaultUrl": "http://127.0.0.1:8114",
+    "commands": {
+      "install": "pnpm install",
+      "dev": "pnpm dev",
+      "start": "pnpm start"
+    }
+  },
+  "surfaces": [],
+  "skills": []
+}

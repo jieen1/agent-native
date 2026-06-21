@@ -7,6 +7,8 @@ const createThreadMock = vi.hoisted(() => vi.fn());
 const runAgentLoopMock = vi.hoisted(() => vi.fn());
 const dbExecuteMock = vi.hoisted(() => vi.fn());
 const getDbExecMock = vi.hoisted(() => vi.fn());
+const insertRoutineRunMock = vi.hoisted(() => vi.fn());
+const finishRoutineRunMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../resources/store.js", () => ({
   resourceListAllOwners: resourceListAllOwnersMock,
@@ -26,6 +28,11 @@ vi.mock("../agent/production-agent.js", () => ({
   actionsToEngineTools: vi.fn(() => []),
   getOwnerActiveApiKey: vi.fn(async () => "test-api-key"),
   runAgentLoop: runAgentLoopMock,
+}));
+
+vi.mock("../routine-runs/store.js", () => ({
+  insertRoutineRun: insertRoutineRunMock,
+  finishRoutineRun: finishRoutineRunMock,
 }));
 
 // Partial-mock db/client so the user/membership validation lookup is
@@ -66,6 +73,8 @@ Summarize the inbox.`,
     resourcePutMock.mockResolvedValue(undefined);
     createThreadMock.mockResolvedValue({ id: "thread-1" });
     runAgentLoopMock.mockResolvedValue(undefined);
+    insertRoutineRunMock.mockResolvedValue("run-1");
+    finishRoutineRunMock.mockResolvedValue(undefined);
   });
 
   it("creates run history threads owned by the job user", async () => {
@@ -207,5 +216,95 @@ Do some work.`,
     // Still within 10-minute window — must be skipped without resetting.
     expect(createThreadMock).not.toHaveBeenCalled();
     expect(resourcePutMock).not.toHaveBeenCalled();
+  });
+
+  // ─── Phase A4: deterministic schedule routine ──────────────────────────────
+
+  it("deterministic schedule routine runs the web-request step with NO agent loop and records routine_runs success", async () => {
+    const webRequestSpy = vi.fn(async () => "HTTP 200 OK");
+    resourceListAllOwnersMock.mockResolvedValueOnce([
+      {
+        id: "resource-det",
+        owner: "alice+jobs@agent-native.test",
+        path: "jobs/webhook-ping.md",
+        content: `---
+schedule: "* * * * *"
+nextRun: "1970-01-01T00:00:00.000Z"
+enabled: true
+createdBy: alice+jobs@agent-native.test
+mode: deterministic
+---
+
+\`\`\`json
+{ "kind": "web-request", "method": "POST", "url": "https://hooks.example.com/abc" }
+\`\`\``,
+      },
+    ]);
+
+    await processRecurringJobs({
+      getActions: () => ({
+        "web-request": { tool: {} as any, run: webRequestSpy },
+      }),
+      getSystemPrompt: async () => "system",
+      engine: {} as any,
+      model: "test-model",
+    });
+
+    // No agent loop / LLM ran — the deterministic path skips startRun/runAgentLoop.
+    expect(runAgentLoopMock).not.toHaveBeenCalled();
+
+    // The wired web-request entry was invoked exactly once with the declared URL.
+    expect(webRequestSpy).toHaveBeenCalledTimes(1);
+    expect(webRequestSpy.mock.calls[0][0].url).toBe(
+      "https://hooks.example.com/abc",
+    );
+
+    // routine_runs: one running row inserted, then finished success.
+    expect(insertRoutineRunMock).toHaveBeenCalledTimes(1);
+    expect(insertRoutineRunMock.mock.calls[0][0]).toMatchObject({
+      routineName: "webhook-ping",
+      kind: "schedule",
+      status: "running",
+    });
+    expect(finishRoutineRunMock).toHaveBeenCalledTimes(1);
+    expect(finishRoutineRunMock).toHaveBeenCalledWith(
+      "run-1",
+      expect.objectContaining({ status: "success" }),
+    );
+
+    // Frontmatter was written back as success, preserving mode: deterministic.
+    const successPut = resourcePutMock.mock.calls.find((call) =>
+      String(call[2]).includes("lastStatus: success"),
+    );
+    expect(successPut).toBeTruthy();
+    expect(String(successPut?.[2])).toContain("mode: deterministic");
+  });
+
+  it("control: an equivalent AGENTIC schedule routine DOES run the agent loop (probe is effective)", async () => {
+    resourceListAllOwnersMock.mockResolvedValueOnce([
+      {
+        id: "resource-ag",
+        owner: "alice+jobs@agent-native.test",
+        path: "jobs/agentic-ping.md",
+        content: `---
+schedule: "* * * * *"
+nextRun: "1970-01-01T00:00:00.000Z"
+enabled: true
+createdBy: alice+jobs@agent-native.test
+mode: agentic
+---
+
+Do the thing.`,
+      },
+    ]);
+
+    await processRecurringJobs({
+      getActions: () => ({}),
+      getSystemPrompt: async () => "system",
+      engine: {} as any,
+      model: "test-model",
+    });
+
+    expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
   });
 });
