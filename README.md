@@ -231,3 +231,4 @@ Full documentation at **[agent-native.com](https://agent-native.com)**.
 ## License
 
 MIT
+- Orchestrator E2E: self-development via Claude Code in a microVM verified.
