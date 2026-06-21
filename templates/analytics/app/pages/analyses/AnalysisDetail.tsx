@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { incrementItemView } from "@/lib/item-popularity";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -83,7 +84,7 @@ async function fetchAnalysis(id: string): Promise<Analysis | null> {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
+  return formatDateLocale(new Date(iso), {
     year: "numeric",
     month: "short",
     day: "numeric",

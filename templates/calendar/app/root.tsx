@@ -22,6 +22,7 @@ import {
   useDbSync,
 } from "@agent-native/core/client";
 import { IconSun, IconMoon } from "@tabler/icons-react";
+import { I18nProvider } from "locale-kit";
 import type { LinksFunction } from "react-router";
 import stylesheet from "./global.css?url";
 configureTracking({
@@ -175,7 +176,12 @@ export default function Root() {
       clientOnlyFallback={<DefaultSpinner />}
       toaster={<Toaster richColors position="bottom-center" />}
     >
-      <AppContent />
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <AppContent />
+      </I18nProvider>
     </AppProviders>
   );
 }

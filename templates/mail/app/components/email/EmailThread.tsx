@@ -14,6 +14,7 @@ import {
   formatFileSize,
   formatShortcut,
 } from "@/lib/utils";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 import { useTheme } from "next-themes";
 import { useComposeState } from "@/hooks/use-compose-state";
 import { useAccountFilter } from "@/hooks/use-account-filter";
@@ -1752,14 +1753,14 @@ const ExpandedMessageCard = forwardRef<
             <div className="flex items-center gap-3">
               <span className="w-10 shrink-0" />
               <span className="text-muted-foreground/60">
-                {new Date(email.date).toLocaleDateString("en-US", {
+                {formatDateLocale(new Date(email.date), {
                   weekday: "long",
                   year: "numeric",
                   month: "long",
                   day: "numeric",
                 })}{" "}
                 at{" "}
-                {new Date(email.date).toLocaleTimeString("en-US", {
+                {formatDateLocale(new Date(email.date), {
                   hour: "numeric",
                   minute: "2-digit",
                   timeZoneName: "short",

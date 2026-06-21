@@ -12,6 +12,10 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  formatCurrency as formatCurrencyLocale,
+  formatDate as formatDateLocale,
+} from "locale-kit/format";
 
 interface RevenueComparisonChartProps {
   title: string;
@@ -26,12 +30,12 @@ interface RevenueComparisonChartProps {
 }
 
 const formatCurrency = (value: number) =>
-  `$${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  formatCurrencyLocale(Math.abs(value), "USD", { maximumFractionDigits: 0 });
 
 const formatDate = (value: string) => {
   try {
     const d = new Date(value);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return formatDateLocale(d, { month: "short", day: "numeric" });
   } catch {
     return String(value);
   }

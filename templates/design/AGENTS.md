@@ -59,6 +59,21 @@ patterns live in `.agents/skills/`.
 - When the user asks to download/export, use export actions or point to the
   editor download menu.
 
+## Response Language
+
+- Always respond in the user's interface language. The user's locale lives in
+  `application_state` under key `locale` (value `{ "locale": "zh-CN" }` or
+  `{ "locale": "en" }`).
+- If the locale isn't already visible in your context, read it (e.g. `db-query`:
+  `SELECT value FROM application_state WHERE key = 'locale'`, or the
+  `view-screen` / app-state tool).
+- `zh-CN` → reply in 简体中文; `en` → reply in English. Default to English if
+  unset.
+- Match the user's UI language for all natural-language prose (explanations,
+  summaries, confirmations). Keep code, identifiers, file paths, API/SQL
+  keywords, and proper nouns (brand/model names) unchanged. Mirror the language
+  the user writes in if it differs from the stored locale.
+
 ## Application State
 
 - `navigation` tells you the current view, design id, file id, and related UI

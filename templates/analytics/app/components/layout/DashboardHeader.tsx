@@ -2,6 +2,7 @@ import { IconUser, IconCalendar } from "@tabler/icons-react";
 import { useMemo } from "react";
 import { useParams } from "react-router";
 import { dashboards } from "@/pages/adhoc/registry";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 
 interface DashboardHeaderProps {
   title?: string;
@@ -69,7 +70,7 @@ export function DashboardHeader({
 function formatDate(dateStr: string): string {
   try {
     const date = new Date(dateStr);
-    return date.toLocaleDateString("en-US", {
+    return formatDateLocale(date, {
       year: "numeric",
       month: "short",
       day: "numeric",

@@ -6,6 +6,7 @@ import {
   useCallback,
   type RefObject,
 } from "react";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 import {
   useComments,
   useCreateComment,
@@ -83,7 +84,7 @@ function emailToAvatarColor(email: string) {
 
 function formatDate(dateStr: string) {
   const d = new Date(dateStr);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatDateLocale(d, { month: "short", day: "numeric" });
 }
 
 /**

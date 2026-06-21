@@ -21,6 +21,7 @@ import {
   useCommandMenuShortcut,
 } from "@agent-native/core/client";
 import { IconSun, IconMoon } from "@tabler/icons-react";
+import { I18nProvider } from "locale-kit";
 import { useTheme } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { Layout as AppLayout } from "@/components/layout/Layout";
@@ -143,8 +144,13 @@ export default function Root() {
       queryClient={queryClient}
       toaster={<Toaster richColors position="bottom-left" />}
     >
-      <DbSyncSetup />
-      <AppContent />
+      {/* I18nProvider lives inside AppProviders so useLocaleSync() can use the
+          shared react-query client. Initial locale is read client-side from the
+          `locale` cookie (SSR-first-paint via a root loader is refined later). */}
+      <I18nProvider>
+        <DbSyncSetup />
+        <AppContent />
+      </I18nProvider>
     </AppProviders>
   );
 }

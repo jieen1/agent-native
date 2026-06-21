@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate, Link } from "react-router";
 import { nanoid } from "nanoid";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 import {
   IconChecks,
   IconPlus,
@@ -386,7 +387,7 @@ export default function Index() {
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return "";
     const d = new Date(dateStr);
-    return d.toLocaleDateString("en-US", {
+    return formatDateLocale(d, {
       month: "short",
       day: "numeric",
       year: "numeric",

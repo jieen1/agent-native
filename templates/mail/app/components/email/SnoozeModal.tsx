@@ -5,6 +5,7 @@ import { useParseDate, useSnoozeEmail } from "@/hooks/use-scheduled-jobs";
 import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 
 interface SnoozeModalProps {
   open: boolean;
@@ -85,10 +86,8 @@ function getWeekdayOptions(): Option[] {
 
 function formatRight(date: Date, sublabel?: string): string {
   if (sublabel) return sublabel;
-  const day = date
-    .toLocaleDateString("en-US", { weekday: "short" })
-    .toUpperCase();
-  const time = date.toLocaleTimeString("en-US", {
+  const day = formatDateLocale(date, { weekday: "short" }).toUpperCase();
+  const time = formatDateLocale(date, {
     hour: "numeric",
     minute: "2-digit",
   });

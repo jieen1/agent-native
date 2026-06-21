@@ -22,6 +22,11 @@ import {
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  formatCurrency as formatCurrencyLocale,
+  formatDate as formatDateLocale,
+  formatNumber as formatNumberLocale,
+} from "locale-kit/format";
 
 type TablerIcon = ComponentType<{ className?: string }>;
 
@@ -928,7 +933,7 @@ function valueOf(value: unknown): number {
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat("en-US").format(Math.round(value));
+  return formatNumberLocale(Math.round(value));
 }
 
 function formatCurrency(value: number | undefined): string {
@@ -939,17 +944,15 @@ function formatCurrency(value: number | undefined): string {
   if (Math.abs(amount) >= 1_000) {
     return `$${Math.round(amount / 1_000)}K`;
   }
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return formatCurrencyLocale(amount, "USD", {
     maximumFractionDigits: 0,
-  }).format(amount);
+  });
 }
 
 function formatShortDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-US", {
+  return formatDateLocale(date, {
     month: "short",
     day: "numeric",
     year: "numeric",

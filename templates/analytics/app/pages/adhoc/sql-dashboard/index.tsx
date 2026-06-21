@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -1158,7 +1159,7 @@ export default function SqlDashboardPage() {
           <span className="flex items-center gap-1">
             <IconClock className="h-3 w-3" />
             Updated{" "}
-            {new Date(dashboardUpdatedAt).toLocaleDateString("en-US", {
+            {formatDateLocale(new Date(dashboardUpdatedAt), {
               year: "numeric",
               month: "short",
               day: "numeric",

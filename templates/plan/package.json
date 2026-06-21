@@ -32,6 +32,7 @@
     "html2canvas": "^1.4.1",
     "isbot": "^5",
     "jszip": "^3.10.1",
+    "locale-kit": "workspace:*",
     "mermaid": "11.15.0",
     "node-pty": "^1.1.0",
     "react-markdown": "^10.1.0",

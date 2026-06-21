@@ -10,6 +10,10 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  formatCurrency as formatCurrencyLocale,
+  formatDate as formatDateLocale,
+} from "locale-kit/format";
 
 interface CumulativeNetChartProps {
   title: string;
@@ -21,7 +25,7 @@ interface CumulativeNetChartProps {
 const formatDate = (value: any) => {
   try {
     const d = new Date(value);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return formatDateLocale(d, { month: "short", day: "numeric" });
   } catch {
     return String(value);
   }
@@ -103,7 +107,9 @@ export function CumulativeNetChart({
                   }}
                   labelFormatter={formatDate}
                   formatter={(value: any) => [
-                    `$${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+                    formatCurrencyLocale(Number(value), "USD", {
+                      maximumFractionDigits: 0,
+                    }),
                     "Cumulative Net ARR",
                   ]}
                 />

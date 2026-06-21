@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 
 interface TimeSeriesChartProps {
   title: string;
@@ -34,7 +35,7 @@ export function TimeSeriesChart({
   const formatXLabel = (value: any) => {
     try {
       const d = new Date(value);
-      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return formatDateLocale(d, { month: "short", day: "numeric" });
     } catch {
       return String(value);
     }
