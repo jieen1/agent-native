@@ -269,6 +269,13 @@ export interface NodeRuntimeSpec {
   baseRef?: string;
   /** Working branch; default = an/run-<runId>, shared across a run's nodes. */
   branch?: string;
+  /**
+   * Git remote (https URL) to CLONE into the VM and PUSH the run branch to.
+   * Injected per-run from the bound project's `gitRemote` by the engine
+   * (DESIGN §7.1a); a template node may also set it explicitly. When set, INIT
+   * clones the repo and EXTRACT delivers (commit + push branch + open PR).
+   */
+  gitRemote?: string;
   /** Extra folders to attach (read-only by default). */
   mounts?: { host: string; path: string; mode?: "ro" | "rw" }[];
   /** Secret keys → injected as scoped VM env via resolveSecret; never baked in. */
@@ -400,6 +407,7 @@ function parseRuntime(raw: unknown): NodeRuntimeSpec | undefined {
   if (typeof r.image === "string") spec.image = r.image;
   if (typeof r.baseRef === "string") spec.baseRef = r.baseRef;
   if (typeof r.branch === "string") spec.branch = r.branch;
+  if (typeof r.gitRemote === "string") spec.gitRemote = r.gitRemote;
   if (Array.isArray(r.creds)) {
     spec.creds = r.creds.filter((x): x is string => typeof x === "string");
   }

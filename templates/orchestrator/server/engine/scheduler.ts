@@ -1073,12 +1073,148 @@ export class Scheduler {
     }
   }
 
-  // ── Loop (loop-until-dry, DESIGN §1.5 / §3.2) ──────────────────────────────
+  // ── Loop (DESIGN §1.5 / §3.2) ──────────────────────────────────────────────
+  //
+  // Two modes, picked at dispatch:
+  //
+  //   1. LOOP-UNTIL-DRY (legacy / finder pattern): body is a SINGLE child agent
+  //      that produces an `items` array each round; the loop dedupes by
+  //      `dedupeKey` and stops after `dryRounds` consecutive iterations add
+  //      nothing new. The original semantics, preserved unchanged.
+  //
+  //   2. LOOP-UNTIL-CONDITION (sequential body + judgement): when the loop has
+  //      >1 child OR an explicit `condition` set, treat `children` as a
+  //      SEQUENTIAL pipeline that runs once per iteration (e.g. dev → test →
+  //      review → judge). After the pipeline finishes, `condition` is evaluated
+  //      against this iteration's child outputs (`deps[<childId>]`) — when truthy,
+  //      the loop stops. Iteration N>0's first child sees the prior iteration's
+  //      LAST child output via `deps["prev_iteration"]` so a "retry with judge
+  //      feedback" workflow is expressible without unrolling.
 
   private async runLoop(state: NodeRunState): Promise<void> {
     const node = state.node;
-    const bodyId = (node.children ?? [])[0];
-    if (!bodyId || !this.g.byId.has(bodyId)) {
+    const childIds = node.children ?? [];
+    if (childIds.length === 0) {
+      await this.markDone(state, { node: node.id, iterations: 0, seen: [] });
+      return;
+    }
+    const useConditionMode = childIds.length > 1 || !!node.condition;
+    if (useConditionMode) {
+      return this.runLoopUntilCondition(state, childIds);
+    }
+    return this.runLoopUntilDry(state, childIds[0]);
+  }
+
+  /**
+   * Loop-until-condition: run `children` sequentially each iteration. Feed each
+   * child the prior siblings' outputs (this iteration) plus `prev_iteration`
+   * = last child output from the PRIOR iteration. After the iteration, eval
+   * `node.condition` against deps={childId: output} — truthy stops the loop.
+   */
+  private async runLoopUntilCondition(
+    state: NodeRunState,
+    childIds: string[],
+  ): Promise<void> {
+    const node = state.node;
+    const maxIter = node.maxIterations ?? 1;
+    const lastCid = childIds[childIds.length - 1];
+
+    let iteration = 0;
+    let aborted = false;
+    let conditionMet = false;
+    let lastIterFeedback: unknown = undefined;
+    let lastIterChildOutputs: Record<string, unknown> = {};
+
+    for (; iteration < maxIter; iteration++) {
+      if (this.cancelled) break;
+
+      const iterOutputs: Record<string, unknown> = {};
+
+      for (const cid of childIds) {
+        const child = this.g.byId.get(cid);
+        if (!child) continue;
+
+        const key: NodeRunKey = { nodeId: cid, iteration, fanoutIndex: 0 };
+        const childState = await this.ensureRun(child, key, iteration > 0);
+        childState.status = "running";
+        childState.startedAt = nowIso();
+        childState.attempts += 1;
+        await store.updateNodeRun(this.db, childState);
+
+        // Build per-child deps: prior siblings THIS iteration + the last
+        // child's output from the PRIOR iteration (the judge's feedback) so
+        // the first child of iter N>0 can read why iter N-1 didn't accept.
+        const deps: Record<string, unknown> = { ...iterOutputs };
+        if (iteration > 0 && lastIterFeedback !== undefined) {
+          deps["prev_iteration"] = lastIterFeedback;
+        }
+
+        const input: NodeExecutionInput = {
+          node: child,
+          deps,
+          fanoutIndex: 0,
+          iteration,
+          effort: child.effort,
+        };
+        try {
+          const res = await this.executor.invoke(input, this.abort.signal);
+          iterOutputs[cid] = res.output;
+          childState.tokensSpent = res.tokensSpent;
+          this.tokensSpent += res.tokensSpent;
+          childState.outputRef = await putOutputArtifact(
+            this.db,
+            this.cfg.runId,
+            childState,
+            res.output,
+          );
+          childState.status = "done";
+          childState.completedAt = nowIso();
+          this.outputs.set(keyStr(key), res.output);
+          await store.updateNodeRun(this.db, childState);
+        } catch (err) {
+          childState.status = "failed";
+          childState.error = err instanceof Error ? err.message : String(err);
+          childState.completedAt = nowIso();
+          await store.updateNodeRun(this.db, childState);
+          aborted = true;
+          break;
+        }
+      }
+
+      lastIterChildOutputs = iterOutputs;
+      lastIterFeedback = iterOutputs[lastCid];
+
+      if (aborted) {
+        iteration++;
+        break;
+      }
+
+      if (node.condition) {
+        const ctx: ConditionContext = { deps: iterOutputs, status: {} };
+        if (evalCondition(node.condition, ctx)) {
+          conditionMet = true;
+          iteration++;
+          break;
+        }
+      }
+    }
+
+    await this.markDone(state, {
+      node: node.id,
+      iterations: iteration,
+      accepted: conditionMet,
+      aborted,
+      lastIterOutputs: lastIterChildOutputs,
+    });
+  }
+
+  /** Original loop-until-dry behavior (unchanged). */
+  private async runLoopUntilDry(
+    state: NodeRunState,
+    bodyId: string,
+  ): Promise<void> {
+    const node = state.node;
+    if (!this.g.byId.has(bodyId)) {
       await this.markDone(state, { node: node.id, iterations: 0, seen: [] });
       return;
     }

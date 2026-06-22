@@ -30,6 +30,12 @@ import {
 
 import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
 import type { NodeRuntime, TeardownPolicy, VmHandle } from "./node-runtime.js";
+import {
+  addAll,
+  commit,
+  pushBranch,
+  type GitContext,
+} from "./git-wrapper.js";
 import { DEFAULT_WORKDIR } from "./executors/workdir.js";
 import { getVmSemaphore, type VmSemaphore } from "./backpressure.js";
 import type {
@@ -259,18 +265,40 @@ export class NodeRunner {
       const durationMs = Date.now() - startedAt;
 
       // STAGE 5 — COLLECT (output + tokens + timing + exit already on result).
-      // STAGE 6 — EXTRACT (minimal P2b: nothing copied out yet; git push is
-      // P2c). The output value IS the extracted result for P2b.
+      // STAGE 6 — EXTRACT (DESIGN §7.1a/§7.4 P2c): a code node (gitRemote set on
+      // its runtime) stages + commits the in-VM edits, pushes the per-run branch,
+      // and opens a PR. The disposable VM's only durable artifact is that pushed
+      // branch / PR. Delivery is best-effort-SURFACED: a push/PR failure is
+      // recorded in `detail.delivery` (the node still returns its output) so the
+      // run stays inspectable rather than silently dropping the work.
+      let delivery: Record<string, unknown> | undefined;
+      const deliverGate =
+        spec.kind === "microvm" && !!spec.gitRemote && !!spec.branch;
+      // eslint-disable-next-line no-console
+      console.log(
+        `[extract] node=${input.node.id} gate=${deliverGate} kind=${spec.kind} gitRemote=${spec.gitRemote ?? "(unset)"} branch=${spec.branch ?? "(unset)"}`,
+      );
+      if (deliverGate) {
+        delivery = await this.deliver(runtime, vm, spec, input);
+        // eslint-disable-next-line no-console
+        console.log(`[extract] node=${input.node.id} delivery=${JSON.stringify(delivery)}`);
+      }
+
       succeeded = true;
       return {
-        output: execResult.output,
+        output:
+          delivery && execResult.output && typeof execResult.output === "object"
+            ? { ...(execResult.output as Record<string, unknown>), delivery }
+            : execResult.output,
         tokensSpent: execResult.tokensSpent,
         toolCallCount: execResult.toolCallCount,
         model: execResult.model,
         vmName: vm.name,
         durationMs,
         attempts: attempt,
-        detail: execResult.detail,
+        detail: delivery
+          ? { ...(execResult.detail ?? {}), delivery }
+          : execResult.detail,
       };
     } finally {
       // STAGE 7 — TEARDOWN. Always runs. Policy depends on success/failure.
@@ -282,6 +310,159 @@ export class NodeRunner {
         // backend's `rm -f` fallback already minimizes leaks.
       }
     }
+  }
+
+  /**
+   * EXTRACT delivery for a code node (DESIGN §7.1a). Stage + commit the in-VM
+   * worktree, push `spec.branch` to `spec.gitRemote`, then open a PR against
+   * `spec.baseRef`. Runs entirely in-VM over `runtime.exec` (the git-wrapper).
+   * Never throws — a failure is returned structurally so the node still yields
+   * its output. The GITHUB_TOKEN is read from the VM's persisted runtime env
+   * (injected at MOUNT via resolveSecret); a "no-token" push surfaces clearly.
+   */
+  private async deliver(
+    runtime: NodeRuntime,
+    vm: VmHandle,
+    spec: NodeRuntimeSpec,
+    input: NodeRunnerInput,
+  ): Promise<Record<string, unknown>> {
+    const env =
+      (vm.meta?.runtimeEnv as Record<string, string> | undefined) ?? {};
+    const ctx: GitContext = { runtime, vm, workdir: WORKDIR, env };
+    const itemTitle = (input.item as { title?: unknown } | undefined)?.title;
+    const title =
+      (typeof itemTitle === "string" && itemTitle.trim() !== ""
+        ? itemTitle
+        : undefined) ??
+      input.node.title ??
+      "Orchestrator change";
+    try {
+      await addAll(ctx);
+      const committed = await commit(ctx, `orchestrator: ${title}`);
+      const pushed = await pushBranch(ctx, {
+        branch: spec.branch!,
+        remoteUrl: spec.gitRemote,
+      });
+      // Open a PR for the pushed branch via the GitHub REST API from the HOST
+      // (the orchestrator process has node `fetch` + the token). The repo's VM
+      // has no `gh`, and a PR-open is an HTTPS call, not a git op — so it does not
+      // need to run in-VM. Idempotent: a re-pushed branch returns the existing PR.
+      let prUrl: string | null = null;
+      let prReason: string | null = null;
+      if (pushed.pushed && spec.gitRemote) {
+        const prRes = await openPrViaApi({
+          remoteUrl: spec.gitRemote,
+          branch: spec.branch!,
+          baseBranch: spec.baseRef ?? "main",
+          title,
+          body: `Automated by an orchestrator run on branch \`${spec.branch}\`.`,
+          token: env.GITHUB_TOKEN,
+        });
+        prUrl = prRes.url;
+        prReason = prRes.reason;
+      }
+
+      // Persist the run's durable deliverable (DESIGN §7.1a / §9): a PR when one
+      // opened, else the pushed branch. runId is parsed from the per-run branch
+      // (`an/run-<runId>`). Best-effort: the PR/branch already exists on the
+      // remote regardless of whether this DB write lands, and it also rides in
+      // the node output so the engine can propagate it to the work item.
+      const runId = (spec.branch ?? "").replace(/^an\/run-/, "");
+      const deliverable: { kind: string; ref: string } | null = prUrl
+        ? { kind: "pr", ref: prUrl }
+        : pushed.pushed && spec.branch
+          ? { kind: "branch", ref: spec.branch }
+          : null;
+      if (runId && deliverable) {
+        try {
+          const { getDb, schema } = await import("../db/index.js");
+          const { eq } = await import("drizzle-orm");
+          await getDb()
+            .update(schema.workflowRuns)
+            .set({ deliverable: JSON.stringify(deliverable) })
+            .where(eq(schema.workflowRuns.id, runId));
+        } catch {
+          // best-effort — the deliverable also rides in the node output below.
+        }
+      }
+
+      return {
+        committed: committed.committed,
+        commitSha: committed.sha,
+        branch: spec.branch,
+        pushed: pushed.pushed,
+        pushReason: pushed.reason,
+        pushDetail: pushed.detail,
+        prUrl,
+        prReason,
+        deliverable,
+      };
+    } catch (err) {
+      return {
+        committed: false,
+        pushed: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+}
+
+/**
+ * Open a PR for a pushed branch via the GitHub REST API (host-side; the node's
+ * microVM has no `gh`, and a PR-open is an HTTPS call, not a git op). Idempotent:
+ * a 422 "already exists" resolves the existing open PR's url. Never throws.
+ */
+async function openPrViaApi(opts: {
+  remoteUrl: string;
+  branch: string;
+  baseBranch: string;
+  title: string;
+  body: string;
+  token?: string;
+}): Promise<{ url: string | null; reason: string }> {
+  const token = opts.token;
+  if (!token || token.trim() === "") return { url: null, reason: "no-token" };
+  const m = /github\.com[/:]([^/]+)\/([^/.]+)/.exec(opts.remoteUrl);
+  if (!m) return { url: null, reason: "bad-remote" };
+  const owner = m[1];
+  const repo = `${owner}/${m[2]}`;
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "User-Agent": "an-orchestrator",
+    "Content-Type": "application/json",
+  };
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/pulls`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        title: opts.title,
+        head: opts.branch,
+        base: opts.baseBranch,
+        body: opts.body,
+      }),
+    });
+    const text = await res.text();
+    if (res.status === 201) {
+      const url = (JSON.parse(text) as { html_url?: string }).html_url ?? null;
+      return { url, reason: url ? "ok" : "error" };
+    }
+    if (res.status === 422 && /already exists/i.test(text)) {
+      const listRes = await fetch(
+        `https://api.github.com/repos/${repo}/pulls?head=${owner}:${opts.branch}&state=open`,
+        { headers },
+      );
+      const arr = (await listRes.json()) as Array<{ html_url?: string }>;
+      const url = Array.isArray(arr) ? (arr[0]?.html_url ?? null) : null;
+      return { url, reason: url ? "exists" : "exists-unresolved" };
+    }
+    return { url: null, reason: `error-${res.status}` };
+  } catch (err) {
+    return {
+      url: null,
+      reason: `error:${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }
 

@@ -104,6 +104,14 @@ export async function runEngineLoopInVm(args: {
 
   // Call runAgentLoop DIRECTLY so its returned AgentLoopUsage is captured
   // (DESIGN §4.2.3). We are already in the run's request context.
+  //
+  // maxOutputTokens is set to the model's full context window because the AI
+  // SDK applies a small DEFAULT (~4k) when the option is omitted — that cap is
+  // EXHAUSTED by thinking tokens on reasoning models (qwen3.6 thinking returned
+  // an empty string + toolCallCount=0 with the default, 2026-06-21). Local vLLM
+  // has no usage quota, and a server-side `max_model_len` (262_144 on qwen3.6)
+  // already bounds the actual response — passing a generous client cap simply
+  // means "do not let the SDK clip you; the server is the real limit".
   const usage = await runAgentLoop({
     engine,
     model,
@@ -118,6 +126,7 @@ export async function runEngineLoopInVm(args: {
     ownerEmail: ctx.ownerEmail,
     orgId: ctx.orgId,
     reasoningEffort: reasoningEffort(ctx.effort),
+    maxOutputTokens: 200_000,
   });
 
   const tokensSpent =

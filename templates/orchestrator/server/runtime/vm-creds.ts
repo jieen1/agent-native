@@ -74,6 +74,18 @@ export async function mountClaudeSubscription(
     await runtime.exec(vm, `rm -rf ${home}/.claude`);
     // Copy the `.claude` dir INTO $HOME → lands at $HOME/.claude (see doc above).
     await runtime.fs(vm).copyFromHost(src, home);
+    // claude ALSO reads the global config FILE at $HOME/.claude.json — a SIBLING
+    // of the `.claude` dir, not inside it. It is REQUIRED once claude uses tools
+    // or runs with `--dangerously-skip-permissions` (otherwise: "Claude
+    // configuration file not found at: /root/.claude.json" → exit 1). Copy it
+    // too (best-effort): the disposable VM reuses the host's onboarding + account
+    // state; a missing MCP server listed inside is non-fatal (claude logs +
+    // continues). `${src}.json` == `<...>/.claude.json` for the standard layout.
+    try {
+      await runtime.fs(vm).copyFromHost(`${src}.json`, home);
+    } catch {
+      // Optional — a no-tool prompt can still run without it.
+    }
     // Sanity: the credentials file must be present for the in-VM claude to auth.
     const check = await runtime.exec(
       vm,

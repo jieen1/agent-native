@@ -97,8 +97,13 @@ export async function ensureToolchain(
   if (wantApk) {
     // alpine: refresh the index then add the toolchain. `--no-cache` keeps the
     // image small. curl is added so later egress probes prefer it over busybox
-    // wget. A non-zero code is captured (not thrown) so we can report the tail.
-    const pkgs = ["curl"];
+    // wget. ca-certificates is ALWAYS added — alpine ships without a CA bundle,
+    // so `git clone https://…` and `curl https://…` fail with a TLS "unexpected
+    // EOF" without it. (nodejs implicitly pulls ca-certs as a dep; git alone does
+    // not — proven by a vllm-only node that installed just `git` failing to
+    // clone github until ca-certs landed, 2026-06-21.) A non-zero code is
+    // captured (not thrown) so we can report the tail.
+    const pkgs = ["curl", "ca-certificates"];
     if (needNode) pkgs.push("nodejs", "npm");
     if (needs.git) pkgs.push("git");
     const apk = await runtime.exec(

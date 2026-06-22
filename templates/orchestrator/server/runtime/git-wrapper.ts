@@ -73,6 +73,95 @@ async function git(ctx: GitContext, args: string): Promise<ExecResult> {
 }
 
 /**
+ * Clone `remoteUrl` into the (empty) worktree so a real run branches off the
+ * project's ACTUAL code, not an empty `git init` (§7.1a). Public repos clone
+ * token-less; when a GITHUB_TOKEN is present we clone via an EPHEMERAL
+ * `https://x-access-token:<tok>@…` URL (so private repos work too) and then RESET
+ * `origin` to the clean URL — the token never persists in the disposable VM's
+ * `.git/config`. A deterministic bot identity is set so later commits succeed.
+ * Never throws: a non-zero git code is a STRUCTURED failure (the caller decides
+ * whether the node fails) and the token is redacted from any echoed URL.
+ */
+export async function cloneRepo(
+  ctx: GitContext,
+  opts: { remoteUrl: string; branch?: string },
+): Promise<{
+  cloned: boolean;
+  /** True when an EXISTING remote `branch` was fetched + checked out (so the
+   *  worktree carries the prior node's commits, e.g. dev1 → review1 / dev2).
+   *  False when the worktree is fresh from the remote default and the caller
+   *  must still cut the run branch from baseRef. */
+  branchPickedUp: boolean;
+  reason: string;
+  detail: string;
+}> {
+  const clean = opts.remoteUrl?.trim();
+  if (!clean) {
+    return {
+      cloned: false,
+      branchPickedUp: false,
+      reason: "no-remote",
+      detail: "no remote URL provided to cloneRepo",
+    };
+  }
+  const token = ctx.env.GITHUB_TOKEN;
+  const cloneUrl =
+    token && token.trim() !== "" && /^https:\/\//.test(clean)
+      ? clean.replace(/^https:\/\/(.*)$/, `https://x-access-token:${token}@$1`)
+      : clean;
+  // Clone into "." of the empty worktree. SHALLOW (--depth 1) so a large repo
+  // lands in seconds over the VM's egress (not minutes of history); all branch
+  // tips (--no-single-branch) so a later node can check out the shared run
+  // branch. Pushing one new commit still works: its parent (baseRef tip) is
+  // already on the remote.
+  const res = await git(
+    ctx,
+    `clone --depth 1 --no-single-branch ${shArg(cloneUrl)} . 2>&1`,
+  );
+  if (res.code !== 0) {
+    return {
+      cloned: false,
+      branchPickedUp: false,
+      reason: "error",
+      detail: redact(tail(`${res.stdout}\n${res.stderr}`), token ?? ""),
+    };
+  }
+  // Drop the token from the persisted remote (push re-injects it ephemerally).
+  await git(ctx, `remote set-url origin ${shArg(clean)}`);
+  // Deterministic non-secret bot identity so commits succeed in the fresh VM.
+  await git(ctx, `config user.email ${shArg("orchestrator@an.local")}`);
+  await git(ctx, `config user.name ${shArg("Orchestrator Run")}`);
+
+  // Multi-VM run-branch sharing (DESIGN §7.1a): when the per-run branch already
+  // exists on the remote (an earlier node in this run pushed to it), fetch +
+  // checkout it so this VM continues from those commits — otherwise the run
+  // branch would be cut FRESH from baseRef and silently overwrite prior work.
+  let branchPickedUp = false;
+  if (opts.branch && opts.branch.trim() !== "") {
+    const fetched = await git(
+      ctx,
+      `fetch --depth 1 origin ${shArg(opts.branch)} 2>&1`,
+    );
+    if (fetched.code === 0) {
+      const checkout = await git(
+        ctx,
+        `checkout -B ${shArg(opts.branch)} ${shArg(`origin/${opts.branch}`)}`,
+      );
+      if (checkout.code === 0) {
+        branchPickedUp = true;
+      }
+    }
+  }
+
+  return {
+    cloned: true,
+    branchPickedUp,
+    reason: branchPickedUp ? "ok-branch-picked-up" : "ok",
+    detail: tail(res.stdout),
+  };
+}
+
+/**
  * Ensure a git repo + identity exist in the worktree, then create/switch to the
  * per-run branch from `baseRef` (§7.1a). For a worktree that is already a clone
  * we branch off `baseRef`; for a bare/empty worktree we `git init` so commits can

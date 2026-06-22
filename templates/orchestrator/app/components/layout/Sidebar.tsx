@@ -47,7 +47,8 @@ import {
 
 const navItems = [
   { icon: IconLayoutKanban, labelKey: "nav.board", href: "/board", view: "board" },
-  { icon: IconListCheck, labelKey: "nav.tasks", href: "/", view: "tasks" },
+  // v1 "Tasks" entry removed — `/board` is the canonical work list. The legacy
+  // v1 task detail route (`/tasks/:id`) remains reachable by direct URL.
   {
     icon: IconFolders,
     labelKey: "nav.projects",
@@ -440,7 +441,7 @@ export function Sidebar({
         )}
       >
         <Link
-          to="/"
+          to="/board"
           className={cn(
             "flex min-w-0 items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-ring",
             collapsed ? "size-7 justify-center" : "flex-1 gap-3",

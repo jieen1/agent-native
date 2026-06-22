@@ -43,6 +43,14 @@ export function buildClaudeCommand(ctx: RuntimeExecCtx): string {
     "--output-format",
     "stream-json",
     "--verbose",
+    // The node runs in a DISPOSABLE microVM on a fresh clone, headless (`-p`):
+    // there is no human to approve edits, so auto-accept them. We use
+    // `--permission-mode acceptEdits` rather than `--dangerously-skip-permissions`
+    // because the VM runs claude as root, and claude REFUSES skip-permissions
+    // under root ("cannot be used with root/sudo privileges"). acceptEdits
+    // auto-approves Edit/Write (what a code change needs) without that root gate.
+    "--permission-mode",
+    "acceptEdits",
     "-p",
     shArg(prompt),
   ];

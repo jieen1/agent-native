@@ -38,6 +38,7 @@ import { mountVmCredentials, VM_HOME } from "./vm-creds.js";
 import { ensureToolchain, type ToolchainNeeds } from "./vm-setup.js";
 import {
   checkoutRunBranch,
+  cloneRepo,
   type GitContext,
 } from "./git-wrapper.js";
 
@@ -252,19 +253,39 @@ export class MicrosandboxRuntime implements NodeRuntime {
     // 1) Toolchain (§7.4.8). Uses the egress env so installs can reach the net.
     await ensureToolchain(this, vm, toolchainNeedsFor(vm), runEnv);
 
-    // 2) Branch checkout (§7.1a). Only when a workdir is known; the NodeRunner
-    //    mounts `/work`, so we cut the run branch there.
+    // The NodeRunner mounts `/work`; that is where we clone + cut the run branch.
     const workdir =
       (vm.meta?.workdir as string | undefined) ??
       vm.spec.mounts?.find((m) => m.mode === "rw")?.path ??
       "/work";
-    if (branch && branch.trim() !== "") {
-      const gitCtx: GitContext = {
-        runtime: this,
-        vm,
-        workdir,
-        env: runEnv,
-      };
+    const gitCtx: GitContext = { runtime: this, vm, workdir, env: runEnv };
+
+    // 1.5) CLONE the project repo into the worktree (§7.1a) when the node spec
+    //      carries a gitRemote — so the run branches off the REAL code instead of
+    //      an empty `git init`. Tokenless for a public repo; a present
+    //      GITHUB_TOKEN enables private clone and is reset out of the remote.
+    //      Pass the per-run branch so cloneRepo can fetch+checkout it when an
+    //      earlier node already pushed work to it (multi-VM run-branch sharing).
+    let branchPickedUp = false;
+    if (vm.spec.gitRemote && vm.spec.gitRemote.trim() !== "") {
+      const cloned = await cloneRepo(gitCtx, {
+        remoteUrl: vm.spec.gitRemote,
+        branch,
+      });
+      if (!cloned.cloned) {
+        throw new Error(
+          `init: clone ${vm.spec.gitRemote} failed (${cloned.reason}): ${cloned.detail}`,
+        );
+      }
+      branchPickedUp = cloned.branchPickedUp;
+    }
+
+    // 2) Branch checkout (§7.1a): cut the per-run branch from baseRef ONLY when
+    //    cloneRepo did not already pick it up from the remote (a later node in
+    //    the same run reuses prior commits) and for empty-worktree runs where
+    //    cloneRepo was skipped. `checkoutRunBranch` is idempotent — it'll `git
+    //    init` an empty worktree so branch+commit still work without a remote.
+    if (branch && branch.trim() !== "" && !branchPickedUp) {
       await checkoutRunBranch(gitCtx, {
         branch,
         baseRef: vm.spec.baseRef,
