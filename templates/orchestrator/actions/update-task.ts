@@ -1,3 +1,7 @@
+/**
+ * @deprecated Use `update-work-item` (actions/update-work-item.ts) instead.
+ * This V1 action is retained for backward compatibility only.
+ */
 import { defineAction } from "@agent-native/core";
 import { resolveAccess } from "@agent-native/core/sharing";
 import { eq } from "drizzle-orm";

@@ -41,7 +41,8 @@ function routeOwnsToolbar(pathname: string): boolean {
     pathname.startsWith("/runs") ||
     pathname.startsWith("/settings") ||
     pathname === "/database" ||
-    pathname.startsWith("/extensions")
+    pathname.startsWith("/extensions") ||
+    pathname.startsWith("/v3")
   );
 }
 

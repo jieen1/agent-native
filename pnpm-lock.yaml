@@ -3822,6 +3822,12 @@ importers:
       ai:
         specifier: ^6.0.208
         version: 6.0.208(zod@4.4.3)
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
+      ajv-formats:
+        specifier: ^3.0.1
+        version: 3.0.1(ajv@8.20.0)
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@libsql/client@0.15.15)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.8.0)(kysely@0.28.15)(pg@8.20.0)(postgres@3.4.9)
@@ -3843,6 +3849,9 @@ importers:
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
       react-i18next:
         specifier: ^17.0.8
         version: 17.0.8(i18next@26.3.1(typescript@6.0.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@6.0.3)

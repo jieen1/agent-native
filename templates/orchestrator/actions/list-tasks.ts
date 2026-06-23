@@ -1,3 +1,7 @@
+/**
+ * @deprecated Use `list-work-items` (actions/list-work-items.ts) instead.
+ * This V1 action is retained for backward compatibility only.
+ */
 import { defineAction } from "@agent-native/core";
 import { accessFilter } from "@agent-native/core/sharing";
 import { and, desc, eq, isNull } from "drizzle-orm";

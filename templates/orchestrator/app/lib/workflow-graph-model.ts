@@ -10,7 +10,6 @@
 // the live lint banner calls the EXACT function `save-template` calls. One import,
 // one validator (FRONTEND §6.3 / DESIGN §6.3) — never a client-side copy.
 
-import type { Edge as RFEdge, Node as RFNode, XYPosition } from "@xyflow/react";
 import {
   parseGraph,
   type Condition,
@@ -20,6 +19,48 @@ import {
   type WorkflowGraph,
 } from "../../shared/types";
 import { isContainerType } from "./node-meta";
+
+// Local type replacements for @xyflow/react (removed, V3 has no visual editor).
+export interface XYPosition {
+  x: number;
+  y: number;
+}
+
+/** Data attached to every canvas node so renderers reach the model node. */
+export interface RFNodeData extends Record<string, unknown> {
+  node: Node;
+  /** Run-mode tint key (NodeRun status). Undefined in edit mode. */
+  runStatus?: string;
+  /** Run-mode counters (loop iteration / fanout index) for the overlay seam. */
+  iteration?: number;
+  dynamic?: boolean;
+}
+
+export interface RFEdgeData extends Record<string, unknown> {
+  when?: Condition;
+}
+
+export interface FlowNode {
+  id: string;
+  type: string;
+  position: XYPosition;
+  data: RFNodeData;
+  selected?: boolean;
+  draggable?: boolean;
+  connectable?: boolean;
+  selectable?: boolean;
+  parentId?: string;
+  extent?: string;
+}
+export interface FlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  data: RFEdgeData;
+  updatable?: boolean;
+  selectable?: boolean;
+}
 
 // Re-export the SHARED validator. The editor imports `validateGraph` from THIS
 // module, which forwards the single implementation in shared/graph-validator —
@@ -37,23 +78,6 @@ export interface WorkflowGraphModel {
   graph: WorkflowGraph;
   positions: PositionMap;
 }
-
-/** Data attached to every React Flow node so renderers reach the model node. */
-export interface RFNodeData extends Record<string, unknown> {
-  node: Node;
-  /** Run-mode tint key (NodeRun status). Undefined in edit mode. */
-  runStatus?: string;
-  /** Run-mode counters (loop iteration / fanout index) for the overlay seam. */
-  iteration?: number;
-  dynamic?: boolean;
-}
-
-export interface RFEdgeData extends Record<string, unknown> {
-  when?: Condition;
-}
-
-export type FlowNode = RFNode<RFNodeData>;
-export type FlowEdge = RFEdge<RFEdgeData>;
 
 const GRID_X = 240;
 const GRID_Y = 140;

@@ -1,3 +1,8 @@
+/**
+ * @deprecated V1 orchestrator — superseded by v2 `run-start` (actions/run-start.ts)
+ * combined with `v3-workflow` action `workflow.run`. This file is retained for
+ * backward compatibility only.
+ */
 import { defineAction } from "@agent-native/core";
 import { resolveAccess } from "@agent-native/core/sharing";
 import { eq } from "drizzle-orm";

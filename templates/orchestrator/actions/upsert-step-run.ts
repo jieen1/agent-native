@@ -1,3 +1,8 @@
+/**
+ * @deprecated V1 step tracking — superseded by v2 node runs
+ * (`node-get`, `run-events` in actions/). This file is retained for backward
+ * compatibility only.
+ */
 import { defineAction } from "@agent-native/core";
 import { resolveAccess } from "@agent-native/core/sharing";
 import { and, eq } from "drizzle-orm";

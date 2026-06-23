@@ -1,3 +1,7 @@
+/**
+ * @deprecated Use `create-work-item` (actions/create-work-item.ts) instead.
+ * This V1 action is retained for backward compatibility only.
+ */
 import { defineAction } from "@agent-native/core";
 import {
   getRequestUserEmail,
