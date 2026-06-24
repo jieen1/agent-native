@@ -1,0 +1,19 @@
+{
+  "name": "clips-chrome-extension",
+  "displayName": "Clips Chrome Extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "dev:hot": "tsx scripts/dev.ts",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "package": "pnpm build && tsx scripts/package.ts"
+  },
+  "devDependencies": {
+    "vite": "catalog:",
+    "typescript": "catalog:",
+    "tsx": "catalog:",
+    "@types/chrome": "^0.2.0"
+  }
+}

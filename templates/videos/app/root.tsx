@@ -21,6 +21,7 @@ import {
   configureTracking,
   getThemeInitScript,
 } from "@agent-native/core/client";
+import changelog from "../CHANGELOG.md?raw";
 configureTracking({
   getDefaultProps: (_name, properties) => ({
     ...properties,
@@ -84,7 +85,12 @@ function AppContent() {
 
   return (
     <>
-      <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
+      <CommandMenu
+        open={cmdkOpen}
+        onOpenChange={setCmdkOpen}
+        changelog={changelog}
+        changelogKey="videos"
+      >
         <CommandMenu.Group heading="Videos">
           <CommandMenu.Item onSelect={() => {}}>
             Search compositions

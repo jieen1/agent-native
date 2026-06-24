@@ -27,6 +27,7 @@ import {
 import { I18nProvider } from "locale-kit";
 import { useDbSync } from "./hooks/use-db-sync";
 import { useNavigationState } from "./hooks/use-navigation-state";
+import changelog from "../CHANGELOG.md?raw";
 import type { LinksFunction } from "react-router";
 import stylesheet from "./global.css?url";
 import { configureTracking } from "@agent-native/core/client";
@@ -257,7 +258,12 @@ export default function Root() {
       <I18nProvider>
         <AppSetup />
         <Toaster />
-        <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
+        <CommandMenu
+          open={cmdkOpen}
+          onOpenChange={setCmdkOpen}
+          changelog={changelog}
+          changelogKey="content"
+        >
           <CommandMenu.Group heading="Content">
             <CommandMenu.Item onSelect={() => {}}>
               Search documents

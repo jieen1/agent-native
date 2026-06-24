@@ -23,6 +23,7 @@ import {
 } from "@agent-native/core/client";
 import { IconSun, IconMoon } from "@tabler/icons-react";
 import { I18nProvider } from "locale-kit";
+import changelog from "../CHANGELOG.md?raw";
 import type { LinksFunction } from "react-router";
 import stylesheet from "./global.css?url";
 configureTracking({
@@ -138,7 +139,12 @@ function AppContent() {
   return (
     <>
       <DbSyncSetup />
-      <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
+      <CommandMenu
+        open={cmdkOpen}
+        onOpenChange={setCmdkOpen}
+        changelog={changelog}
+        changelogKey="calendar"
+      >
         <CommandMenu.Group heading="Actions">
           <CommandMenu.Item onSelect={() => {}}>Search</CommandMenu.Item>
         </CommandMenu.Group>

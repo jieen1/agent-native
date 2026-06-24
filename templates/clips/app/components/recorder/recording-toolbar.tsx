@@ -6,11 +6,7 @@ import {
   IconPlayerStop,
   IconX,
 } from "@tabler/icons-react";
-import {
-  clampToViewport,
-  snapToCorner,
-  type BubblePosition,
-} from "./camera-positioner";
+import { clampRectToViewport, type BubblePosition } from "./camera-positioner";
 import {
   Tooltip,
   TooltipContent,
@@ -29,6 +25,10 @@ export interface RecordingToolbarProps {
 
 const TOOLBAR_WIDTH = 276;
 const TOOLBAR_HEIGHT = 56;
+// Drop the toolbar just below the centered "Recording your screen…" status
+// text (which sits at the viewport's vertical center) so the controls don't
+// overlap it.
+const TOOLBAR_TOP_OFFSET = 48;
 
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -51,8 +51,8 @@ export function RecordingToolbar({
       ? { left: 16, top: 16, corner: "tl" }
       : {
           left: Math.max(16, (window.innerWidth - TOOLBAR_WIDTH) / 2),
-          top: window.innerHeight - TOOLBAR_HEIGHT - 32,
-          corner: "bl",
+          top: Math.max(16, window.innerHeight / 2 + TOOLBAR_TOP_OFFSET),
+          corner: "tl",
         },
   );
   const [dragging, setDragging] = useState(false);
@@ -60,14 +60,25 @@ export function RecordingToolbar({
 
   useEffect(() => {
     function onResize() {
-      setPos((p) =>
-        snapToCorner(p.left, p.top, Math.max(TOOLBAR_WIDTH, TOOLBAR_HEIGHT), {
-          width: window.innerWidth,
-          height: window.innerHeight,
-        }),
-      );
+      setPos((p) => {
+        const clamped = clampRectToViewport(
+          p.left,
+          p.top,
+          { width: TOOLBAR_WIDTH, height: TOOLBAR_HEIGHT },
+          {
+            width: window.innerWidth,
+            height: window.innerHeight,
+          },
+        );
+        return {
+          ...p,
+          left: clamped.left,
+          top: clamped.top,
+        };
+      });
     }
     window.addEventListener("resize", onResize);
+    onResize();
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
@@ -89,10 +100,10 @@ export function RecordingToolbar({
     const { dx, dy } = dragOffsetRef.current;
     const left = e.clientX - dx;
     const top = e.clientY - dy;
-    const clamped = clampToViewport(
+    const clamped = clampRectToViewport(
       left,
       top,
-      Math.max(TOOLBAR_WIDTH, TOOLBAR_HEIGHT),
+      { width: TOOLBAR_WIDTH, height: TOOLBAR_HEIGHT },
       { width: window.innerWidth, height: window.innerHeight },
     );
     setPos((prev) => ({ ...prev, left: clamped.left, top: clamped.top }));

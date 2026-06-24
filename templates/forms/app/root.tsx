@@ -28,6 +28,7 @@ import {
 } from "@agent-native/core/client";
 import { I18nProvider } from "locale-kit";
 import type { LinksFunction } from "react-router";
+import changelog from "../CHANGELOG.md?raw";
 import stylesheet from "./global.css?url";
 import { TAB_ID } from "@/lib/tab-id";
 
@@ -203,7 +204,12 @@ export default function Root() {
         <NavigationStateSync />
         <UrlStateSync />
         <OpenLinkInterceptor />
-        <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
+        <CommandMenu
+          open={cmdkOpen}
+          onOpenChange={setCmdkOpen}
+          changelog={changelog}
+          changelogKey="forms"
+        >
           <CommandMenu.Group heading="Forms">
             <CommandMenu.Item onSelect={() => {}}>
               Search forms

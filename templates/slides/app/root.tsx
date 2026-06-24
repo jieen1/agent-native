@@ -29,6 +29,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { LinksFunction } from "react-router";
 import stylesheet from "./global.css?url";
 import { configureTracking } from "@agent-native/core/client";
+import changelog from "../CHANGELOG.md?raw";
 import { getThemeInitScript } from "@agent-native/core/client";
 import { TAB_ID } from "@/lib/tab-id";
 configureTracking({
@@ -163,7 +164,12 @@ function AppContent() {
 
   return (
     <>
-      <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
+      <CommandMenu
+        open={cmdkOpen}
+        onOpenChange={setCmdkOpen}
+        changelog={changelog}
+        changelogKey="slides"
+      >
         <CommandMenu.Group heading="Presentations">
           <CommandMenu.Item onSelect={() => {}}>Search decks</CommandMenu.Item>
         </CommandMenu.Group>

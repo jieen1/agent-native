@@ -72,7 +72,14 @@ import type { LocalRecordingMode } from "../shared/config";
 export type { LocalExportedFile } from "./local-export";
 
 export type CaptureMode = "screen" | "screen-camera" | "camera";
-export type CaptureSource = "full-screen" | "window";
+export type CaptureSource = "full-screen" | "window" | "region";
+
+export interface RegionCaptureRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 const NATIVE_FULLSCREEN_RECORDING_FLAG = "clips:native-fullscreen-recording";
 const DEV_SYNTHETIC_CAPTURE_FLAG = "clips:dev-synthetic-capture";
@@ -81,9 +88,13 @@ const LIVE_UPLOAD_CHUNK_MS = 1_000;
 const CLOUD_CAPTURE_FRAME_RATE = 24;
 const CLOUD_CAPTURE_MAX_WIDTH = 1920;
 const CLOUD_CAPTURE_MAX_HEIGHT = 1080;
-const CLOUD_RECORDING_MAX_LONG_EDGE = 1280;
-const CLOUD_RECORDING_VIDEO_BITRATE_BPS = 900_000;
-const CLOUD_RECORDING_AUDIO_BITRATE_BPS = 96_000;
+// Crisp capture for the desktop browser MediaRecorder fallback. Files are no
+// longer shrunk client-side and the upload provider streams large files, so we
+// keep full 1080p (was downscaled to a 1280 long edge) and a sharp bitrate (was
+// 900 kbps, which left UI and text fuzzy). Dial down if file size matters.
+const CLOUD_RECORDING_MAX_LONG_EDGE = 1920;
+const CLOUD_RECORDING_VIDEO_BITRATE_BPS = 8_000_000;
+const CLOUD_RECORDING_AUDIO_BITRATE_BPS = 128_000;
 
 function isMacPlatform(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -98,7 +109,7 @@ function isMacPlatform(): boolean {
 export function shouldUseNativeFullscreenRecording(
   source: CaptureSource | undefined,
 ): boolean {
-  if (source !== "full-screen") return false;
+  if (source !== "full-screen" && source !== "region") return false;
   if (typeof localStorage === "undefined") return false;
   const saved = localStorage.getItem(NATIVE_FULLSCREEN_RECORDING_FLAG);
   if (saved !== null) {
@@ -906,7 +917,7 @@ async function captureTitleForRecording(params: {
   return buildCaptureTitle({
     appName: context?.appName,
     windowTitle: context?.windowTitle,
-    displaySurface: params.source === "full-screen" ? "monitor" : "window",
+    displaySurface: params.source === "window" ? "window" : "monitor",
     mode: params.mode,
   });
 }
@@ -1265,12 +1276,126 @@ class CountdownCancelledError extends Error {
   }
 }
 
+class RegionSelectionCancelledError extends Error {
+  constructor() {
+    super("Recording region selection cancelled");
+    this.name = "AbortError";
+  }
+}
+
 function isCountdownCancelledError(err: unknown) {
   return (
     err instanceof Error &&
     err.name === "AbortError" &&
     /countdown/i.test(err.message)
   );
+}
+
+function isRegionSelectionCancelledError(err: unknown) {
+  return (
+    err instanceof Error &&
+    err.name === "AbortError" &&
+    /region selection/i.test(err.message)
+  );
+}
+
+function normalizeRegionCaptureRect(value: unknown): RegionCaptureRect | null {
+  if (!value || typeof value !== "object") return null;
+  const rect = value as Partial<RegionCaptureRect>;
+  const x = Number(rect.x);
+  const y = Number(rect.y);
+  const width = Number(rect.width);
+  const height = Number(rect.height);
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null;
+  }
+  return { x, y, width, height };
+}
+
+function waitForRegionSelection(): {
+  promise: Promise<RegionCaptureRect>;
+  cleanup: () => void;
+} {
+  let settled = false;
+  const unlistens: UnlistenFn[] = [];
+
+  const cleanup = () => {
+    settled = true;
+    for (const unlisten of unlistens.splice(0)) {
+      try {
+        unlisten();
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const promise = new Promise<RegionCaptureRect>((resolve, reject) => {
+    const finish = (result: RegionCaptureRect | null) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (result) resolve(result);
+      else reject(new RegionSelectionCancelledError());
+    };
+
+    const track = (listener: Promise<UnlistenFn>) => {
+      listener
+        .then((unlisten) => {
+          if (settled) {
+            try {
+              unlisten();
+            } catch {
+              // ignore
+            }
+            return;
+          }
+          unlistens.push(unlisten);
+        })
+        .catch((err) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(err);
+        });
+    };
+
+    track(
+      listen<unknown>("clips:region-capture-selected", (event) => {
+        const rect = normalizeRegionCaptureRect(event.payload);
+        if (!rect) {
+          finish(null);
+          return;
+        }
+        finish(rect);
+      }),
+    );
+    track(
+      listen("clips:region-capture-cancelled", () => {
+        finish(null);
+      }),
+    );
+  });
+
+  return { promise, cleanup };
+}
+
+async function selectRegionForRecording(): Promise<RegionCaptureRect> {
+  const selection = waitForRegionSelection();
+  try {
+    await invoke("show_region_capture_selector");
+    return await selection.promise;
+  } catch (err) {
+    selection.cleanup();
+    throw err;
+  }
 }
 
 function waitForCountdownEvent(timeoutMs = 4000): Promise<void> {
@@ -1346,7 +1471,27 @@ async function showRegionGuidesForRecording(wantsScreen: boolean) {
   });
 }
 
+// Frame the chosen screen region with a live border so the user can see exactly
+// what's being captured throughout the countdown and recording. The overlay is
+// capture-excluded and draws its stroke outside the captured pixels, so it never
+// lands in the video. Torn down with the rest of the recording chrome on stop.
+async function showRegionRecordBorder(region: RegionCaptureRect | null) {
+  if (!region) return;
+  await invoke("show_region_record_border", {
+    x: region.x,
+    y: region.y,
+    width: region.width,
+    height: region.height,
+  }).catch((err) => {
+    console.warn("[clips-recorder] show_region_record_border failed:", err);
+  });
+}
+
 async function runRecordingCountdown(wantsScreen: boolean) {
+  // The recording-start chime is intentionally NOT played here. It fires from
+  // `audioCue.playBeforeCapture()` at the real capture-start (right before the
+  // recorder/native capture is kicked off) so the beep lines up with the moment
+  // recording actually begins — not one second early on the countdown's "1".
   const countdownEvent = waitForCountdownEvent(COUNTDOWN_EVENT_TIMEOUT_MS);
   await showRegionGuidesForRecording(wantsScreen);
   try {
@@ -1409,6 +1554,7 @@ async function startNativeFullscreenRecording(
   let localCameraStream: MediaStream | null = null;
   let localOwnsCameraStream = false;
   let bubbleCaptureExcluded = false;
+  let captureRegion: RegionCaptureRect | null = null;
   let transcriptionCapture: TranscriptionCapture | null = null;
   // Timer baseline for the toolbar/pill elapsed clock. Stamped the instant
   // native capture goes live (right after the start invoke resolves), not after
@@ -1430,6 +1576,14 @@ async function startNativeFullscreenRecording(
   try {
     await invoke("park_popover_offscreen").catch(() => {});
     emit("clips:popover-visible", false).catch(() => {});
+
+    if (params.source === "region") {
+      captureRegion = await selectRegionForRecording();
+      // Frame the selected area now so it stays visible through the countdown
+      // and the whole recording. hide_recording_chrome / hide_overlays tear it
+      // down on stop, cancel, and the error paths below.
+      await showRegionRecordBorder(captureRegion);
+    }
 
     if (localOnly && localRecordingMode === "separate" && wantsCamera) {
       localCameraStream =
@@ -1467,14 +1621,66 @@ async function startNativeFullscreenRecording(
         ? "[clips-recorder] invoking show_countdown for native local recording"
         : "[clips-recorder] invoking show_countdown + createServerRecording",
     );
+    const wantsSystemAudio = wantsAudio && params.systemAudioOn !== false;
+    // Resolve the mic's REAL device name for the native recorder. WebKit's
+    // deviceId is a salted hash that never equals ScreenCaptureKit's CoreAudio
+    // device UID, so the Rust side can only pin the input by NAME. The stored
+    // label can be stale or empty (device list locked when picked, or a rotated
+    // deviceId salt after an app update) — that's what makes "only Default
+    // works": the hash matches nothing and there's no name to fall back to.
+    // A one-shot getUserMedia gives the exact current device name, the same
+    // string ScreenCaptureKit exposes, so name resolution succeeds. Done before
+    // warming so both phases pin the same input.
+    let micDeviceLabel = params.micLabel || null;
+    if (wantsAudio && params.micId) {
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { exact: params.micId } },
+          video: false,
+        });
+        const liveLabel = probe.getAudioTracks()[0]?.label?.trim();
+        probe.getTracks().forEach((track) => track.stop());
+        if (liveLabel) micDeviceLabel = liveLabel;
+        console.log(
+          `[clips-recorder] mic resolve: id=${params.micId} storedLabel=${JSON.stringify(params.micLabel ?? null)} liveLabel=${JSON.stringify(liveLabel ?? null)} -> using=${JSON.stringify(micDeviceLabel)}`,
+        );
+      } catch (probeErr) {
+        // Probe failed (rotated/stale deviceId, device unplugged, or denied) —
+        // fall back to the stored label, which the Rust side name-matches.
+        console.warn(
+          `[clips-recorder] mic probe failed: id=${params.micId} storedLabel=${JSON.stringify(params.micLabel ?? null)} err=${probeErr instanceof Error ? probeErr.name : String(probeErr)} -> falling back to stored label`,
+        );
+      }
+    }
+    // Audio config shared by the warm + begin phases — built once so the two
+    // phases can't drift.
+    const captureAudioParams = {
+      includeAudio: wantsAudio,
+      captureSystemAudio: wantsSystemAudio,
+      micDeviceId: params.micId || null,
+      micDeviceLabel,
+      captureRegion,
+    };
+    // Warm the mic DURING the countdown. ScreenCaptureKit delivers its first
+    // mic sample ~1s after capture starts; warming now lets `begin` attach the
+    // recording output to an already-live mic, so the clip no longer starts
+    // with a silent second. No-op when there's nothing to pre-warm (mic off /
+    // SCK unavailable) — `begin` then does a normal immediate start.
+    const warmMic = (recordingId: string) =>
+      invoke("native_fullscreen_recording_warm", {
+        recordingId,
+        ...captureAudioParams,
+      }).catch((err) => {
+        console.warn("[clips-recorder] mic warm failed:", err);
+      });
     const countdownPromise = runRecordingCountdown(true);
     if (localOnly) {
-      await countdownPromise;
       id = localFolderName;
+      await Promise.all([countdownPromise, warmMic(id)]);
     } else {
       const captureTitle = await captureTitleForRecording({
         mode: params.mode,
-        source: "full-screen",
+        source: params.source,
       });
       console.time("[clips-recorder] createServerRecording duration");
       const recordingPromise = createServerRecording(
@@ -1485,9 +1691,16 @@ async function startNativeFullscreenRecording(
       ).finally(() => {
         console.timeEnd("[clips-recorder] createServerRecording duration");
       });
-      let createRes: Awaited<ReturnType<typeof createServerRecording>>;
+      // The recording id usually lands well before the countdown ends — warm
+      // the mic as soon as it does so the warm-up overlaps the 3-2-1.
+      const warmAndId = (async () => {
+        const createRes = await recordingPromise;
+        await warmMic(createRes.id);
+        return createRes.id;
+      })();
       try {
-        [, createRes] = await Promise.all([countdownPromise, recordingPromise]);
+        const [, warmedId] = await Promise.all([countdownPromise, warmAndId]);
+        id = warmedId;
       } catch (err) {
         abortCreatedRecordingOnCountdownCancel(
           err,
@@ -1496,17 +1709,14 @@ async function startNativeFullscreenRecording(
         );
         throw err;
       }
-      id = createRes.id;
     }
 
     await audioCue.playBeforeCapture();
-    const wantsSystemAudio = wantsAudio && params.systemAudioOn !== false;
-    await invoke("native_fullscreen_recording_start", {
+    // Phase 2: attach the recording output now that the mic is warm (or do a
+    // normal immediate start if warming was skipped/failed).
+    await invoke("native_fullscreen_recording_begin", {
       recordingId: id,
-      includeAudio: wantsAudio,
-      captureSystemAudio: wantsSystemAudio,
-      micDeviceId: params.micId || null,
-      micDeviceLabel: params.micLabel || null,
+      ...captureAudioParams,
     });
     // Capture is now live — stamp the timer baseline before any further awaits
     // so the toolbar clock and toolbar-enable line up with the real start.
@@ -1514,6 +1724,10 @@ async function startNativeFullscreenRecording(
     localCameraExport?.start(2_000);
   } catch (err) {
     await localCameraExport?.cancel().catch(() => {});
+    // Tear down any capture started by the warm phase — on a countdown cancel
+    // (or a `begin` failure) the SCStream is already running with the mic live,
+    // and without this it would keep capturing after the aborted start.
+    await invoke("native_fullscreen_recording_cancel").catch(() => {});
     if (bubbleCaptureExcluded) {
       await invoke("set_bubble_capture_excluded", {
         excluded: false,
@@ -1623,6 +1837,19 @@ async function startNativeFullscreenRecording(
         }
 
         let uploadResult: NativeFullscreenUploadResult | null = null;
+        const viewUrl = `/r/${id}`;
+        const uploadPromise = invoke<NativeFullscreenUploadResult>(
+          "native_fullscreen_recording_stop_and_upload",
+          {
+            serverUrl: params.serverUrl,
+            recordingId: id,
+            authToken: params.authToken ?? "",
+            cookie: params.cookie ?? "",
+            hasAudio: wantsAudio,
+            hasCamera: wantsCamera,
+          },
+        );
+        uploadPromise.catch(() => {});
         try {
           const capturedTranscript = await transcriptionCapture
             ?.stop()
@@ -1661,19 +1888,8 @@ async function startNativeFullscreenRecording(
             );
           });
 
-          const viewUrl = `/r/${id}`;
           try {
-            uploadResult = await invoke<NativeFullscreenUploadResult>(
-              "native_fullscreen_recording_stop_and_upload",
-              {
-                serverUrl: params.serverUrl,
-                recordingId: id,
-                authToken: params.authToken ?? "",
-                cookie: params.cookie ?? "",
-                hasAudio: wantsAudio,
-                hasCamera: wantsCamera,
-              },
-            );
+            uploadResult = await uploadPromise;
           } catch (err) {
             await abortRecordingUpload(
               params.serverUrl,
@@ -2734,6 +2950,11 @@ async function startRecordingInner(
         );
       }
       await thumbnailUploadPromise;
+
+      if (popoverOwnsCamera) {
+        console.log("[clips-recorder] releasing popover camera");
+        emit("clips:release-camera").catch(() => {});
+      }
 
       const videoSettings = uploadPrimaryVideo.stream
         .getVideoTracks()[0]

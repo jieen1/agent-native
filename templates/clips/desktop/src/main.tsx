@@ -12,6 +12,7 @@ import { MeetingNub } from "./overlays/meeting-nub";
 import { FlowBar } from "./overlays/flow-bar";
 import { RecordingPill } from "./overlays/recording-pill";
 import { RegionGuideEditor, RegionGuides } from "./overlays/region-guides";
+import { RegionRecordBorder } from "./overlays/region-record-border";
 import "./styles.css";
 
 /**
@@ -53,6 +54,10 @@ function pickRoute(route: string): React.ReactElement {
       return <RegionGuides />;
     case "region-guides-editor":
       return <RegionGuideEditor />;
+    case "region-capture-selector":
+      return <RegionGuideEditor mode="capture" />;
+    case "region-record-border":
+      return <RegionRecordBorder />;
     default:
       return <App />;
   }

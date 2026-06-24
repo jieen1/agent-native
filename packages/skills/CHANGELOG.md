@@ -1,5 +1,181 @@
 # @agent-native/skills
 
+## 0.2.64
+
+### Patch Changes
+
+- Updated dependencies [9a984f2]
+- Updated dependencies [9a984f2]
+- Updated dependencies [9a984f2]
+- Updated dependencies [9a984f2]
+  - @agent-native/core@0.72.0
+
+## 0.2.63
+
+### Patch Changes
+
+- Updated dependencies [38266fc]
+- Updated dependencies [38266fc]
+- Updated dependencies [38266fc]
+  - @agent-native/core@0.71.0
+
+## 0.2.62
+
+### Patch Changes
+
+- Updated dependencies [3c80603]
+  - @agent-native/core@0.70.3
+
+## 0.2.61
+
+### Patch Changes
+
+- Updated dependencies [2d36525]
+  - @agent-native/core@0.70.2
+
+## 0.2.60
+
+### Patch Changes
+
+- Updated dependencies [8003c56]
+- Updated dependencies [8003c56]
+- Updated dependencies [8003c56]
+- Updated dependencies [8003c56]
+- Updated dependencies [8003c56]
+- Updated dependencies [8003c56]
+- Updated dependencies [8003c56]
+- Updated dependencies [8003c56]
+- Updated dependencies [8003c56]
+  - @agent-native/core@0.70.1
+
+## 0.2.59
+
+### Patch Changes
+
+- Updated dependencies [b35c8cb]
+- Updated dependencies [b35c8cb]
+- Updated dependencies [b35c8cb]
+- Updated dependencies [b35c8cb]
+- Updated dependencies [b35c8cb]
+- Updated dependencies [b35c8cb]
+- Updated dependencies [b35c8cb]
+- Updated dependencies [b35c8cb]
+  - @agent-native/core@0.70.0
+
+## 0.2.58
+
+### Patch Changes
+
+- Updated dependencies [530de18]
+  - @agent-native/core@0.69.0
+
+## 0.2.57
+
+### Patch Changes
+
+- Updated dependencies [9db3c12]
+  - @agent-native/core@0.68.3
+
+## 0.2.56
+
+### Patch Changes
+
+- Updated dependencies [feaf633]
+- Updated dependencies [feaf633]
+- Updated dependencies [feaf633]
+- Updated dependencies [feaf633]
+- Updated dependencies [feaf633]
+  - @agent-native/core@0.68.2
+
+## 0.2.55
+
+### Patch Changes
+
+- Updated dependencies [48356d7]
+- Updated dependencies [48356d7]
+- Updated dependencies [48356d7]
+  - @agent-native/core@0.68.1
+
+## 0.2.54
+
+### Patch Changes
+
+- a623ab6: Refresh bundled workspace skill guidance for source-search and runtime/dev skill scope.
+- Updated dependencies [a623ab6]
+- Updated dependencies [a623ab6]
+- Updated dependencies [a623ab6]
+- Updated dependencies [a623ab6]
+- Updated dependencies [a623ab6]
+- Updated dependencies [a623ab6]
+- Updated dependencies [a623ab6]
+  - @agent-native/core@0.68.0
+
+## 0.2.53
+
+### Patch Changes
+
+- Updated dependencies [7ceb907]
+  - @agent-native/core@0.67.1
+
+## 0.2.52
+
+### Patch Changes
+
+- Updated dependencies [1b61a90]
+  - @agent-native/core@0.67.0
+
+## 0.2.51
+
+### Patch Changes
+
+- Updated dependencies [11a28e7]
+  - @agent-native/core@0.66.9
+
+## 0.2.50
+
+### Patch Changes
+
+- f514c12: Add the Content app-backed skill and a `skills add content --mode local-files`
+  install path that writes Content local-file workspace defaults to
+  `agent-native.json`.
+- Updated dependencies [f514c12]
+- Updated dependencies [f514c12]
+- Updated dependencies [f514c12]
+- Updated dependencies [f514c12]
+- Updated dependencies [f514c12]
+  - @agent-native/core@0.66.8
+
+## 0.2.49
+
+### Patch Changes
+
+- Updated dependencies [3d7df7d]
+- Updated dependencies [3d7df7d]
+  - @agent-native/core@0.66.7
+
+## 0.2.48
+
+### Patch Changes
+
+- Updated dependencies [337bcc5]
+- Updated dependencies [337bcc5]
+- Updated dependencies [337bcc5]
+  - @agent-native/core@0.66.6
+
+## 0.2.47
+
+### Patch Changes
+
+- Updated dependencies [c650d44]
+  - @agent-native/core@0.66.5
+
+## 0.2.46
+
+### Patch Changes
+
+- Updated dependencies [54b2c33]
+  - @agent-native/core@0.66.4
+
 ## 0.2.45
 
 ### Patch Changes

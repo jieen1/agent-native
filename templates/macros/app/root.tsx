@@ -18,6 +18,7 @@ import { I18nProvider } from "locale-kit";
 import { TAB_ID } from "@/lib/tab-id";
 import { AppLayout } from "@/components/layout/AppLayout";
 import type { LinksFunction } from "react-router";
+import changelog from "../CHANGELOG.md?raw";
 import stylesheet from "./global.css?url";
 
 configureTracking({
@@ -129,7 +130,12 @@ export default function Root() {
           `locale` cookie (SSR-first-paint via a root loader is refined later). */}
       <I18nProvider>
         <DbSyncSetup />
-        <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
+        <CommandMenu
+          open={cmdkOpen}
+          onOpenChange={setCmdkOpen}
+          changelog={changelog}
+          changelogKey="macros"
+        >
           <CommandMenu.Group heading="Actions">
             <CommandMenu.Item onSelect={() => {}}>Search</CommandMenu.Item>
           </CommandMenu.Group>
