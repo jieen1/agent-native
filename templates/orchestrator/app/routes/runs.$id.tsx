@@ -33,7 +33,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Run` }];
+  return [{ title: `${APP_TITLE} — 运行详情` }];
 }
 
 // Work-item / Run console (FRONTEND §4 / §6 run overlay). The live DAG is the
