@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "orchestrator": {
+      "type": "http",
+      "url": "http://localhost:3002/_agent-native/mcp",
+      "headers": {
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MTMzNDM5OThAcXEuY29tIiwiaWF0IjoxNzgyMzgyODU1LCJleHAiOjE3ODI0NjkyNTUsImNhdGFsb2dfc2NvcGUiOiJmdWxsIn0._2RzeKkO6mYt7zeg9ijKw-DaMa397loNJ1IKVw9xs8s",
+        "X-Agent-Native-Owner-Email": "413343998@qq.com"
+      }
+    }
+  }
+}
