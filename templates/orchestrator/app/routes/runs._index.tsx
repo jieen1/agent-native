@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Runs` }];
+  return [{ title: `${APP_TITLE} — 运行` }];
 }
 
 const RUN_STATUSES = [
