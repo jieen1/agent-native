@@ -17,7 +17,7 @@ import { EmptyState } from "@/components/board/EmptyState";
 import { ProjectDialog } from "@/components/dialogs/ProjectDialog";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Projects` }];
+  return [{ title: `${APP_TITLE} — 项目` }];
 }
 
 // Projects list (FRONTEND §3). Grid of project cards: name, key, repo-linked
