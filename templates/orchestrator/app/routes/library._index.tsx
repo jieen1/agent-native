@@ -31,7 +31,7 @@ import { ConfirmDialog } from "@/components/board/ConfirmDialog";
 import { NodeDefDialog } from "@/components/dialogs/NodeDefDialog";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Library` }];
+  return [{ title: `${APP_TITLE} — 节点库` }];
 }
 
 // Node library (FRONTEND §7). list-node-defs in a DataTable: key, kind
