@@ -2,6 +2,11 @@
 //
 // Tests CAS, 5 mutation types, cycle detection, and conflict handling.
 // All DB queries and dag-validator are mocked.
+//
+// G11: Added tests for running/done rejection and ready demotion in
+//      modify_node and modify_loop.
+// G15: Mock now supports reads inside the transaction (tx.select) and
+//      .returning() on update to simulate the CAS row-count assertion.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -13,6 +18,10 @@ const hoisted = vi.hoisted(() => ({
   detectCycleResult: null as string | null,
   insertedPatches: [] as Array<Record<string, unknown>>,
   updatedRuns: [] as Array<Record<string, unknown>>,
+  updatedNodes: [] as Array<Record<string, unknown>>,
+  // Controls whether the CAS UPDATE .returning() simulates a concurrent write:
+  // true = another writer raced us (returns empty array)
+  simulateCasRace: false,
 }));
 
 vi.mock("./dag-validator.js", () => ({
@@ -59,6 +68,16 @@ interface MockNodeRow {
   orgId: string | null;
 }
 
+/**
+ * Creates a mock Drizzle DB that supports the query patterns used by V3Patcher,
+ * including reads and writes inside a transaction.
+ *
+ * G15: The transaction callback receives a `tx` that has:
+ *   - tx.select() — reads from the same in-memory store as db.select()
+ *   - tx.update().set().where().returning() — asserts CAS via returning()
+ *   - tx.update().set().where() (no returning) — node status demotion
+ *   - tx.insert().values() — patch record insertion
+ */
 function createMockDb(
   initialRun: MockRunRow,
   initialNodes: MockNodeRow[],
@@ -68,58 +87,119 @@ function createMockDb(
   runs.set(initialRun.id, { ...initialRun });
   const nodes: MockNodeRow[] = initialNodes.map((n) => ({ ...n }));
 
-  // Simulate eq filter: if the test wants "not found" for a specific runId
-  let notFoundRunId: string | null = opts.notFoundForRunId ?? null;
+  const notFoundRunId: string | null = opts.notFoundForRunId ?? null;
 
-  // Use selectSeq to distinguish first select (run) from second (nodes)
-  let selectSeq = 0;
-
-  const db = {
-    select: () => ({
-      from: (_table: unknown) => ({
+  // Helper: build a select chain that resolves with the right data.
+  // We distinguish tables by checking the columns they expose.  In the patcher:
+  //   - v3Runs has `dagVersion`; first select-from-v3Runs returns run rows
+  //   - v3Nodes has `nodeIdInDag`; select-from-v3Nodes returns node rows
+  // Both the outer `db` and the inner `tx` use this same builder.
+  function makeSelectChain() {
+    return {
+      from: (table: unknown) => ({
         where: async (_filter: unknown) => {
-          selectSeq++;
-          // We disambiguate by checking the v3Nodes table has nodeIdInDag
-          const isNodesTable = (arg: any) => arg?.nodeIdInDag !== undefined;
-          if (isNodesTable(_table)) {
-            return nodes;
+          // Distinguish by duck-typing the table object.
+          // v3Nodes schema object exposes `nodeIdInDag`; v3Runs exposes `dagVersion`.
+          const isNodesTable =
+            table !== null &&
+            typeof table === "object" &&
+            "nodeIdInDag" in (table as object);
+
+          if (isNodesTable) {
+            return nodes.map((n) => ({ ...n }));
           }
-          // First select is for the run — check if we should simulate not-found
+
+          // It's the runs table
           if (notFoundRunId) return [];
           return Array.from(runs.values());
         },
       }),
-    }),
-    transaction: async (fn: (tx: any) => Promise<void>) => {
+    };
+  }
+
+  // Helper: build the update chain.
+  // Supports two forms used by the patcher:
+  //   a) .update(v3Nodes).set(...).where(...)          — node demotion (no returning)
+  //   b) .update(v3Runs).set(...).where(...).returning() — CAS assertion
+  function makeUpdateChain() {
+    return (table: unknown) => ({
+      set: (data: Record<string, unknown>) => ({
+        where: (_filter: unknown) => {
+          // Detect whether this is a nodes update or a runs update.
+          const isNodesTable =
+            table !== null &&
+            typeof table === "object" &&
+            "nodeIdInDag" in (table as object);
+
+          if (isNodesTable) {
+            // Node status demotion — record it but don't assert rowcount.
+            hoisted.updatedNodes.push(data);
+            // Apply to in-memory node list.
+            if (data.status && typeof data.status === "string") {
+              for (const n of nodes) {
+                if (n.status === "ready") {
+                  n.status = data.status as string;
+                }
+              }
+            }
+            return {
+              // No .returning() needed for node updates; return a thenable.
+              then: (resolve: (v: unknown) => void) => resolve({}),
+            };
+          }
+
+          // Runs update: record + support .returning()
+          return {
+            returning: async (_col?: unknown) => {
+              if (hoisted.simulateCasRace) {
+                // Another writer raced us — return empty array (0 rows updated).
+                return [];
+              }
+              hoisted.updatedRuns.push(data);
+              // Apply the update to the in-memory run.
+              for (const [, run] of runs) {
+                if (data.dag) run.dag = data.dag;
+                if (data.dagVersion) run.dagVersion = data.dagVersion as number;
+              }
+              return [{ id: initialRun.id }];
+            },
+            // Also support awaiting without .returning() (used nowhere in patcher
+            // after G15, but kept for safety).
+            then: (resolve: (v: unknown) => void) => resolve({}),
+          };
+        },
+      }),
+    });
+  }
+
+  const db = {
+    select: makeSelectChain,
+    transaction: async (fn: (tx: any) => Promise<unknown>) => {
       const tx = {
+        select: makeSelectChain,
+        update: makeUpdateChain(),
         insert: (_table: unknown) => ({
           values: async (row: Record<string, unknown>) => {
             hoisted.insertedPatches.push(row);
             return {};
           },
         }),
-        update: (_table: unknown) => ({
-          set: (data: Record<string, unknown>) => ({
-            where: async (_filter: unknown) => {
-              hoisted.updatedRuns.push(data);
-              // Apply the update to the in-memory run
-              for (const [, run] of runs) {
-                if (data.dag) run.dag = data.dag;
-                if (data.dagVersion) run.dagVersion = data.dagVersion as number;
-              }
-              return {};
-            },
-          }),
-        }),
       };
-      await fn(tx);
+      return fn(tx);
     },
   } as unknown as PostgresJsDatabase;
 
-  return { db, runs, nodes, reset: () => {
-    hoisted.insertedPatches.length = 0;
-    hoisted.updatedRuns.length = 0;
-  }};
+  return {
+    db,
+    runs,
+    nodes,
+    reset: () => {
+      hoisted.insertedPatches.length = 0;
+      hoisted.updatedRuns.length = 0;
+      hoisted.updatedNodes.length = 0;
+      hoisted.simulateCasRace = false;
+    },
+  };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -177,6 +257,8 @@ describe("V3Patcher", () => {
     hoisted.detectCycleResult = null;
     hoisted.insertedPatches.length = 0;
     hoisted.updatedRuns.length = 0;
+    hoisted.updatedNodes.length = 0;
+    hoisted.simulateCasRace = false;
   });
 
   async function getPatcher() {
@@ -250,6 +332,36 @@ describe("V3Patcher", () => {
         expect(result.error).toContain("not found");
       }
     });
+
+    it("G15: race between CAS read and UPDATE returns version_conflict", async () => {
+      // Simulates: another writer bumped dag_version between our read (CAS ok)
+      // and our UPDATE.  The .returning() returns [] → version_conflict.
+      const V3Patcher = await getPatcher();
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
+        makeNode(),
+      ]);
+
+      hoisted.simulateCasRace = true;
+
+      const patcher = new V3Patcher(db);
+      const result = await patcher.applyPatch({
+        runId: "run-1",
+        dagVersion: 1,
+        mutations: [
+          {
+            kind: "modify_node",
+            nodeIdInDag: "a",
+            prompt: "New prompt",
+          },
+        ],
+        appliedBy: "agent",
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toBe("version_conflict");
+      }
+    });
   });
 
   describe("modify_node mutation", () => {
@@ -269,6 +381,30 @@ describe("V3Patcher", () => {
             nodeIdInDag: "a",
             prompt: "New prompt",
             model_override: "claude-opus-4-5",
+          },
+        ],
+        appliedBy: "agent",
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it("modify_node updates guard and deps (G11 extension)", async () => {
+      const V3Patcher = await getPatcher();
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
+        makeNode(),
+      ]);
+
+      const patcher = new V3Patcher(db);
+      const result = await patcher.applyPatch({
+        runId: "run-1",
+        dagVersion: 1,
+        mutations: [
+          {
+            kind: "modify_node",
+            nodeIdInDag: "a",
+            guard: "inputs.dryRun != true",
+            deps: ["b"],
           },
         ],
         appliedBy: "agent",
@@ -334,6 +470,89 @@ describe("V3Patcher", () => {
       if (!result.success) {
         expect(result.error).toContain("not found");
       }
+    });
+
+    // G11: running and done nodes are behind the frontier — immutable
+    it("G11: modify_node rejects node with status 'running'", async () => {
+      const V3Patcher = await getPatcher();
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
+        makeNode({ status: "running" }),
+      ]);
+
+      const patcher = new V3Patcher(db);
+      const result = await patcher.applyPatch({
+        runId: "run-1",
+        dagVersion: 1,
+        mutations: [
+          {
+            kind: "modify_node",
+            nodeIdInDag: "a",
+            prompt: "Too late",
+          },
+        ],
+        appliedBy: "agent",
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toBe("node_not_patchable");
+        expect(result.nodeId).toBe("a");
+        expect(result.nodeStatus).toBe("running");
+      }
+    });
+
+    it("G11: modify_node rejects node with status 'done'", async () => {
+      const V3Patcher = await getPatcher();
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
+        makeNode({ status: "done" }),
+      ]);
+
+      const patcher = new V3Patcher(db);
+      const result = await patcher.applyPatch({
+        runId: "run-1",
+        dagVersion: 1,
+        mutations: [
+          {
+            kind: "modify_node",
+            nodeIdInDag: "a",
+            prompt: "Already done",
+          },
+        ],
+        appliedBy: "agent",
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toBe("node_not_patchable");
+        expect(result.nodeId).toBe("a");
+        expect(result.nodeStatus).toBe("done");
+      }
+    });
+
+    it("G11: modify_node on a 'ready' node succeeds and demotes it to pending", async () => {
+      const V3Patcher = await getPatcher();
+      const { db, nodes } = createMockDb(makeRun({ dagVersion: 1 }), [
+        makeNode({ status: "ready" }),
+      ]);
+
+      const patcher = new V3Patcher(db);
+      const result = await patcher.applyPatch({
+        runId: "run-1",
+        dagVersion: 1,
+        mutations: [
+          {
+            kind: "modify_node",
+            nodeIdInDag: "a",
+            prompt: "Updated before dispatch",
+          },
+        ],
+        appliedBy: "agent",
+      });
+
+      expect(result.success).toBe(true);
+      // The mock applies the demotion to the in-memory node list.
+      const demotedNode = nodes.find((n) => n.nodeIdInDag === "a");
+      expect(demotedNode?.status).toBe("pending");
     });
   });
 
@@ -558,6 +777,130 @@ describe("V3Patcher", () => {
       if (!result.success) {
         expect(result.error).toContain("not a loop node");
       }
+    });
+
+    // G11: loop control node behind the frontier is immutable
+    it("G11: modify_loop rejects loop node with status 'running'", async () => {
+      const V3Patcher = await getPatcher();
+      const { db } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              {
+                id: "loop1",
+                type: "loop",
+                body: "a",
+                deps: [],
+                maxIterations: 3,
+                until: "false",
+              },
+            ],
+          },
+        }),
+        [makeNode({ nodeIdInDag: "loop1", type: "loop", id: "node-loop", status: "running" })],
+      );
+
+      const patcher = new V3Patcher(db);
+      const result = await patcher.applyPatch({
+        runId: "run-1",
+        dagVersion: 1,
+        mutations: [
+          {
+            kind: "modify_loop",
+            nodeIdInDag: "loop1",
+            maxIterations: 10,
+          },
+        ],
+        appliedBy: "agent",
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toBe("node_not_patchable");
+        expect(result.nodeId).toBe("loop1");
+        expect(result.nodeStatus).toBe("running");
+      }
+    });
+
+    it("G11: modify_loop rejects loop node with status 'done'", async () => {
+      const V3Patcher = await getPatcher();
+      const { db } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              {
+                id: "loop1",
+                type: "loop",
+                body: "a",
+                deps: [],
+                maxIterations: 3,
+                until: "false",
+              },
+            ],
+          },
+        }),
+        [makeNode({ nodeIdInDag: "loop1", type: "loop", id: "node-loop", status: "done" })],
+      );
+
+      const patcher = new V3Patcher(db);
+      const result = await patcher.applyPatch({
+        runId: "run-1",
+        dagVersion: 1,
+        mutations: [
+          {
+            kind: "modify_loop",
+            nodeIdInDag: "loop1",
+            until: "inputs.done",
+          },
+        ],
+        appliedBy: "agent",
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toBe("node_not_patchable");
+        expect(result.nodeStatus).toBe("done");
+      }
+    });
+
+    it("G11: modify_loop on a 'ready' loop node succeeds and demotes to pending", async () => {
+      const V3Patcher = await getPatcher();
+      const { db, nodes } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              {
+                id: "loop1",
+                type: "loop",
+                body: "a",
+                deps: [],
+                maxIterations: 3,
+                until: "false",
+              },
+            ],
+          },
+        }),
+        [makeNode({ nodeIdInDag: "loop1", type: "loop", id: "node-loop", status: "ready" })],
+      );
+
+      const patcher = new V3Patcher(db);
+      const result = await patcher.applyPatch({
+        runId: "run-1",
+        dagVersion: 1,
+        mutations: [
+          {
+            kind: "modify_loop",
+            nodeIdInDag: "loop1",
+            maxIterations: 5,
+          },
+        ],
+        appliedBy: "agent",
+      });
+
+      expect(result.success).toBe(true);
+      // The loop node should have been demoted to pending.
+      const demotedNode = nodes.find((n) => n.nodeIdInDag === "loop1");
+      expect(demotedNode?.status).toBe("pending");
     });
   });
 

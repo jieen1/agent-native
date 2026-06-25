@@ -27,7 +27,14 @@ import { DEFAULT_WORKDIR } from "./workdir.js";
 // consumers don't pull in this heavy engine-loop just for the constant.
 export { DEFAULT_WORKDIR };
 
-/** Build the user-turn instruction from the node prompt + resolved deps/item. */
+/** Build the user-turn instruction from the node prompt + resolved deps/item.
+ *
+ * DESIGN §6.5 / I7: the backend does NOT auto-dump deps into the prompt.
+ * The only data that crosses into the spawn is the rendered prompt string
+ * (already interpolated by the dispatcher via renderTemplate). We only
+ * append the `item` value for fanout children (that IS part of the channel
+ * contract — it is the per-item slot the author writes `{{item}}` for).
+ */
 export function buildPrompt(ctx: RuntimeExecCtx): string {
   const lines: string[] = [];
   lines.push(ctx.node.prompt ?? ctx.node.title ?? "Complete the task.");
@@ -35,11 +42,11 @@ export function buildPrompt(ctx: RuntimeExecCtx): string {
     lines.push("");
     lines.push(`Input item:\n${safeJson(ctx.item)}`);
   }
-  const depKeys = Object.keys(ctx.deps);
-  if (depKeys.length > 0) {
-    lines.push("");
-    lines.push(`Dependency outputs:\n${safeJson(ctx.deps)}`);
-  }
+  // NOTE: deps are intentionally NOT appended here (I7 / DESIGN §6.5).
+  // Authors inject upstream outputs via {{deps.X.output.Y}} in the node
+  // prompt; the dispatcher resolves those references before calling the
+  // executor. Appending a raw JSON dump of deps would violate the channel
+  // contract and is explicitly listed as a non-goal.
   lines.push("");
   lines.push(
     `You are acting inside an isolated workspace at ${

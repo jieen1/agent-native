@@ -102,13 +102,13 @@ export async function listExpiredRuns(
   // Gather counts per run.
   const nodeRows = await db.execute(sql.raw(`
     SELECT run_id, count(*)::int AS c FROM v3_nodes
-    WHERE run_id = ANY(${ids})
+    WHERE run_id = ANY('{${ids.join(",")}}'::text[])
     GROUP BY run_id
   `));
 
   const eventRows = await db.execute(sql.raw(`
     SELECT run_id, count(*)::int AS c FROM v3_events
-    WHERE run_id = ANY(${ids})
+    WHERE run_id = ANY('{${ids.join(",")}}'::text[])
     GROUP BY run_id
   `));
 
@@ -117,7 +117,7 @@ export async function listExpiredRuns(
     FROM v3_artifacts a
     JOIN v3_spawns sp ON sp.id = a.spawn_id
     JOIN v3_nodes nr ON nr.id = sp.node_id
-    WHERE nr.run_id = ANY(${ids})
+    WHERE nr.run_id = ANY('{${ids.join(",")}}'::text[])
     GROUP BY nr.run_id
   `));
 

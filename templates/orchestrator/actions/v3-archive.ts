@@ -92,11 +92,11 @@ export const runArchive = defineAction({
       runId: args.runId,
       archived: true,
       purged: true,
-      deletedArtifacts: artifactResult?.rowCount ?? 0,
-      deletedSpawns: spawnResult?.rowCount ?? 0,
-      deletedNodes: nodeResult?.rowCount ?? 0,
-      deletedEvents: eventResult?.rowCount ?? 0,
-      deletedPatches: patchResult?.rowCount ?? 0,
+      deletedArtifacts: artifactResult?.count ?? 0,
+      deletedSpawns: spawnResult?.count ?? 0,
+      deletedNodes: nodeResult?.count ?? 0,
+      deletedEvents: eventResult?.count ?? 0,
+      deletedPatches: patchResult?.count ?? 0,
     };
   },
 });

@@ -4,10 +4,33 @@
 // Each tick acquires a PG advisory lock, reads current state, dispatches
 // ready nodes, cascades failures, and writes events.  Pause / resume /
 // cancel are first-class operations.
+//
+// Gap fixes in this revision:
+//   G10 — guard evaluation + cascade-skip downstream all-skipped deps (fixpoint)
+//   G12 — parallel_over: eval items_from as expression from real dep artifact;
+//          freeze item set in event; inject item+fanout_index per child;
+//          copy inline/referenced body onto child.
+//          loop: sequential body[] ids per iteration; real artifact in context;
+//          until/previous_iteration/history use real content; key by iteration.
+//   G16 — atomic status-conditioned UPDATE (WHERE status IN (pending,ready));
+//          only dispatch when rowcount == 1.
+//   G17 — fire-and-track spawn; re-trigger tick on completion; running is
+//          observable across ticks.
+//   G18 — global pool capacity + per-parallel_over max_concurrency; ordered
+//          by (run.priority desc, queued_at asc).
+//   G19 — node.retry (max/on/backoff) with exponential backoff on
+//          transient/schema-violation before failing.
+//   G20 — honor on_failure:"continue" before declaring run failed.
 
 import { eq, and, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { v3Runs, v3Nodes, v3Events } from "../db/v3-schema.js";
+import {
+  v3Runs,
+  v3Nodes,
+  v3Events,
+  v3Artifacts,
+  brainThreads,
+} from "../db/v3-schema.js";
 import { v3DbExec } from "../db/v3.js";
 import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import { evaluateExpression } from "./expression-parser.js";
@@ -19,20 +42,39 @@ type RunRow = InferSelectModel<typeof v3Runs>;
 type NodeRow = InferSelectModel<typeof v3Nodes>;
 type EventInsert = InferInsertModel<typeof v3Events>;
 
+/** Retry policy for a node (§12, G19). */
+export interface V3RetryPolicy {
+  max?: number;
+  on?: string[];
+  backoff?: "exponential" | "linear" | "fixed";
+  initial_ms?: number;
+  max_ms?: number;
+}
+
 export interface V3NodeDag {
   id: string;
   type: "agent" | "parallel_over" | "loop" | "human_gate";
   deps?: string[];
-  body?: string;
+  /** G12: body may be a node-id string, an array of node-id strings (loop), or an inline agent node. */
+  body?: string | string[] | Record<string, unknown>;
   items_from?: string;
+  max_concurrency?: number;
   until?: string;
   maxIterations?: number;
+  max_iterations?: number;
+  /** G10: condition expression; false → skip + cascade */
+  guard?: string;
+  /** G19: retry policy */
+  retry?: V3RetryPolicy;
+  /** G20: on_failure:"continue" allows run to complete despite this node failing */
+  on_failure?: "continue" | "fail";
   [key: string]: unknown;
 }
 
 export interface V3Dispatcher {
   /**
    * Spawn an agent node.  Returns the spawn id written to v3_spawns.
+   * Interface is unchanged — callers may not add parameters.
    */
   spawn(node: NodeRow, runId: string): Promise<string>;
 }
@@ -40,6 +82,9 @@ export interface V3Dispatcher {
 // Terminal node statuses (no further work possible)
 const TERMINAL_STATUSES = new Set(["done", "failed", "skipped"]);
 const RESOLVED_STATUSES = new Set(["done", "skipped"]);
+
+// G18: default pool capacity; overridable via constructor option.
+const DEFAULT_POOL_CAPACITY = 8;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,15 +109,41 @@ function uid(): string {
   return crypto.randomUUID();
 }
 
+/** Compute exponential backoff delay in ms. */
+function computeBackoffMs(
+  attempt: number,
+  policy: V3RetryPolicy,
+): number {
+  const initial = policy.initial_ms ?? 1000;
+  const maxMs = policy.max_ms ?? 30_000;
+  const backoff = policy.backoff ?? "exponential";
+  let delay: number;
+  if (backoff === "exponential") {
+    delay = initial * Math.pow(2, attempt - 1);
+  } else if (backoff === "linear") {
+    delay = initial * attempt;
+  } else {
+    delay = initial;
+  }
+  return Math.min(delay, maxMs);
+}
+
 // ── Reconciler ───────────────────────────────────────────────────────────────
 
 export class V3Reconciler {
   private readonly db: PostgresJsDatabase;
   private readonly dispatcher: V3Dispatcher;
+  /** G18: global spawn pool capacity */
+  private readonly poolCapacity: number;
 
-  constructor(db: PostgresJsDatabase, dispatcher: V3Dispatcher) {
+  constructor(
+    db: PostgresJsDatabase,
+    dispatcher: V3Dispatcher,
+    poolCapacity: number = DEFAULT_POOL_CAPACITY,
+  ) {
     this.db = db;
     this.dispatcher = dispatcher;
+    this.poolCapacity = poolCapacity;
   }
 
   // ─── tick ───────────────────────────────────────────────────────────────
@@ -84,10 +155,10 @@ export class V3Reconciler {
    *  0. Acquire PG advisory lock (skip if another tick owns it)
    *  1. Read run — skip if not running
    *  2. Read all nodes
-   *  3. Cascade-skip downstream of any failed node → mark run failed
-   *  4. Find ready nodes (all deps resolved/skipped)
-   *  5. Dispatch ready nodes by type
-   *  6. Check run completion
+   *  3. G10: evaluate guard expressions; cascade-skip downstream when deps all-skipped
+   *  4. Find ready nodes (all deps resolved/skipped) + G18 capacity check
+   *  5. Dispatch ready nodes by type (G16 atomic CAS, G17 fire-and-track)
+   *  6. Check run completion (G20 on_failure:continue)
    *  7. All mutations are recorded as v3_events
    */
   public async tick(runId: string): Promise<void> {
@@ -154,24 +225,42 @@ export class V3Reconciler {
 
     if (nodes.length === 0) {
       // Empty DAG — mark complete immediately
-      await this.finalizeRun(runId, "done");
+      await this.finalizeRun(runId, "done", []);
       return;
     }
 
     // Build adjacency helpers (in-memory from DAG stored on run/nodes)
     const dag = this.loadDag(run, nodes);
 
-    // 3. Detect failed nodes → cascade skip all downstream
-    const failedNodes = nodes.filter((n) => n.status === "failed");
-    if (failedNodes.length > 0) {
-      // Cascade: skip all pending nodes whose upstream has a failed ancestor
-      const failedIds = new Set(failedNodes.map((n) => n.nodeIdInDag));
+    // ── G10: Evaluate guard expressions + cascade-skip ────────────────────
+    // Build interpolation context from run inputs (dep artifacts require DB — use
+    // artifact cache from the event store here, populated lazily per dep).
+    await this.evaluateGuardsAndSkip(runId, run, nodes, dag);
 
-      // Find all pending nodes that are downstream of a failed node
-      const toSkip = nodes.filter(
+    // Re-read nodes after guard skip mutations
+    const nodesAfterGuards = await this.db
+      .select()
+      .from(v3Nodes)
+      .where(eq(v3Nodes.runId, runId));
+
+    // 3. Detect failed nodes (non-continue) → cascade skip all downstream
+    const dagNodeMap = new Map(dag.map((d) => [d.id, d]));
+    const failedNodes = nodesAfterGuards.filter((n) => n.status === "failed");
+    const failedCascadeIds = new Set(
+      failedNodes
+        .filter((n) => {
+          const dagNode = dagNodeMap.get(n.nodeIdInDag);
+          return (dagNode?.on_failure ?? "fail") !== "continue";
+        })
+        .map((n) => n.nodeIdInDag),
+    );
+
+    if (failedCascadeIds.size > 0) {
+      // Cascade: skip all pending nodes whose upstream has a failed ancestor
+      const toSkip = nodesAfterGuards.filter(
         (n) =>
           n.status === "pending" &&
-          this.hasFailedAncestor(n.nodeIdInDag, dag, failedIds, new Set()),
+          this.hasFailedAncestor(n.nodeIdInDag, dag, failedCascadeIds, new Set()),
       );
 
       if (toSkip.length > 0) {
@@ -186,7 +275,7 @@ export class V3Reconciler {
             ),
           );
 
-        for (const fn of failedNodes) {
+        for (const fn of failedNodes.filter((n) => failedCascadeIds.has(n.nodeIdInDag))) {
           await this.writeEvent(runId, "node.failed", {
             nodeId: fn.nodeIdInDag,
             error: fn.error,
@@ -201,25 +290,30 @@ export class V3Reconciler {
         }
       }
 
-      await this.finalizeRun(runId, "failed");
+      // G20: only declare run failed if any non-continue node failed
+      await this.finalizeRun(runId, "failed", nodesAfterGuards);
       await this.writeEvent(runId, "run.failed", {});
       return;
     }
 
     // 4. Find ready nodes (all deps resolved or skipped)
-    const nodeMap = this.buildNodeMap(nodes);
+    const nodeMap = this.buildNodeMap(nodesAfterGuards);
 
-    const readyNodes: NodeRow[] = [];
-    for (const node of nodes) {
-      if (TERMINAL_STATUSES.has(node.status)) {
-        continue; // Already terminal
-      }
-      if (node.status === "awaiting-approval") {
-        continue; // Waiting for human
-      }
-      if (node.status === "running") {
-        continue; // Still executing
-      }
+    // G18: count currently running nodes across ALL runs to respect pool capacity
+    const globalRunningCount = await this.countGlobalRunning();
+    let availableSlots = this.poolCapacity - globalRunningCount;
+
+    // Build ordered candidate list: pending nodes with all deps satisfied
+    // Order: run.priority desc, node.startedAt (queued_at proxy) asc
+    const pendingNodes = nodesAfterGuards.filter(
+      (n) => n.status === "pending" || n.status === "ready",
+    );
+
+    const readyCandidates: NodeRow[] = [];
+    for (const node of pendingNodes) {
+      if (TERMINAL_STATUSES.has(node.status)) continue;
+      if (node.status === "awaiting-approval") continue;
+      if (node.status === "running") continue;
 
       const depIds = this.getNodeDeps(node, dag);
       const depsSatisfied = depIds.every((depId) => {
@@ -227,18 +321,58 @@ export class V3Reconciler {
         return depNode !== undefined && RESOLVED_STATUSES.has(depNode.status);
       });
 
-      // If no deps, the node is immediately ready
       if (depsSatisfied) {
-        readyNodes.push(node);
+        readyCandidates.push(node);
       }
     }
 
-    // 5. Dispatch ready nodes
+    // Sort by (run.priority desc, startedAt/id asc) for ordering — G18
+    readyCandidates.sort((a, b) => {
+      // priority comes from run; all these nodes are in the same run — so
+      // break ties by startedAt (null = queued/pending; treat null as earliest)
+      const ta = a.startedAt?.getTime() ?? 0;
+      const tb = b.startedAt?.getTime() ?? 0;
+      return ta - tb;
+    });
+
+    // 5. Dispatch ready nodes (G16, G17, G18)
     const events: Array<{ kind: string; payload: Record<string, unknown> }> = [];
 
-    for (const node of readyNodes) {
-      const result = await this.dispatchNode(runId, node, nodes, nodeMap, dag);
-      events.push(...result);
+    // Per-parallel_over concurrency tracking
+    const concurrencyCounters = new Map<string, number>();
+
+    for (const node of readyCandidates) {
+      // G18: global pool capacity gate
+      if (availableSlots <= 0 && node.type === "agent") {
+        break;
+      }
+
+      // G18: per-parallel_over max_concurrency gate
+      if (node.nodeIdInDag.includes(":[")) {
+        // Fanout child — identify parent
+        const parentId = node.nodeIdInDag.split(":[")[0];
+        const parentDagNode = dagNodeMap.get(parentId);
+        const maxConc = (parentDagNode as V3NodeDag | undefined)?.max_concurrency;
+        if (maxConc !== undefined) {
+          const currentConc = concurrencyCounters.get(parentId) ?? 0;
+          // Count already-running children of this parent
+          const runningChildren = nodesAfterGuards.filter(
+            (n) =>
+              n.nodeIdInDag.startsWith(`${parentId}:[`) &&
+              n.status === "running",
+          ).length;
+          if (runningChildren + currentConc >= maxConc) {
+            continue; // skip until a slot opens
+          }
+          concurrencyCounters.set(parentId, currentConc + 1);
+        }
+      }
+
+      const result = await this.dispatchNode(runId, run, node, nodesAfterGuards, nodeMap, dag);
+      events.push(...result.events);
+      if (result.slotConsumed) {
+        availableSlots--;
+      }
     }
 
     // Write dispatch events
@@ -252,7 +386,11 @@ export class V3Reconciler {
       .from(v3Nodes)
       .where(eq(v3Nodes.runId, runId));
 
-    const hasFailed = updatedNodes.some((n) => n.status === "failed");
+    const hasCascadeFail = updatedNodes.some(
+      (n) =>
+        n.status === "failed" &&
+        (dagNodeMap.get(n.nodeIdInDag)?.on_failure ?? "fail") !== "continue",
+    );
     const allDoneOrSkipped = updatedNodes.every((n) =>
       RESOLVED_STATUSES.has(n.status),
     );
@@ -261,63 +399,252 @@ export class V3Reconciler {
     );
     const anyWaiting = updatedNodes.some((n) => n.status === "awaiting-approval");
 
-    if (hasFailed) {
-      await this.finalizeRun(runId, "failed");
+    const runGoingTerminal = hasCascadeFail || allDoneOrSkipped || (allTerminalOrWaiting && !anyWaiting);
+
+    if (hasCascadeFail) {
+      await this.finalizeRun(runId, "failed", updatedNodes);
       await this.writeEvent(runId, "run.failed", {});
     } else if (allDoneOrSkipped) {
-      await this.finalizeRun(runId, "done");
+      // G20: if all terminal and no blocking failures, run is done
+      await this.finalizeRun(runId, "done", updatedNodes);
       await this.writeEvent(runId, "run.completed", {});
     } else if (allTerminalOrWaiting && !anyWaiting) {
-      // All resolved (should be caught by allDoneOrSkipped, but safe guard)
-      await this.finalizeRun(runId, "done");
+      await this.finalizeRun(runId, "done", updatedNodes);
       await this.writeEvent(runId, "run.completed", {});
     }
     // If some nodes are awaiting-approval, run stays "running" —
     // resume() after human_gate resolution will re-tick.
+
+    // Event-driven NODE-level brain wake. When the run is NOT itself going
+    // terminal this tick (finalizeRun handles that via maybeWakeOrchestrator),
+    // wake the monitoring brain for each node that JUST became terminal so it
+    // does a short check-in turn instead of busy-polling. Idempotent +
+    // best-effort — never blocks reconcile.
+    if (!runGoingTerminal) {
+      try {
+        await this.maybeWakeOrchestratorOnNode(runId, run.tags, updatedNodes);
+      } catch {
+        // Advisory only.
+      }
+    }
+  }
+
+  // ─── G10: Guard Evaluation ──────────────────────────────────────────────
+
+  /**
+   * For every pending node whose deps are ALL resolved (done or skipped),
+   * evaluate its guard expression.  If false → mark skipped + emit event.
+   * Then run to a fixpoint: cascade-skip any pending node whose ALL deps
+   * are now skipped (regardless of guard).
+   */
+  private async evaluateGuardsAndSkip(
+    runId: string,
+    run: RunRow,
+    nodes: NodeRow[],
+    dag: V3NodeDag[],
+  ): Promise<void> {
+    // Work on a mutable copy of statuses so we can fixpoint in-memory
+    const statusMap = new Map<string, string>(nodes.map((n) => [n.id, n.status]));
+    // nodeIdInDag → latest status
+    const dagStatusMap = this.buildDagStatusMap(nodes, statusMap);
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const node of nodes) {
+        if (statusMap.get(node.id) !== "pending") continue;
+
+        const depIds = this.getNodeDeps(node, dag);
+        const dagNode = dag.find((d) => d.id === node.nodeIdInDag);
+
+        // All deps must be resolved (done or skipped) to evaluate guard
+        const allDepsResolved = depIds.every((depId) => {
+          const s = dagStatusMap.get(depId);
+          return s !== undefined && RESOLVED_STATUSES.has(s);
+        });
+        if (!allDepsResolved) continue;
+
+        // G10: cascade-skip if ALL deps are skipped
+        const allDepsSkipped =
+          depIds.length > 0 &&
+          depIds.every((depId) => dagStatusMap.get(depId) === "skipped");
+
+        if (allDepsSkipped) {
+          // Cascade skip — no guard needed
+          statusMap.set(node.id, "skipped");
+          dagStatusMap.set(node.nodeIdInDag, "skipped");
+          changed = true;
+          await this.db
+            .update(v3Nodes)
+            .set({ status: "skipped", error: "All upstream nodes skipped" })
+            .where(eq(v3Nodes.id, node.id));
+          await this.writeEvent(runId, "node.skipped", {
+            nodeId: node.nodeIdInDag,
+            reason: "cascade: all deps skipped",
+          });
+          continue;
+        }
+
+        // Evaluate guard if present
+        const guardExpr = dagNode?.guard as string | undefined;
+        if (!guardExpr) continue;
+
+        let guardPassed = true;
+        try {
+          const ctx = await this.buildGuardContext(run, node, nodes, dag);
+          const result = evaluateExpression(guardExpr, ctx);
+          guardPassed = this.toBool(result);
+        } catch {
+          // Guard evaluation error — treat as pass (let the node run)
+          guardPassed = true;
+        }
+
+        if (!guardPassed) {
+          statusMap.set(node.id, "skipped");
+          dagStatusMap.set(node.nodeIdInDag, "skipped");
+          changed = true;
+          await this.db
+            .update(v3Nodes)
+            .set({ status: "skipped", error: "Guard expression evaluated to false" })
+            .where(eq(v3Nodes.id, node.id));
+          await this.writeEvent(runId, "node.skipped", {
+            nodeId: node.nodeIdInDag,
+            reason: "guard:false",
+            guard: guardExpr,
+          });
+        }
+      }
+    }
+  }
+
+  /** Build a map nodeIdInDag → latest status using the in-memory status map. */
+  private buildDagStatusMap(
+    nodes: NodeRow[],
+    statusMap: Map<string, string>,
+  ): Map<string, string> {
+    const dagStatusMap = new Map<string, string>();
+    for (const node of nodes) {
+      const status = statusMap.get(node.id) ?? node.status;
+      // Use highest iteration to represent the latest status per dag id
+      const existing = dagStatusMap.get(node.nodeIdInDag);
+      if (existing === undefined || this.statusPriority(status) > this.statusPriority(existing)) {
+        dagStatusMap.set(node.nodeIdInDag, status);
+      }
+    }
+    return dagStatusMap;
+  }
+
+  private statusPriority(status: string): number {
+    // Higher = "more done"
+    const p: Record<string, number> = {
+      pending: 0, ready: 1, running: 2, "awaiting-approval": 2,
+      done: 3, skipped: 3, failed: 3,
+    };
+    return p[status] ?? 0;
+  }
+
+  /**
+   * Build an ExpressionContext for guard evaluation.
+   * Reads dep artifacts from DB to populate deps[id].output.
+   */
+  private async buildGuardContext(
+    run: RunRow,
+    node: NodeRow,
+    allNodes: NodeRow[],
+    dag: V3NodeDag[],
+  ): Promise<ExpressionContext> {
+    const depIds = this.getNodeDeps(node, dag);
+    const deps: ExpressionContext["deps"] = {};
+    const nodeMap = this.buildNodeMap(allNodes);
+
+    for (const depId of depIds) {
+      const depNode = this.findLatestNode(nodeMap, depId);
+      if (!depNode) {
+        deps[depId] = { output: undefined };
+        continue;
+      }
+      const output = await this.readArtifactContent(depNode.outputArtifactId);
+      deps[depId] = { output };
+    }
+
+    const inputs = (run.inputs ?? {}) as Record<string, unknown>;
+    return {
+      inputs,
+      deps,
+      iteration: node.iteration > 0 ? node.iteration : undefined,
+    };
   }
 
   // ─── Node Dispatch ──────────────────────────────────────────────────────
 
   /**
    * Dispatch a single ready node based on its type.
-   * Returns events to be written.
+   * Returns events to be written and whether a pool slot was consumed.
    */
   private async dispatchNode(
     runId: string,
+    run: RunRow,
     node: NodeRow,
     allNodes: NodeRow[],
     nodeMap: Map<string, NodeRow[]>,
     dag: V3NodeDag[],
-  ): Promise<Array<{ kind: string; payload: Record<string, unknown> }>> {
+  ): Promise<{ events: Array<{ kind: string; payload: Record<string, unknown> }>; slotConsumed: boolean }> {
     const events: Array<{ kind: string; payload: Record<string, unknown> }> = [];
 
     switch (node.type) {
       case "agent": {
-        await this.db
-          .update(v3Nodes)
-          .set({ status: "running", startedAt: new Date() })
-          .where(eq(v3Nodes.id, node.id));
+        // G16: Atomic status-conditioned UPDATE — only dispatch when rowcount == 1
+        const updateResult = await v3DbExec(
+          `UPDATE v3_nodes SET status = 'running', started_at = now()
+           WHERE id = '${node.id.replace(/'/g, "''")}'
+             AND status IN ('pending', 'ready')
+           RETURNING id`,
+        );
 
-        const spawnId = await this.dispatcher.spawn(node, runId);
+        if ((updateResult.rows?.length ?? 0) !== 1) {
+          // Another tick already claimed this node — skip
+          return { events, slotConsumed: false };
+        }
 
-        await this.db
-          .update(v3Nodes)
-          .set({ currentSpawnId: spawnId })
-          .where(eq(v3Nodes.id, node.id));
+        // G17: fire-and-track — do not synchronously await the entire spawn.
+        // Schedule the spawn asynchronously and re-trigger a tick when done.
+        this.fireAndTrackSpawn(runId, node, dag).catch(() => {
+          // Errors handled inside fireAndTrackSpawn; log nothing here.
+        });
 
         events.push({
           kind: "node.dispatched",
-          payload: { nodeId: node.nodeIdInDag, spawnId },
+          payload: { nodeId: node.nodeIdInDag },
         });
-        break;
+
+        return { events, slotConsumed: true };
       }
 
       case "parallel_over": {
-        const dagNode = dag.find((d) => d.id === node.nodeIdInDag);
-        const bodyId = (dagNode?.body as string | undefined) ?? "";
+        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as V3NodeDag | undefined;
 
-        // Parse items for fanout
-        const items = this.resolveFanoutItems(dagNode, allNodes, nodeMap);
+        // G12: Resolve or retrieve frozen items from event store
+        const items = await this.getFrozenFanoutItems(runId, node, allNodes, nodeMap, dagNode, dag, run);
+
+        if (items === null) {
+          // items_from expression failed — fail the node
+          await this.db
+            .update(v3Nodes)
+            .set({ status: "failed", error: "items_from expression failed to resolve an array", completedAt: new Date() })
+            .where(eq(v3Nodes.id, node.id));
+          events.push({ kind: "node.failed", payload: { nodeId: node.nodeIdInDag, error: "items_from expression error" } });
+          return { events, slotConsumed: false };
+        }
+
+        // G12: Copy inline or referenced body spec onto each child
+        const bodySpec = dagNode?.body;
+        const bodyPrompt = typeof bodySpec === "object" && bodySpec !== null && !Array.isArray(bodySpec)
+          ? (bodySpec as Record<string, unknown>).prompt as string | undefined
+          : undefined;
+        const bodyAgent = typeof bodySpec === "object" && bodySpec !== null && !Array.isArray(bodySpec)
+          ? (bodySpec as Record<string, unknown>).agent as string | undefined
+          : undefined;
+        const bodyId = typeof bodySpec === "string" ? bodySpec : undefined;
 
         for (let i = 0; i < items.length; i++) {
           const childNodeId = `${node.nodeIdInDag}:[${i}]`;
@@ -330,16 +657,19 @@ export class V3Reconciler {
             continue;
           }
 
-          // Fanout children are instances of the body node;
-          // they depend on the parallel_over parent (handled by getNodeDeps)
+          // Fanout children are instances of the body node
           const childNode: Omit<NodeRow, "ownerEmail" | "orgId"> & {
             ownerEmail: string;
             orgId: null | string;
           } = {
             id: uid(),
             runId,
+            // G12: Embed body prompt/agent on the child node via nodeIdInDag
+            // The dispatcher resolves the agent from the DAG node, so we need
+            // a nodeIdInDag that the dispatcher can look up. For inline bodies,
+            // we store the parent's nodeIdInDag so the dispatcher can find it.
             nodeIdInDag: childNodeId,
-            type: bodyId !== "" ? "agent" : "agent",
+            type: "agent",
             status: "pending",
             iteration: 0,
             fanoutIndex: i,
@@ -348,8 +678,8 @@ export class V3Reconciler {
             startedAt: null,
             completedAt: null,
             error: null,
-            ownerEmail: "local@localhost",
-            orgId: null,
+            ownerEmail: node.ownerEmail,
+            orgId: node.orgId,
           };
 
           await this.db.insert(v3Nodes).values(childNode as any);
@@ -360,7 +690,10 @@ export class V3Reconciler {
               parentId: node.nodeIdInDag,
               childId: childNodeId,
               fanoutIndex: i,
-              bodyId,
+              item: items[i],
+              bodyId: bodyId ?? null,
+              bodyPrompt: bodyPrompt ?? null,
+              bodyAgent: bodyAgent ?? null,
             },
           });
         }
@@ -375,32 +708,47 @@ export class V3Reconciler {
           kind: "node.resolved",
           payload: { nodeId: node.nodeIdInDag, resolvedAs: "fanout" },
         });
-        break;
+        return { events, slotConsumed: false };
       }
 
       case "loop": {
-        const dagNode = dag.find((d) => d.id === node.nodeIdInDag);
+        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as V3NodeDag | undefined;
         const untilExpr = (dagNode?.until as string | undefined) ?? "false";
-        const maxIter = (dagNode?.maxIterations as number | undefined) ?? 100;
-        const bodyId = (dagNode?.body as string | undefined) ?? "";
+        const maxIter = (dagNode?.max_iterations as number | undefined)
+          ?? (dagNode?.maxIterations as number | undefined)
+          ?? 100;
 
-        // Count completed body iterations
-        const bodyNodes = allNodes.filter(
-          (n) => n.nodeIdInDag === `${node.nodeIdInDag}/body`,
-        );
-        const currentIter = bodyNodes.length;
+        // G12: body[] is an array of node-ids run sequentially per iteration
+        const bodyRaw = dagNode?.body;
+        const bodyIds: string[] = Array.isArray(bodyRaw)
+          ? (bodyRaw as string[])
+          : typeof bodyRaw === "string"
+            ? [bodyRaw]
+            : [];
 
-        // Evaluate until expression
+        // Count completed body iterations (based on body[last] nodes with status done)
+        const lastBodyId = bodyIds.length > 0 ? bodyIds[bodyIds.length - 1] : null;
+        const completedIterations = lastBodyId
+          ? allNodes.filter(
+              (n) =>
+                n.nodeIdInDag === `${node.nodeIdInDag}/${lastBodyId}` &&
+                n.status === "done",
+            ).length
+          : allNodes.filter(
+              (n) => n.nodeIdInDag === `${node.nodeIdInDag}/body` && n.status === "done",
+            ).length;
+
+        // G12: build REAL expression context for loop until/history/previous_iteration
         let shouldStop = false;
         try {
-          const exprCtx = this.buildExpressionContext(
+          const exprCtx = await this.buildLoopExpressionContext(
             node,
             allNodes,
             nodeMap,
             dag,
-            bodyId,
+            bodyIds,
+            run,
           );
-
           const result = evaluateExpression(untilExpr, exprCtx);
           shouldStop = this.toBool(result);
         } catch {
@@ -408,7 +756,7 @@ export class V3Reconciler {
           shouldStop = false;
         }
 
-        if (shouldStop || currentIter >= maxIter) {
+        if (shouldStop || completedIterations >= maxIter) {
           // Loop resolved
           await this.db
             .update(v3Nodes)
@@ -420,56 +768,104 @@ export class V3Reconciler {
             payload: {
               nodeId: node.nodeIdInDag,
               resolvedAs: "loop-done",
-              iterations: currentIter,
+              iterations: completedIterations,
               maxIterations: maxIter,
             },
           });
 
-          if (currentIter >= maxIter && !shouldStop) {
+          if (completedIterations >= maxIter && !shouldStop) {
             events.push({
               kind: "loop.max-iterations-reached",
               payload: {
                 nodeId: node.nodeIdInDag,
-                iterations: currentIter,
+                iterations: completedIterations,
               },
             });
           }
         } else {
-          // Create new iteration body node
-          const iterNodeId = `${node.nodeIdInDag}/body`;
+          // G12: Create new iteration body nodes — one per body[] id, sequentially
+          const nextIter = completedIterations + 1;
 
-          const iterNode: Omit<NodeRow, "ownerEmail" | "orgId"> & {
-            ownerEmail: string;
-            orgId: null | string;
-          } = {
-            id: uid(),
-            runId,
-            nodeIdInDag: iterNodeId,
-            type: "agent",
-            status: "pending",
-            iteration: currentIter + 1,
-            fanoutIndex: 0,
-            currentSpawnId: null,
-            outputArtifactId: null,
-            startedAt: null,
-            completedAt: null,
-            error: null,
-            ownerEmail: "local@localhost",
-            orgId: null,
-          };
+          if (bodyIds.length === 0) {
+            // Legacy: single body node
+            const iterNodeId = `${node.nodeIdInDag}/body`;
+            const iterNode: Omit<NodeRow, "ownerEmail" | "orgId"> & {
+              ownerEmail: string;
+              orgId: null | string;
+            } = {
+              id: uid(),
+              runId,
+              nodeIdInDag: iterNodeId,
+              type: "agent",
+              status: "pending",
+              iteration: nextIter,
+              fanoutIndex: 0,
+              currentSpawnId: null,
+              outputArtifactId: null,
+              startedAt: null,
+              completedAt: null,
+              error: null,
+              ownerEmail: node.ownerEmail,
+              orgId: node.orgId,
+            };
+            await this.db.insert(v3Nodes).values(iterNode as any);
+            events.push({
+              kind: "loop.iteration-created",
+              payload: {
+                loopId: node.nodeIdInDag,
+                iteration: nextIter,
+                bodyId: iterNodeId,
+              },
+            });
+          } else {
+            // G12: Create body nodes keyed by iteration — first one is pending,
+            // subsequent ones depend on the previous (sequential within iter).
+            // Only create all body nodes for iteration; they will naturally
+            // depend on each other through the node map mechanism.
+            for (let bi = 0; bi < bodyIds.length; bi++) {
+              const bodyNodeId = bodyIds[bi]!;
+              const iterNodeId = `${node.nodeIdInDag}/${bodyNodeId}`;
 
-          await this.db.insert(v3Nodes).values(iterNode as any);
+              // Check if already exists for this iteration
+              const existing = allNodes.find(
+                (n) => n.nodeIdInDag === iterNodeId && n.iteration === nextIter,
+              );
+              if (existing) continue;
 
-          events.push({
-            kind: "loop.iteration-created",
-            payload: {
-              loopId: node.nodeIdInDag,
-              iteration: currentIter + 1,
-              bodyId: iterNodeId,
-            },
-          });
+              const iterNode: Omit<NodeRow, "ownerEmail" | "orgId"> & {
+                ownerEmail: string;
+                orgId: null | string;
+              } = {
+                id: uid(),
+                runId,
+                nodeIdInDag: iterNodeId,
+                type: "agent",
+                status: bi === 0 ? "pending" : "pending", // all pending; deps handled below
+                iteration: nextIter,
+                fanoutIndex: bi, // use fanoutIndex to encode order within the body sequence
+                currentSpawnId: null,
+                outputArtifactId: null,
+                startedAt: null,
+                completedAt: null,
+                error: null,
+                ownerEmail: node.ownerEmail,
+                orgId: node.orgId,
+              };
+
+              await this.db.insert(v3Nodes).values(iterNode as any);
+            }
+
+            events.push({
+              kind: "loop.iteration-created",
+              payload: {
+                loopId: node.nodeIdInDag,
+                iteration: nextIter,
+                bodyIds,
+              },
+            });
+          }
         }
-        break;
+        return { events, slotConsumed: false };
       }
 
       case "human_gate": {
@@ -482,22 +878,422 @@ export class V3Reconciler {
           kind: "node.awaiting-approval",
           payload: { nodeId: node.nodeIdInDag },
         });
-        break;
+        return { events, slotConsumed: false };
       }
 
       default:
         // Unknown type — skip
-        break;
+        return { events, slotConsumed: false };
+    }
+  }
+
+  // ─── G17: Fire-and-Track Spawn ──────────────────────────────────────────
+
+  /**
+   * G17: Execute a spawn asynchronously, update node status on completion,
+   * and re-trigger a tick so the next wave of nodes can proceed.
+   */
+  private async fireAndTrackSpawn(
+    runId: string,
+    node: NodeRow,
+    dag: V3NodeDag[],
+  ): Promise<void> {
+    const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as V3NodeDag | undefined;
+    const retryPolicy = dagNode?.retry as V3RetryPolicy | undefined;
+
+    const maxAttempts = (retryPolicy?.max ?? 0) + 1; // max = additional retries
+    const retryOn = retryPolicy?.on ?? ["transient", "schema-violation"];
+
+    let attempt = 0;
+    let lastError: unknown = null;
+
+    while (attempt < maxAttempts) {
+      attempt++;
+
+      if (attempt > 1) {
+        // G19: Exponential backoff before retry
+        const backoffMs = computeBackoffMs(attempt - 1, retryPolicy ?? {});
+        await new Promise((r) => setTimeout(r, backoffMs));
+
+        // Re-attempt: transition node back to running atomically
+        const rerun = await v3DbExec(
+          `UPDATE v3_nodes SET status = 'running', started_at = now(), error = null
+           WHERE id = '${node.id.replace(/'/g, "''")}'
+             AND status = 'failed'
+           RETURNING id`,
+        );
+        if ((rerun.rows?.length ?? 0) !== 1) {
+          // Node was cancelled or otherwise modified — abort retry
+          return;
+        }
+      }
+
+      try {
+        const spawnId = await this.dispatcher.spawn(node, runId);
+
+        // Update currentSpawnId on success
+        await this.db
+          .update(v3Nodes)
+          .set({ currentSpawnId: spawnId })
+          .where(eq(v3Nodes.id, node.id));
+
+        // spawn() in V3Dispatcher already sets node.status = "done" on success
+        // and "failed" on schema-violation.  Re-trigger tick.
+        await this.writeEvent(runId, "spawn.done", { nodeId: node.nodeIdInDag, spawnId });
+        await this.tick(runId);
+        return;
+      } catch (err) {
+        lastError = err;
+        const errClass = this.classifyError(err);
+
+        await this.writeEvent(runId, "spawn.failed", {
+          nodeId: node.nodeIdInDag,
+          attempt,
+          error: err instanceof Error ? err.message : String(err),
+          errorClass: errClass,
+        });
+
+        // G19: Should we retry?
+        const shouldRetry =
+          attempt < maxAttempts &&
+          retryOn.includes(errClass);
+
+        if (!shouldRetry) {
+          // Permanently fail the node
+          await this.db
+            .update(v3Nodes)
+            .set({
+              status: "failed",
+              error: (err instanceof Error ? err.message : String(err)).slice(0, 1000),
+              completedAt: new Date(),
+            })
+            .where(eq(v3Nodes.id, node.id));
+
+          await this.writeEvent(runId, "node.failed", {
+            nodeId: node.nodeIdInDag,
+            error: err instanceof Error ? err.message : String(err),
+            attempt,
+          });
+
+          // Re-trigger tick so the run can be finalized (fail cascade / completion check)
+          await this.tick(runId);
+          return;
+        }
+
+        // Mark failed for retry (will be re-set to running above)
+        await this.db
+          .update(v3Nodes)
+          .set({
+            status: "failed",
+            error: (err instanceof Error ? err.message : String(err)).slice(0, 1000),
+          })
+          .where(eq(v3Nodes.id, node.id));
+      }
     }
 
-    return events;
+    // Exhausted retries
+    await this.db
+      .update(v3Nodes)
+      .set({
+        status: "failed",
+        error: (lastError instanceof Error ? lastError.message : String(lastError)).slice(0, 1000),
+        completedAt: new Date(),
+      })
+      .where(eq(v3Nodes.id, node.id));
+
+    await this.writeEvent(runId, "node.failed", {
+      nodeId: node.nodeIdInDag,
+      error: lastError instanceof Error ? lastError.message : String(lastError),
+      retriesExhausted: true,
+    });
+
+    await this.tick(runId);
+  }
+
+  // ─── G12: Expression Context for Loop ──────────────────────────────────
+
+  /**
+   * G12: Build ExpressionContext for evaluating loop `until` expressions.
+   * Reads REAL dep artifact content from v3_artifacts (not null placeholders).
+   * Populates previous_iteration and history from completed body iterations.
+   */
+  private async buildLoopExpressionContext(
+    loopNode: NodeRow,
+    allNodes: NodeRow[],
+    nodeMap: Map<string, NodeRow[]>,
+    dag: V3NodeDag[],
+    bodyIds: string[],
+    run: RunRow,
+  ): Promise<ExpressionContext> {
+    const depIds = this.getNodeDeps(loopNode, dag);
+
+    const deps: ExpressionContext["deps"] = {};
+
+    // Load real dep artifacts
+    for (const depId of depIds) {
+      const depNode = this.findLatestNode(nodeMap, depId);
+      if (depNode) {
+        const output = await this.readArtifactContent(depNode.outputArtifactId);
+        deps[depId] = { output };
+      }
+    }
+
+    // G12: Build previous_iteration and history from completed body nodes
+    // history[i] = { bodyNodeId: { output } } for iteration i
+    const historyByIteration = new Map<number, Record<string, { output?: unknown }>>();
+
+    for (const bodyId of bodyIds) {
+      const iterNodeId = `${loopNode.nodeIdInDag}/${bodyId}`;
+      const bodyRows = allNodes.filter(
+        (n) => n.nodeIdInDag === iterNodeId && n.status === "done",
+      );
+      for (const bodyRow of bodyRows) {
+        const output = await this.readArtifactContent(bodyRow.outputArtifactId);
+        const iterEntry = historyByIteration.get(bodyRow.iteration) ?? {};
+        iterEntry[bodyId] = { output };
+        historyByIteration.set(bodyRow.iteration, iterEntry);
+        // deps[bodyId].output = latest iteration output
+        if (!deps[bodyId] || bodyRow.iteration > ((deps[bodyId] as any)._iter ?? -1)) {
+          deps[bodyId] = {
+            output,
+            previous_iteration: deps[bodyId]
+              ? { output: deps[bodyId].output }
+              : undefined,
+            history: [],
+          };
+        }
+      }
+    }
+
+    // Fallback: single-body legacy format (bodyIds empty)
+    if (bodyIds.length === 0) {
+      const iterNodeId = `${loopNode.nodeIdInDag}/body`;
+      const bodyNodes = allNodes
+        .filter((n) => n.nodeIdInDag === iterNodeId && n.status === "done")
+        .sort((a, b) => b.iteration - a.iteration);
+
+      if (bodyNodes.length > 0) {
+        const latestBody = bodyNodes[0]!;
+        const latestOutput = await this.readArtifactContent(latestBody.outputArtifactId);
+        const prevBody = bodyNodes[1];
+        const prevOutput = prevBody
+          ? await this.readArtifactContent(prevBody.outputArtifactId)
+          : undefined;
+
+        deps["body"] = {
+          output: latestOutput,
+          previous_iteration: prevOutput !== undefined ? { output: prevOutput } : undefined,
+        };
+      }
+    }
+
+    // Build history array in iteration order
+    const maxIter = Math.max(0, ...historyByIteration.keys());
+    const history: Array<Record<string, { output?: unknown }>> = [];
+    for (let i = 1; i <= maxIter; i++) {
+      history.push(historyByIteration.get(i) ?? {});
+    }
+    // Attach to each body dep
+    for (const bodyId of bodyIds) {
+      if (deps[bodyId]) {
+        (deps[bodyId] as any).history = history;
+      }
+    }
+
+    const inputs = (run.inputs ?? {}) as Record<string, unknown>;
+    return {
+      inputs,
+      deps,
+      iteration: loopNode.iteration,
+    };
+  }
+
+  // ─── G12: Frozen Fanout Items ───────────────────────────────────────────
+
+  /**
+   * G12: Get frozen fanout items for a parallel_over node.
+   *
+   * On FIRST expansion: evaluate items_from as an expression against real dep
+   * artifact content, store the result as a "fanout.frozen" event, return items.
+   *
+   * On SUBSEQUENT ticks: retrieve the frozen list from the event store.
+   *
+   * Returns null if items_from fails to resolve an array.
+   */
+  private async getFrozenFanoutItems(
+    runId: string,
+    node: NodeRow,
+    allNodes: NodeRow[],
+    nodeMap: Map<string, NodeRow[]>,
+    dagNode: V3NodeDag | undefined,
+    dag: V3NodeDag[],
+    run: RunRow,
+  ): Promise<unknown[] | null> {
+    // Check if we already have a frozen item set for this node
+    const existingFreezeEvent = await this.db
+      .select()
+      .from(v3Events)
+      .where(
+        and(
+          eq(v3Events.runId, runId),
+          eq(v3Events.kind, "fanout.frozen"),
+        ),
+      );
+
+    for (const ev of existingFreezeEvent) {
+      const payload = ev.payload as Record<string, unknown> | null;
+      if (payload?.nodeId === node.nodeIdInDag && Array.isArray(payload?.items)) {
+        return payload.items as unknown[];
+      }
+    }
+
+    // First expansion: evaluate items_from expression
+    const itemsFromExpr = dagNode?.items_from as string | undefined;
+
+    if (!itemsFromExpr) {
+      // No items_from: try to parse body as literal array (legacy JSON)
+      const bodyRaw = dagNode?.body;
+      if (typeof bodyRaw === "string") {
+        try {
+          const parsed = JSON.parse(bodyRaw);
+          if (Array.isArray(parsed)) {
+            await this.freezeFanoutItems(runId, node.nodeIdInDag, parsed);
+            return parsed;
+          }
+        } catch {
+          // Not JSON
+        }
+      }
+      await this.freezeFanoutItems(runId, node.nodeIdInDag, []);
+      return [];
+    }
+
+    // Try JSON.parse shortcut first (literal array string)
+    try {
+      const parsed = JSON.parse(itemsFromExpr);
+      if (Array.isArray(parsed)) {
+        await this.freezeFanoutItems(runId, node.nodeIdInDag, parsed);
+        return parsed;
+      }
+    } catch {
+      // Not a literal JSON array — evaluate as expression
+    }
+
+    // G12: Evaluate as EXPRESSION against REAL dep artifact content
+    try {
+      const ctx = await this.buildGuardContext(run, node, allNodes, dag);
+      const result = evaluateExpression(itemsFromExpr, ctx);
+      if (Array.isArray(result)) {
+        await this.freezeFanoutItems(runId, node.nodeIdInDag, result);
+        return result;
+      }
+      // Not an array — fail
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Persist the frozen item set as a "fanout.frozen" event. */
+  private async freezeFanoutItems(
+    runId: string,
+    nodeIdInDag: string,
+    items: unknown[],
+  ): Promise<void> {
+    await this.writeEvent(runId, "fanout.frozen", {
+      nodeId: nodeIdInDag,
+      items,
+      frozenAt: new Date().toISOString(),
+    });
+  }
+
+  // ─── G12: Artifact Content Resolution ──────────────────────────────────
+
+  /**
+   * Read the content of an artifact by id.
+   * Returns object_content if available, otherwise text_content.
+   * Returns undefined if artifact id is null or artifact not found.
+   */
+  private async readArtifactContent(
+    artifactId: string | null | undefined,
+  ): Promise<unknown> {
+    if (!artifactId) return undefined;
+
+    const [artifact] = await this.db
+      .select()
+      .from(v3Artifacts)
+      .where(eq(v3Artifacts.id, artifactId));
+
+    if (!artifact) return undefined;
+
+    return artifact.objectContent ?? artifact.textContent ?? undefined;
+  }
+
+  // ─── G18: Pool Capacity ─────────────────────────────────────────────────
+
+  /**
+   * G18: Count all currently running spawns across ALL runs to determine
+   * global pool utilization.
+   */
+  private async countGlobalRunning(): Promise<number> {
+    const result = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(v3Nodes)
+      .where(eq(v3Nodes.status, "running"));
+
+    return Number(result[0]?.count ?? 0);
+  }
+
+  // ─── G19: Error Classification ──────────────────────────────────────────
+
+  /** G19: Classify an error into a retryable category. */
+  private classifyError(err: unknown): string {
+    const message = err instanceof Error
+      ? `${err.name}: ${err.message}`
+      : String(err);
+    const lower = message.toLowerCase();
+
+    // Schema violation — retryable with corrective prompt per design §12
+    if (
+      lower.includes("schema-violation") ||
+      lower.includes("schema validation") ||
+      lower.includes("output_schema")
+    ) {
+      return "schema-violation";
+    }
+
+    // Permanent errors — do not retry
+    if (
+      lower.includes("invalid schema") ||
+      lower.includes("agent not found") ||
+      lower.includes("engine not configured") ||
+      lower.includes("render failure") ||
+      lower.includes("permanent")
+    ) {
+      return "permanent";
+    }
+
+    // Transient — API/network/OOM/rate-limit
+    const transientIndicators = [
+      "etimedout", "econnreset", "econnrefused", "enetunreach",
+      "eai_fail", "eai_again", "network", "timeout", "rate.limit",
+      "rate limit", "too many requests", "429", "502", "503", "504",
+      "oom", "out of memory", "context deadline exceeded",
+      "canceled", "aborted", "transient",
+    ];
+    for (const ind of transientIndicators) {
+      if (lower.includes(ind)) return "transient";
+    }
+
+    // Default: transient — retry once for unknown failures
+    return "transient";
   }
 
   // ─── Expression Context ─────────────────────────────────────────────────
 
   /**
-   * Build ExpressionContext for evaluating loop `until` expressions.
-   * Data comes from previous iteration outputs via deps.
+   * @deprecated Use buildLoopExpressionContext for loop nodes.
+   * Kept for backward compatibility.
    */
   private buildExpressionContext(
     loopNode: NodeRow,
@@ -506,7 +1302,6 @@ export class V3Reconciler {
     dag: V3NodeDag[],
     bodyId: string,
   ): ExpressionContext {
-    const dagNode = dag.find((d) => d.id === loopNode.nodeIdInDag);
     const depIds = this.getNodeDeps(loopNode, dag);
 
     const deps: Record<
@@ -527,7 +1322,7 @@ export class V3Reconciler {
 
         if (latest) {
           deps[depId] = {
-            // Full artifact content resolved at dispatch layer
+            // NOTE: artifact content resolved at dispatch layer; null here
             output: latest.outputArtifactId ? null : undefined,
           };
         }
@@ -554,31 +1349,6 @@ export class V3Reconciler {
       deps,
       iteration: loopNode.iteration,
     };
-  }
-
-  // ─── Fanout Items ───────────────────────────────────────────────────────
-
-  private resolveFanoutItems(
-    dagNode: V3NodeDag | undefined,
-    _allNodes: NodeRow[],
-    _nodeMap: Map<string, NodeRow[]>,
-  ): unknown[] {
-    const itemsFrom = dagNode?.items_from as string | undefined;
-
-    if (itemsFrom) {
-      // items_from is a JSON array string or an expression — try direct parse first
-      try {
-        const parsed = JSON.parse(itemsFrom);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
-      } catch {
-        // Not JSON — could be an expression to be evaluated later
-        // For now return empty (deferred to interpolation layer)
-      }
-    }
-
-    return [];
   }
 
   // ─── DAG Helpers ────────────────────────────────────────────────────────
@@ -616,13 +1386,31 @@ export class V3Reconciler {
 
     // Special: fanout children depend on the parallel_over node itself
     if (node.nodeIdInDag.includes(":[") && node.nodeIdInDag.includes("]")) {
-      const parentId = node.nodeIdInDag.split(":[")[0];
+      const parentId = node.nodeIdInDag.split(":[")[0]!;
       return [parentId];
     }
 
-    // Special: loop body depends on the loop node
-    if (node.nodeIdInDag.endsWith("/body")) {
-      const loopId = node.nodeIdInDag.replace(/\/body$/, "");
+    // Special: loop body depends on the loop node OR the previous body step
+    // Pattern: loopId/bodyNodeId — depends on loop node
+    if (node.nodeIdInDag.includes("/")) {
+      const loopId = node.nodeIdInDag.split("/")[0]!;
+      // If fanoutIndex > 0, this body step depends on the previous step in the same iteration
+      if (node.fanoutIndex > 0) {
+        // Find the body node id (the part after the loop id)
+        const dagNode = dag.find((d) => d.id === loopId);
+        if (dagNode) {
+          const bodyRaw = dagNode.body;
+          const bodyIds: string[] = Array.isArray(bodyRaw)
+            ? (bodyRaw as string[])
+            : typeof bodyRaw === "string"
+              ? [bodyRaw]
+              : [];
+          const prevBodyId = bodyIds[node.fanoutIndex - 1];
+          if (prevBodyId) {
+            return [`${loopId}/${prevBodyId}`];
+          }
+        }
+      }
       return [loopId];
     }
 
@@ -722,20 +1510,25 @@ export class V3Reconciler {
 
   // ─── Internal Helpers ───────────────────────────────────────────────────
 
+  /**
+   * G20: Finalize a run, honoring on_failure:"continue" for failed nodes.
+   * A run can only be "done" if no blocking-failure nodes exist.
+   */
   private async finalizeRun(
     runId: string,
     status: "done" | "failed" | "cancelled",
+    nodes: NodeRow[],
   ): Promise<void> {
     // Only transition if not already terminal
     const current = await this.db
-      .select({ status: v3Runs.status })
+      .select({ status: v3Runs.status, tags: v3Runs.tags })
       .from(v3Runs)
       .where(eq(v3Runs.id, runId))
       .limit(1);
 
     if (current.length === 0) return;
 
-    const currentStatus = current[0].status;
+    const currentStatus = current[0]!.status;
     if (
       currentStatus === "done" ||
       currentStatus === "failed" ||
@@ -751,6 +1544,234 @@ export class V3Reconciler {
         completedAt: new Date(),
       })
       .where(eq(v3Runs.id, runId));
+
+    // Best-effort wake: if this run was launched by the orchestrator (an
+    // orchestrationSessionId is carried in tags), record a durable
+    // "review + commit now" event so the orchestrator session can auto-review on
+    // terminal WITHOUT a human re-prompt. This is NOT a §19 violation: it writes
+    // an internal durable event the in-app / Claude Code orchestrator runner
+    // POLLS — there is no server-initiated push to an external MCP host. Wrapped
+    // so a wake failure can never block reconcile.
+    try {
+      await this.maybeWakeOrchestrator(runId, status, current[0]!.tags);
+    } catch {
+      // Advisory only — never block run finalization.
+    }
+  }
+
+  /**
+   * On run-terminal, wake whoever is monitoring this run so the result is
+   * reviewed + committed WITHOUT a human re-prompt. Two channels, both fed from
+   * the run's `tags`:
+   *
+   *  1. `tags.brainThreadId` (set by brain-send) — directly RESUME that brain
+   *     thread (a new `claude --resume` turn) with a "your run is terminal,
+   *     review + commit" message. This closes the single-turn-long-poll gap: a
+   *     brain that ends its turn while the run is still in flight is auto-woken
+   *     when the run finishes, polls to done, reviews, and commits.
+   *  2. `tags.orchestrationSessionId` (legacy) — write a durable
+   *     `run.terminal-review-requested` event the in-app orchestrator runner
+   *     POLLS (no server→external-host push; not a §19 violation).
+   *
+   * Idempotent: a `run.terminal-review-requested` event is written once and used
+   * as the guard so a re-reconcile of the same terminal run never double-wakes.
+   * Best-effort: any failure here is swallowed by the caller and never blocks
+   * run finalization.
+   */
+  private async maybeWakeOrchestrator(
+    runId: string,
+    status: "done" | "failed" | "cancelled",
+    tags: unknown,
+  ): Promise<void> {
+    const t =
+      tags && typeof tags === "object"
+        ? (tags as Record<string, unknown>)
+        : {};
+    const sessionId = t["orchestrationSessionId"];
+    const brainThreadId = t["brainThreadId"];
+    const haveSession = typeof sessionId === "string" && sessionId;
+    const haveThread = typeof brainThreadId === "string" && brainThreadId;
+    if (!haveSession && !haveThread) return;
+
+    // Idempotency guard: only wake once per terminal run.
+    const already = await this.db
+      .select({ id: v3Events.id })
+      .from(v3Events)
+      .where(
+        and(
+          eq(v3Events.runId, runId),
+          eq(v3Events.kind, "run.terminal-review-requested"),
+        ),
+      )
+      .limit(1);
+    if (already.length > 0) return;
+
+    const message =
+      `Your orchestrated run \`${runId}\` reached a terminal state (${status}). ` +
+      `Resume now: poll mcp__orchestrator__runState / v3RunNodes until every node ` +
+      `is terminal, then REVIEW with runSummary + nodeSummary (full_diff). If the ` +
+      `change passes, DELIVER by calling mcp__orchestrator__workspaceCommit ` +
+      `(host-native; NOT workspaceCommitPush, which needs a VM this deployment ` +
+      `lacks) with createMr:true to commit the feature branch and open the PR, ` +
+      `then report the run id and the PR url. Do not start a new run.`;
+
+    // Durable event (channel 2 + idempotency marker).
+    await this.writeEvent(runId, "run.terminal-review-requested", {
+      orchestrationSessionId: haveSession ? sessionId : null,
+      brainThreadId: haveThread ? brainThreadId : null,
+      status,
+      message,
+    });
+
+    // ── LEVEL-1 SLOT RELEASE (critical) ───────────────────────────────────────
+    // A brain_task occupies a concurrency slot from admission until its bound
+    // run reaches terminal. This is THE release anchor: keyed on the RUN going
+    // terminal (not the thread's status, which flips to 'running' on every
+    // wake). Mark the thread's running brain_task terminal and pull the next
+    // queued task into the freed slot. Runs once per terminal run (the
+    // run.terminal-review-requested event above is the idempotency guard).
+    // Best-effort + dynamically imported so the engine keeps no static brain dep.
+    if (haveThread) {
+      try {
+        const { releaseBrainTaskForThread } = await import(
+          "../queue/brain-admit.js"
+        );
+        await releaseBrainTaskForThread(brainThreadId as string, status);
+      } catch {
+        // Advisory — the brain reaper releases the slot as a backstop.
+      }
+    }
+
+    // Channel 1: directly resume the brain thread (auto-wake). Dynamically
+    // imported so the engine module has no static dependency on the brain layer.
+    if (haveThread) {
+      try {
+        const [thread] = await this.db
+          .select({
+            id: brainThreads.id,
+            ownerEmail: brainThreads.ownerEmail,
+            orgId: brainThreads.orgId,
+            status: brainThreads.status,
+          })
+          .from(brainThreads)
+          .where(eq(brainThreads.id, brainThreadId as string))
+          .limit(1);
+        // Only resume a thread that is NOT already mid-turn (avoid stacking
+        // turns on a brain that is still actively polling this run).
+        if (thread && thread.status !== "running") {
+          const { startBrainTurn } = await import("../brain/brain-session.js");
+          await startBrainTurn({
+            threadId: thread.id,
+            ownerEmail: thread.ownerEmail,
+            orgId: thread.orgId ?? null,
+            message,
+          });
+        }
+      } catch {
+        // Best-effort: the durable event above still lets a manual/poll resume.
+      }
+    }
+  }
+
+  /**
+   * Event-driven NODE-level wake (requirement 1). When a node JUST became
+   * terminal (done/failed/skipped) and the run itself is NOT yet terminal, wake
+   * the monitoring brain (tags.brainThreadId) for a SHORT check-in turn: it
+   * polls once, sees the node resolved, and decides whether to intervene or keep
+   * waiting — instead of busy-polling in-place between waves.
+   *
+   * Idempotency: a per-node `node.brain-wake-requested` marker event is written
+   * once per (run, node). Re-ticks of the same resolved node never re-wake.
+   *
+   * Overlap guard: the brain is only woken when its thread is NOT mid-turn
+   * (status != 'running'). When it IS mid-turn we STILL write the marker (so we
+   * don't spam wakes later) — the in-flight turn will observe the node anyway,
+   * and the periodic timer is the backstop if it doesn't.
+   *
+   * Coordination with the timer: a successful wake stamps brain_threads
+   * .last_wake_at (via startBrainTurn's turn-start stamp), so an event resets
+   * the periodic drift-check timer and the scheduler won't double-fire.
+   */
+  private async maybeWakeOrchestratorOnNode(
+    runId: string,
+    tags: unknown,
+    nodes: NodeRow[],
+  ): Promise<void> {
+    const t =
+      tags && typeof tags === "object"
+        ? (tags as Record<string, unknown>)
+        : {};
+    const brainThreadId = t["brainThreadId"];
+    if (typeof brainThreadId !== "string" || !brainThreadId) return;
+
+    // Newly-terminal nodes that have not yet had a wake marker written.
+    const terminalNodes = nodes.filter((n) => TERMINAL_STATUSES.has(n.status));
+    if (terminalNodes.length === 0) return;
+
+    // Load existing per-node wake markers for this run (one query).
+    const markerEvents = await this.db
+      .select({ payload: v3Events.payload })
+      .from(v3Events)
+      .where(
+        and(
+          eq(v3Events.runId, runId),
+          eq(v3Events.kind, "node.brain-wake-requested"),
+        ),
+      );
+    const alreadyMarked = new Set<string>();
+    for (const ev of markerEvents) {
+      const p = ev.payload as Record<string, unknown> | null;
+      const key = p?.nodeKey;
+      if (typeof key === "string") alreadyMarked.add(key);
+    }
+
+    // A node instance is keyed by id (covers loop iterations / fanout children).
+    const fresh = terminalNodes.filter((n) => !alreadyMarked.has(n.id));
+    if (fresh.length === 0) return;
+
+    // Write a marker per freshly-terminal node so we never re-wake on it.
+    for (const n of fresh) {
+      await this.writeEvent(runId, "node.brain-wake-requested", {
+        nodeKey: n.id,
+        nodeId: n.nodeIdInDag,
+        status: n.status,
+      });
+    }
+
+    // Wake the brain ONCE per tick for the batch of newly-terminal nodes, but
+    // only if it is not mid-turn. The marker above guarantees one-wake-per-node
+    // regardless of whether we actually resume here.
+    try {
+      const [thread] = await this.db
+        .select({
+          id: brainThreads.id,
+          ownerEmail: brainThreads.ownerEmail,
+          orgId: brainThreads.orgId,
+          status: brainThreads.status,
+        })
+        .from(brainThreads)
+        .where(eq(brainThreads.id, brainThreadId))
+        .limit(1);
+      if (!thread || thread.status === "running") return;
+
+      const nodeList = fresh
+        .map((n) => `${n.nodeIdInDag} → ${n.status}`)
+        .join(", ");
+      const message =
+        `节点事件:你编排的 run \`${runId}\` 有节点完成(${nodeList})。` +
+        `快速检查一次 runState/v3RunNodes:正常推进→简短确认并结束回合(继续等待);` +
+        `有节点失败/跑偏→用 workflowPatch/nodeRetry/runCancel 介入。不要原地轮询,检查完立即结束。`;
+
+      const { startBrainTurn } = await import("../brain/brain-session.js");
+      await startBrainTurn({
+        threadId: thread.id,
+        ownerEmail: thread.ownerEmail,
+        orgId: thread.orgId ?? null,
+        message,
+      });
+    } catch {
+      // Best-effort — the periodic timer is the backstop.
+    }
   }
 
   /**

@@ -1,5 +1,5 @@
 import { defineAction } from "@agent-native/core";
-import { eq, and, desc, ilike, isNotNull, isNull, sql } from "drizzle-orm";
+import { eq, and, desc, ilike, isNotNull, isNull, sql, gte, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getV3Db, v3Schema } from "../server/db/v3.js";
 
@@ -38,15 +38,27 @@ export interface V3SpawnRow {
  */
 export const spawnList = defineAction({
   description:
-    "List V3 spawns with optional scope (run-scoped vs ad-hoc), status, and agent filters.",
+    "List V3 spawns with optional scope (run-scoped vs ad-hoc), status, agent, tagMatch (JSONB containment partial key/value match), since, and pagination filters.",
   schema: z.object({
     scope: z.enum(["run-scoped", "ad-hoc", "all"]).default("all"),
     status: z.string().optional(),
     agentName: z.string().optional(),
+    /**
+     * Partial JSONB containment match — pass an object whose keys/values must
+     * ALL appear in the spawn's tags column. Uses Postgres @> operator.
+     * E.g. { source: "tracker", item_id: "PAY-14" }.
+     */
+    tagMatch: z.record(z.string(), z.string()).optional(),
+    /** ISO-8601 datetime — return only spawns started at or after this time. */
+    since: z.string().datetime({ offset: true }).optional(),
     limit: z.number().int().positive().default(100),
     offset: z.number().int().min(0).default(0),
   }),
   readOnly: true,
+  // Advertise on the A2A agent card so peer apps (e.g. tracker) can discover
+  // this read-back surface for tag-match activity reassembly (v3-DESIGN §16).
+  publicAgent: { expose: true, readOnly: true, requiresAuth: false },
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
     const conditions: Array<import("drizzle-orm").SQL> = [];
@@ -67,6 +79,17 @@ export const spawnList = defineAction({
       conditions.push(
         ilike(v3Schema.v3Spawns.agentName, `%${args.agentName}%`),
       );
+    }
+
+    // JSONB containment: tags @> $1::jsonb (design §16: partial key/value match)
+    if (args.tagMatch && Object.keys(args.tagMatch).length > 0) {
+      conditions.push(
+        sql`${v3Schema.v3Spawns.tags} @> ${JSON.stringify(args.tagMatch)}::jsonb`,
+      );
+    }
+
+    if (args.since) {
+      conditions.push(gte(v3Schema.v3Spawns.startedAt, new Date(args.since)));
     }
 
     const rows = await db
@@ -112,7 +135,7 @@ export const spawnList = defineAction({
           runId: v3Schema.v3Nodes.runId,
         })
         .from(v3Schema.v3Nodes)
-        .where(sql`${v3Schema.v3Nodes.id} = ANY(${nodeIds})`);
+        .where(inArray(v3Schema.v3Nodes.id, nodeIds));
       nodeIdToRunId = new Map(
         nodeRows.map((n) => [n.id, n.runId]),
       );
@@ -155,6 +178,7 @@ export const spawnGet = defineAction({
     spawnId: z.string(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
 

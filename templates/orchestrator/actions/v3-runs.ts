@@ -1,26 +1,48 @@
 import { defineAction } from "@agent-native/core";
-import { eq, ilike, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { z } from "zod";
 import { getV3Db, v3Schema } from "../server/db/v3.js";
 
 /** List V3 runs with optional status/tag filters and pagination. */
 export const runsList = defineAction({
-  description: "List V3 runs with optional status and tag filters.",
+  description:
+    "List V3 runs with optional status, tagMatch (JSONB containment partial key/value match), since, and pagination filters.",
   schema: z.object({
     status: z.string().optional(),
-    tagMatch: z.string().optional(),
+    /**
+     * Partial JSONB containment match — pass an object whose keys/values must
+     * ALL appear in the run's tags column. E.g. { source: "tracker", item_id: "PAY-14" }.
+     * Uses Postgres @> operator — O(1) via GIN index.
+     */
+    tagMatch: z.record(z.string(), z.string()).optional(),
+    /** ISO-8601 datetime — return only runs started at or after this time. */
+    since: z.string().datetime({ offset: true }).optional(),
     limit: z.number().int().positive().default(50),
     offset: z.number().int().min(0).default(0),
   }),
   readOnly: true,
+  // Advertise on the A2A agent card so peer apps (e.g. tracker) can discover
+  // this read-back surface for tag-match activity reassembly (v3-DESIGN §16).
+  publicAgent: { expose: true, readOnly: true, requiresAuth: false },
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
-    const conditions: Array<any> = [];
+    const conditions: Array<import("drizzle-orm").SQL> = [];
 
     if (args.status) {
+      conditions.push(eq(v3Schema.v3Runs.status, args.status as any));
+    }
+
+    // JSONB containment: tags @> $1::jsonb — matches when all supplied keys+values
+    // are present in the stored JSONB. Far more correct than a substring scan.
+    if (args.tagMatch && Object.keys(args.tagMatch).length > 0) {
       conditions.push(
-        eq(v3Schema.v3Runs.status, args.status as any),
+        sql`${v3Schema.v3Runs.tags} @> ${JSON.stringify(args.tagMatch)}::jsonb`,
       );
+    }
+
+    if (args.since) {
+      conditions.push(gte(v3Schema.v3Runs.startedAt, new Date(args.since)));
     }
 
     const rows = await db
@@ -40,22 +62,7 @@ export const runsList = defineAction({
       .limit(args.limit)
       .offset(args.offset);
 
-    // Filter by tag substring if requested
-    let filtered = rows;
-    if (args.tagMatch) {
-      filtered = rows.filter((r) => {
-        const tags = r.tags as Record<string, unknown> | string[] | null | undefined;
-        if (!tags) return false;
-        if (Array.isArray(tags)) {
-          return tags.some((t) => String(t).includes(args.tagMatch!));
-        }
-        return Object.values(tags).some((v) =>
-          String(v).includes(args.tagMatch!),
-        );
-      });
-    }
-
-    return filtered.map((r) => ({
+    return rows.map((r) => ({
       id: r.id,
       templateId: r.templateId,
       templateVersion: r.templateVersion,
@@ -76,6 +83,7 @@ export const runState = defineAction({
     runId: z.string(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
 

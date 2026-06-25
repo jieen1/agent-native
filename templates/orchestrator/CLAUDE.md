@@ -67,9 +67,33 @@ output.
 - `navigate` moves the UI. `view-screen` reports what the user is looking at and,
   for an open item/run, its live progress.
 
+## V3 Execution (current — the orchestrator brain)
+
+The current execution surface is **V3**: a pure DAG execution engine the
+orchestrator brain drives. The **backend never decomposes** a task and never
+decides it is done — the brain (a persistent, resumable Claude Code session that
+reaches these actions as MCP tools) authors a DAG, runs it, monitors it by
+**polling**, reviews, and commits. New task work goes through the V3 surface:
+
+- **Launch / run:** `launch-task` (create workspace + start template run or hand
+  a task to the orchestrator), `workspaceCreate`, `workflowRun`, `workflowSave`,
+  `workflowList`, `workflowPatch`, `runFork`, `spawnOnce`.
+- **Monitor (poll — no push):** `runState`, `v3RunEvents`, `runSummary`,
+  `nodeSummary`.
+- **Workspace / deliver:** `workspaceDiff`, `workspaceCommitPush`.
+
+Read the **`orchestrating-v3`** skill for the decomposition recipe, the channel
+contract (`{{deps.<id>.output}}` — no auto-injection), the canonical
+design→develop→review→commit DAG (CC analyze, vLLM develop, CC review, commit),
+and monitor-by-polling. Worker agents: `claude-code` (analyze + review,
+`acp:claude-code`) and `vllm` (development, `ai-sdk:openai`).
+
+The v2 `orchestrating` skill (work-item + `run-start` + `transition-work-item`)
+is **legacy** — retained, not deleted. Prefer V3 for new work.
+
 ## Skills
 
-Read the relevant skill before deeper work: `orchestrating` (work-item
-execution + status transitions), `adding-a-feature`, `actions`, `storing-data`,
-`real-time-sync`, `security`, `delegate-to-agent`, `frontend-design`,
-`shadcn-ui`, `self-modifying-code`.
+Read the relevant skill before deeper work: `orchestrating-v3` (V3 task
+execution — the current path), `orchestrating` (v2 legacy work-item execution),
+`adding-a-feature`, `actions`, `storing-data`, `real-time-sync`, `security`,
+`delegate-to-agent`, `frontend-design`, `shadcn-ui`, `self-modifying-code`.

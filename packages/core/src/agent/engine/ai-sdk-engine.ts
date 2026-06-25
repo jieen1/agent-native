@@ -399,7 +399,12 @@ class AISDKEngine implements AgentEngine {
     // GPT reasoning models get the API OpenAI recommends. If someone points
     // the OpenAI provider at an OpenAI-compatible gateway, keep using Chat
     // Completions because many gateway base URLs do not implement Responses.
-    return this.provider === "openai" && this.baseUrl
+    // A custom OpenAI base URL (set on the engine OR via the OPENAI_BASE_URL
+    // env, which the AI SDK provider itself reads) means an OpenAI-COMPATIBLE
+    // gateway (vLLM, etc.) — keep Chat Completions, since most such gateways do
+    // not implement (or fully validate) the Responses API.
+    const hasCustomBase = !!(this.baseUrl || process.env.OPENAI_BASE_URL);
+    return this.provider === "openai" && hasCustomBase
       ? provider.chat(model)
       : provider(model);
   }

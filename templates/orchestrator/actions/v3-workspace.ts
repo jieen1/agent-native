@@ -1,7 +1,40 @@
 import { defineAction } from "@agent-native/core";
+import { resolveSecret } from "@agent-native/core/server";
+import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { MicrosandboxRuntime } from "../server/runtime/microsandbox-runtime.js";
+import {
+  addAll,
+  commit,
+  pushBranch,
+  type GitContext,
+} from "../server/runtime/git-wrapper.js";
+import { VM_HOME, scrubSecretsFromLog } from "../server/runtime/vm-creds.js";
+import {
+  createLocalWorkspace,
+  localWorkspaceDiff,
+  localWorkspaceFiles,
+  localWorkspaceRead,
+  commitAndPush as commitAndPushLocal,
+} from "../server/v3-workspace-local.js";
+
+/** Build a minimal VmHandle for msb exec calls against a named running sandbox. */
+function vmHandleFor(vmName: string) {
+  return {
+    name: vmName,
+    spec: { kind: "microvm" as const, onFailure: "recreate" as const },
+    meta: {},
+  };
+}
+
+/** Shared MicrosandboxRuntime for workspace git operations. */
+let _wsRuntime: MicrosandboxRuntime | null = null;
+function getWsRuntime(): MicrosandboxRuntime {
+  if (!_wsRuntime) _wsRuntime = new MicrosandboxRuntime();
+  return _wsRuntime;
+}
 
 export interface V3WorkspaceRow {
   id: string;
@@ -17,29 +50,45 @@ export interface V3WorkspaceRow {
   createdBy: string | null;
 }
 
-/** List V3 workspaces with optional owner_kind and state filters. */
+/** List V3 workspaces with optional owner_kind, ownerId, state, and tagMatch filters. */
 export const workspaceList = defineAction({
   description:
-    "List V3 workspaces with optional owner_kind and state filters.",
+    "List V3 workspaces with optional owner_kind, ownerId, state, and tagMatch (JSONB containment partial match) filters.",
   schema: z.object({
     ownerKind: z.string().optional(),
+    ownerId: z.string().optional(),
     state: z.string().optional(),
+    /**
+     * Partial JSONB match: only return workspaces whose tags contain ALL
+     * the supplied key/value pairs (Postgres @> containment). E.g.
+     * { source: "tracker", item_id: "PAY-14" }.
+     */
+    tagMatch: z.record(z.string(), z.string()).optional(),
     limit: z.number().int().positive().default(100),
     offset: z.number().int().min(0).default(0),
   }),
   readOnly: true,
+  // Advertise on the A2A agent card so peer apps (e.g. tracker) can discover
+  // this read-back surface for tag-match activity reassembly (v3-DESIGN §16).
+  publicAgent: { expose: true, readOnly: true, requiresAuth: false },
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
     const conditions: Array<import("drizzle-orm").SQL> = [];
 
     if (args.ownerKind) {
-      conditions.push(
-        eq(v3Schema.v3Workspaces.ownerKind, args.ownerKind),
-      );
+      conditions.push(eq(v3Schema.v3Workspaces.ownerKind, args.ownerKind));
+    }
+    if (args.ownerId) {
+      conditions.push(eq(v3Schema.v3Workspaces.ownerId, args.ownerId));
     }
     if (args.state) {
+      conditions.push(eq(v3Schema.v3Workspaces.state, args.state as any));
+    }
+    // JSONB containment: tags @> '{"key":"value",...}'
+    if (args.tagMatch && Object.keys(args.tagMatch).length > 0) {
       conditions.push(
-        eq(v3Schema.v3Workspaces.state, args.state as any),
+        sql`${v3Schema.v3Workspaces.tags} @> ${JSON.stringify(args.tagMatch)}::jsonb`,
       );
     }
 
@@ -86,6 +135,7 @@ export const workspaceGet = defineAction({
     workspaceId: z.string(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
 
@@ -163,64 +213,139 @@ export const workspaceDestroy = defineAction({
   },
 });
 
-/** Create a V3 workspace (provisions a VM, clones repo). */
+/** Create a V3 workspace (host-native: real git clone into a volume dir). */
 export const workspaceCreate = defineAction({
   description:
-    "Create a V3 workspace. Provisions a VM, clones the repo, and checks out the branch.",
+    "Create a V3 workspace. Host-native: git-clones the repo into a directory on " +
+    "the workspace volume and checks out the run branch (no microVM). Agent " +
+    "workers cwd into the returned directory.",
   schema: z.object({
-    repo: z.string().url(),
+    // Accept https:// and file:// (a local path clone). z.string().url() admits
+    // both; not constrained to .url() so a bare path is still rejected cleanly
+    // by git rather than the schema.
+    repo: z.string().min(1),
     branch: z.string().optional(),
-    ownerKind: z.enum(["cc", "run"]).default("cc"),
+    // "user" (default): a person created this workspace — the owner is that
+    // real requesting user. "run": a workflow run owns it (ownerId is the run
+    // id). "cc" is the legacy agent-on-behalf-of-user value, treated as "user".
+    ownerKind: z.enum(["user", "run", "cc"]).default("user"),
     ownerId: z.string().optional(),
     keepAfterRun: z.boolean().optional(),
     tags: z.unknown().optional(),
   }),
   run: async (args) => {
-    const db = getV3Db();
-    const uuid = crypto.randomUUID();
-    const vmName = `v3-ws-${uuid.slice(0, 8)}`;
+    // Resolve the real requesting user from the framework request context (the
+    // same identity every other action records). This becomes the owner of a
+    // user-created workspace and the audit `created_by` in all cases.
+    const requesterEmail = getRequestUserEmail() ?? "local@localhost";
 
-    await db.execute(sql.raw(`
-      INSERT INTO v3_workspaces (id, owner_kind, owner_id, vm_name, repo_url, branch, state, tags, created_by, created_at)
-      VALUES (${uuid}, ${args.ownerKind}, ${args.ownerId ?? null}, ${vmName}, ${args.repo}, ${args.branch ?? null}, 'provisioning', ${JSON.stringify(args.tags ?? {}) }::jsonb, ${args.ownerId ?? null}, NOW())
-    `));
+    // A run-owned workspace keeps the run id as its owner (passed as ownerId); a
+    // person-owned one is owned by the real requesting user (legacy "cc" maps to
+    // the real user too). Never the meaningless "cc" placeholder.
+    const ownerKind = args.ownerKind === "run" ? "run" : "user";
+    const ownerId = args.ownerId ?? requesterEmail;
 
-    // TODO: actual msb exec to provision VM, git clone, checkout
-    // For now, transition to ready after recording in DB.
-    await db
-      .update(v3Schema.v3Workspaces)
-      .set({ state: "ready" as any })
-      .where(eq(v3Schema.v3Workspaces.id, uuid));
-
-    return {
-      workspaceId: uuid,
-      vmName,
-      state: "ready",
+    // Host-native workspace (DESIGN §10.6): real git clone into the volume,
+    // checkout the run branch, persist host_path. No MicrosandboxRuntime — works
+    // in Docker where msb/libkrun is unavailable.
+    const ws = await createLocalWorkspace({
       repoUrl: args.repo,
       branch: args.branch,
+      ownerKind,
+      ownerId,
+      createdBy: requesterEmail,
+    });
+
+    return {
+      workspaceId: ws.id,
+      // vmName stays null for host-native workspaces; hostPath is the new dir.
+      vmName: null as string | null,
+      hostPath: ws.dir,
+      state: "ready",
+      repoUrl: args.repo,
+      branch: ws.branch,
     };
   },
 });
 
-/** Get git diff for a workspace. */
+/**
+ * Get the git diff for a V3 workspace. Returns the full patch plus a per-file
+ * breakdown (path + add/del counts + that file's hunk) so the UI can render
+ * grouped, color-coded diffs.
+ *
+ * Two execution paths:
+ *  • Host-native (host_path set, no VM): diffs against the divergence point from
+ *    the default branch (merge-base origin/main…HEAD) so BOTH committed branch
+ *    work and uncommitted edits render — `git diff HEAD` would be empty because
+ *    the run branch's change is already committed.
+ *  • VM (vm_name set): `git diff HEAD` over the microsandbox (legacy path).
+ */
 export const workspaceDiff = defineAction({
-  description: "Get git diff for a V3 workspace.",
+  description:
+    "Get the git diff for a V3 workspace as a full patch plus a per-file " +
+    "breakdown (path, additions, deletions, status, per-file patch). Host-native " +
+    "workspaces diff against the branch divergence point so committed work shows.",
   schema: z.object({
     workspaceId: z.string(),
     against: z.string().optional(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const ws = await assertWorkspaceExists(args.workspaceId);
     if (ws.state !== "ready" && ws.state !== "busy") {
-      throw new Error(`Workspace ${args.workspaceId} is ${ws.state}, cannot diff`);
+      throw new Error(
+        `Workspace ${args.workspaceId} is ${ws.state}, cannot diff`,
+      );
     }
 
-    // TODO: msb exec `git diff ${args.against || ""}` inside VM
+    // Host-native path: diff over the checkout dir (vm_name NULL, host_path set).
+    if (!ws.vmName) {
+      const local = await localWorkspaceDiff(args.workspaceId, args.against);
+      if (!local) {
+        throw new Error(
+          `Workspace ${args.workspaceId} has neither a VM nor a host path`,
+        );
+      }
+      return {
+        workspaceId: args.workspaceId,
+        vmName: null as string | null,
+        base: local.base,
+        diff: scrubSecretsFromLog(local.diff),
+        files: local.files.map((f) => ({
+          path: f.path,
+          additions: f.additions,
+          deletions: f.deletions,
+          status: f.status,
+          patch: scrubSecretsFromLog(f.patch),
+        })),
+      };
+    }
+
+    // VM path (legacy microsandbox).
+    const runtime = getWsRuntime();
+    const vm = vmHandleFor(ws.vmName);
+    const workdir = "/work";
+    const diffArgs = args.against ? `diff ${args.against}` : "diff HEAD";
+    const res = await runtime.exec(vm, `git --no-pager ${diffArgs}`, {
+      cwd: workdir,
+      env: { HOME: VM_HOME },
+    });
+
     return {
       workspaceId: args.workspaceId,
       vmName: ws.vmName,
-      diff: "", // placeholder until msb integration
+      base: args.against ?? "HEAD",
+      diff: scrubSecretsFromLog(
+        res.stdout + (res.stderr ? `\n[stderr]\n${res.stderr}` : ""),
+      ),
+      files: [] as Array<{
+        path: string;
+        additions: number;
+        deletions: number;
+        status: string;
+        patch: string;
+      }>,
     };
   },
 });
@@ -233,17 +358,49 @@ export const workspaceFiles = defineAction({
     path: z.string().optional(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const ws = await assertWorkspaceExists(args.workspaceId);
     if (ws.state !== "ready" && ws.state !== "busy") {
-      throw new Error(`Workspace ${args.workspaceId} is ${ws.state}, cannot list files`);
+      throw new Error(
+        `Workspace ${args.workspaceId} is ${ws.state}, cannot list files`,
+      );
     }
 
-    // TODO: msb exec `find <path> -maxdepth 1` inside VM
+    // Host-native path: list directory entries over the checkout dir.
+    if (!ws.vmName) {
+      const local = await localWorkspaceFiles(args.workspaceId, args.path);
+      if (!local) {
+        throw new Error(
+          `Workspace ${args.workspaceId} has neither a VM nor a host path`,
+        );
+      }
+      return {
+        workspaceId: args.workspaceId,
+        path: local.path,
+        files: local.files,
+      };
+    }
+
+    // VM path (legacy microsandbox).
+    const runtime = getWsRuntime();
+    const vm = vmHandleFor(ws.vmName);
+    const targetPath = args.path ?? "/work";
+    const res = await runtime.exec(
+      vm,
+      `find '${targetPath.replace(/'/g, `'\\''`)}' -maxdepth 1 -not -path '${targetPath.replace(/'/g, `'\\''`)}' 2>/dev/null | sort`,
+      { env: { HOME: VM_HOME } },
+    );
+
+    const files = res.stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+
     return {
       workspaceId: args.workspaceId,
-      path: args.path ?? "/",
-      files: [] as string[], // placeholder until msb integration
+      path: targetPath,
+      files,
     };
   },
 });
@@ -256,17 +413,39 @@ export const workspaceRead = defineAction({
     path: z.string(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const ws = await assertWorkspaceExists(args.workspaceId);
     if (ws.state !== "ready" && ws.state !== "busy") {
-      throw new Error(`Workspace ${args.workspaceId} is ${ws.state}, cannot read`);
+      throw new Error(
+        `Workspace ${args.workspaceId} is ${ws.state}, cannot read`,
+      );
     }
 
-    // TODO: msb exec `cat <path>` inside VM
+    // Host-native path: read the file over the checkout dir (path-traversal safe).
+    if (!ws.vmName) {
+      const local = await localWorkspaceRead(args.workspaceId, args.path);
+      if (!local) {
+        throw new Error(
+          `Workspace ${args.workspaceId} has neither a VM nor a host path`,
+        );
+      }
+      return {
+        workspaceId: args.workspaceId,
+        path: local.path,
+        content: scrubSecretsFromLog(local.content),
+      };
+    }
+
+    // VM path (legacy microsandbox).
+    const runtime = getWsRuntime();
+    const vm = vmHandleFor(ws.vmName);
+    const content = await runtime.fs(vm).read(args.path);
+
     return {
       workspaceId: args.workspaceId,
       path: args.path,
-      content: "", // placeholder until msb integration
+      content,
     };
   },
 });
@@ -287,14 +466,73 @@ export const workspaceCommitPush = defineAction({
         `Workspace ${args.workspaceId} is ${ws.state}, cannot commit`,
       );
     }
+    // Host-native (non-microVM) workspace: commit + push + open a PR directly in
+    // the local git checkout via commitAndPush (DESIGN §10.6, §13). The VM path
+    // below requires a running microVM, which host-native workspaces (vm_name
+    // NULL, host_path set) never have — without this branch the brain cannot
+    // ship a host-native run's work (it throws "has no VM"). commitAndPush
+    // resolves GITHUB_TOKEN within THIS action's request context (so app_secrets
+    // / Vault scoping works), excludes .mcp.json, retargets off the base branch,
+    // and opens a real PR.
+    if (!ws.vmName) {
+      const baseBranch = ws.branch && ws.branch.trim() !== "" ? ws.branch : "main";
+      const result = await commitAndPushLocal({
+        id: args.workspaceId,
+        message: args.message,
+        createMr: true,
+        baseBranch,
+        prTitle: args.message.split("\n")[0] || args.message,
+        prBody: args.message,
+      });
+      return {
+        workspaceId: args.workspaceId,
+        sha: result.sha,
+        branch: result.branch,
+        pushed: result.pushed,
+        pushReason: result.pushed ? "pushed" : "not-pushed",
+        pushDetail: result.prUrl ?? null,
+        committed: result.committed,
+        prUrl: result.prUrl ?? null,
+      };
+    }
 
-    // TODO: msb exec `git add . && git commit -m <msg> && git push origin <branch>`
-    // with GITHUB_TOKEN injected from resolveSecret("GITHUB_TOKEN")
+    // Resolve GITHUB_TOKEN ephemerally from the Vault (DESIGN §13) — never
+    // written to the repo config or persisted beyond this call.
+    const githubToken = (await resolveSecret("GITHUB_TOKEN").catch(
+      () => null,
+    )) as string | null;
+
+    const runtime = getWsRuntime();
+    const vm = vmHandleFor(ws.vmName);
+    const workdir = "/work";
+    const env: Record<string, string> = {
+      HOME: VM_HOME,
+      ...(githubToken ? { GITHUB_TOKEN: githubToken } : {}),
+    };
+    const gitCtx: GitContext = { runtime, vm, workdir, env };
+
+    // Stage all changes.
+    await addAll(gitCtx);
+
+    // Commit (idempotent if nothing to commit).
+    const commitResult = await commit(gitCtx, args.message);
+
+    const branch = args.pushBranch ?? ws.branch ?? "main";
+
+    // Push to remote using ephemeral token URL (DESIGN §13 — token never in config).
+    const pushResult = await pushBranch(gitCtx, {
+      branch,
+      remoteUrl: ws.repoUrl ?? undefined,
+    });
+
     return {
       workspaceId: args.workspaceId,
-      sha: "pending-msb",
-      branch: ws.branch ?? "main",
-      pushed: false, // placeholder until msb integration
+      sha: commitResult.sha ?? null,
+      branch,
+      pushed: pushResult.pushed,
+      pushReason: pushResult.reason,
+      pushDetail: pushResult.detail,
+      committed: commitResult.committed,
     };
   },
 });

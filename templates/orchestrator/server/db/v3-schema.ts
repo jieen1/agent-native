@@ -74,9 +74,7 @@ export const v3WorkflowTemplates = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     ...ownableColumns(),
   },
-  (t) => [
-    unique("unique_v3_wf_template_name_version").on(t.name, t.version),
-  ],
+  (t) => [unique("unique_v3_wf_template_name_version").on(t.name, t.version)],
 );
 
 // ─── v3_runs ────────────────────────────────────────────────────────────────
@@ -91,6 +89,8 @@ export const v3Runs = pgTable("v3_runs", {
   status: v3RunStatusEnum("status").notNull().default("pending"),
   priority: integer("priority").notNull().default(0),
   tags: jsonb("tags"),
+  // Additive: archive flag (0/1) — hides a run from the default list (P4-A).
+  archived: integer("archived").notNull().default(0),
   startedAt: timestamp("started_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   ...ownableColumns(),
@@ -128,54 +128,54 @@ export const v3Nodes = pgTable(
 
 // ─── v3_spawns ──────────────────────────────────────────────────────────────
 
-export const v3Spawns = pgTable("v3_spawns", {
-  id: text("id").primaryKey(),
-  nodeId: text("node_id"),
-  attempt: integer("attempt").notNull().default(1),
-  agentName: text("agent_name"),
-  engineRef: text("engine_ref"),
-  modelRef: text("model_ref"),
-  runtime: text("runtime"),
-  workspaceId: text("workspace_id"),
-  renderedPrompt: text("rendered_prompt").notNull(),
-  logRef: text("log_ref"),
-  vmName: text("vm_name"),
-  acpSessionId: text("acp_session_id"),
-  status: v3SpawnStatusEnum("status").notNull().default("pending"),
-  outputArtifactId: text("output_artifact_id"),
-  outputKind: text("output_kind"),
-  tokensInput: integer("tokens_input").notNull().default(0),
-  tokensOutput: integer("tokens_output").notNull().default(0),
-  latencyMs: integer("latency_ms"),
-  error: text("error"),
-  errorClass: text("error_class"),
-  tags: jsonb("tags"),
-  startedAt: timestamp("started_at", { withTimezone: true }),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  ...ownableColumns(),
-},
-(t) => [
-  index("idx_v3_spawns_node_id").on(t.nodeId),
-],
+export const v3Spawns = pgTable(
+  "v3_spawns",
+  {
+    id: text("id").primaryKey(),
+    nodeId: text("node_id"),
+    attempt: integer("attempt").notNull().default(1),
+    agentName: text("agent_name"),
+    engineRef: text("engine_ref"),
+    modelRef: text("model_ref"),
+    runtime: text("runtime"),
+    workspaceId: text("workspace_id"),
+    renderedPrompt: text("rendered_prompt").notNull(),
+    logRef: text("log_ref"),
+    vmName: text("vm_name"),
+    acpSessionId: text("acp_session_id"),
+    status: v3SpawnStatusEnum("status").notNull().default("pending"),
+    outputArtifactId: text("output_artifact_id"),
+    outputKind: text("output_kind"),
+    tokensInput: integer("tokens_input").notNull().default(0),
+    tokensOutput: integer("tokens_output").notNull().default(0),
+    latencyMs: integer("latency_ms"),
+    error: text("error"),
+    errorClass: text("error_class"),
+    tags: jsonb("tags"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...ownableColumns(),
+  },
+  (t) => [index("idx_v3_spawns_node_id").on(t.nodeId)],
 );
 
 // ─── v3_artifacts ───────────────────────────────────────────────────────────
 
-export const v3Artifacts = pgTable("v3_artifacts", {
-  id: text("id").primaryKey(),
-  spawnId: text("spawn_id").notNull(),
-  kind: text("kind").notNull(),
-  textContent: text("text_content"),
-  objectContent: jsonb("object_content"),
-  fullContentRef: text("full_content_ref"),
-  byteSize: integer("byte_size"),
-  truncated: integer("truncated").notNull().default(0),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  ...ownableColumns(),
-},
-(t) => [
-  index("idx_v3_artifacts_spawn_id").on(t.spawnId),
-],
+export const v3Artifacts = pgTable(
+  "v3_artifacts",
+  {
+    id: text("id").primaryKey(),
+    spawnId: text("spawn_id").notNull(),
+    kind: text("kind").notNull(),
+    textContent: text("text_content"),
+    objectContent: jsonb("object_content"),
+    fullContentRef: text("full_content_ref"),
+    byteSize: integer("byte_size"),
+    truncated: integer("truncated").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    ...ownableColumns(),
+  },
+  (t) => [index("idx_v3_artifacts_spawn_id").on(t.spawnId)],
 );
 
 // ─── v3_workspaces ──────────────────────────────────────────────────────────
@@ -188,6 +188,10 @@ export const v3Workspaces = pgTable(
     ownerId: text("owner_id").notNull(),
     tags: jsonb("tags"),
     vmName: text("vm_name"),
+    // Additive (host-native workspaces, DESIGN §10.6): the local checkout dir on
+    // the workspace volume that agent workers cwd into. NULL for microVM
+    // workspaces. Never dropped/renamed.
+    hostPath: text("host_path"),
     repoUrl: text("repo_url"),
     branch: text("branch"),
     state: v3WorkspaceStateEnum("state").notNull().default("provisioning"),
@@ -204,37 +208,160 @@ export const v3Workspaces = pgTable(
 
 // ─── v3_patches ─────────────────────────────────────────────────────────────
 
-export const v3Patches = pgTable("v3_patches", {
-  id: text("id").primaryKey(),
-  runId: text("run_id").notNull(),
-  dagVersionBefore: integer("dag_version_before").notNull(),
-  dagVersionAfter: integer("dag_version_after").notNull(),
-  patchOps: jsonb("patch_ops").notNull(),
-  actor: text("actor").notNull(),
-  reason: text("reason"),
-  applied: integer("applied").notNull().default(0),
-  appliedAt: timestamp("applied_at", { withTimezone: true }),
-  ...ownableColumns(),
-},
-(t) => [
-  index("idx_v3_patches_run_id").on(t.runId),
-],
+export const v3Patches = pgTable(
+  "v3_patches",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull(),
+    dagVersionBefore: integer("dag_version_before").notNull(),
+    dagVersionAfter: integer("dag_version_after").notNull(),
+    patchOps: jsonb("patch_ops").notNull(),
+    actor: text("actor").notNull(),
+    reason: text("reason"),
+    applied: integer("applied").notNull().default(0),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    ...ownableColumns(),
+  },
+  (t) => [index("idx_v3_patches_run_id").on(t.runId)],
 );
 
 // ─── v3_events ──────────────────────────────────────────────────────────────
 
-export const v3Events = pgTable("v3_events", {
-  id: text("id").primaryKey(),
-  runId: text("run_id"),
-  spawnId: text("spawn_id"),
-  kind: text("kind").notNull(),
-  payload: jsonb("payload"),
-  seqNum: integer("seq_num"),
-  ts: timestamp("ts", { withTimezone: true }).defaultNow(),
-  ...ownableColumns(),
-},
-(t) => [
-  index("idx_v3_events_run_seq").on(t.runId, t.seqNum),
-  index("idx_v3_events_spawn_id").on(t.spawnId),
-],
+export const v3Events = pgTable(
+  "v3_events",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id"),
+    spawnId: text("spawn_id"),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload"),
+    seqNum: integer("seq_num"),
+    ts: timestamp("ts", { withTimezone: true }).defaultNow(),
+    ...ownableColumns(),
+  },
+  (t) => [
+    index("idx_v3_events_run_seq").on(t.runId, t.seqNum),
+    index("idx_v3_events_spawn_id").on(t.spawnId),
+  ],
+);
+
+// ─── brain_threads ───────────────────────────────────────────────────────────
+// The orchestrator brain: a persistent, resumable Claude Code session per
+// thread. session_id is the CC session captured from the stream-json init
+// event; passing it on the next turn (--resume) retains full context. Additive.
+
+export const brainThreads = pgTable(
+  "brain_threads",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull().default("New session"),
+    // The Claude Code session id captured from the stream-json `system/init`
+    // event. Null until the first turn produces it; reused via --resume.
+    sessionId: text("session_id"),
+    // running | done | error | idle
+    status: text("status").notNull().default("idle"),
+    // Optional task workspace this thread operates in (a v3_workspaces id).
+    workspaceId: text("workspace_id"),
+    // The working directory the CC child runs in (resolved per turn).
+    cwd: text("cwd"),
+    // Last error string, when status = error.
+    error: text("error"),
+    // Periodic drift-check cadence in seconds for the brain monitor scheduler.
+    // NULL → use the env default (BRAIN_MONITOR_INTERVAL_SEC, default 120).
+    // 0 → disable the timer entirely (event-only wakes). Additive, nullable.
+    monitorIntervalSec: integer("monitor_interval_sec"),
+    // The last time ANY wake (event / timer / terminal) re-invoked this thread.
+    // The scheduler uses this so events naturally reset the periodic timer and
+    // a thread is never double-fired. Additive, nullable.
+    lastWakeAt: timestamp("last_wake_at", { withTimezone: true }),
+    // Live model + context telemetry captured from the stream-json child.
+    // model = the resolved model id from the init `system` event (e.g.
+    // claude-opus-4-8[1m]); contextWindow = result.modelUsage[model].contextWindow
+    // (read from the result event, never hardcoded); contextUsed = the latest
+    // assistant usage (input + cache_read + cache_creation input tokens);
+    // lastUsage = the raw usage object surfaced on the brain-usage panel.
+    // All additive + nullable.
+    model: text("model"),
+    contextWindow: integer("context_window"),
+    contextUsed: integer("context_used"),
+    lastUsage: jsonb("last_usage"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    ...ownableColumns(),
+  },
+  (t) => [
+    index("idx_brain_threads_owner").on(t.ownerEmail),
+    index("idx_brain_threads_updated").on(t.updatedAt),
+  ],
+);
+
+// ─── brain_events ────────────────────────────────────────────────────────────
+// Append-only transcript of a brain turn: user messages, assistant text,
+// every MCP/tool call (name + input + result), and the terminal result/error.
+// `seq` is monotonic within a thread so the page renders in order. Additive.
+
+export const brainEvents = pgTable(
+  "brain_events",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id").notNull(),
+    // Monotonic order within the thread.
+    seq: integer("seq").notNull(),
+    // user | assistant | tool_use | tool_result | result | error | system
+    type: text("type").notNull(),
+    // Free text for user/assistant/result/error/system events.
+    text: text("text"),
+    // For tool_use / tool_result events.
+    toolName: text("tool_name"),
+    toolUseId: text("tool_use_id"),
+    toolInput: jsonb("tool_input"),
+    toolResult: jsonb("tool_result"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    ...ownableColumns(),
+  },
+  (t) => [
+    unique("unique_brain_event_thread_seq").on(t.threadId, t.seq),
+    index("idx_brain_events_thread").on(t.threadId),
+  ],
+);
+
+// ─── brain_tasks ───────────────────────────────────────────────────────────────
+// LEVEL-1 brain-task concurrency queue. One row per brain dispatch (brain-send).
+// status: queued → running → done | failed | cancelled. The admission gate
+// promotes up to `brain-concurrency` rows from queued→running under an atomic
+// claim, and ONLY those start a `claude -p` brain child; the rest stay queued.
+// A running task occupies one slot from admission until its bound run reaches
+// terminal (released by the reconciler run-terminal wake) or the reaper. Additive.
+
+export const brainTasks = pgTable(
+  "brain_tasks",
+  {
+    id: text("id").primaryKey(),
+    // The brain thread this task drives (also the run-tag beacon brainThreadId).
+    threadId: text("thread_id").notNull(),
+    // queued | running | done | failed | cancelled
+    status: text("status").notNull().default("queued"),
+    // The brain message + dispatch params, so the gate can start the turn later
+    // (a queued task is not started until a slot frees).
+    message: text("message"),
+    repo: text("repo"),
+    baseBranch: text("base_branch"),
+    workspaceId: text("workspace_id"),
+    tags: jsonb("tags"),
+    priority: integer("priority").notNull().default(0),
+    // The v3_runs id this task is bound to (set when the brain creates a run);
+    // currently informational — slot release keys on the brain thread / run-tag.
+    runId: text("run_id"),
+    // Heartbeat: set at admission (running), used by the reaper liveness cutoff.
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    ...ownableColumns(),
+  },
+  (t) => [
+    index("idx_brain_tasks_status").on(t.status),
+    index("idx_brain_tasks_thread").on(t.threadId),
+    index("idx_brain_tasks_owner").on(t.ownerEmail),
+    index("idx_brain_tasks_priority").on(t.priority, t.createdAt),
+  ],
 );

@@ -36,7 +36,6 @@ export {
 export {
   mountVmCredentials,
   resolveGithubTokenEnv,
-  mountClaudeSubscription,
   VM_HOME,
   type VmCredsResult,
 } from "./vm-creds.js";

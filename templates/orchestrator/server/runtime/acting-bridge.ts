@@ -27,6 +27,7 @@
 import type { ActionEntry } from "@agent-native/core/server";
 
 import type { NodeRuntime, VmHandle } from "./node-runtime.js";
+import { scrubSecretsFromLog } from "./vm-creds.js";
 
 /** Options for {@link createVmActingBridge}. */
 export interface VmActingBridgeOptions {
@@ -44,6 +45,13 @@ export interface VmActingBridgeOptions {
   commandTimeoutMs?: number;
   /** Truncate any tool result to at most this many chars. Default 50 000. */
   maxResultChars?: number;
+  /**
+   * Resolved secret values to scrub from stderr before returning to the model
+   * (DESIGN §13/§18). Prefix-based scrubbing (sk-*, ghp_*, etc.) is always on;
+   * pass additional resolved values (e.g. GITHUB_TOKEN) here for verbatim
+   * redaction. Values are never logged.
+   */
+  secretValues?: readonly string[];
 }
 
 /** A single edit op (mirrors coding-tools' `edits` array element). */
@@ -157,19 +165,28 @@ function parseEditsArray(raw: unknown): EditOp[] | null {
 }
 
 /**
- * Build the VM-bound `{ bash, read, edit, write }` tool registry (DESIGN
- * §7.4.1a). Each entry's `tool` schema mirrors `createCodingToolRegistry`'s so
- * the model sees an identical contract; each `run` reimplements the side effect
+ * Build the VM-bound `{ bash, read, edit, write, glob, grep }` tool registry
+ * (DESIGN §7.4.1a). Each entry's `tool` schema mirrors `createCodingToolRegistry`'s
+ * so the model sees an identical contract; each `run` reimplements the side effect
  * against `runtime`/`vm` instead of the host.
+ *
+ * The full 6-tool set matches the CC native tools: Read/Edit/Write/Bash/Glob/Grep
+ * (DESIGN §0 channel contract, §4 node types, §7.3 tools list).
  */
 export function createVmActingBridge(
   options: VmActingBridgeOptions,
-): Record<"bash" | "read" | "edit" | "write", ActionEntry> {
+): Record<"bash" | "read" | "edit" | "write" | "glob" | "grep", ActionEntry> {
   const { runtime, vm, workdir } = options;
   const commandTimeoutMs =
     options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
   const maxResultChars = options.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
+  const secretValues = options.secretValues ?? [];
   const fs = runtime.fs(vm);
+
+  /** Scrub secrets from a string before surfacing to the model (§13/§18). */
+  function scrub(text: string): string {
+    return scrubSecretsFromLog(text, secretValues);
+  }
 
   const bash: ActionEntry = {
     tool: {
@@ -214,8 +231,9 @@ export function createVmActingBridge(
           ? Math.min(requested, MAX_COMMAND_TIMEOUT_MS)
           : commandTimeoutMs;
       const res = await runtime.exec(vm, command, { cwd, timeoutMs });
+      // Scrub secrets from stderr before returning to the model (DESIGN §13/§18).
       return truncate(
-        formatBashResult(res.code, res.stdout, res.stderr),
+        formatBashResult(res.code, res.stdout, scrub(res.stderr)),
         maxResultChars,
       );
     },
@@ -424,11 +442,151 @@ export function createVmActingBridge(
     },
   };
 
-  void isTrueFlag; // reserved for future bash background flag (P2c)
-  return { bash, read, edit, write };
+  const glob: ActionEntry = {
+    tool: {
+      description:
+        "Find files matching a glob pattern inside the workspace. Returns a " +
+        "newline-separated list of matching paths relative to the workspace " +
+        "root. Use this to discover files by name or extension before reading " +
+        "or editing them.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description:
+              "Glob pattern relative to the workspace root, e.g. " +
+              '"**/*.ts" or "src/**/*.{ts,tsx}".',
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Directory to expand the pattern from. Defaults to the " +
+              "workspace root.",
+          },
+        },
+        required: ["pattern"],
+      },
+    },
+    run: async (args: Record<string, unknown>): Promise<string> => {
+      const pattern = stringArg(args.pattern);
+      if (pattern === "") return "Error: pattern is required.";
+      const cwd = resolveVmPath(workdir, stringArg(args.cwd) || ".");
+      // Convert the glob pattern to an ERE regex and pipe `find` output through
+      // `grep -E` for portability across Alpine ash (no extglob by default).
+      const escapedCwd = cwd.replace(/'/g, `'\\''`);
+      const cmd =
+        `cd '${escapedCwd}' && ` +
+        `find . -type f | grep -E '${globToRegex(pattern)}' | sort`;
+      const res = await runtime.exec(vm, cmd, { cwd, timeoutMs: commandTimeoutMs });
+      const out =
+        res.code === 0
+          ? res.stdout.trim()
+          : `[exit code: ${res.code}]\n${scrub(res.stderr)}`;
+      return truncate(out, maxResultChars);
+    },
+  };
+
+  const grep: ActionEntry = {
+    tool: {
+      description:
+        "Search for a regex pattern in files inside the workspace. Returns " +
+        "matching lines with file and line number. Use this to find usages, " +
+        "definitions, or string literals across the codebase.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description: "The regex pattern to search for.",
+          },
+          include: {
+            type: "string",
+            description:
+              'Optional glob pattern to restrict which files are searched, ' +
+              'e.g. "*.ts" or "src/**".',
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Directory to search from. Defaults to the workspace root.",
+          },
+          ignoreCase: {
+            type: "string",
+            description: 'Set to "true" to search case-insensitively.',
+            enum: ["true", "false"],
+          },
+        },
+        required: ["pattern"],
+      },
+    },
+    run: async (args: Record<string, unknown>): Promise<string> => {
+      const pattern = stringArg(args.pattern);
+      if (pattern === "") return "Error: pattern is required.";
+      const cwd = resolveVmPath(workdir, stringArg(args.cwd) || ".");
+      const ignoreCase = isTrueFlag(args.ignoreCase) ? "-i " : "";
+      const include = stringArg(args.include);
+      // Use `grep -rn` (recursive with line numbers). Include filter is expressed
+      // via `--include` when provided.
+      const includeFlag = include ? `--include='${include.replace(/'/g, `'\\''`)}' ` : "";
+      const escapedPattern = pattern.replace(/'/g, `'\\''`);
+      const cmd = `grep -rn ${ignoreCase}${includeFlag}'${escapedPattern}' . 2>/dev/null | head -200`;
+      const res = await runtime.exec(vm, cmd, { cwd, timeoutMs: commandTimeoutMs });
+      const out =
+        res.code === 0
+          ? res.stdout.trim() || "(no matches)"
+          : res.code === 1
+            ? "(no matches)"
+            : `[exit code: ${res.code}]\n${scrub(res.stderr)}`;
+      return truncate(out, maxResultChars);
+    },
+  };
+
+  return { bash, read, edit, write, glob, grep };
 }
 
 /** Single-quote a value for safe interpolation into the VM shell (mkdir -p). */
 function shSingleQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Convert a simple glob pattern to an ERE regex string suitable for `grep -E`.
+ * Supports `**` (any path), `*` (any filename segment), `?` (any single char),
+ * and `{a,b}` alternation. Other regex metacharacters are escaped.
+ */
+function globToRegex(glob: string): string {
+  let regex = "";
+  let i = 0;
+  while (i < glob.length) {
+    const ch = glob[i];
+    if (ch === "*" && glob[i + 1] === "*") {
+      regex += ".*";
+      i += 2;
+      if (glob[i] === "/") i++; // consume trailing slash after **
+    } else if (ch === "*") {
+      regex += "[^/]*";
+      i++;
+    } else if (ch === "?") {
+      regex += "[^/]";
+      i++;
+    } else if (ch === "{") {
+      const end = glob.indexOf("}", i);
+      if (end === -1) {
+        regex += "\\{";
+        i++;
+      } else {
+        const alts = glob.slice(i + 1, end).split(",").map(globToRegex);
+        regex += `(${alts.join("|")})`;
+        i = end + 1;
+      }
+    } else if (/[.+^${}()|[\]\\]/.test(ch)) {
+      regex += `\\${ch}`;
+      i++;
+    } else {
+      regex += ch;
+      i++;
+    }
+  }
+  return regex;
 }

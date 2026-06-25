@@ -10,27 +10,31 @@
 //   6. Truncate via max_summary_tokens
 //   7. Write v3_spawns + v3_artifacts rows
 //   8. Update v3_nodes status
-//   9. Error class mapping: transient → rollback, permanent → keep, workspace_error → recreate
+//   9. Error class mapping: transient → recreate, schema-violation → rollback, permanent/cancelled → keep
 
-import { eq, and } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import type { FormatName } from "ajv-formats";
 
-import { v3Runs, v3Nodes, v3Spawns, v3Artifacts } from "../db/v3-schema.js";
+import { v3Runs, v3Nodes, v3Spawns, v3Artifacts, v3Events } from "../db/v3-schema.js";
 import type { InferSelectModel } from "drizzle-orm";
 import { loadAgent, type AgentConfig } from "../agent-loader.js";
 import { renderTemplate, type ExpressionContext } from "./interpolation.js";
-import type { V3NodeDag } from "./v3-reconciler.js";
-import type { V3Node } from "./dag-validator.js";
+import type { V3Node, V3AgentNode } from "./dag-validator.js";
 import { NodeRunner } from "../runtime/node-runner.js";
+import {
+  runClaudeCodeWorker,
+  isClaudeCodeRuntime,
+} from "../runtime/claude-code-worker.js";
+import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import type { RuntimeExecutor } from "../runtime/executors/types.js";
 import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
+import { getWorkspace } from "./v3-workspace.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-type RunRow = InferSelectModel<typeof v3Runs>;
 type NodeRow = InferSelectModel<typeof v3Nodes>;
 
 /**
@@ -55,8 +59,15 @@ type V3SpawnOutput =
   | { path: "object"; schema: unknown; value: Record<string, unknown> }
   | { path: "schema-violation"; schema: unknown; raw: unknown; error: string };
 
-/** Error classification that drives retry policy. */
-type ErrorClass = "transient" | "permanent" | "workspace_error";
+/**
+ * Error classification that drives retry policy (DESIGN §12).
+ * Aligned to the four design-specified classes:
+ *   transient        — API 5xx, network, rate-limit, pool exhaustion, VM failures
+ *   schema-violation — output didn't match schema after self-correction
+ *   permanent        — agent not found, engine not configured, render failure
+ *   cancelled        — run cancelled, VM killed, parent cancelled
+ */
+type ErrorClass = "transient" | "schema-violation" | "permanent" | "cancelled";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -84,29 +95,25 @@ const TRANSIENT_INDICATORS = [
   "aborted",
 ] as const;
 
-/** Permanent error substrings — schema violations, config errors. */
+/** Permanent error substrings — config errors, render failures (DESIGN §12). */
 const PERMANENT_INDICATORS = [
-  "schema-violation",
-  "output_schema",
+  "agent not found",
+  "engine not configured",
+  "render failed",
+  "prompt template",
   "invalid schema",
-  "invalid output",
-  "schema validation",
+  "acp adapter not installed",
 ] as const;
 
-/** Workspace error substrings — VM crash, mount failures. */
-const WORKSPACE_INDICATORS = [
-  "mount",
-  "vm",
-  "microsandbox",
-  "msb",
-  "provision",
-  "teardown",
-  "workdir",
-  "workspace",
-  "permission denied",
-  "enoent",
-  "eacces",
-  "eexist",
+/** Cancelled error substrings — abort / kill signals (DESIGN §12). */
+const CANCELLED_INDICATORS = [
+  "aborted",
+  "canceled",
+  "cancelled",
+  "context canceled",
+  "context deadline exceeded",
+  "vm killed",
+  "run cancelled",
 ] as const;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -115,24 +122,24 @@ function uid(): string {
   return crypto.randomUUID();
 }
 
-/** Classify an error into V3 error class to drive retry policy. */
+/** Classify an error into a V3 error class to drive retry policy (DESIGN §12). */
 function classifyErrorClass(error: unknown): ErrorClass {
   const message = error instanceof Error
     ? `${error.name}: ${error.message}`
     : String(error);
   const lower = message.toLowerCase();
 
-  // Check permanent first (schema violations are explicitly permanent)
+  // Cancelled first — abort signals are terminal, not retryable
+  for (const indicator of CANCELLED_INDICATORS) {
+    if (lower.includes(indicator)) return "cancelled";
+  }
+
+  // Permanent — config errors, render failures fail immediately
   for (const indicator of PERMANENT_INDICATORS) {
     if (lower.includes(indicator)) return "permanent";
   }
 
-  // Check workspace errors (VM/mount failures)
-  for (const indicator of WORKSPACE_INDICATORS) {
-    if (lower.includes(indicator)) return "workspace_error";
-  }
-
-  // Check transient (API/network timeouts)
+  // Transient — API/network/rate-limit/OOM; also VM/mount errors (retryable)
   for (const indicator of TRANSIENT_INDICATORS) {
     if (lower.includes(indicator)) return "transient";
   }
@@ -141,15 +148,17 @@ function classifyErrorClass(error: unknown): ErrorClass {
   return "transient";
 }
 
-/** Map error class to NodeRunner onFailure policy. */
+/** Map error class to NodeRunner onFailure policy (DESIGN §12). */
 function errorClassToOnFailure(errorClass: ErrorClass): NodeRuntimeSpec["onFailure"] {
   switch (errorClass) {
     case "transient":
-      return "rollback";
+      return "recreate"; // boot a fresh VM on retry
+    case "schema-violation":
+      return "rollback"; // same VM is fine; just re-prompt
     case "permanent":
-      return "keep";
-    case "workspace_error":
-      return "recreate";
+      return "keep"; // snapshot for inspection
+    case "cancelled":
+      return "keep"; // terminal; don't retry
   }
 }
 
@@ -179,6 +188,10 @@ function v3ToNodeRunnerInput(
 /**
  * Classify a NodeRunnerResult.output into V3 output paths.
  * If output_schema is present, validate via ajv.
+ *
+ * G13 note: callers must pass the extracted `assistantText` (output.text),
+ * not the raw NodeRunnerResult.output object, so that schema-less nodes
+ * yield bare text instead of JSON.stringify({text,...}).
  */
 function classifyOutput(
   output: unknown,
@@ -192,19 +205,31 @@ function classifyOutput(
     };
   }
 
+  // Schema present — if output is a string, try to parse it as JSON first.
+  // LLMs typically return JSON as text, so we need to deserialize it before
+  // validating against the schema.
+  let coerced: unknown = output;
+  if (typeof output === "string") {
+    try {
+      coerced = JSON.parse(output.trim());
+    } catch {
+      // Not valid JSON — will fall through to schema-violation below.
+    }
+  }
+
   // Schema present — must be a plain object (not array, not null)
-  if (output !== null && typeof output === "object" && !Array.isArray(output)) {
+  if (coerced !== null && typeof coerced === "object" && !Array.isArray(coerced)) {
     // Validate with ajv
     try {
       const ajv = createAjv();
       const validate = ajv.compile(outputSchema as object);
-      const valid = validate(output as Record<string, unknown>);
+      const valid = validate(coerced as Record<string, unknown>);
 
       if (valid) {
         return {
           path: "object",
           schema: outputSchema,
-          value: output as Record<string, unknown>,
+          value: coerced as Record<string, unknown>,
         };
       }
 
@@ -212,7 +237,7 @@ function classifyOutput(
       return {
         path: "schema-violation",
         schema: outputSchema,
-        raw: output,
+        raw: coerced,
         error: `Output does not match schema: ${validate.errors
           ?.map((e) => `${e.instancePath} ${e.message}`)
           .join("; ") ?? "validation failed"}`,
@@ -222,19 +247,40 @@ function classifyOutput(
       return {
         path: "schema-violation",
         schema: outputSchema,
-        raw: output,
+        raw: coerced,
         error: `Schema compile error: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  }
+
+  // BUG 2 leniency: the agent returned a non-object (typically PROSE — a plain
+  // string analysis/plan/review) but an object `output_schema` was attached.
+  // Rather than hard-failing the node (which kills the run), COERCE the text to
+  // `{ text: <output> }` and accept it as the object output. The brain authors
+  // analysis/review nodes that return natural-language plans; an over-strict
+  // schema on such a node must NOT abort delivery. Downstream deps should read
+  // the whole text as `{{deps.<id>.output}}` (or `.text`). We log a warning so
+  // the over-strict schema is still visible, but we do not fail.
+  if (typeof output === "string") {
+    console.warn(
+      `[v3-dispatcher] output_schema expected an object but the agent returned ` +
+        `text; coercing to { text } and accepting (prose-node leniency). ` +
+        `Length=${output.length}.`,
+    );
+    return {
+      path: "object",
+      schema: outputSchema,
+      value: { text: output },
+    };
   }
 
   // Array or null when object expected → schema-violation
   return {
     path: "schema-violation",
     schema: outputSchema,
-    raw: output,
+    raw: coerced,
     error: `Output does not match schema: expected object, got ${
-      Array.isArray(output) ? "array" : typeof output
+      Array.isArray(coerced) ? "array" : typeof coerced
     }`,
   };
 }
@@ -303,31 +349,80 @@ export class V3Dispatcher {
    * Spawn an agent node (DESIGN §6.2, IMPLEMENTATION §B).
    *
    * Steps:
-   *  1. Resolve agent config via loadAgent(node.assignee)
-   *  2. Build interpolation context from v3_nodes deps → their v3_artifacts
-   *  3. Render prompt via renderTemplate(node.prompt, context)
-   *  4. Create V3 spawn input: { system_prompt, rendered_prompt, tools, workspace }
-   *  5. Convert to NodeRunner input format (v3ToNodeRunnerInput)
-   *  6. Call NodeRunner.run(input, signal)
-   *  7. Classify output: string / object / schema-violation (via ajv)
-   *  8. Truncate via max_summary_tokens if set
-   *  9. Write v3_spawns row + v3_artifacts row
-   *  10. Update v3_nodes status
+   *  1. Load DAG + dagNode; resolve agent name from dagNode.agent (G8)
+   *  2. Resolve agent config via loadAgent(dagNode.agent)
+   *  3. Build interpolation context from v3_nodes deps → their v3_artifacts
+   *  4. Render prompt from dagNode.prompt (G7) — NOT from agentConfig.systemPrompt
+   *  5. Create V3 spawn input (4-field channel contract)
+   *  6. Mount workspace VM via v3-workspace.ts exports if dagNode.workspace set (G34)
+   *  7. Thread dagNode.retry + dagNode.timeout_seconds into NodeRunner node (G27)
+   *  8. Call NodeRunner with the run's abort signal + timeout enforcer (G27)
+   *  9. Extract assistant text (output.text) before classifyOutput (G13)
+   *  10. classifyOutput; on schema-violation: ONE corrective re-prompt (G14)
+   *  11. Truncate via max_summary_tokens with per-node override (G32)
+   *  12. Write v3_spawns + v3_artifacts (plumb full_content_ref) (G33)
+   *  13. Update v3_nodes status
    */
-  async spawn(nodeRow: NodeRow, runId: string): Promise<string> {
+  async spawn(
+    nodeRow: NodeRow,
+    runId: string,
+    runSignal?: AbortSignal,
+  ): Promise<string> {
     const spawnId = uid();
     const startedAt = new Date();
 
-    // ── Step 1: Resolve agent config ──────────────────────────────────────
-    const agentConfig = this.resolveAgentConfig(nodeRow);
+    // ── Step 1: Load DAG node (G8 — must happen before resolveAgentConfig) ─
+    const dag = await this.loadDagForRun(runId);
+    const dagNode = this.findDagNode(dag, nodeRow.nodeIdInDag);
 
-    // ── Step 2: Build interpolation context ───────────────────────────────
+    // Cast to agent node for field access; fall back to safe defaults.
+    // V3AgentNode already has workspace?, engine_override?, model_override?,
+    // retry?, timeout_seconds?, max_summary_tokens? per dag-validator.ts.
+    const agentDagNode = dagNode?.type === "agent"
+      ? (dagNode as V3AgentNode)
+      : undefined;
+    const dagNodeAgentName = agentDagNode?.agent;
+    const dagNodePrompt = agentDagNode?.prompt;
+    const outputSchema = agentDagNode?.output_schema;
+
+    // ── Step 2: Resolve agent config — use dagNode.agent field (G8) ───────
+    const agentConfig = this.resolveAgentConfig(nodeRow, dagNodeAgentName);
+
+    // ── Step 3: Build interpolation context ───────────────────────────────
     const context = await this.buildInterpolationContext(runId, nodeRow);
 
-    // ── Step 3: Render prompt ─────────────────────────────────────────────
-    const renderedPrompt = renderTemplate(agentConfig.systemPrompt, context);
+    // ── Step 4: Render prompt from dagNode.prompt (G7) ────────────────────
+    // dagNode.prompt is the template string authored by the DAG author with
+    // {{ }} interpolations. system_prompt stays static / verbatim (channel
+    // input 1). NEVER render system_prompt as the user prompt.
+    const renderedPrompt = dagNodePrompt
+      ? renderTemplate(dagNodePrompt, context)
+      : "(no prompt defined)";
 
-    // ── Step 4: Create V3 spawn input (4-field channel contract) ──────────
+    // ── Step 4b: Resolve the node's workspace ref (BUG 1 fix) ──────────────
+    // The DAG author writes `workspace: "{{inputs.workspaceId}}"` (a channel
+    // template), so the RAW field is NOT a workspace id — it must be rendered
+    // through the SAME interpolation engine + context as the prompt before it
+    // is handed to getWorkspace / getLocalWorkspaceDir. Without this, resolving
+    // the literal "{{inputs.workspaceId}}" returns null → no hostDir → the node
+    // runs in a throwaway /tmp/an-none-… dir instead of the shared checkout, so
+    // its edits are discarded and nothing is committed.
+    const rawWorkspaceRef = agentDagNode?.workspace;
+    let resolvedWorkspaceRef: string | undefined;
+    if (rawWorkspaceRef) {
+      try {
+        resolvedWorkspaceRef = renderTemplate(rawWorkspaceRef, context).trim();
+      } catch {
+        // Interpolation failed (e.g. path not present yet) — fall back to the
+        // raw ref so behaviour is no worse than before the fix.
+        resolvedWorkspaceRef = rawWorkspaceRef;
+      }
+      if (!resolvedWorkspaceRef) resolvedWorkspaceRef = undefined;
+    }
+
+    // ── Step 5: Create V3 spawn input (4-field channel contract) ──────────
+    // system_prompt = verbatim from agent.md (channel input 1).
+    // rendered_prompt = interpolated dagNode.prompt (channel input 2).
     const v3Input: V3SpawnInput = {
       system_prompt: agentConfig.systemPrompt,
       rendered_prompt: renderedPrompt,
@@ -335,12 +430,23 @@ export class V3Dispatcher {
       workspace: agentConfig.runtime === "microvm" ? "/work" : undefined,
     };
 
-    // Resolve the V3 node dag to find output_schema
-    const dag = await this.loadDagForRun(runId);
-    const dagNode = this.findDagNode(dag, nodeRow.nodeIdInDag);
-    const outputSchema = (dagNode as { output_schema?: unknown })?.output_schema;
+    // ── Step 6: Mount workspace VM (G34) ──────────────────────────────────
+    // If dagNode.workspace is set, call the EXISTING v3-workspace.ts exports
+    // to obtain the workspace's vmName. Do NOT boot a disposable VM here.
+    let resolvedWorkspaceId: string | null = null;
+    if (resolvedWorkspaceRef) {
+      try {
+        const ws = await getWorkspace(resolvedWorkspaceRef);
+        resolvedWorkspaceId = ws.id;
+        // Override the workspace path — the long-lived VM is already at /work.
+        v3Input.workspace = "/work";
+      } catch {
+        // Workspace lookup failed — proceed without workspace mount.
+        // The node will still run but without the workspace context.
+      }
+    }
 
-    // ── Step 5: Convert to NodeRunner input ───────────────────────────────
+    // ── Step 7: Build NodeRunner node with retry / timeout from dag (G27) ─
     const { node: runnerNode } = v3ToNodeRunnerInput(
       v3Input,
       nodeRow.id,
@@ -348,57 +454,113 @@ export class V3Dispatcher {
       outputSchema,
     );
 
-    // Apply engine/model from agent config if present
-    if (agentConfig.engine) runnerNode.engine = agentConfig.engine;
-    if (agentConfig.model) runnerNode.model = agentConfig.model;
+    // Apply engine/model overrides: dagNode overrides > agent config.
+    const engineOverride = agentDagNode?.engine_override;
+    const modelOverride = agentDagNode?.model_override;
+    if (engineOverride) {
+      runnerNode.engine = engineOverride;
+    } else if (agentConfig.engine) {
+      runnerNode.engine = agentConfig.engine;
+    }
+    if (modelOverride) {
+      runnerNode.model = modelOverride;
+    } else if (agentConfig.model) {
+      runnerNode.model = agentConfig.model;
+    }
 
-    // ── Step 6: Call NodeRunner ───────────────────────────────────────────
-    const signal = new AbortController().signal;
-    const runnerResult = await this.runner.run(
-      {
-        node: runnerNode,
-        deps: context.deps,
-        ownerEmail: nodeRow.ownerEmail,
-        orgId: nodeRow.orgId,
-      },
-      signal,
-    );
+    // Thread dagNode.retry into the NodeRunner node (G27).
+    const dagRetry = agentDagNode?.retry;
+    if (dagRetry) {
+      runnerNode.retry = {
+        max: dagRetry.max,
+        backoffMs: dagRetry.initial_ms ?? 1000,
+      };
+    }
+
+    // Thread dagNode.timeout_seconds → timeoutMs (G27).
+    const timeoutSeconds = agentDagNode?.timeout_seconds;
+    if (typeof timeoutSeconds === "number" && timeoutSeconds > 0) {
+      runnerNode.timeoutMs = timeoutSeconds * 1000;
+    }
+
+    // ── Step 8: Run — use the run's abort signal; enforce timeout (G27) ───
+    // Build a composed signal: abort if the run's signal fires OR if the
+    // per-node timeout elapses (whichever comes first).
+    const timeoutMs = runnerNode.timeoutMs;
+    const effectiveSignal = this.buildAbortSignal(runSignal, timeoutMs);
+
+    // Claude Code (subscription) agents run via the container's OWN managed
+    // login (DESIGN §7.3 `acp:claude-code`) — `claude -p` host-native, no VM,
+    // no host-credential sharing. Every other agent runs on the engine executor
+    // (vLLM / hosted API) through the 7-stage NodeRunner.
+    // Workspace (non-microVM git checkout): resolve the shared local dir so the
+    // worker runs IN the project the workflow targets (DESIGN §10.6 / orca).
+    const localWorkspaceDir = resolvedWorkspaceRef
+      ? ((await getLocalWorkspaceDir(resolvedWorkspaceRef)) ?? undefined)
+      : undefined;
+    // Engine (vLLM/API) nodes also run IN the shared workspace: NoneRuntime
+    // symlinks /work → hostDir, so their tool edits persist for downstream
+    // nodes. (The Claude branch gets the dir as cwd directly, below.)
+    if (localWorkspaceDir && runnerNode.runtime) {
+      // A local git checkout → run host-native IN it (NoneRuntime symlinks
+      // /work → hostDir). The DAG `workspace` field otherwise routes the node to
+      // MicrosandboxRuntime (wsl/msb), which isn't available in this deployment.
+      runnerNode.runtime.kind = "none";
+      runnerNode.runtime.hostDir = localWorkspaceDir;
+    }
+    const runnerResult = isClaudeCodeRuntime(agentConfig.runtime)
+      ? await runClaudeCodeWorker({
+          prompt: renderedPrompt,
+          model: runnerNode.model,
+          cwd: localWorkspaceDir,
+          signal: effectiveSignal,
+        })
+      : await this.runner.run(
+          {
+            node: runnerNode,
+            deps: context.deps,
+            ownerEmail: nodeRow.ownerEmail,
+            orgId: nodeRow.orgId,
+          },
+          effectiveSignal,
+        );
 
     const latencyMs = Date.now() - startedAt.getTime();
 
-    // ── Step 7: Classify output ───────────────────────────────────────────
-    const classifiedOutput = classifyOutput(runnerResult.output, outputSchema);
+    // ── Step 9: Extract assistant text before classifyOutput (G13) ────────
+    // runnerResult.output is { text, toolCallCount, model } for schema-less
+    // nodes. We need the bare text string, not a JSON.stringify of the object.
+    const rawOutput = runnerResult.output;
+    const assistantText: unknown =
+      rawOutput !== null &&
+      typeof rawOutput === "object" &&
+      "text" in (rawOutput as Record<string, unknown>)
+        ? (rawOutput as Record<string, unknown>).text
+        : rawOutput;
 
-    // ── Step 8: Truncate via max_summary_tokens ───────────────────────────
-    let truncated = false;
-    let textContent: string | null = null;
-    let objectContent: Record<string, unknown> | null = null;
+    // ── Step 10: Classify output; on schema-violation: ONE re-prompt (G14) ─
+    let classifiedOutput = classifyOutput(assistantText, outputSchema);
 
-    switch (classifiedOutput.path) {
-      case "string": {
-        if (agentConfig.maxSummaryTokens) {
-          const result = truncateToMaxTokens(classifiedOutput.value, agentConfig.maxSummaryTokens);
-          textContent = result.text;
-          truncated = result.truncated;
-        } else {
-          textContent = classifiedOutput.value;
-        }
-        break;
+    if (classifiedOutput.path === "schema-violation") {
+      // DESIGN §6.2 step 5: ONE internal self-correction attempt.
+      const correctedOutput = await this.attemptSchemaCorrection(
+        nodeRow,
+        runId,
+        agentConfig,
+        renderedPrompt,
+        assistantText,
+        outputSchema,
+        classifiedOutput.error,
+        effectiveSignal,
+      );
+
+      if (correctedOutput !== null) {
+        // Re-classify with the corrected output.
+        classifiedOutput = classifyOutput(correctedOutput, outputSchema);
       }
-      case "object": {
-        objectContent = classifiedOutput.value;
-        // Also store a text summary for quick reads
-        textContent = JSON.stringify(classifiedOutput.value);
-        if (agentConfig.maxSummaryTokens) {
-          const result = truncateToMaxTokens(textContent, agentConfig.maxSummaryTokens);
-          textContent = result.text;
-          truncated = result.truncated;
-        }
-        break;
-      }
-      case "schema-violation": {
-        textContent = `Schema violation: ${classifiedOutput.error}`;
-        // Schema violation is a permanent error — write spawn + fail node
+
+      // If still a violation after the correction attempt, fail the node.
+      if (classifiedOutput.path === "schema-violation") {
         await this.writeSpawnRecord({
           spawnId,
           nodeRow,
@@ -409,21 +571,78 @@ export class V3Dispatcher {
           status: "failed",
           outputKind: "schema-violation",
           outputArtifactId: null,
+          workspaceId: resolvedWorkspaceId,
           tokensInput: 0,
           tokensOutput: runnerResult.tokensSpent,
           latencyMs,
           error: classifiedOutput.error,
-          errorClass: "permanent",
+          errorClass: "schema-violation",
           vmName: runnerResult.vmName,
         });
 
-        await this.failNode(nodeRow, classifiedOutput.error, "permanent");
+        await this.failNode(nodeRow, classifiedOutput.error, "schema-violation");
 
         return spawnId;
       }
     }
 
-    // ── Step 9: Write v3_spawns + v3_artifacts ────────────────────────────
+    // ── Step 11: Truncate via max_summary_tokens (G32) ────────────────────
+    // Per-node override > agent.md value > default 2000 (DESIGN §11 layer 3).
+    const maxSummaryTokens =
+      agentDagNode?.max_summary_tokens ?? agentConfig.maxSummaryTokens ?? 2000;
+
+    let truncated = false;
+    let textContent: string | null = null;
+    let objectContent: Record<string, unknown> | null = null;
+    // G33: full_content_ref for large secondary outputs.
+    let fullContentRef: string | null = null;
+
+    switch (classifiedOutput.path) {
+      case "string": {
+        const result = truncateToMaxTokens(classifiedOutput.value, maxSummaryTokens);
+        textContent = result.text;
+        truncated = result.truncated;
+        if (truncated) {
+          // Store the full text as a ref when it exceeds the token cap.
+          fullContentRef = await this.writeFullContentRef(
+            spawnId,
+            classifiedOutput.value,
+            nodeRow,
+          );
+        }
+        break;
+      }
+      case "object": {
+        objectContent = classifiedOutput.value;
+        // Also store a text summary for quick reads.
+        const serialized = JSON.stringify(classifiedOutput.value);
+        const result = truncateToMaxTokens(serialized, maxSummaryTokens);
+        textContent = result.text;
+        truncated = result.truncated;
+        if (truncated) {
+          fullContentRef = await this.writeFullContentRef(
+            spawnId,
+            serialized,
+            nodeRow,
+          );
+        }
+        break;
+      }
+      // "schema-violation" was already handled above and returned early.
+    }
+
+    // Emit summary_truncated event when truncating (G32).
+    if (truncated) {
+      await this.writeEvent(runId, "summary_truncated", {
+        nodeId: nodeRow.id,
+        nodeIdInDag: nodeRow.nodeIdInDag,
+        spawnId,
+        maxSummaryTokens,
+        fullContentRef,
+      });
+    }
+
+    // ── Step 12: Write v3_spawns + v3_artifacts (G33) ────────────────────
     const artifactId = uid();
     const byteSize = textContent ? new TextEncoder().encode(textContent).length : 0;
 
@@ -433,7 +652,7 @@ export class V3Dispatcher {
       kind: classifiedOutput.path,
       textContent,
       objectContent,
-      fullContentRef: null,
+      fullContentRef,
       byteSize,
       truncated: truncated ? 1 : 0,
       createdAt: new Date(),
@@ -451,6 +670,7 @@ export class V3Dispatcher {
       status: "done",
       outputKind: classifiedOutput.path,
       outputArtifactId: artifactId,
+      workspaceId: resolvedWorkspaceId,
       tokensInput: 0,
       tokensOutput: runnerResult.tokensSpent,
       latencyMs,
@@ -459,7 +679,7 @@ export class V3Dispatcher {
       vmName: runnerResult.vmName,
     });
 
-    // ── Step 10: Update v3_nodes status ───────────────────────────────────
+    // ── Step 13: Update v3_nodes status ───────────────────────────────────
     await this.db
       .update(v3Nodes)
       .set({
@@ -473,13 +693,15 @@ export class V3Dispatcher {
   }
 
   /**
-   * Resolve agent config from the node's assignee.
-   * The assignee field holds the agent name (matches .claude/agents/{name}.md).
+   * Resolve agent config from the DAG node's `agent` field (G8).
+   * Falls back to nodeRow.nodeIdInDag if dagNodeAgentName is absent.
    */
-  private resolveAgentConfig(nodeRow: NodeRow): AgentConfig {
-    const agentName = nodeRow.nodeIdInDag;
-    // The assignee is stored in the DAG dag field as the `agent` property on
-    // agent nodes. We resolve from the DAG first, falling back to the nodeId.
+  private resolveAgentConfig(
+    nodeRow: NodeRow,
+    dagNodeAgentName?: string,
+  ): AgentConfig {
+    // G8: use dagNode.agent (the node field), not nodeRow.nodeIdInDag.
+    const agentName = dagNodeAgentName ?? nodeRow.nodeIdInDag;
     try {
       return loadAgent(agentName);
     } catch {
@@ -495,6 +717,165 @@ export class V3Dispatcher {
         systemPrompt: "",
       };
     }
+  }
+
+  /**
+   * Build a composed AbortSignal (G27):
+   * - aborts if the parent run signal fires, OR
+   * - aborts after timeoutMs if provided.
+   */
+  private buildAbortSignal(
+    runSignal: AbortSignal | undefined,
+    timeoutMs: number | undefined,
+  ): AbortSignal {
+    const combined = new AbortController();
+
+    const abort = (reason?: unknown) => {
+      if (!combined.signal.aborted) combined.abort(reason);
+    };
+
+    if (runSignal) {
+      if (runSignal.aborted) {
+        abort(runSignal.reason);
+      } else {
+        runSignal.addEventListener("abort", () => abort(runSignal.reason), { once: true });
+      }
+    }
+
+    if (typeof timeoutMs === "number" && timeoutMs > 0) {
+      const timer = setTimeout(() => abort(new Error(`node timeout after ${timeoutMs}ms`)), timeoutMs);
+      // Clean up the timer if the signal fires first.
+      combined.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+    }
+
+    return combined.signal;
+  }
+
+  /**
+   * ONE corrective re-prompt on schema violation (G14, DESIGN §6.2 step 5).
+   * Feeds the AJV error messages back to the model as a new user turn.
+   * Returns the corrected raw output, or null if the correction also fails.
+   */
+  private async attemptSchemaCorrection(
+    nodeRow: NodeRow,
+    _runId: string,
+    agentConfig: AgentConfig,
+    _originalRenderedPrompt: string,
+    originalOutput: unknown,
+    _outputSchema: unknown,
+    violationError: string,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    // Build a corrective prompt that shows what was wrong.
+    const correctionPrompt =
+      `Your previous response did not match the required JSON schema.\n\n` +
+      `Schema violations:\n${violationError}\n\n` +
+      `Your previous response:\n${
+        typeof originalOutput === "string"
+          ? originalOutput
+          : JSON.stringify(originalOutput)
+      }\n\n` +
+      `Please respond ONLY with valid JSON that matches the required schema. ` +
+      `Do not include any other text.`;
+
+    try {
+      // Build a minimal NodeRunner call for the corrective re-prompt.
+      const correctionNode: Node = {
+        id: `${nodeRow.id}-correction`,
+        type: "agent",
+        title: "schema-correction",
+        prompt: correctionPrompt,
+        runtime: { kind: "none", onFailure: "keep" },
+      };
+
+      if (agentConfig.engine) correctionNode.engine = agentConfig.engine;
+      if (agentConfig.model) correctionNode.model = agentConfig.model;
+
+      const correctionResult = await this.runner.run(
+        {
+          node: correctionNode,
+          deps: {},
+          ownerEmail: nodeRow.ownerEmail,
+          orgId: nodeRow.orgId,
+        },
+        signal,
+      );
+
+      // Extract text from the correction result.
+      const rawCorrected = correctionResult.output;
+      const correctedText: unknown =
+        rawCorrected !== null &&
+        typeof rawCorrected === "object" &&
+        "text" in (rawCorrected as Record<string, unknown>)
+          ? (rawCorrected as Record<string, unknown>).text
+          : rawCorrected;
+
+      // Try to parse as JSON if the output is a string.
+      if (typeof correctedText === "string") {
+        try {
+          return JSON.parse(correctedText.trim());
+        } catch {
+          return correctedText;
+        }
+      }
+      return correctedText;
+    } catch {
+      // Correction attempt itself failed — return null so the caller fails the node.
+      return null;
+    }
+  }
+
+  /**
+   * Write full content to a side file and return a ref pointer (G33).
+   * For now uses a filesystem path under /tmp; callers can swap for S3/FS.
+   */
+  private async writeFullContentRef(
+    spawnId: string,
+    content: string,
+    nodeRow: NodeRow,
+  ): Promise<string | null> {
+    try {
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const dir = `/tmp/v3-artifacts/${nodeRow.ownerEmail.replace(/[^a-z0-9]/g, "_")}`;
+      await mkdir(dir, { recursive: true });
+      const filePath = join(dir, `${spawnId}-full.txt`);
+      await writeFile(filePath, content, "utf-8");
+      return `file://${filePath}`;
+    } catch {
+      // Full content ref is best-effort; never block the spawn write.
+      return null;
+    }
+  }
+
+  /**
+   * Write a v3_event with auto-incrementing seq_num.
+   */
+  private async writeEvent(
+    runId: string,
+    kind: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const maxResult = await this.db
+      .select({
+        nextSeq: sql<number>`COALESCE(MAX(${v3Events.seqNum}), 0) + 1`,
+      })
+      .from(v3Events)
+      .where(eq(v3Events.runId, runId));
+
+    const nextSeq = maxResult[0]?.nextSeq ?? 1;
+
+    await this.db.insert(v3Events).values({
+      id: uid(),
+      runId,
+      spawnId: null,
+      kind,
+      payload,
+      seqNum: nextSeq,
+      ts: new Date(),
+      ownerEmail: "local@localhost",
+      orgId: null,
+    });
   }
 
   /**
@@ -584,6 +965,7 @@ export class V3Dispatcher {
     status: "done" | "failed" | "running" | "cancelled";
     outputKind: string;
     outputArtifactId: string | null;
+    workspaceId: string | null;
     tokensInput: number;
     tokensOutput: number;
     latencyMs: number;
@@ -599,7 +981,7 @@ export class V3Dispatcher {
       engineRef: opts.agentConfig.engine || null,
       modelRef: opts.agentConfig.model || null,
       runtime: opts.agentConfig.runtime,
-      workspaceId: null,
+      workspaceId: opts.workspaceId,
       renderedPrompt: opts.renderedPrompt,
       logRef: null,
       vmName: opts.vmName,

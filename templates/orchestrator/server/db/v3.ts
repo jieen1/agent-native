@@ -5,6 +5,8 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import $ from "postgres";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 
 // Re-export schema so consumers import from this module
 import * as v3Schema from "./v3-schema.js";
@@ -13,17 +15,21 @@ export type * from "./v3-schema.js";
 
 /**
  * Resolve the Postgres connection string for V3.
- * Uses DATABASE_URL_PG environment variable.
+ * Prefers an explicit DATABASE_URL_PG, but falls back to the standard
+ * DATABASE_URL when it already points at Postgres — the common single-database
+ * deployment where the whole app runs on one Postgres instance.
  */
 function v3DatabaseUrl(): string {
-  const url = process.env.DATABASE_URL_PG;
-  if (!url) {
-    throw new Error(
-      "DATABASE_URL_PG not set. V3 requires a Postgres database. " +
-        "Set DATABASE_URL_PG to a Postgres connection string.",
-    );
+  const explicit = process.env.DATABASE_URL_PG;
+  if (explicit) return explicit;
+  const fallback = process.env.DATABASE_URL;
+  if (fallback && /^postgres(ql)?:\/\//.test(fallback)) {
+    return fallback;
   }
-  return url;
+  throw new Error(
+    "V3 requires a Postgres database. Set DATABASE_URL_PG (or a Postgres " +
+      "DATABASE_URL) to a Postgres connection string.",
+  );
 }
 
 /**
@@ -57,6 +63,21 @@ export function getV3Db(): PostgresJsDatabase<typeof v3Schema> {
 }
 
 /**
+ * Get the raw postgres.js client for V3 (pooled). Initializes the pool on first
+ * use via getV3Db(). Use this when you need a SINGLE-connection scope — e.g. a
+ * transaction (`pg.begin(...)`) or a session-scoped feature like an advisory
+ * lock — that v3DbExec (which runs each statement on an arbitrary pooled
+ * connection) cannot provide. Returns null when V3 Postgres is not configured.
+ */
+export function getV3PgClient(): ReturnType<typeof $> | null {
+  if (!v3PgClient) {
+    if (!isV3PostgresConfigured()) return null;
+    getV3Db(); // lazily initialize the pool + v3PgClient
+  }
+  return v3PgClient;
+}
+
+/**
  * Close the V3 Postgres connection. Use for scripts that need cleanup.
  */
 export async function closeV3Db(): Promise<void> {
@@ -82,4 +103,57 @@ export async function v3DbExec(sql: string, params?: unknown[]): Promise<{
     rows: result || [],
     rowsAffected: result?.length ?? 0,
   };
+}
+
+/**
+ * True when V3's Postgres connection is configured — either an explicit
+ * DATABASE_URL_PG or a standard DATABASE_URL that points at Postgres.
+ */
+export function isV3PostgresConfigured(): boolean {
+  if (process.env.DATABASE_URL_PG) return true;
+  const url = process.env.DATABASE_URL;
+  return !!url && /^postgres(ql)?:\/\//.test(url);
+}
+
+/**
+ * Ensure the V3 schema exists by applying the generated drizzle migration SQL
+ * idempotently (CREATE TABLE/INDEX IF NOT EXISTS). Runs once on startup; safe to
+ * repeat. Best-effort: failures are logged, never thrown, so boot is not blocked.
+ */
+export async function ensureV3Schema(): Promise<void> {
+  if (!isV3PostgresConfigured()) return;
+  const candidates = [
+    join(process.cwd(), "server/db/v3-migrations"),
+    join(process.cwd(), "templates/orchestrator/server/db/v3-migrations"),
+  ];
+  const dir = candidates.find((d) => existsSync(d));
+  if (!dir) {
+    console.warn("[v3-migrate] migrations directory not found; skipping schema ensure");
+    return;
+  }
+  getV3Db(); // initialize the pooled client used by v3DbExec
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  for (const file of files) {
+    const content = readFileSync(join(dir, file), "utf-8")
+      .replace(/CREATE TABLE "/g, 'CREATE TABLE IF NOT EXISTS "')
+      .replace(/CREATE INDEX "/g, 'CREATE INDEX IF NOT EXISTS "')
+      .replace(/CREATE UNIQUE INDEX "/g, 'CREATE UNIQUE INDEX IF NOT EXISTS "');
+    const statements = content
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const stmt of statements) {
+      try {
+        await v3DbExec(stmt);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/already exists/i.test(msg)) {
+          console.warn(`[v3-migrate] statement failed: ${msg}`);
+        }
+      }
+    }
+  }
+  console.log("[v3-migrate] V3 schema ensured");
 }

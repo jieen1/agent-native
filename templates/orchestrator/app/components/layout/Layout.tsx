@@ -32,17 +32,14 @@ const SIDEBAR_COLLAPSE_KEY = "orchestrator.sidebar.collapsed";
 function routeOwnsToolbar(pathname: string): boolean {
   return (
     pathname === "/" ||
-    pathname.startsWith("/board") ||
-    pathname.startsWith("/projects") ||
-    pathname.startsWith("/library") ||
-    pathname.startsWith("/items") ||
-    pathname.startsWith("/tasks") ||
-    pathname.startsWith("/workflows") ||
     pathname.startsWith("/runs") ||
+    pathname.startsWith("/workflows") ||
+    pathname.startsWith("/agents") ||
+    pathname.startsWith("/workspaces") ||
+    pathname.startsWith("/spawns") ||
+    pathname.startsWith("/pool") ||
     pathname.startsWith("/settings") ||
-    pathname === "/database" ||
-    pathname.startsWith("/extensions") ||
-    pathname.startsWith("/v3")
+    pathname.startsWith("/extensions")
   );
 }
 

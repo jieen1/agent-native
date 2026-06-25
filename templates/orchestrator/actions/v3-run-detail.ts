@@ -14,6 +14,7 @@ export const v3RunNodes = defineAction({
     runId: z.string(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
 
@@ -67,6 +68,7 @@ export const v3RunDag = defineAction({
     runId: z.string(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
 
@@ -111,6 +113,7 @@ export const v3RunPatches = defineAction({
     runId: z.string(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
 
@@ -153,6 +156,7 @@ export const v3RunEvents = defineAction({
     limit: z.number().int().positive().default(200),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
 
@@ -254,19 +258,33 @@ export const nodeSkip = defineAction({
   },
 });
 
-/** Resolve a human_gate node (approve/reject). */
+/**
+ * Resolve a human_gate node.
+ *
+ * G31: accepts ANY string choice; validates it against the node's declared
+ * `options` array from the DAG definition (not a hard-coded approve/reject enum).
+ * Output shape: { choice, note } per design §4.4.
+ */
 export const nodeResolveGate = defineAction({
-  description: "Resolve a V3 human_gate node (approve or reject).",
+  description:
+    "Resolve a V3 human_gate node. `choice` must be one of the options declared on the node in the DAG (e.g. 'approve', 'reject', 'modify'). Returns { choice, note }.",
   schema: z.object({
     runId: z.string(),
     nodeId: z.string(),
-    choice: z.enum(["approve", "reject"]),
+    /** One of the strings declared in the node's `options` array in the DAG. */
+    choice: z.string().min(1),
     note: z.string().optional(),
   }),
   run: async (args) => {
     const db = getV3Db();
+
+    // Load node row
     const rows = await db
-      .select({ id: v3Schema.v3Nodes.id, status: v3Schema.v3Nodes.status })
+      .select({
+        id: v3Schema.v3Nodes.id,
+        status: v3Schema.v3Nodes.status,
+        nodeIdInDag: v3Schema.v3Nodes.nodeIdInDag,
+      })
       .from(v3Schema.v3Nodes)
       .where(
         and(
@@ -281,24 +299,55 @@ export const nodeResolveGate = defineAction({
       throw new Error(`Node is ${rows[0].status}; expected awaiting-approval`);
     }
 
-    const newStatus = args.choice === "approve" ? "done" : "skipped";
+    // Load the DAG to find the node's declared options
+    const runRows = await db
+      .select({ dag: v3Schema.v3Runs.dag })
+      .from(v3Schema.v3Runs)
+      .where(eq(v3Schema.v3Runs.id, args.runId))
+      .limit(1);
+
+    if (!runRows.length) throw new Error(`Run '${args.runId}' not found`);
+
+    // Find the DAG node definition to extract declared options
+    const dag = runRows[0].dag as { nodes?: Array<{ id: string; type: string; options?: string[] }> } | null;
+    const dagNode = (dag?.nodes ?? []).find((n) => n.id === rows[0].nodeIdInDag);
+    const declaredOptions: string[] | undefined = dagNode?.options;
+
+    // Validate choice against declared options when the node has them
+    if (declaredOptions && declaredOptions.length > 0) {
+      if (!declaredOptions.includes(args.choice)) {
+        throw new Error(
+          `Invalid choice '${args.choice}'. Node '${rows[0].nodeIdInDag}' declares options: [${declaredOptions.join(", ")}]`,
+        );
+      }
+    }
+
+    // The node is "done" after resolution regardless of choice — downstream
+    // nodes use {{deps.NODE.output.choice}} in their guards to branch.
     await db
       .update(v3Schema.v3Nodes)
-      .set({ status: newStatus as any, completedAt: new Date() })
+      .set({ status: "done" as any, completedAt: new Date() })
       .where(eq(v3Schema.v3Nodes.id, args.nodeId));
 
-    // Store resolution as artifact
+    // Store resolution as artifact — output shape per design §4.4: { choice, note }
     const artifactId = crypto.randomUUID();
-    await db.execute(sql.raw(`
-      INSERT INTO v3_artifacts (id, spawn_id, text_content, object_content)
-      VALUES (${artifactId}, NULL, ${JSON.stringify({ choice: args.choice, note: args.note ?? "" })}::text, ${JSON.stringify({ choice: args.choice, note: args.note ?? "" })}::jsonb)
-    `));
+    const resolution = { choice: args.choice, note: args.note ?? null };
+
+    await db.insert(v3Schema.v3Artifacts).values({
+      id: artifactId,
+      spawnId: "",            // no spawn for human_gate resolutions
+      kind: "human-gate-resolution",
+      textContent: JSON.stringify(resolution),
+      objectContent: resolution as any,
+      byteSize: JSON.stringify(resolution).length,
+      truncated: 0,
+    });
 
     await db
       .update(v3Schema.v3Nodes)
       .set({ outputArtifactId: artifactId })
       .where(eq(v3Schema.v3Nodes.id, args.nodeId));
 
-    return { nodeId: args.nodeId, choice: args.choice, status: newStatus };
+    return { nodeId: args.nodeId, choice: args.choice, note: args.note ?? null };
   },
 });

@@ -169,3 +169,127 @@ export function useV3RunEvents(runId: string | undefined) {
     },
   ) as { data?: V3Event[]; isLoading: boolean; error?: unknown };
 }
+
+// ── Per-node detail ──────────────────────────────────────────────────────────
+
+/**
+ * Spawn metadata surfaced through `nodeSummary` — who ran the node, with which
+ * model/runtime, and what it cost.
+ */
+export interface V3NodeSpawn {
+  id: string;
+  agentName: string | null;
+  runtime: string | null;
+  engineRef: string | null;
+  modelRef: string | null;
+  status: string;
+  tokensInput: number;
+  tokensOutput: number;
+  latencyMs: number | null;
+  error: string | null;
+  errorClass: string | null;
+}
+
+/**
+ * Full per-node detail joined from node → spawn → output artifact. This is the
+ * cleanest single read for "agent + model + tokens + time + output text".
+ */
+export interface V3NodeSummary {
+  nodeId: string;
+  runId: string;
+  nodeIdInDag: string;
+  type: string;
+  status: V3NodeStatus;
+  iteration: number;
+  fanoutIndex: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  output: string | null;
+  outputKind: string | null;
+  truncated: boolean;
+  spawn: V3NodeSpawn | null;
+}
+
+/** Detailed spawn read (adds the rendered prompt + full log to the summary). */
+export interface V3SpawnDetail {
+  id: string;
+  agentName: string | null;
+  modelRef: string | null;
+  engineRef: string | null;
+  runtime: string | null;
+  workspaceId: string | null;
+  renderedPrompt: string;
+  status: string;
+  tokensInput: number;
+  tokensOutput: number;
+  latencyMs: number | null;
+  output?: string | null;
+  log?: string | null;
+  error: string | null;
+}
+
+/** Aggregate roll-up of a run: node counts + total token usage. */
+export interface V3RunRollup {
+  runId: string;
+  status: V3RunStatus;
+  templateId: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  nodes: {
+    total: number;
+    done: number;
+    failed: number;
+    skipped: number;
+    running: number;
+    pending: number;
+    awaitingApproval: number;
+    ready: number;
+  };
+  tokens: {
+    input: number;
+    output: number;
+    total: number;
+    spawnCount: number;
+  };
+}
+
+/** Fetch the run roll-up (total tokens, node counts) via `runSummary`. */
+export function useV3RunSummary(runId: string | undefined) {
+  return useActionQuery(
+    "runSummary" as any,
+    { runId: runId ?? "" },
+    {
+      enabled: !!runId,
+      refetchInterval: (query: { state: { data?: unknown } }) => {
+        const data = query.state.data as V3RunRollup | undefined;
+        return isLive(data?.status) ? LIVE_POLL_MS : false;
+      },
+    },
+  ) as { data?: V3RunRollup; isLoading: boolean; error?: unknown };
+}
+
+/** Fetch the full summary for one node (agent, model, tokens, time, output). */
+export function useV3NodeSummary(
+  runId: string | undefined,
+  nodeId: string | null | undefined,
+) {
+  return useActionQuery(
+    "nodeSummary" as any,
+    { runId: runId ?? "", nodeId: nodeId ?? "" },
+    {
+      enabled: !!runId && !!nodeId,
+    },
+  ) as { data?: V3NodeSummary; isLoading: boolean; error?: unknown };
+}
+
+/** Fetch a single spawn's detail — used for the rendered prompt. */
+export function useV3SpawnDetail(spawnId: string | null | undefined) {
+  return useActionQuery(
+    "spawnGet" as any,
+    { spawnId: spawnId ?? "" },
+    {
+      enabled: !!spawnId,
+    },
+  ) as { data?: V3SpawnDetail; isLoading: boolean; error?: unknown };
+}

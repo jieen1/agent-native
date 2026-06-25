@@ -3,6 +3,12 @@
 // CAS-protected mid-run DAG mutation.  Supports five mutation types:
 // modify_node, add_node, remove_node, modify_loop, replace_dag.
 // Every patch is validated (structural + acyclic) before it touches the run.
+//
+// G15: The CAS version read, per-node status recheck, and dag_version UPDATE
+// are performed inside a SINGLE transaction.  The UPDATE uses .returning() to
+// assert exactly one row was changed; if zero rows are returned (meaning another
+// writer raced us and bumped dag_version) the transaction throws, rolling back,
+// and we return { error: "version_conflict" }.
 
 import { eq, and, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -34,14 +40,23 @@ const REMOVABLE_STATUSES = new Set(["pending", "skipped"]);
 /** Node statuses considered terminal (completed work). */
 const TERMINAL_STATUSES = new Set(["done", "failed", "skipped"]);
 
+/** Node statuses that are behind or at the frontier — immutable (I5/I9). */
+const IMMUTABLE_STATUSES = new Set(["running", "done", "failed"]);
+
 // ── Mutation types ───────────────────────────────────────────────────────────
 
-/** Modify an existing node's prompt and/or model_override. */
+/**
+ * Modify an existing agent node's editable fields.
+ * Allowed: prompt, model_override, guard, deps (§8.6 design spec).
+ * Ready nodes are atomically demoted to pending before edit (G11).
+ */
 interface ModifyNodeMutation {
   kind: "modify_node";
   nodeIdInDag: string;
   prompt?: string;
   model_override?: string;
+  guard?: string;
+  deps?: string[];
 }
 
 /** Add a brand-new node to the DAG. */
@@ -56,7 +71,11 @@ interface RemoveNodeMutation {
   nodeIdInDag: string;
 }
 
-/** Modify a loop node's max_iterations and/or until expression. */
+/**
+ * Modify a loop node's max_iterations and/or until expression.
+ * Ready/running body nodes are handled per §9 (loop mid-run scoping).
+ * The loop control node itself is checked for immutability (G11).
+ */
 interface ModifyLoopMutation {
   kind: "modify_loop";
   nodeIdInDag: string;
@@ -91,10 +110,28 @@ export type ApplyPatchResult =
   | { success: true; newDagVersion: number; patchId: string }
   | {
       success: false;
-      error: "version_conflict" | "validation_failed" | "removal_blocked" | string;
+      error:
+        | "version_conflict"
+        | "validation_failed"
+        | "removal_blocked"
+        | "node_not_patchable"
+        | string;
       currentDagVersion?: number;
+      nodeId?: string;
+      nodeStatus?: string;
       errors?: string[];
     };
+
+// Internal sentinel thrown inside the transaction to signal known failure kinds
+// without losing the structured error info through Drizzle's rollback path.
+class PatchError extends Error {
+  constructor(
+    public readonly result: ApplyPatchResult & { success: false },
+  ) {
+    super(result.error);
+    this.name = "PatchError";
+  }
+}
 
 // ── Patcher ──────────────────────────────────────────────────────────────────
 
@@ -109,95 +146,176 @@ export class V3Patcher {
    * Apply a batch of DAG mutations to a running V3 run.
    *
    * The batch is atomic: either all mutations succeed together, or none are
-   * applied.  A CAS check on `dag_version` prevents concurrent patch conflicts.
+   * applied.  All reads, status checks, and the dag_version UPDATE happen
+   * inside a single transaction (G15).  A CAS on the UPDATE's WHERE clause
+   * plus a returning() row-count assertion catches races where another writer
+   * incremented dag_version between our read and our write.
    */
   public async applyPatch(params: ApplyPatchParams): Promise<ApplyPatchResult> {
     const { runId, dagVersion, mutations, appliedBy, reason } = params;
 
-    // 1. Read current run row
-    const [run] = await this.db
-      .select()
-      .from(v3Runs)
-      .where(eq(v3Runs.id, runId));
-
-    if (!run) {
-      return { success: false, error: `Run ${runId} not found` };
-    }
-
-    // 2. CAS check — dag_version must match
-    if (run.dagVersion !== dagVersion) {
-      return {
-        success: false,
-        error: "version_conflict",
-        currentDagVersion: run.dagVersion,
-      };
-    }
-
-    // 3. Parse current DAG
-    const currentDag = this.parseDag(run.dag);
-    if (!currentDag) {
-      return { success: false, error: "Failed to parse current DAG" };
-    }
-
-    // 4. Read current node rows (needed for remove_node constraint)
-    const nodeRows = await this.db
-      .select()
-      .from(v3Nodes)
-      .where(eq(v3Nodes.runId, runId));
-
-    // 5. Apply mutations to a DAG snapshot
-    const newDag = structuredClone(currentDag);
-    const applyResult = this.applyMutations(newDag, mutations, nodeRows);
-    if (!applyResult.ok) {
-      return {
-        success: false,
-        error: applyResult.error,
-        errors: applyResult.errors,
-      };
-    }
-
-    // 6. Validate resulting DAG via validateDag()
-    const validation = validateDag(newDag);
-    if (!validation.ok) {
-      return {
-        success: false,
-        error: "validation_failed",
-        errors: validation.errors,
-      };
-    }
-
-    // 7. Write v3_patches row + update v3_runs atomically via raw SQL
-    const newVersion = run.dagVersion + 1;
     const id = patchId();
     const now = new Date();
 
-    await this.db.transaction(async (tx) => {
-      // Insert patch record
-      await tx.insert(v3Patches).values({
-        id,
-        runId,
-        dagVersionBefore: run.dagVersion,
-        dagVersionAfter: newVersion,
-        patchOps: mutations,
-        actor: appliedBy,
-        reason: reason ?? null,
-        applied: 1,
-        appliedAt: now,
-        ownerEmail: "local@localhost",
-        orgId: null,
+    try {
+      const newDagVersion = await this.db.transaction(async (tx) => {
+        // ── Step 1: Read run row (inside tx for serializability) ──────────
+        const [run] = await (tx as any)
+          .select()
+          .from(v3Runs)
+          .where(eq(v3Runs.id, runId));
+
+        if (!run) {
+          throw new PatchError({
+            success: false,
+            error: `Run ${runId} not found`,
+          });
+        }
+
+        // ── Step 2: CAS check ─────────────────────────────────────────────
+        if (run.dagVersion !== dagVersion) {
+          throw new PatchError({
+            success: false,
+            error: "version_conflict",
+            currentDagVersion: run.dagVersion,
+          });
+        }
+
+        // ── Step 3: Parse current DAG ─────────────────────────────────────
+        const currentDag = this.parseDag(run.dag);
+        if (!currentDag) {
+          throw new PatchError({
+            success: false,
+            error: "Failed to parse current DAG",
+          });
+        }
+
+        // ── Step 4: Read current node rows (inside tx) ────────────────────
+        const nodeRows: NodeRow[] = await (tx as any)
+          .select()
+          .from(v3Nodes)
+          .where(eq(v3Nodes.runId, runId));
+
+        // ── Step 5: Collect ready nodes that need demotion ─────────────────
+        // Any node targeted by modify_node/modify_loop that is currently
+        // "ready" must be demoted to "pending" before editing so the
+        // reconciler re-evaluates it after the patch (§8.6 rule 2 / G11).
+        const readyNodesToDemote = this.collectReadyDemotions(
+          mutations,
+          nodeRows,
+        );
+
+        // ── Step 6: Apply mutations to a DAG snapshot ─────────────────────
+        const newDag = structuredClone(currentDag);
+        const applyResult = this.applyMutations(newDag, mutations, nodeRows);
+        if (!applyResult.ok) {
+          throw new PatchError({
+            success: false,
+            error: applyResult.error,
+            nodeId: applyResult.nodeId,
+            nodeStatus: applyResult.nodeStatus,
+            errors: applyResult.errors,
+          });
+        }
+
+        // ── Step 7: Validate resulting DAG ────────────────────────────────
+        const validation = validateDag(newDag);
+        if (!validation.ok) {
+          throw new PatchError({
+            success: false,
+            error: "validation_failed",
+            errors: validation.errors,
+          });
+        }
+
+        // ── Step 8: Demote ready nodes to pending (G11) ───────────────────
+        if (readyNodesToDemote.length > 0) {
+          await (tx as any)
+            .update(v3Nodes)
+            .set({ status: "pending" })
+            .where(
+              and(
+                eq(v3Nodes.runId, runId),
+                inArray(v3Nodes.nodeIdInDag, readyNodesToDemote),
+              ),
+            );
+        }
+
+        // ── Step 9: Insert patch record ───────────────────────────────────
+        const newVersion = dagVersion + 1;
+        await (tx as any).insert(v3Patches).values({
+          id,
+          runId,
+          dagVersionBefore: dagVersion,
+          dagVersionAfter: newVersion,
+          patchOps: mutations,
+          actor: appliedBy,
+          reason: reason ?? null,
+          applied: 1,
+          appliedAt: now,
+          ownerEmail: "local@localhost",
+          orgId: null,
+        });
+
+        // ── Step 10: CAS UPDATE with returning() row-count assertion (G15) ─
+        // The WHERE clause re-asserts dag_version = expected.  If another
+        // writer bumped the version since Step 2, zero rows are returned
+        // here and we roll back with version_conflict.
+        const updated = await (tx as any)
+          .update(v3Runs)
+          .set({ dag: newDag, dagVersion: newVersion })
+          .where(
+            and(eq(v3Runs.id, runId), eq(v3Runs.dagVersion, dagVersion)),
+          )
+          .returning({ id: v3Runs.id });
+
+        if (!updated || updated.length === 0) {
+          throw new PatchError({
+            success: false,
+            error: "version_conflict",
+            currentDagVersion: undefined, // unknown at this point
+          });
+        }
+
+        return newVersion;
       });
 
-      // Update run DAG + version
-      await tx
-        .update(v3Runs)
-        .set({
-          dag: newDag,
-          dagVersion: newVersion,
-        })
-        .where(and(eq(v3Runs.id, runId), eq(v3Runs.dagVersion, dagVersion)));
-    });
+      return { success: true, newDagVersion, patchId: id };
+    } catch (err) {
+      if (err instanceof PatchError) {
+        return err.result;
+      }
+      throw err;
+    }
+  }
 
-    return { success: true, newDagVersion: newVersion, patchId: id };
+  // ── Ready-demotion helper ────────────────────────────────────────────────
+
+  /**
+   * Identify node ids that are currently "ready" and are targeted by
+   * modify_node or modify_loop mutations.  These must be demoted to
+   * "pending" inside the transaction so the reconciler re-evaluates them.
+   */
+  private collectReadyDemotions(
+    mutations: DagMutation[],
+    nodeRows: NodeRow[],
+  ): string[] {
+    const readySet = new Set(
+      nodeRows
+        .filter((r) => r.status === "ready")
+        .map((r) => r.nodeIdInDag),
+    );
+
+    const demote: string[] = [];
+    for (const m of mutations) {
+      if (
+        (m.kind === "modify_node" || m.kind === "modify_loop") &&
+        readySet.has(m.nodeIdInDag)
+      ) {
+        demote.push(m.nodeIdInDag);
+      }
+    }
+    return demote;
   }
 
   // ── Mutation application ─────────────────────────────────────────────────
@@ -212,7 +330,14 @@ export class V3Patcher {
     nodeRows: NodeRow[],
   ):
     | { ok: true }
-    | { ok: false; error: string; errors?: string[]; currentDagVersion?: number } {
+    | {
+        ok: false;
+        error: string;
+        nodeId?: string;
+        nodeStatus?: string;
+        errors?: string[];
+        currentDagVersion?: number;
+      } {
     for (const mutation of mutations) {
       const result = this.applyOne(dag, mutation, nodeRows);
       if (!result.ok) return result;
@@ -224,16 +349,18 @@ export class V3Patcher {
     dag: V3Dag,
     mutation: DagMutation,
     nodeRows: NodeRow[],
-  ): { ok: true } | { ok: false; error: string; errors?: string[] } {
+  ):
+    | { ok: true }
+    | { ok: false; error: string; nodeId?: string; nodeStatus?: string; errors?: string[] } {
     switch (mutation.kind) {
       case "modify_node":
-        return this.applyModifyNode(dag, mutation);
+        return this.applyModifyNode(dag, mutation, nodeRows);
       case "add_node":
         return this.applyAddNode(dag, mutation);
       case "remove_node":
         return this.applyRemoveNode(dag, mutation, nodeRows);
       case "modify_loop":
-        return this.applyModifyLoop(dag, mutation);
+        return this.applyModifyLoop(dag, mutation, nodeRows);
       case "replace_dag":
         return this.applyReplaceDag(dag, mutation, nodeRows);
       default:
@@ -245,13 +372,18 @@ export class V3Patcher {
   }
 
   /**
-   * modify_node — change prompt and/or model_override on the matching node.
-   * Only agent nodes have prompt/model_override.
+   * modify_node — change prompt, model_override, guard, and/or deps on an
+   * agent node.  Per §8.6 / G11:
+   *   - running / done (immutable journal)  → node_not_patchable
+   *   - ready (queued, not yet dispatched) → demoted to pending in tx (Step 8)
+   *     then edited here on the DAG snapshot
+   *   - pending → edited in place
    */
   private applyModifyNode(
     dag: V3Dag,
     mutation: ModifyNodeMutation,
-  ): { ok: true } | { ok: false; error: string } {
+    nodeRows: NodeRow[],
+  ): { ok: true } | { ok: false; error: string; nodeId?: string; nodeStatus?: string } {
     const node = dag.nodes.find((n) => n.id === mutation.nodeIdInDag);
     if (!node) {
       return {
@@ -266,12 +398,31 @@ export class V3Patcher {
       };
     }
 
+    // G11: check current status from v3_nodes rows
+    const nodeRow = nodeRows.find((r) => r.nodeIdInDag === mutation.nodeIdInDag);
+    if (nodeRow && IMMUTABLE_STATUSES.has(nodeRow.status)) {
+      return {
+        ok: false,
+        error: "node_not_patchable",
+        nodeId: mutation.nodeIdInDag,
+        nodeStatus: nodeRow.status,
+      };
+    }
+    // "ready" is allowed — demotion to "pending" is handled separately in
+    // collectReadyDemotions + Step 8 of applyPatch.
+
     const agentNode = node as V3AgentNode;
     if (mutation.prompt !== undefined) {
       agentNode.prompt = mutation.prompt;
     }
     if (mutation.model_override !== undefined) {
       agentNode.model_override = mutation.model_override;
+    }
+    if (mutation.guard !== undefined) {
+      agentNode.guard = mutation.guard;
+    }
+    if (mutation.deps !== undefined) {
+      agentNode.deps = mutation.deps;
     }
 
     return { ok: true };
@@ -332,11 +483,20 @@ export class V3Patcher {
 
   /**
    * modify_loop — change max_iterations and/or until on a loop node.
+   * Per §8.6 / G11:
+   *   - running / done on the loop control node → node_not_patchable
+   *   - ready loop node → demoted to pending in tx (Step 8), then edited
+   *   - pending → edited in place
+   *
+   * Note: per §9, a running loop body iteration is behind the frontier and
+   * is immutable; edits to max_iterations/until take effect at the next
+   * iteration boundary, not the current one.
    */
   private applyModifyLoop(
     dag: V3Dag,
     mutation: ModifyLoopMutation,
-  ): { ok: true } | { ok: false; error: string } {
+    nodeRows: NodeRow[],
+  ): { ok: true } | { ok: false; error: string; nodeId?: string; nodeStatus?: string } {
     const node = dag.nodes.find((n) => n.id === mutation.nodeIdInDag);
     if (!node) {
       return {
@@ -350,6 +510,18 @@ export class V3Patcher {
         error: `modify_loop: node '${mutation.nodeIdInDag}' is not a loop node`,
       };
     }
+
+    // G11: check current status from v3_nodes rows
+    const nodeRow = nodeRows.find((r) => r.nodeIdInDag === mutation.nodeIdInDag);
+    if (nodeRow && IMMUTABLE_STATUSES.has(nodeRow.status)) {
+      return {
+        ok: false,
+        error: "node_not_patchable",
+        nodeId: mutation.nodeIdInDag,
+        nodeStatus: nodeRow.status,
+      };
+    }
+    // "ready" is allowed — demotion handled separately.
 
     const loopNode = node as V3LoopNode;
     if (mutation.maxIterations !== undefined) {

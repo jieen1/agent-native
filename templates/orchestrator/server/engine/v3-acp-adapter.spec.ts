@@ -163,22 +163,23 @@ describe("resolveAcpHarness", () => {
   });
 });
 
-describe("P3 session lifecycle stubs", () => {
-  it("startAcpSession throws implement in P3", async () => {
-    await expect(startAcpSession("acp:claude-code")).rejects.toThrow(
-      "implement in P3",
-    );
+describe("session lifecycle (G23)", () => {
+  it("startAcpSession rejects with a harness error when the harness is not registered", async () => {
+    // The framework registry throws "Unknown harness" when the harness is not
+    // registered. This maps to a "permanent" ACP error class (config error).
+    await expect(
+      startAcpSession("acp:claude-code", { prompt: "hello" }),
+    ).rejects.toThrow(/unknown harness/i);
   });
 
-  it("cancelAcpSession throws implement in P3", async () => {
-    await expect(cancelAcpSession("session-123")).rejects.toThrow(
-      "implement in P3",
-    );
+  it("cancelAcpSession resolves idempotently for an unknown session", async () => {
+    // cancelAcpSession is idempotent: unknown session → no error.
+    await expect(cancelAcpSession("nonexistent-session-id")).resolves.toBeUndefined();
   });
 
-  it("getAcpSession throws implement in P3", async () => {
-    await expect(getAcpSession("session-123")).rejects.toThrow(
-      "implement in P3",
+  it("getAcpSession rejects for an unknown session", async () => {
+    await expect(getAcpSession("nonexistent-session-id")).rejects.toThrow(
+      /not found/i,
     );
   });
 });

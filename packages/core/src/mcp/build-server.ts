@@ -1575,6 +1575,25 @@ export async function createMCPServerForRequest(
           Array.isArray(toolVisibility) &&
           toolVisibility.length > 0 &&
           toolVisibility.every((v) => v === "app");
+        // Read-only data reads (e.g. cross-app MCP fetches) need the FULL
+        // structured payload, not the ~2000-char concise text the LLM gets.
+        // The concise `text` rendering is lossy by design (it truncates and
+        // summarizes for chat context), which silently breaks machine callers
+        // that parse the text back into JSON. For a `readOnly` action whose
+        // result is a plain object AND that produces no link/embed artifacts
+        // (so there is no embed-start ticket to leak), surface the PURGED raw
+        // result via `structuredContent` so structured callers read it intact.
+        // Guarded by `readOnly` + `!block` so the security contract for
+        // model-callable / link-producing tools (see the counter-regression
+        // test) is unchanged.
+        const readOnlyStructured =
+          entry.readOnly === true &&
+          !block &&
+          rawResult &&
+          typeof rawResult === "object" &&
+          !Array.isArray(rawResult)
+            ? (purgeEmbedStartUrls(rawResult) as Record<string, unknown>)
+            : undefined;
         const structuredContent = mcpAppResource
           ? mcpAppStructuredContent(rawResultForClient, responseMeta)
           : isAppOnlyVisibility &&
@@ -1582,7 +1601,7 @@ export async function createMCPServerForRequest(
               typeof rawResult === "object" &&
               !Array.isArray(rawResult)
             ? (rawResult as Record<string, unknown>)
-            : undefined;
+            : readOnlyStructured;
         const text = mcpAppResource
           ? conciseMcpAppToolText(name, resultForClient, structuredContent!)
           : conciseToolResultText(name, resultForClient);

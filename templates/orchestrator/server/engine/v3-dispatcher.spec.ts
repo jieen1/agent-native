@@ -91,36 +91,33 @@ describe("classifyNodeError", () => {
     expect(classifyNodeError(new Error("out of memory"))).toBe("transient");
   });
 
-  it("permanent: schema-violation", () => {
-    expect(classifyNodeError(new Error("schema-violation: missing field"))).toBe(
+  it("permanent: config / render failures", () => {
+    expect(classifyNodeError(new Error("agent not found"))).toBe("permanent");
+    expect(classifyNodeError(new Error("engine not configured"))).toBe(
       "permanent",
     );
-    expect(classifyNodeError(new Error("output_schema mismatch"))).toBe(
-      "permanent",
-    );
-    expect(classifyNodeError(new Error("schema validation failed"))).toBe(
+    expect(classifyNodeError(new Error("render failed"))).toBe("permanent");
+    expect(classifyNodeError(new Error("invalid schema"))).toBe("permanent");
+    expect(classifyNodeError(new Error("acp adapter not installed"))).toBe(
       "permanent",
     );
   });
 
-  it("workspace_error: mount/microsandbox/permission failures", () => {
-    // Note: the source lowercases the message before matching indicators.
-    // "mount" is lowercase so it matches. "VM" is uppercase in the indicator
-    // array but lowercased messages wont match it — that is existing code
-    // behavior. We test the indicators that actually work.
-    expect(classifyNodeError(new Error("mount failed"))).toBe("workspace_error");
-    expect(classifyNodeError(new Error("microsandbox error"))).toBe("workspace_error");
-    expect(classifyNodeError(new Error("msb crashed"))).toBe("workspace_error");
-    expect(classifyNodeError(new Error("provision failed"))).toBe("workspace_error");
-    expect(classifyNodeError(new Error("teardown timeout"))).toBe("workspace_error");
-    expect(classifyNodeError(new Error("workdir not found"))).toBe("workspace_error");
-    expect(classifyNodeError(new Error("workspace unavailable"))).toBe(
-      "workspace_error",
-    );
-    expect(classifyNodeError(new Error("permission denied"))).toBe("workspace_error");
-    expect(classifyNodeError(new Error("ENOENT: no such file"))).toBe("workspace_error");
-    expect(classifyNodeError(new Error("EACCES forbidden"))).toBe("workspace_error");
-    expect(classifyNodeError(new Error("EEXIST"))).toBe("workspace_error");
+  it("cancelled: abort / kill signals", () => {
+    expect(classifyNodeError(new Error("run cancelled"))).toBe("cancelled");
+    expect(classifyNodeError(new Error("vm killed"))).toBe("cancelled");
+    // "aborted" is in both CANCELLED and TRANSIENT indicators; CANCELLED is
+    // checked first, so abort signals classify as cancelled (terminal).
+    expect(classifyNodeError(new Error("aborted"))).toBe("cancelled");
+  });
+
+  it("transient: infra / VM errors fall through to transient (retryable)", () => {
+    // workspace_error was removed in the §12 realignment — mount/microsandbox/
+    // provision/permission failures are now retryable transient errors.
+    expect(classifyNodeError(new Error("mount failed"))).toBe("transient");
+    expect(classifyNodeError(new Error("microsandbox error"))).toBe("transient");
+    expect(classifyNodeError(new Error("provision failed"))).toBe("transient");
+    expect(classifyNodeError(new Error("permission denied"))).toBe("transient");
   });
 
   it("default: unknown error classifies as transient", () => {
@@ -134,16 +131,20 @@ describe("classifyNodeError", () => {
 // ── Tests: errorClassToOnFailurePolicy (module export) ──────────────────────
 
 describe("errorClassToOnFailurePolicy", () => {
-  it("transient -> rollback", () => {
-    expect(errorClassToOnFailurePolicy("transient")).toBe("rollback");
+  it("transient -> recreate", () => {
+    expect(errorClassToOnFailurePolicy("transient")).toBe("recreate");
+  });
+
+  it("schema-violation -> rollback", () => {
+    expect(errorClassToOnFailurePolicy("schema-violation")).toBe("rollback");
   });
 
   it("permanent -> keep", () => {
     expect(errorClassToOnFailurePolicy("permanent")).toBe("keep");
   });
 
-  it("workspace_error -> recreate", () => {
-    expect(errorClassToOnFailurePolicy("workspace_error")).toBe("recreate");
+  it("cancelled -> keep", () => {
+    expect(errorClassToOnFailurePolicy("cancelled")).toBe("keep");
   });
 });
 

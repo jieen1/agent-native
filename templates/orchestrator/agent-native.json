@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "mode": "database",
+  "apps": {
+    "orchestrator": {
+      "mode": "database"
+    }
+  },
+  "a2a": {
+    "name": "Orchestrator",
+    "description": "Multi-model workflow execution engine. Sibling agent-native apps in the same workspace can dispatch tasks to it over A2A and read activity back by tag.",
+    "agentCardPath": "/.well-known/agent-card.json",
+    "endpoint": "/_agent-native/a2a",
+    "auth": {
+      "scheme": "jwtBearer",
+      "secretEnv": "A2A_SECRET",
+      "subjectClaim": "sub"
+    },
+    "dispatch": ["brain-send", "workflowRun", "workspaceCreate"],
+    "readback": ["runsList", "spawnList", "workspaceList"],
+    "tagConvention": {
+      "note": "Pass an opaque `tags` map on brain-send / workflowRun / workspaceCreate, then reassemble activity with runsList / spawnList / workspaceList using `tagMatch` (v3-DESIGN §16).",
+      "example": { "source": "tracker", "item_id": "PAY-14", "actor_email": "alice@example.com" }
+    }
+  }
+}

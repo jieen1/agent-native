@@ -1,96 +1,138 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
+import {
+  IconPlayerPlay,
+  IconSend,
+  IconCircleCheck,
+  IconCircleX,
+  IconGitBranch,
+  IconActivity,
+} from "@tabler/icons-react";
+import { appPath } from "@agent-native/core/client/api-path";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { V3Event } from "@/hooks/use-v3-run";
+import { fmtTime } from "./v3-format";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Event kind presentation ──────────────────────────────────────────────────
 
-function formatTime(iso: string | null): string {
-  if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleTimeString("en-US", {
-      hour12: false,
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    } as Intl.DateTimeFormatOptions);
-  } catch {
-    return iso;
+interface KindStyle {
+  icon: typeof IconActivity;
+  dot: string;
+  label: string;
+}
+
+function kindStyle(kind: string): KindStyle {
+  switch (kind) {
+    case "run.started":
+      return { icon: IconPlayerPlay, dot: "bg-blue-500", label: "Run started" };
+    case "node.dispatched":
+    case "node.ready":
+      return { icon: IconSend, dot: "bg-sky-500", label: "Node dispatched" };
+    case "spawn.started":
+      return { icon: IconActivity, dot: "bg-amber-500", label: "Spawn started" };
+    case "spawn.done":
+    case "spawn.completed":
+    case "node.resolved":
+      return {
+        icon: IconCircleCheck,
+        dot: "bg-emerald-500",
+        label: "Spawn done",
+      };
+    case "run.completed":
+      return {
+        icon: IconCircleCheck,
+        dot: "bg-emerald-500",
+        label: "Run completed",
+      };
+    case "run.failed":
+      return { icon: IconCircleX, dot: "bg-red-500", label: "Run failed" };
+    case "patch_applied":
+      return { icon: IconGitBranch, dot: "bg-purple-500", label: "Patch applied" };
+    default:
+      return { icon: IconActivity, dot: "bg-zinc-500", label: kind };
   }
 }
 
-const KIND_COLORS: Record<string, string> = {
-  "run.created": "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  "run.started": "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  "node.ready": "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
-  "spawn.started": "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  "spawn.completed": "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  "node.resolved": "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  "run.completed": "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  "run.failed": "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-  patch_applied: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
-};
+// ── SSE parsing (live tail) ──────────────────────────────────────────────────
 
-// ── SSE Event Feed ───────────────────────────────────────────────────────────
-
-interface SseEvent {
+interface FeedEvent {
   id: string;
   kind: string;
   seqNum: number | null;
   ts: string;
   payload: Record<string, unknown>;
-  raw: string;
 }
 
-function parseSseLine(line: string): Partial<SseEvent> | null {
+function parseSseLine(line: string): Partial<FeedEvent> & { raw?: string } | null {
   if (!line || line.startsWith(":")) return null;
   const [key, ...rest] = line.split(":");
   const value = rest.join(":").trimStart();
-  const result: Partial<SseEvent> = {};
-
   switch (key.trim()) {
     case "id":
-      result.id = value;
-      break;
+      return { id: value };
     case "seq_num":
-      result.seqNum = parseInt(value, 10) ?? null;
-      break;
+      return { seqNum: parseInt(value, 10) };
     case "ts":
-      result.ts = value;
-      break;
+      return { ts: value };
     case "event":
-      result.kind = value;
-      break;
-    case "data":
-      result.raw = value;
+      return { kind: value };
+    case "data": {
+      let payload: Record<string, unknown> = {};
       try {
-        result.payload = JSON.parse(value);
+        payload = JSON.parse(value);
       } catch {
-        result.payload = { raw: value };
+        payload = { raw: value };
       }
-      break;
+      return { payload, raw: value };
+    }
+    default:
+      return null;
   }
-  return result;
+}
+
+function payloadSummary(p: Record<string, unknown>): string {
+  if (!p || typeof p !== "object") return "";
+  const parts: string[] = [];
+  if (typeof p.nodeId === "string") parts.push(p.nodeId);
+  if (typeof p.spawnId === "string") parts.push(p.spawnId.slice(0, 8));
+  if (parts.length) return parts.join(" · ");
+  const keys = Object.keys(p);
+  if (keys.length === 0) return "";
+  if (keys.length === 1 && typeof p.raw === "string") return p.raw.slice(0, 80);
+  return keys.slice(0, 3).join(", ");
 }
 
 export interface EventFeedProps {
   runId: string;
   initialEvents?: V3Event[];
+  /**
+   * Whether the run is still live. Terminal runs already carry their full event
+   * history, so we skip the SSE tail entirely (no socket, no reconnect noise).
+   */
+  live?: boolean;
 }
 
-export function EventFeed({ runId, initialEvents = [] }: EventFeedProps) {
-  const [events, setEvents] = useState<SseEvent[]>(() =>
+export function EventFeed({
+  runId,
+  initialEvents = [],
+  live = false,
+}: EventFeedProps) {
+  const [events, setEvents] = useState<FeedEvent[]>(() =>
     initialEvents.map((e) => ({
       id: e.id,
       kind: e.kind,
       seqNum: e.seqNum,
       ts: e.ts ?? "",
-      payload: typeof e.payload === "object" && e.payload !== null
-        ? (e.payload as Record<string, unknown>)
-        : { raw: String(e.payload ?? "") },
-      raw: String(e.payload ?? ""),
+      payload:
+        typeof e.payload === "object" && e.payload !== null
+          ? (e.payload as Record<string, unknown>)
+          : { raw: String(e.payload ?? "") },
     })),
   );
   const [connected, setConnected] = useState(false);
@@ -99,145 +141,147 @@ export function EventFeed({ runId, initialEvents = [] }: EventFeedProps) {
     return max || null;
   });
   const scrollRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const bufferRef = useRef<Partial<SseEvent>>({});
+  const esRef = useRef<EventSource | null>(null);
+  const bufRef = useRef<Partial<FeedEvent>>({});
 
   const connect = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
-
-    const url = new URL(`/_v3/runs/${runId}/events`, window.location.origin);
-    if (lastSeq !== null) {
-      url.searchParams.set("since", String(lastSeq));
-    }
-
+    esRef.current?.close();
+    // Respect the app base path (e.g. `/orchestrator`) — the SSE route is
+    // mounted under it, so a bare `/_v3/...` would 404.
+    const url = new URL(
+      appPath(`/_v3/runs/${runId}/events`),
+      window.location.origin,
+    );
+    if (lastSeq !== null) url.searchParams.set("since", String(lastSeq));
     const es = new EventSource(url.toString());
-    eventSourceRef.current = es;
-
-    es.onopen = () => {
-      setConnected(true);
-    };
-
-    es.onerror = () => {
-      setConnected(false);
-      // EventSource auto-reconnects, no manual action needed
-    };
-
-    // Handle SSE messages — accumulate multi-line data
+    esRef.current = es;
+    es.onopen = () => setConnected(true);
+    es.onerror = () => setConnected(false);
     es.onmessage = (event: MessageEvent) => {
       const data = event.data;
-      if (!data || data === "") return;
-
-      // SSE messages may contain multiple lines
-      const lines = data.split("\n");
-      for (const line of lines) {
+      if (!data) return;
+      for (const line of data.split("\n")) {
         const parsed = parseSseLine(line);
         if (!parsed) continue;
-
-        // Merge into buffer
-        Object.assign(bufferRef.current, parsed);
-
-        // When we have data, emit the event
-        if (parsed.raw) {
-          const evt: SseEvent = {
-            id: bufferRef.current.id ?? "",
-            kind: bufferRef.current.kind ?? "",
-            seqNum: bufferRef.current.seqNum ?? null,
-            ts: bufferRef.current.ts ?? new Date().toISOString(),
-            payload: bufferRef.current.payload ?? {},
-            raw: bufferRef.current.raw ?? "",
+        Object.assign(bufRef.current, parsed);
+        if ("raw" in parsed) {
+          const evt: FeedEvent = {
+            id: bufRef.current.id ?? crypto.randomUUID(),
+            kind: bufRef.current.kind ?? "",
+            seqNum: bufRef.current.seqNum ?? null,
+            ts: bufRef.current.ts ?? new Date().toISOString(),
+            payload: bufRef.current.payload ?? {},
           };
-
           setEvents((prev) => [...prev, evt]);
           if (evt.seqNum !== null && evt.seqNum > (lastSeq ?? 0)) {
             setLastSeq(evt.seqNum);
           }
-          bufferRef.current = {};
+          bufRef.current = {};
         }
       }
     };
   }, [runId, lastSeq]);
 
   useEffect(() => {
+    // Only tail live runs; terminal runs already have their complete history.
+    if (!live) return;
     connect();
-    return () => {
-      eventSourceRef.current?.close();
-    };
-  }, [connect]);
+    return () => esRef.current?.close();
+  }, [connect, live]);
 
   useEffect(() => {
-    // Auto-scroll to bottom
-    if (scrollRef.current) {
-      const el = scrollRef.current;
-      el.scrollTop = el.scrollHeight;
-    }
+    if (scrollRef.current)
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [events]);
 
+  const sorted = useMemo(
+    () =>
+      [...events].sort((a, b) => (a.seqNum ?? 0) - (b.seqNum ?? 0)),
+    [events],
+  );
+
   return (
-    <div className="flex h-full flex-col">
-      {/* Connection status bar */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs">
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Status bar */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-xs">
         <span
           className={cn(
-            "h-2 w-2 shrink-0 rounded-full",
-            connected ? "bg-emerald-500" : "bg-red-500",
+            "size-2 shrink-0 rounded-full",
+            live && connected
+              ? "bg-emerald-500 animate-pulse"
+              : live
+                ? "bg-amber-500"
+                : "bg-zinc-400",
           )}
         />
-        {connected ? "Connected" : "Disconnected"}
-        <span className="text-muted-foreground ml-auto">
-          {events.length} events
+        <span className="text-muted-foreground">
+          {live ? (connected ? "Live" : "Connecting…") : "Complete"}
+        </span>
+        <span className="ml-auto text-muted-foreground">
+          {sorted.length} events
         </span>
       </div>
 
-      {/* Event list */}
-      <ScrollArea ref={scrollRef} className="flex-1 p-3">
-        {events.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">
-            Waiting for events...
+      {/* Timeline */}
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto px-4 py-3">
+        {sorted.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            No events recorded for this run.
           </div>
         ) : (
-          <div className="space-y-1">
-            {events.map((evt, idx) => (
-              <div
-                key={`${evt.id}-${idx}`}
-                className="flex items-start gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted/50"
-              >
-                {/* Timestamp */}
-                <span className="shrink-0 font-mono text-muted-foreground tabular-nums">
-                  {formatTime(evt.ts)}
-                </span>
+          <ol className="relative">
+            {sorted.map((evt, idx) => {
+              const style = kindStyle(evt.kind);
+              const Icon = style.icon;
+              const detail = payloadSummary(evt.payload);
+              const isLast = idx === sorted.length - 1;
+              return (
+                <li key={`${evt.id}-${idx}`} className="relative flex gap-3 pb-4">
+                  {/* Rail + dot */}
+                  <div className="flex flex-col items-center">
+                    <span
+                      className={cn(
+                        "z-10 flex size-6 shrink-0 items-center justify-center rounded-full ring-4 ring-background",
+                        style.dot,
+                      )}
+                    >
+                      <Icon className="size-3.5 text-white" />
+                    </span>
+                    {!isLast ? (
+                      <span className="w-px flex-1 bg-border" />
+                    ) : null}
+                  </div>
 
-                {/* Sequence number */}
-                {evt.seqNum !== null ? (
-                  <span className="shrink-0 font-mono text-muted-foreground tabular-nums">
-                    #{evt.seqNum}
-                  </span>
-                ) : null}
-
-                {/* Kind badge */}
-                <Badge
-                  variant="secondary"
-                  className={cn(
-                    "shrink-0 font-mono text-[10px]",
-                    KIND_COLORS[evt.kind] ??
-                      "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-                  )}
-                >
-                  {evt.kind}
-                </Badge>
-
-                {/* Payload preview */}
-                <span className="max-w-[200px] truncate font-mono text-muted-foreground sm:max-w-[400px]">
-                  {evt.raw.length < 200
-                    ? evt.raw
-                    : `${evt.raw.slice(0, 200)}…`}
-                </span>
-              </div>
-            ))}
-          </div>
+                  {/* Content */}
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">
+                        {style.label}
+                      </span>
+                      {evt.seqNum !== null ? (
+                        <Badge
+                          variant="secondary"
+                          className="h-4 px-1 font-mono text-[10px]"
+                        >
+                          #{evt.seqNum}
+                        </Badge>
+                      ) : null}
+                      <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                        {fmtTime(evt.ts)}
+                      </span>
+                    </div>
+                    {detail ? (
+                      <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                        {detail}
+                      </p>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
         )}
-      </ScrollArea>
+      </div>
     </div>
   );
 }

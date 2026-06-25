@@ -11,6 +11,7 @@ import { validateDag } from "../server/engine/dag-validator.js";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import type { FormatName } from "ajv-formats";
+import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";
 
 const allFormats: FormatName[] = ["date", "time", "date-time", "duration", "uri", "uri-reference", "uri-template", "url", "email", "hostname", "ipv4", "ipv6", "regex", "uuid", "json-pointer", "json-pointer-uri-fragment", "relative-json-pointer", "byte", "int32", "int64", "float", "double"];
 
@@ -19,6 +20,7 @@ export const workflowList = defineAction({
   description: "List all V3 workflow templates.",
   schema: z.object({}),
   readOnly: true,
+  http: { method: "GET" },
   run: async () => {
     const db = getV3Db();
     const rows = await db
@@ -43,6 +45,7 @@ export const workflowGet = defineAction({
     version: z.number().int().positive().optional(),
   }),
   readOnly: true,
+  http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
     let rows;
@@ -232,6 +235,24 @@ export const workflowRun = defineAction({
       throw new Error(`Invalid DAG: ${dagResult.errors.join("; ")}`);
     }
 
+    // Normalize a JSON-string DAG to an object. validateDag() accepts and parses
+    // a string form (a common, valid way the brain passes a DAG), but only
+    // returns { ok, errors } — not the parsed value. Without this, both the
+    // stored v3_runs.dag and the node-materialization loop below would see an
+    // unparsed string, `dag.nodes` would be undefined, ZERO node rows would be
+    // inserted, and the run would reconcile straight to "done" as an empty DAG.
+    if (typeof dag === "string") {
+      try {
+        dag = JSON.parse(dag);
+      } catch (e) {
+        throw new Error(
+          `Invalid DAG: failed to parse JSON string — ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
+
     // Validate inputs against input_schema (if we have one)
     if (inputSchema) {
       const ajv = new Ajv({ strict: false });
@@ -272,6 +293,13 @@ export const workflowRun = defineAction({
     // Insert node rows from DAG
     const dagTyped = dag as { nodes?: Array<{ id: string; type: string }> };
     const nodes = dagTyped?.nodes ?? [];
+    // Fail loud rather than create a 0-node run that instantly reconciles to
+    // "done" as a no-op (the symptom of the string-DAG bug above).
+    if (nodes.length === 0) {
+      throw new Error(
+        "Invalid DAG: no nodes to run (dag.nodes is empty after parsing)",
+      );
+    }
     for (const node of nodes) {
       await db.insert(v3Schema.v3Nodes).values({
         id: newId("v3n"),
@@ -285,6 +313,10 @@ export const workflowRun = defineAction({
         orgId,
       });
     }
+
+    // G1: Trigger the first reconciler tick so pending nodes advance immediately.
+    // Best-effort — a missing dispatcher/db config must not prevent run creation.
+    triggerTickSafe(runId).catch(() => {});
 
     return {
       runId,

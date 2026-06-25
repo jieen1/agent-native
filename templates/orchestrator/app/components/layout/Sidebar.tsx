@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   IconActivity,
   IconArchive,
+  IconBrain,
   IconDatabase,
   IconDots,
   IconEdit,
@@ -46,50 +47,55 @@ import {
 } from "@/components/ui/tooltip";
 
 const navItems = [
-  { icon: IconLayoutKanban, labelKey: "nav.board", href: "/board", view: "board" },
-  // v1 "Tasks" entry removed — `/board` is the canonical work list. The legacy
-  // v1 task detail route (`/tasks/:id`) remains reachable by direct URL.
   {
-    icon: IconFolders,
-    labelKey: "nav.projects",
-    href: "/projects",
-    view: "projects",
+    icon: IconBrain,
+    labelKey: "nav.brain",
+    label: "Brain",
+    href: "/brain",
+    view: "brain",
   },
+  { icon: IconPlayerPlay, labelKey: "nav.runs", label: "Runs", href: "/runs", view: "runs" },
   {
     icon: IconSitemap,
     labelKey: "nav.workflows",
+    label: "Workflows",
     href: "/workflows",
     view: "workflows",
   },
   {
-    icon: IconPackages,
-    labelKey: "nav.library",
-    href: "/library",
-    view: "library",
+    icon: IconListCheck,
+    labelKey: "nav.agents",
+    label: "Agents",
+    href: "/agents",
+    view: "agents",
   },
   {
-    icon: IconPlayerPlay,
-    labelKey: "nav.runs",
-    href: "/runs",
-    view: "runs",
+    icon: IconFolders,
+    labelKey: "nav.workspaces",
+    label: "Workspaces",
+    href: "/workspaces",
+    view: "workspaces",
+  },
+  {
+    icon: IconActivity,
+    labelKey: "nav.spawns",
+    label: "Spawns",
+    href: "/spawns",
+    view: "spawns",
+  },
+  {
+    icon: IconDatabase,
+    labelKey: "nav.pool",
+    label: "Pool",
+    href: "/pool",
+    view: "pool",
   },
   {
     icon: IconSettings,
     labelKey: "nav.settings",
+    label: "Settings",
     href: "/settings",
     view: "settings",
-  },
-  {
-    icon: IconActivity,
-    labelKey: "nav.observability",
-    href: "/observability",
-    view: "observability",
-  },
-  {
-    icon: IconDatabase,
-    labelKey: "nav.database",
-    href: "/database",
-    view: "database",
   },
 ];
 
@@ -441,7 +447,7 @@ export function Sidebar({
         )}
       >
         <Link
-          to="/board"
+          to="/"
           className={cn(
             "flex min-w-0 items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-ring",
             collapsed ? "size-7 justify-center" : "flex-1 gap-3",
@@ -477,7 +483,9 @@ export function Sidebar({
         <div className={cn("grid", collapsed ? "gap-0" : "gap-1")}>
           {navItems.map((item) => {
             const Icon = item.icon;
-            const label = t(item.labelKey);
+            const label = t(item.labelKey, {
+              defaultValue: (item as { label?: string }).label ?? item.labelKey,
+            });
             const isActive =
               item.href === "/"
                 ? location.pathname === "/"
