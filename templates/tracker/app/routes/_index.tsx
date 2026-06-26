@@ -4,7 +4,11 @@ import {
   markAgentChatHomeHandoff,
   navigateWithAgentChatViewTransition,
 } from "@agent-native/core/client";
-import { IconArrowRight, IconLayoutKanban, IconFolders } from "@tabler/icons-react";
+import {
+  IconArrowRight,
+  IconLayoutKanban,
+  IconFolders,
+} from "@tabler/icons-react";
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -17,9 +21,9 @@ import {
 } from "@/components/ui/tooltip";
 import { TAB_ID } from "@/lib/tab-id";
 
-const SEO_TITLE = "Tracker - Projects, work items, and orchestrator dispatch";
+const SEO_TITLE = "Tracker - 项目、工作项与编排器调度";
 const SEO_DESCRIPTION =
-  "Track requirements and tasks, configure repo/branch once per project, and dispatch work items to the orchestrator's Claude Code brain for autonomous execution.";
+  "跟踪需求与任务,为每个项目一次性配置仓库/分支,并将工作项调度给编排器的 Claude Code 大脑以自主执行。";
 
 export function meta() {
   return [
@@ -57,7 +61,7 @@ export default function Index() {
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label="Open board"
+                aria-label="打开看板"
                 className="pointer-events-auto flex items-center gap-2 rounded-md text-sm font-semibold text-foreground transition-colors hover:text-foreground/80"
                 onClick={openBoard}
               >
@@ -76,7 +80,7 @@ export default function Index() {
                 Tracker
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Open board</TooltipContent>
+            <TooltipContent side="bottom">打开看板</TooltipContent>
           </Tooltip>
         </TooltipProvider>
         <div className="pointer-events-auto flex items-center gap-1.5">
@@ -88,7 +92,7 @@ export default function Index() {
             className="gap-1.5"
             onClick={openBoard}
           >
-            Board
+            看板
             <IconArrowRight className="size-3.5" />
           </Button>
         </div>
@@ -104,19 +108,18 @@ export default function Index() {
         showTabBar={false}
         dynamicSuggestions={false}
         suggestions={[]}
-        emptyStateText="Ask Tracker to create a project, add work items, or dispatch to the orchestrator."
+        emptyStateText="让 Tracker 创建项目、添加工作项,或调度给编排器。"
         emptyStateDisplay="hidden"
         centerComposerWhenEmpty
         composerLayoutVariant="hero"
-        composerPlaceholder="Create a project, add a work item, or dispatch one to the orchestrator..."
+        composerPlaceholder="创建项目、添加工作项,或将其调度给编排器……"
         composerSlot={
           <div className="mx-auto mb-4 max-w-2xl text-center">
             <h1 className="text-2xl font-semibold tracking-tight">
-              What do you want to track?
+              你想跟踪什么?
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Configure a project's repo once, drop in requirements, and dispatch
-              them to the orchestrator's CC brain.
+              为项目一次性配置好仓库,填入需求,然后将它们调度给编排器的 CC 大脑。
             </p>
             <div
               className="mt-4 flex items-center justify-center gap-3 text-xs text-muted-foreground"
@@ -124,11 +127,11 @@ export default function Index() {
             >
               <span className="inline-flex items-center gap-1.5">
                 <IconFolders className="size-3.5" />
-                projects
+                项目
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <IconLayoutKanban className="size-3.5" />
-                work items
+                工作项
               </span>
             </div>
           </div>

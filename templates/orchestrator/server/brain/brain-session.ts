@@ -29,6 +29,7 @@ import { writeBrainMcpConfig } from "./brain-mcp-config.js";
 import { ensureBrainSchema } from "../db/brain-schema.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import { getBrainModel } from "./brain-model.js";
+import { deriveContextWindow } from "../../actions/brain-usage.js";
 
 /**
  * The brain's system prompt. Appended via --append-system-prompt on every turn.
@@ -409,6 +410,10 @@ async function streamBrainChild(opts: {
 
   let capturedSessionId: string | null = opts.resumeSessionId;
   let capturedModel: string | null = null;
+  // The context window persisted so far (early model-family derivation at init,
+  // then refined by the authoritative result.modelUsage window). Tracked so the
+  // early set never overwrites an authoritative value already captured.
+  let capturedWindow: number | null = null;
   let capturedContextUsed = 0;
   let stderr = "";
   let sawResult = false;
@@ -462,9 +467,23 @@ async function streamBrainChild(opts: {
         initModel !== capturedModel
       ) {
         capturedModel = initModel;
+        // Set context_window EARLY from the model family so a running thread in
+        // its first/current turn shows "used / window / %" immediately, instead
+        // of "used / —" (the authoritative window only lands at turn-END from the
+        // result event's modelUsage, which then refines this). Only set it when
+        // not already captured so we never downgrade an authoritative value.
+        const earlyWindow = deriveContextWindow(initModel);
+        const set: Record<string, unknown> = {
+          model: initModel,
+          updatedAt: new Date(),
+        };
+        if (earlyWindow != null && capturedWindow == null) {
+          set.contextWindow = earlyWindow;
+          capturedWindow = earlyWindow;
+        }
         await db
           .update(v3Schema.brainThreads)
-          .set({ model: initModel, updatedAt: new Date() })
+          .set(set)
           .where(eq(v3Schema.brainThreads.id, opts.threadId));
       }
     } else if (type === "rate_limit_event") {
@@ -561,7 +580,10 @@ async function streamBrainChild(opts: {
         const mu = key ? asRecord(modelUsage[key]) : null;
         const window = mu ? numFrom(mu.contextWindow) : 0;
         const update: Record<string, unknown> = { updatedAt: new Date() };
-        if (window > 0) update.contextWindow = window;
+        if (window > 0) {
+          update.contextWindow = window;
+          capturedWindow = window; // authoritative — refines the early derive
+        }
         // Prefer the model key from modelUsage if the init event didn't carry it.
         if (!capturedModel && key) {
           capturedModel = key;

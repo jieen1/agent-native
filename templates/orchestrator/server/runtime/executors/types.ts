@@ -16,6 +16,29 @@ import type { Node } from "../../../shared/types.js";
 import type { NodeRuntime, VmHandle } from "../node-runtime.js";
 
 /**
+ * One ordered intermediate step a node's brain produced (DESIGN §8.5 — the
+ * Node Inspector execution timeline). Mirrors `ClaudeStreamStep`: assistant
+ * reasoning `text`, a `tool_use` (name + input), or a `tool_result`. Both the
+ * in-VM claude executor and the host engine loop emit these so the dispatcher
+ * can persist them as `spawn_events`, regardless of provider.
+ */
+export interface RuntimeExecStep {
+  /** Monotonic order within the run (0-based). */
+  seq: number;
+  type: "text" | "tool_use" | "tool_result";
+  /** Tool name for a `tool_use` step. */
+  name?: string;
+  /** The model-side tool-call id (links a tool_use to its tool_result). */
+  toolUseId?: string;
+  /** The tool input for a `tool_use` step. */
+  input?: unknown;
+  /** The tool result for a `tool_result` step. */
+  result?: unknown;
+  /** Assistant reasoning/answer text for a `text` step. */
+  text?: string;
+}
+
+/**
  * The context a {@link RuntimeExecutor} receives at the EXECUTE stage (DESIGN
  * §7.4.1a — `node.executor.run({ vm, node, deps })`). The VM is already
  * provisioned/mounted/branch-initialized by the NodeRunner; the executor only
@@ -49,6 +72,14 @@ export interface RuntimeExecCtx {
   orgId: string | null;
   /** Cooperative cancellation — the model loop checks this at boundaries. */
   signal: AbortSignal;
+  /**
+   * Live step sink (DESIGN §8.5). When set, the executor calls this for EACH
+   * intermediate step (reasoning text / tool_use / tool_result) AS IT ARRIVES,
+   * so the dispatcher can append `spawn_events` rows for a RUNNING node instead
+   * of only after it finishes. Best-effort: the executor must not let a sink
+   * error abort the model loop. The same steps are also returned in `steps[]`.
+   */
+  onStep?: (step: RuntimeExecStep) => void;
 }
 
 /** What a {@link RuntimeExecutor} returns from EXECUTE (DESIGN §7.4.1a stage 5). */
@@ -61,6 +92,13 @@ export interface RuntimeExecResult {
   toolCallCount: number;
   /** The model id the executor actually ran (for observability/journaling). */
   model: string;
+  /**
+   * The ordered intermediate transcript (assistant reasoning + tool calls +
+   * tool results) the brain produced. Persisted by the dispatcher as
+   * `spawn_events` for the Node Inspector. Optional/empty for executors that
+   * cannot surface steps.
+   */
+  steps?: RuntimeExecStep[];
   /** Free-form per-provider detail (e.g. final assistant text). */
   detail?: Record<string, unknown>;
 }

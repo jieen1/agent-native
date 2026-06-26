@@ -27,7 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Spawns` }];
+  return [{ title: `${APP_TITLE} — 一次性任务` }];
 }
 
 const SPAWN_STATUSES = [
@@ -64,7 +64,8 @@ const STATUS_COLORS: Record<string, string> = {
   running: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   done: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
   failed: "bg-destructive/10 text-destructive",
-  cancelled: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+  cancelled:
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
 };
 
 interface SpawnItem {
@@ -114,9 +115,9 @@ export default function V3SpawnsRoute() {
   );
 
   const spawnGetAction = useActionMutation("spawnGet" as any, {});
-  const [detailCache, setDetailCache] = useState<
-    Record<string, SpawnDetail>
-  >({});
+  const [detailCache, setDetailCache] = useState<Record<string, SpawnDetail>>(
+    {},
+  );
 
   // Distinct agent names for the filter dropdown
   const agentNames = useMemo(() => {
@@ -162,30 +163,30 @@ export default function V3SpawnsRoute() {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            Spawns
+            一次性任务
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Individual agent invocations across runs.
+            各次运行中的单个 Agent 调用。
           </p>
         </div>
         {spawns.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2">
             <Select value={scopeFilter} onValueChange={setScopeFilter}>
               <SelectTrigger className="h-8 w-[140px]">
-                <SelectValue placeholder="Scope" />
+                <SelectValue placeholder="范围" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All spawns</SelectItem>
-                <SelectItem value="run-scoped">Run-scoped</SelectItem>
-                <SelectItem value="ad-hoc">Ad-hoc</SelectItem>
+                <SelectItem value="all">全部一次性任务</SelectItem>
+                <SelectItem value="run-scoped">运行内</SelectItem>
+                <SelectItem value="ad-hoc">临时</SelectItem>
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="h-8 w-[130px]">
-                <SelectValue placeholder="Status" />
+                <SelectValue placeholder="状态" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="all">所有状态</SelectItem>
                 {SPAWN_STATUSES.map((s) => (
                   <SelectItem key={s} value={s}>
                     {t(`v3.spawn.status.${s}`, { defaultValue: s })}
@@ -198,7 +199,7 @@ export default function V3SpawnsRoute() {
                 <SelectValue placeholder="Agent" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All agents</SelectItem>
+                <SelectItem value="all">所有 Agent</SelectItem>
                 {agentNames.map((a) => (
                   <SelectItem key={a} value={a}>
                     {a}
@@ -212,55 +213,53 @@ export default function V3SpawnsRoute() {
 
       {error ? (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-          Failed to load spawns.
+          加载一次性任务失败。
         </div>
       ) : (
         <div className="space-y-1">
-          {isLoading
-            ? Array.from({ length: 5 }).map((_, i) => (
-                <SkeletonRow key={`sk-${i}`} />
-              ))
-            : spawns.length === 0
-              ? (
-                  <EmptyState
-                    icon={IconBolt}
-                    title={
-                      isFiltered
-                        ? "No spawns match filters"
-                        : "No spawns yet"
-                    }
-                    description={
-                      isFiltered
-                        ? "Try adjusting the scope, status, or agent filter."
-                        : "Spawns are created when nodes dispatch agent work."
-                    }
-                    className="border-0"
-                    action={
-                      isFiltered ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setScopeFilter("all");
-                            setStatusFilter("all");
-                            setAgentFilter("all");
-                          }}
-                        >
-                          Clear filters
-                        </Button>
-                      ) : undefined
-                    }
-                  />
-                )
-              : spawns.map((spawn: SpawnItem) => (
-                  <SpawnRow
-                    key={spawn.id}
-                    spawn={spawn}
-                    isExpanded={expandedId === spawn.id}
-                    detail={detailCache[spawn.id]}
-                    onToggle={() => toggleExpand(spawn.id)}
-                  />
-                ))}
+          {isLoading ? (
+            Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonRow key={`sk-${i}`} />
+            ))
+          ) : spawns.length === 0 ? (
+            <EmptyState
+              icon={IconBolt}
+              title={
+                isFiltered ? "没有符合筛选条件的一次性任务" : "暂无一次性任务"
+              }
+              description={
+                isFiltered
+                  ? "请尝试调整范围、状态或 Agent 筛选条件。"
+                  : "当节点派发 Agent 工作时会创建一次性任务。"
+              }
+              className="border-0"
+              action={
+                isFiltered ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setScopeFilter("all");
+                      setStatusFilter("all");
+                      setAgentFilter("all");
+                    }}
+                  >
+                    清除筛选
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            spawns.map((spawn: SpawnItem) => (
+              <SpawnRow
+                key={spawn.id}
+                spawn={spawn}
+                isExpanded={expandedId === spawn.id}
+                detail={detailCache[spawn.id]}
+                onToggle={() => toggleExpand(spawn.id)}
+              />
+            ))
+          )}
         </div>
       )}
     </div>
@@ -341,7 +340,7 @@ function SpawnRow({
             </span>
           ) : (
             <span className="hidden text-xs text-muted-foreground md:inline">
-              ad-hoc
+              临时
             </span>
           )}
 
@@ -386,14 +385,14 @@ function SpawnDetailPanel({
 
   // Rendered prompt
   sections.push({
-    label: "Rendered Prompt",
+    label: "渲染后的提示词",
     content: spawn.renderedPrompt ?? null,
   });
 
   // Output (from detail)
   if (detail?.output != null) {
     sections.push({
-      label: "Output",
+      label: "输出",
       content: detail.output,
     });
   }
@@ -401,7 +400,7 @@ function SpawnDetailPanel({
   // Log (from detail)
   if (detail?.log != null) {
     sections.push({
-      label: "Log",
+      label: "日志",
       content: detail.log,
     });
   }
@@ -409,19 +408,25 @@ function SpawnDetailPanel({
   // Error
   if (spawn.error) {
     sections.push({
-      label: "Error",
+      label: "错误",
       content: spawn.error,
     });
   }
 
   // Metadata
   const metaItems: Array<{ label: string; value: string }> = [];
-  if (detail?.modelRef) metaItems.push({ label: "Model", value: detail.modelRef });
-  if (detail?.engineRef) metaItems.push({ label: "Engine", value: detail.engineRef });
-  if (detail?.runtime) metaItems.push({ label: "Runtime", value: detail.runtime });
-  if (detail?.workspaceId) metaItems.push({ label: "Workspace", value: detail.workspaceId.slice(0, 14) });
-  if (spawn.nodeId) metaItems.push({ label: "Node", value: spawn.nodeId.slice(0, 14) });
-  if (spawn.runId) metaItems.push({ label: "Run", value: spawn.runId.slice(0, 14) });
+  if (detail?.modelRef)
+    metaItems.push({ label: "模型", value: detail.modelRef });
+  if (detail?.engineRef)
+    metaItems.push({ label: "引擎", value: detail.engineRef });
+  if (detail?.runtime)
+    metaItems.push({ label: "运行时", value: detail.runtime });
+  if (detail?.workspaceId)
+    metaItems.push({ label: "工作区", value: detail.workspaceId.slice(0, 14) });
+  if (spawn.nodeId)
+    metaItems.push({ label: "节点", value: spawn.nodeId.slice(0, 14) });
+  if (spawn.runId)
+    metaItems.push({ label: "运行", value: spawn.runId.slice(0, 14) });
 
   return (
     <div className="space-y-4">

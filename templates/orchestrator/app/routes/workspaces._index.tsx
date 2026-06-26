@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/dialog";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Workspaces` }];
+  return [{ title: `${APP_TITLE} — 工作区` }];
 }
 
 const WORKSPACE_STATES = [
@@ -54,13 +54,13 @@ function fmtDurationAgo(iso: string | null): string {
   try {
     const diff = Date.now() - new Date(iso).getTime();
     const s = Math.round(diff / 1000);
-    if (s < 60) return `${s}s ago`;
+    if (s < 60) return `${s} 秒前`;
     const m = Math.floor(s / 60);
-    if (m < 60) return `${m}m ago`;
+    if (m < 60) return `${m} 分钟前`;
     const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h ago`;
+    if (h < 24) return `${h} 小时前`;
     const d = Math.floor(h / 24);
-    return `${d}d ago`;
+    return `${d} 天前`;
   } catch {
     return iso;
   }
@@ -150,20 +150,20 @@ export default function V3WorkspacesRoute() {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            Workspaces
+            工作区
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Compute environments for workflow spawns.
+            用于工作流派生的计算环境。
           </p>
         </div>
         {workspaces.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2">
             <Select value={ownerKindFilter} onValueChange={setOwnerKindFilter}>
               <SelectTrigger className="h-8 w-[150px]">
-                <SelectValue placeholder="Owner kind" />
+                <SelectValue placeholder="所有者类型" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All owner kinds</SelectItem>
+                <SelectItem value="all">全部所有者类型</SelectItem>
                 {ownerKinds.map((ok) => (
                   <SelectItem key={ok} value={ok}>
                     {ok}
@@ -173,10 +173,10 @@ export default function V3WorkspacesRoute() {
             </Select>
             <Select value={stateFilter} onValueChange={setStateFilter}>
               <SelectTrigger className="h-8 w-[150px]">
-                <SelectValue placeholder="State" />
+                <SelectValue placeholder="状态" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All states</SelectItem>
+                <SelectItem value="all">全部状态</SelectItem>
                 {WORKSPACE_STATES.map((s) => (
                   <SelectItem key={s} value={s}>
                     {t(`v3.workspace.state.${s}`, { defaultValue: s })}
@@ -190,7 +190,7 @@ export default function V3WorkspacesRoute() {
 
       {error ? (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-          Failed to load workspaces.
+          加载工作区失败。
         </div>
       ) : (
         <DataTable<WorkspaceItem>
@@ -201,7 +201,7 @@ export default function V3WorkspacesRoute() {
           columns={[
             {
               id: "id",
-              header: "Workspace ID",
+              header: "工作区 ID",
               cell: (r) => (
                 <span className="font-mono text-xs font-medium">
                   {r.id.slice(0, 14)}
@@ -210,7 +210,7 @@ export default function V3WorkspacesRoute() {
             },
             {
               id: "owner",
-              header: "Owner",
+              header: "所有者",
               cell: (r) => (
                 <div className="flex flex-col gap-0.5">
                   <span className="text-xs font-medium">{r.ownerKind}</span>
@@ -222,7 +222,7 @@ export default function V3WorkspacesRoute() {
             },
             {
               id: "repo",
-              header: "Repo",
+              header: "仓库",
               className: "hidden md:table-cell",
               headClassName: "hidden md:table-cell",
               cell: (r) => (
@@ -233,7 +233,7 @@ export default function V3WorkspacesRoute() {
             },
             {
               id: "branch",
-              header: "Branch",
+              header: "分支",
               className: "hidden md:table-cell",
               headClassName: "hidden md:table-cell",
               cell: (r) => (
@@ -244,7 +244,7 @@ export default function V3WorkspacesRoute() {
             },
             {
               id: "state",
-              header: "State",
+              header: "状态",
               cell: (r) => (
                 <Badge
                   variant="secondary"
@@ -256,7 +256,7 @@ export default function V3WorkspacesRoute() {
             },
             {
               id: "vm",
-              header: "VM",
+              header: "虚拟机",
               className: "hidden lg:table-cell",
               headClassName: "hidden lg:table-cell",
               cell: (r) => (
@@ -267,7 +267,7 @@ export default function V3WorkspacesRoute() {
             },
             {
               id: "created",
-              header: "Created",
+              header: "创建时间",
               className: "hidden lg:table-cell",
               headClassName: "hidden lg:table-cell",
               cell: (r) => (
@@ -296,7 +296,7 @@ export default function V3WorkspacesRoute() {
                     disabled={destroyAction.isPending}
                   >
                     <IconPlayerStop className="mr-1 size-3" />
-                    Destroy
+                    销毁
                   </Button>
                 );
               },
@@ -306,12 +306,12 @@ export default function V3WorkspacesRoute() {
             <EmptyState
               icon={IconPlayerPlay}
               title={
-                isFiltered ? "No workspaces match filters" : "No workspaces yet"
+                isFiltered ? "没有符合筛选条件的工作区" : "暂无工作区"
               }
               description={
                 isFiltered
-                  ? "Try adjusting the owner kind or state filter."
-                  : "Workspaces are created when spawns require a compute environment."
+                  ? "尝试调整所有者类型或状态筛选条件。"
+                  : "当派生需要计算环境时会自动创建工作区。"
               }
               className="border-0"
               action={
@@ -324,7 +324,7 @@ export default function V3WorkspacesRoute() {
                       setStateFilter("all");
                     }}
                   >
-                    Clear filters
+                    清除筛选
                   </Button>
                 ) : undefined
               }
@@ -337,10 +337,9 @@ export default function V3WorkspacesRoute() {
       <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Destroy workspace?</DialogTitle>
+            <DialogTitle>销毁工作区?</DialogTitle>
             <DialogDescription>
-              This will mark the workspace as destroying. This action cannot be
-              undone.
+              这会将工作区标记为正在销毁。此操作无法撤销。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -351,14 +350,14 @@ export default function V3WorkspacesRoute() {
                 setDestroyingId(null);
               }}
             >
-              Cancel
+              取消
             </Button>
             <Button
               variant="destructive"
               onClick={confirmDestroy}
               disabled={destroyAction.isPending}
             >
-              {destroyAction.isPending ? "Destroying…" : "Destroy"}
+              {destroyAction.isPending ? "销毁中…" : "销毁"}
             </Button>
           </DialogFooter>
         </DialogContent>

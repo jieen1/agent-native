@@ -202,7 +202,7 @@ function FilesPanel({
   if (!enabled) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
-        The file browser is only available while the workspace checkout exists.
+        文件浏览器仅在工作区检出存在时可用。
       </div>
     );
   }
@@ -213,7 +213,7 @@ function FilesPanel({
       <div className="flex max-h-[520px] flex-col overflow-hidden rounded-lg border border-border">
         <div className="flex shrink-0 items-center gap-1.5 border-b border-border bg-card px-3 py-2">
           <IconFolder className="size-3.5 text-muted-foreground" />
-          <span className="font-mono text-xs font-medium">workspace root</span>
+          <span className="font-mono text-xs font-medium">工作区根目录</span>
           <Button
             size="sm"
             variant="ghost"
@@ -221,13 +221,13 @@ function FilesPanel({
             onClick={() => refetch()}
           >
             <IconRefresh className="size-3" />
-            <span className="sr-only">Refresh files</span>
+            <span className="sr-only">刷新文件</span>
           </Button>
         </div>
         <ScrollArea className="min-h-0 flex-1">
           {error ? (
             <div className="p-3 text-xs text-destructive">
-              Failed to list files.
+              无法列出文件。
             </div>
           ) : isLoading ? (
             <div className="space-y-1.5 p-3">
@@ -237,7 +237,7 @@ function FilesPanel({
             </div>
           ) : !filesData?.files.length ? (
             <div className="p-3 text-xs text-muted-foreground">
-              No files found.
+              未找到文件。
             </div>
           ) : (
             <ul className="py-1">
@@ -291,14 +291,14 @@ function FilesPanel({
             <div className="rounded-full bg-muted/50 p-2.5">
               <IconPointerSearch className="size-5 text-muted-foreground" />
             </div>
-            <p className="text-sm font-medium">No file selected</p>
+            <p className="text-sm font-medium">未选择文件</p>
             <p className="max-w-[240px] text-xs text-muted-foreground">
-              Click a file in the tree to preview its contents.
+              在文件树中点击某个文件以预览其内容。
             </p>
           </div>
         ) : contentError ? (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-            Failed to read this file.
+            无法读取此文件。
           </div>
         ) : (
           <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border">
@@ -313,7 +313,7 @@ function FilesPanel({
               </div>
             ) : (
               <pre className="max-h-[480px] overflow-auto whitespace-pre p-4 font-mono text-xs leading-relaxed text-foreground/90">
-                {fileContent?.content || "(empty file)"}
+                {fileContent?.content || "(空文件)"}
               </pre>
             )}
           </div>
@@ -368,7 +368,7 @@ function RunsPanel({ workspaceId }: { workspaceId: string }) {
   if (error) {
     return (
       <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-        Failed to load related runs.
+        无法加载相关运行。
       </div>
     );
   }
@@ -386,7 +386,7 @@ function RunsPanel({ workspaceId }: { workspaceId: string }) {
   if (runs.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
-        No runs have used this workspace yet.
+        尚无运行使用过此工作区。
       </div>
     );
   }
@@ -421,7 +421,7 @@ function RunsPanel({ workspaceId }: { workspaceId: string }) {
                 );
               })}
               <span className="font-mono text-[11px] text-muted-foreground">
-                {run.spawnCount} {run.spawnCount === 1 ? "spawn" : "spawns"}
+                {run.spawnCount} 次生成
               </span>
             </div>
           </div>
@@ -493,11 +493,11 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
         <Button asChild variant="ghost" size="sm" className="-ml-2">
           <Link to="/workspaces">
             <IconArrowLeft className="size-4" />
-            Workspaces
+            工作区
           </Link>
         </Button>
         <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-          Workspace not found or failed to load.
+          未找到工作区或加载失败。
         </div>
       </div>
     );
@@ -587,7 +587,7 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
             <Button asChild variant="outline" size="sm" className="h-8 gap-1.5">
               <a href={ghHref} target="_blank" rel="noopener noreferrer">
                 <IconBrandGithub className="size-4" />
-                Repo
+                仓库
                 <IconExternalLink className="size-3 opacity-60" />
               </a>
             </Button>
@@ -601,7 +601,7 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
               disabled={destroy.isPending}
             >
               <IconPlayerStop className="mr-1.5 size-4" />
-              Destroy
+              销毁
             </Button>
           ) : null}
         </div>
@@ -611,13 +611,13 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <StatChip
           icon={IconFileDiff}
-          label="Files changed"
+          label="变更文件数"
           value={live ? String(diff.data?.files.length ?? 0) : "—"}
           tone="text-sky-500"
         />
         <StatChip
           icon={IconStack2}
-          label="Net lines"
+          label="净变更行数"
           value={
             live && diff.data
               ? `+${diff.data.files.reduce((s, f) => s + f.additions, 0)} −${diff.data.files.reduce((s, f) => s + f.deletions, 0)}`
@@ -627,7 +627,7 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
         />
         <StatChip
           icon={IconHierarchy3}
-          label="Related runs"
+          label="相关运行"
           value={String(relatedRunCount)}
           tone="text-violet-500"
         />
@@ -635,7 +635,7 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
 
       {/* ── Metadata card ── */}
       <section className="mb-6 divide-y divide-border rounded-lg border border-border bg-card">
-        <MetaRow icon={IconUser} label="Owner">
+        <MetaRow icon={IconUser} label="所有者">
           {(() => {
             const owner = ownerPresentation(ws.ownerKind, ws.ownerId);
             return (
@@ -658,16 +658,16 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
             );
           })()}
         </MetaRow>
-        <MetaRow icon={ws.vmName ? IconServer : IconFolder} label="Location">
+        <MetaRow icon={ws.vmName ? IconServer : IconFolder} label="位置">
           {ws.vmName ? (
-            <span className="font-mono text-xs">VM · {ws.vmName}</span>
+            <span className="font-mono text-xs">虚拟机 · {ws.vmName}</span>
           ) : (
             <span className="font-mono text-xs text-foreground/80">
-              host · /workspaces/{ws.id}
+              主机 · /workspaces/{ws.id}
             </span>
           )}
         </MetaRow>
-        <MetaRow icon={IconClockHour3} label="Created">
+        <MetaRow icon={IconClockHour3} label="创建于">
           <span>{fmtDateTime(ws.createdAt)}</span>
           {(() => {
             // Never surface the legacy "cc"/"cc:cc" placeholder as a creator.
@@ -676,17 +676,17 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
               by && by !== "cc" && by !== "cc:cc" ? by.replace(/^cc:/, "") : null;
             return clean ? (
               <span className="ml-2 text-xs text-muted-foreground">
-                by {clean}
+                由 {clean}
               </span>
             ) : null;
           })()}
         </MetaRow>
         {ws.destroyedAt ? (
-          <MetaRow icon={IconPlayerStop} label="Destroyed">
+          <MetaRow icon={IconPlayerStop} label="销毁于">
             <span>{fmtDateTime(ws.destroyedAt)}</span>
           </MetaRow>
         ) : null}
-        <MetaRow icon={IconFile} label="Workspace ID">
+        <MetaRow icon={IconFile} label="工作区 ID">
           <span className="font-mono text-xs text-muted-foreground">
             {ws.id}
           </span>
@@ -701,7 +701,7 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
         <TabsList className="mb-4">
           <TabsTrigger value="diff" className="gap-1.5">
             <IconFileDiff className="size-4" />
-            Changes
+            变更
             {live && diff.data?.files.length ? (
               <Badge
                 variant="secondary"
@@ -713,11 +713,11 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
           </TabsTrigger>
           <TabsTrigger value="files" className="gap-1.5">
             <IconFile className="size-4" />
-            Files
+            文件
           </TabsTrigger>
           <TabsTrigger value="runs" className="gap-1.5">
             <IconHierarchy3 className="size-4" />
-            Runs
+            运行
             {relatedRunCount > 0 ? (
               <Badge
                 variant="secondary"
@@ -754,15 +754,14 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Destroy workspace?</DialogTitle>
+            <DialogTitle>销毁工作区?</DialogTitle>
             <DialogDescription>
-              This removes the workspace checkout and marks it destroyed. This
-              action cannot be undone.
+              这将移除工作区检出并将其标记为已销毁。此操作无法撤销。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>
-              Cancel
+              取消
             </Button>
             <Button
               variant="destructive"
@@ -780,7 +779,7 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
                 );
               }}
             >
-              {destroy.isPending ? "Destroying…" : "Destroy"}
+              {destroy.isPending ? "销毁中…" : "销毁"}
             </Button>
           </DialogFooter>
         </DialogContent>

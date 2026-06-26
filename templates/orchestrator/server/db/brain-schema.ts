@@ -46,6 +46,12 @@ const STATEMENTS = [
   `ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS context_window integer`,
   `ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS context_used integer`,
   `ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS last_usage jsonb`,
+  // Additive: session-management archive flag. `archived` hides a thread from the
+  // brain page's default session list (an "Archived" filter reveals it);
+  // `archived_at` records when it was archived. Both nullable/defaulted, additive.
+  `ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS archived_at timestamptz`,
+  `CREATE INDEX IF NOT EXISTS idx_brain_threads_archived ON brain_threads (archived)`,
   `CREATE TABLE IF NOT EXISTS brain_events (
      id           text PRIMARY KEY,
      thread_id    text NOT NULL,
@@ -90,6 +96,28 @@ const STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_brain_tasks_thread ON brain_tasks (thread_id)`,
   `CREATE INDEX IF NOT EXISTS idx_brain_tasks_owner ON brain_tasks (owner_email)`,
   `CREATE INDEX IF NOT EXISTS idx_brain_tasks_priority ON brain_tasks (priority, created_at)`,
+  // ── spawn_events ─────────────────────────────────────────────────────────
+  // The per-spawn INTERMEDIATE transcript for the run-detail Node Inspector:
+  // ordered reasoning text + every tool call (name + input) + every tool result
+  // a worker brain (claude-code analyze/review or vLLM develop) produced while
+  // running a node. Mirrors brain_events; `seq` monotonic within a spawn. The
+  // dispatcher persists these best-effort after a spawn returns — a logging
+  // failure never fails the node. Additive only.
+  `CREATE TABLE IF NOT EXISTS spawn_events (
+     id           text PRIMARY KEY,
+     spawn_id     text NOT NULL,
+     seq          integer NOT NULL,
+     type         text NOT NULL,
+     name         text,
+     input        jsonb,
+     result       jsonb,
+     text         text,
+     created_at   timestamptz DEFAULT now(),
+     owner_email  text NOT NULL DEFAULT 'local@localhost',
+     org_id       text
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS unique_spawn_event_spawn_seq ON spawn_events (spawn_id, seq)`,
+  `CREATE INDEX IF NOT EXISTS idx_spawn_events_spawn ON spawn_events (spawn_id)`,
 ];
 
 /**

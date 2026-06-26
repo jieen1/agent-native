@@ -79,6 +79,26 @@ function strOrNull(v: unknown): string | null {
   return typeof v === "string" && v.trim() !== "" ? v : null;
 }
 
+/**
+ * Derive the context window (tokens) from a model id by FAMILY when the thread
+ * hasn't yet captured a real `context_window` (it is only persisted at turn-END
+ * from the result event's modelUsage, so a thread still in its first/current
+ * turn has NULL). The `[1m]` suffix is captured INCONSISTENTLY (the same model
+ * shows as `claude-opus-4-8[1m]` on one thread and `claude-opus-4-8` on
+ * another), so we match the model family, not the suffix: opus 4.8 / 4.7 / 4.6
+ * (and anything carrying `[1m]`) are 1M-context; opus 4.5, sonnet 4.6, haiku 4.5
+ * are the standard 200k. Default 200k. The captured value is always preferred
+ * over this derivation when present. Shared with brain-session.ts's early set.
+ */
+export function deriveContextWindow(model: string | null): number | null {
+  if (!model) return null;
+  const m = model.toLowerCase();
+  if (/\[1m\]/.test(m)) return 1_000_000;
+  if (/opus-4-8|opus-4-7|opus-4-6/.test(m)) return 1_000_000;
+  if (/opus-4-5|sonnet-4-6|haiku-4-5/.test(m)) return 200_000;
+  return 200_000;
+}
+
 /** Normalize a severity string (or derive one from a percent) to our enum. */
 function toSeverity(v: unknown, pct: number | null): Severity {
   const s = typeof v === "string" ? v.toLowerCase() : "";
@@ -251,9 +271,17 @@ export default defineAction({
     // The configured override (so the Select reflects a pending switch even
     // before the next turn re-captures the resolved init model).
     const configuredModel = await getBrainModel();
-    const model = threadRow?.model ?? configuredModel ?? null;
-    const window = threadRow?.contextWindow ?? null;
+    // The ACTUAL model the thread ran as (captured from the init `system` event),
+    // independent of any override. The panel surfaces this as the primary value
+    // so the user always sees the real model, not just "CLI default".
+    const actualModel = threadRow?.model ?? null;
+    const model = actualModel ?? configuredModel ?? null;
     const used = threadRow?.contextUsed ?? null;
+    // Prefer the captured window; otherwise derive it from the model id so a
+    // RUNNING thread (window not yet persisted) still shows a real fill %.
+    const capturedWindow = threadRow?.contextWindow ?? null;
+    const window = capturedWindow ?? deriveContextWindow(actualModel ?? model);
+    const windowDerived = capturedWindow == null && window != null;
     const contextPct =
       window && used != null && window > 0
         ? Math.min(100, Math.round((used / window) * 1000) / 10)
@@ -273,8 +301,9 @@ export default defineAction({
         cached: false,
         stale: false,
         model,
+        actualModel,
         configuredModel,
-        context: { used, window, pct: contextPct },
+        context: { used, window, pct: contextPct, windowDerived },
         fiveHour: null,
         weekly: null,
         limits: [],
@@ -301,8 +330,9 @@ export default defineAction({
       cached: usage.cached,
       stale,
       model,
+      actualModel,
       configuredModel,
-      context: { used, window, pct: contextPct },
+      context: { used, window, pct: contextPct, windowDerived },
       fiveHour: usage.snap?.fiveHour ?? null,
       weekly: usage.snap?.weekly ?? null,
       limits: usage.snap?.limits ?? [],

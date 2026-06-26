@@ -32,10 +32,10 @@ import type { WorkItem } from "@shared/types";
 // the orchestrator's live admission-gate slot state; `dispatched` is the legacy
 // in-flight state for items dispatched before the gate resolved their slot.
 const COLUMNS: Array<{ status: string[]; label: string; accent: string }> = [
-  { status: ["open"], label: "Open", accent: "bg-zinc-400" },
-  { status: ["queued"], label: "Queued", accent: "bg-amber-500" },
-  { status: ["running", "dispatched"], label: "Running", accent: "bg-blue-500" },
-  { status: ["done", "failed"], label: "Done", accent: "bg-emerald-500" },
+  { status: ["open"], label: "待处理", accent: "bg-zinc-400" },
+  { status: ["queued"], label: "排队中", accent: "bg-amber-500" },
+  { status: ["running", "dispatched"], label: "运行中", accent: "bg-blue-500" },
+  { status: ["done", "failed"], label: "已完成", accent: "bg-emerald-500" },
 ];
 
 // Keeps a per-item get-activity poll alive while the item is in flight. The
@@ -98,7 +98,7 @@ function WorkItemCard({
           <Checkbox
             checked={selected}
             onCheckedChange={onToggle}
-            aria-label={`Select ${item.title}`}
+            aria-label={`选择 ${item.title}`}
             className="shrink-0"
           />
         ) : null}
@@ -140,7 +140,7 @@ function WorkItemCard({
             <IconRobot className="size-3 text-emerald-500" />
           )}
           <span className="font-mono text-[10px] text-muted-foreground">
-            brain · {item.orchestratorThreadId.slice(0, 8)}
+            智能体 · {item.orchestratorThreadId.slice(0, 8)}
           </span>
         </div>
       ) : null}
@@ -234,13 +234,13 @@ export function BoardPage() {
       <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-3">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold tracking-tight">
-            {activeProject ? activeProject.name : "All work items"}
+            {activeProject ? activeProject.name : "全部工作项"}
           </h2>
           {activeProject ? (
             <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
               <span className="flex items-center gap-1 truncate">
                 <IconBrandGithub className="size-3 shrink-0" />
-                {repoText ?? "no repo configured"}
+                {repoText ?? "未配置仓库"}
               </span>
               <span className="flex items-center gap-1">
                 <IconGitBranch className="size-3 shrink-0" />
@@ -249,15 +249,14 @@ export function BoardPage() {
             </div>
           ) : (
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {items.length} item{items.length === 1 ? "" : "s"} across all
-              projects
+              {items.length} 个工作项 · 覆盖所有项目
             </p>
           )}
         </div>
         <NewWorkItemDialog defaultProjectId={projectId}>
           <Button size="sm" className="gap-1.5" disabled={projects.length === 0}>
             <IconPlus className="size-4" />
-            New work item
+            新建工作项
           </Button>
         </NewWorkItemDialog>
       </div>
@@ -271,14 +270,14 @@ export function BoardPage() {
                 selectedCount > 0 && selectedCount === selectableIds.length
               }
               onCheckedChange={toggleAll}
-              aria-label="Select all open items"
+              aria-label="全选待处理工作项"
             />
-            Select all open ({selectableIds.length})
+            全选待处理 ({selectableIds.length})
           </label>
           <div className="ml-auto flex items-center gap-3">
             {selectedCount > 0 ? (
               <span className="text-xs font-medium text-foreground">
-                {selectedCount} selected
+                已选 {selectedCount} 项
               </span>
             ) : null}
             <Button
@@ -293,8 +292,8 @@ export function BoardPage() {
                 <IconRocket className="size-4" />
               )}
               {bulkDispatch.isPending
-                ? "Dispatching…"
-                : `Dispatch selected${selectedCount ? ` (${selectedCount})` : ""}`}
+                ? "派发中…"
+                : `派发所选${selectedCount ? ` (${selectedCount})` : ""}`}
             </Button>
           </div>
         </div>
@@ -308,11 +307,10 @@ export function BoardPage() {
               <IconInbox className="size-6 text-muted-foreground" />
             </div>
             <p className="text-sm text-muted-foreground">
-              No projects yet. Create a project — set its repo and branch once —
-              to start adding work items.
+              还没有项目。先创建一个项目并一次性设置好仓库与分支,即可开始添加工作项。
             </p>
             <Button asChild className="mt-4">
-              <Link to="/projects">Go to Projects</Link>
+              <Link to="/projects">前往项目</Link>
             </Button>
           </div>
         </div>
@@ -355,7 +353,7 @@ export function BoardPage() {
                   ))}
                   {!isLoading && colItems.length === 0 ? (
                     <p className="px-2 py-6 text-center text-xs text-muted-foreground/60">
-                      Nothing here.
+                      暂无内容。
                     </p>
                   ) : null}
                 </div>

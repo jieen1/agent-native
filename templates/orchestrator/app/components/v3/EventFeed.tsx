@@ -30,30 +30,30 @@ interface KindStyle {
 function kindStyle(kind: string): KindStyle {
   switch (kind) {
     case "run.started":
-      return { icon: IconPlayerPlay, dot: "bg-blue-500", label: "Run started" };
+      return { icon: IconPlayerPlay, dot: "bg-blue-500", label: "运行开始" };
     case "node.dispatched":
     case "node.ready":
-      return { icon: IconSend, dot: "bg-sky-500", label: "Node dispatched" };
+      return { icon: IconSend, dot: "bg-sky-500", label: "节点已派发" };
     case "spawn.started":
-      return { icon: IconActivity, dot: "bg-amber-500", label: "Spawn started" };
+      return { icon: IconActivity, dot: "bg-amber-500", label: "任务开始" };
     case "spawn.done":
     case "spawn.completed":
     case "node.resolved":
       return {
         icon: IconCircleCheck,
         dot: "bg-emerald-500",
-        label: "Spawn done",
+        label: "任务完成",
       };
     case "run.completed":
       return {
         icon: IconCircleCheck,
         dot: "bg-emerald-500",
-        label: "Run completed",
+        label: "运行完成",
       };
     case "run.failed":
-      return { icon: IconCircleX, dot: "bg-red-500", label: "Run failed" };
+      return { icon: IconCircleX, dot: "bg-red-500", label: "运行失败" };
     case "patch_applied":
-      return { icon: IconGitBranch, dot: "bg-purple-500", label: "Patch applied" };
+      return { icon: IconGitBranch, dot: "bg-purple-500", label: "已应用补丁" };
     default:
       return { icon: IconActivity, dot: "bg-zinc-500", label: kind };
   }
@@ -215,10 +215,10 @@ export function EventFeed({
           )}
         />
         <span className="text-muted-foreground">
-          {live ? (connected ? "Live" : "Connecting…") : "Complete"}
+          {live ? (connected ? "实时" : "连接中…") : "已完成"}
         </span>
         <span className="ml-auto text-muted-foreground">
-          {sorted.length} events
+          {sorted.length} 个事件
         </span>
       </div>
 
@@ -226,7 +226,7 @@ export function EventFeed({
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto px-4 py-3">
         {sorted.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            No events recorded for this run.
+            本次运行没有记录任何事件。
           </div>
         ) : (
           <ol className="relative">

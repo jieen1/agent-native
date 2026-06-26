@@ -75,6 +75,43 @@ describe("parseClaudeStreamJson", () => {
     expect(r.totalCostUsd).toBeCloseTo(0.0123);
   });
 
+  it("collects an ordered steps[] transcript: text → tool_use → tool_result → text", () => {
+    const r = parseClaudeStreamJson(SAMPLE);
+    // The transcript is the ordered intermediate steps (for the Node Inspector
+    // execution timeline). The SAMPLE has: assistant text, a Write tool_use, a
+    // user tool_result, then a final assistant text.
+    expect(r.steps.map((s) => s.type)).toEqual([
+      "text",
+      "tool_use",
+      "tool_result",
+      "text",
+    ]);
+    // seq is monotonic 0-based.
+    expect(r.steps.map((s) => s.seq)).toEqual([0, 1, 2, 3]);
+    // The tool_use carries name + input + id.
+    const toolUse = r.steps[1];
+    expect(toolUse).toMatchObject({
+      type: "tool_use",
+      name: "Write",
+      toolUseId: "toolu_1",
+      input: { file_path: "/work/hello.txt", content: "hi" },
+    });
+    // The tool_result links back by tool_use_id and carries the result content.
+    expect(r.steps[2]).toMatchObject({
+      type: "tool_result",
+      toolUseId: "toolu_1",
+      result: "ok",
+    });
+    expect(r.steps[0]).toMatchObject({
+      type: "text",
+      text: "Creating the file now.",
+    });
+  });
+
+  it("steps[] is empty for an empty stream (no fabrication)", () => {
+    expect(parseClaudeStreamJson("").steps).toEqual([]);
+  });
+
   it("falls back to summed per-assistant usage when no result event arrives", () => {
     const cut = SAMPLE.split("\n").slice(0, 4).join("\n"); // drop result line
     const r = parseClaudeStreamJson(cut);

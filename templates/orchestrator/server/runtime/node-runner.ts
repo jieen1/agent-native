@@ -41,6 +41,7 @@ import { getVmSemaphore, type VmSemaphore } from "./backpressure.js";
 import type {
   RuntimeExecCtx,
   RuntimeExecResult,
+  RuntimeExecStep,
   RuntimeExecutor,
 } from "./executors/types.js";
 
@@ -59,6 +60,13 @@ export interface NodeRunnerResult {
   durationMs: number;
   /** How many provision attempts were made (1 = no recovery needed). */
   attempts: number;
+  /**
+   * The ordered intermediate transcript the executor produced (reasoning +
+   * tool calls + results). The dispatcher persists these as `spawn_events` for
+   * the Node Inspector execution timeline. Empty when the executor cannot
+   * surface steps (DESIGN §8.5).
+   */
+  steps?: RuntimeExecStep[];
   detail?: Record<string, unknown>;
 }
 
@@ -70,6 +78,11 @@ export interface NodeRunnerInput {
   effort?: "low" | "medium" | "high";
   ownerEmail: string;
   orgId: string | null;
+  /**
+   * Live step sink (DESIGN §8.5) — forwarded to the executor's EXECUTE ctx so
+   * the dispatcher can append `spawn_events` for a RUNNING node in real time.
+   */
+  onStep?: (step: RuntimeExecStep) => void;
 }
 
 /** A node's effective runtime spec, with defaults filled (§7.4.3). */
@@ -259,6 +272,7 @@ export class NodeRunner {
         ownerEmail: input.ownerEmail,
         orgId: input.orgId,
         signal,
+        onStep: input.onStep,
       };
       const startedAt = Date.now();
       const execResult: RuntimeExecResult = await this.executor.run(ctx);
@@ -293,6 +307,7 @@ export class NodeRunner {
         tokensSpent: execResult.tokensSpent,
         toolCallCount: execResult.toolCallCount,
         model: execResult.model,
+        steps: execResult.steps,
         vmName: vm.name,
         durationMs,
         attempts: attempt,

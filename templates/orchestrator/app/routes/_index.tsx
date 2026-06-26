@@ -7,12 +7,12 @@ export function meta() {
 }
 
 const NAV_ITEMS = [
-  { to: "/runs", label: "Runs" },
-  { to: "/workflows", label: "Workflows" },
-  { to: "/agents", label: "Agents" },
-  { to: "/workspaces", label: "Workspaces" },
-  { to: "/spawns", label: "Spawns" },
-  { to: "/pool", label: "Pool" },
+  { to: "/runs", label: "运行" },
+  { to: "/workflows", label: "工作流" },
+  { to: "/agents", label: "智能体" },
+  { to: "/workspaces", label: "工作区" },
+  { to: "/spawns", label: "派生任务" },
+  { to: "/pool", label: "资源池" },
 ];
 
 export default function V3HomeRoute() {
@@ -23,10 +23,10 @@ export default function V3HomeRoute() {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            Orchestrator
+            编排器
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Workflow execution, templates, agents, and workspaces.
+            工作流执行、模板、智能体与工作区。
           </p>
         </div>
       </header>

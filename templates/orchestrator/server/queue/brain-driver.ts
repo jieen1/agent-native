@@ -65,8 +65,9 @@ let ticking = false;
 
 /**
  * Start the durable brain driver tick. Idempotent. `unref`-ed so it never blocks
- * shutdown; re-entrancy guarded. Default tick = the reap cadence; the prompt
- * calls for ~5s admission responsiveness, so we run faster than the reap window.
+ * shutdown; re-entrancy guarded. Tick = ~5s (much faster than the reap window):
+ * fast enough that a no-run task releases within ~BRAIN_NORUN_RELEASE_GRACE_SEC
+ * + one tick (≈30s) and the freed slot is admitted the SAME tick (reap → admit).
  */
 export function startBrainDriver(opts: { tickMs?: number } = {}): void {
   if (timer) return;

@@ -20,7 +20,11 @@ import {
 import type { AgentEngine } from "@agent-native/core/agent/engine";
 
 import { createVmActingBridge } from "../acting-bridge.js";
-import type { RuntimeExecCtx, RuntimeExecResult } from "./types.js";
+import type {
+  RuntimeExecCtx,
+  RuntimeExecResult,
+  RuntimeExecStep,
+} from "./types.js";
 import { DEFAULT_WORKDIR } from "./workdir.js";
 
 // Re-exported from its own light module (executors/workdir.ts) so light
@@ -96,11 +100,54 @@ export async function runEngineLoopInVm(args: {
   const tools = actionsToEngineTools(actions);
 
   // Tally tool calls + capture the final assistant text from the event stream.
+  // ALSO collect the ordered intermediate transcript (reasoning text, tool_start
+  // → name+input, tool_done → result) so the dispatcher can persist it as
+  // `spawn_events` for the Node Inspector — the AI-SDK loop surfaces every step
+  // through this `send` sink (DESIGN §8.5).
+  //
+  // LIVE capture (DESIGN §8.5): each step is pushed out through `ctx.onStep` AS
+  // IT IS FINALIZED, so a RUNNING node grows its `spawn_events` stream in real
+  // time. Assistant-text deltas are buffered and flushed as one text step at the
+  // next boundary (tool call / end) so we don't emit a row per token but still
+  // stream promptly. seq is monotonic and shared with the returned `steps[]`, so
+  // the live append (`onConflictDoNothing` on (spawn_id, seq)) and the final
+  // return never disagree.
   let toolCallCount = 0;
   let finalText = "";
+  const steps: RuntimeExecStep[] = [];
+  const emit = (s: RuntimeExecStep): void => {
+    try {
+      args.ctx.onStep?.(s);
+    } catch {
+      // A sink error must never abort the model loop.
+    }
+  };
+  const pushStep = (s: Omit<RuntimeExecStep, "seq">): void => {
+    const step = { seq: steps.length, ...s } as RuntimeExecStep;
+    steps.push(step);
+    emit(step);
+  };
+  let textBuf = "";
+  const flushText = (): void => {
+    const t = textBuf.trim();
+    textBuf = "";
+    if (t) pushStep({ type: "text", text: t });
+  };
   const send = (event: AgentChatEvent): void => {
-    if (event.type === "tool_start") toolCallCount += 1;
-    else if (event.type === "text") finalText += event.text;
+    if (event.type === "tool_start") {
+      flushText(); // close any pending reasoning text before the tool call
+      toolCallCount += 1;
+      pushStep({ type: "tool_use", name: event.tool, input: event.input });
+    } else if (event.type === "tool_done") {
+      pushStep({ type: "tool_result", name: event.tool, result: event.result });
+    } else if (event.type === "text") {
+      finalText += event.text;
+      textBuf += event.text; // buffered; flushed at the next boundary
+    } else if (event.type === "thinking" && event.text) {
+      // Reasoning surfaces as its own text step (flush any prior buffer first).
+      flushText();
+      pushStep({ type: "text", text: event.text });
+    }
   };
 
   const systemPrompt =
@@ -142,6 +189,10 @@ export async function runEngineLoopInVm(args: {
     (usage.cacheReadTokens ?? 0) +
     (usage.cacheWriteTokens ?? 0);
 
+  // Flush any trailing assistant text (the final answer) as its own step so a
+  // node whose last action is text — not a tool call — still records it live.
+  flushText();
+
   return {
     output: {
       text: finalText.trim(),
@@ -151,6 +202,7 @@ export async function runEngineLoopInVm(args: {
     tokensSpent,
     toolCallCount,
     model: usage.model || model,
+    steps,
     detail: { finalText: finalText.trim() },
   };
 }

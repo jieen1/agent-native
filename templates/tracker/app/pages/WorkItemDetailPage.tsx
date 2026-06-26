@@ -105,7 +105,7 @@ export function WorkItemDetailPage() {
       {
         onSuccess: (res: { threadId: string }) => {
           toast.success(
-            `Dispatched — brain thread ${res.threadId.slice(0, 12)}…`,
+            `已派发 — 大脑线程 ${res.threadId.slice(0, 12)}…`,
           );
         },
       },
@@ -128,10 +128,10 @@ export function WorkItemDetailPage() {
   if (!item) {
     return (
       <div className="mx-auto max-w-3xl p-6">
-        <p className="text-sm text-muted-foreground">Work item not found.</p>
+        <p className="text-sm text-muted-foreground">未找到该工作项。</p>
         <Button asChild variant="ghost" className="mt-3 gap-1.5">
           <Link to="/board">
-            <IconArrowLeft className="size-4" /> Back to board
+            <IconArrowLeft className="size-4" /> 返回看板
           </Link>
         </Button>
       </div>
@@ -151,7 +151,7 @@ export function WorkItemDetailPage() {
       {/* Back link */}
       <Button asChild variant="ghost" size="sm" className="-ml-2 mb-3 gap-1.5">
         <Link to={`/board?project=${encodeURIComponent(item.projectId)}`}>
-          <IconArrowLeft className="size-4" /> Board
+          <IconArrowLeft className="size-4" /> 看板
         </Link>
       </Button>
 
@@ -172,13 +172,13 @@ export function WorkItemDetailPage() {
           <StatusChip status={status} />
           {slot?.status === "queued" && queue ? (
             <span className="text-xs text-muted-foreground">
-              queued · {queue.running}/{queue.brainConcurrency} slots busy
+              排队中 · {queue.running}/{queue.brainConcurrency} 个槽位忙碌
             </span>
           ) : null}
           {slot?.status === "running" ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
               <IconLoader2 className="size-3.5 animate-spin" />
-              running
+              运行中
             </span>
           ) : null}
         </div>
@@ -201,10 +201,10 @@ export function WorkItemDetailPage() {
               <IconRocket className="size-4" />
             )}
             {dispatch.isPending
-              ? "Dispatching…"
+              ? "派发中…"
               : dispatched
-                ? "Re-dispatch"
-                : "Dispatch to orchestrator"}
+                ? "重新派发"
+                : "派发给编排器"}
           </Button>
 
           <div className="flex items-center gap-2">
@@ -212,7 +212,7 @@ export function WorkItemDetailPage() {
               htmlFor="monitor-interval"
               className="whitespace-nowrap text-xs text-muted-foreground"
             >
-              Monitor interval
+              监控间隔
             </Label>
             <div className="relative">
               <Input
@@ -224,10 +224,10 @@ export function WorkItemDetailPage() {
                 value={monitorInterval}
                 onChange={(e) => setMonitorInterval(e.target.value)}
                 className="h-8 w-24 pr-9 text-sm"
-                title="Periodic drift-check cadence. Blank = default 120s. 0 = event-only (no timer wakes)."
+                title="周期性漂移检查的节奏。留空 = 默认 120 秒。0 = 仅事件触发(无定时唤醒)。"
               />
               <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-[11px] text-muted-foreground">
-                sec
+                秒
               </span>
             </div>
           </div>
@@ -241,7 +241,7 @@ export function WorkItemDetailPage() {
             >
               <a href={orchestratorBrainHref(item.orchestratorThreadId)}>
                 <IconMessageCircle className="size-3.5" />
-                Open brain thread
+                打开大脑线程
                 <IconExternalLink className="size-3 opacity-60" />
               </a>
             </Button>
@@ -256,7 +256,7 @@ export function WorkItemDetailPage() {
           {/* Requirement */}
           <section>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Requirement
+              需求
             </h2>
             <div className="rounded-xl border border-border bg-card/40 p-4">
               {item.description ? (
@@ -265,7 +265,7 @@ export function WorkItemDetailPage() {
                 </p>
               ) : (
                 <p className="text-sm italic text-muted-foreground">
-                  No requirement text.
+                  暂无需求描述。
                 </p>
               )}
             </div>
@@ -275,7 +275,7 @@ export function WorkItemDetailPage() {
           <section>
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Activity
+                动态
               </h2>
               {dispatched ? (
                 <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -288,8 +288,8 @@ export function WorkItemDetailPage() {
                     )}
                   />
                   {activity.data?.thread?.status
-                    ? `brain ${activity.data.thread.status}`
-                    : "live"}
+                    ? `大脑 ${activity.data.thread.status}`
+                    : "实时"}
                 </span>
               ) : null}
             </div>
@@ -304,7 +304,7 @@ export function WorkItemDetailPage() {
         {/* Right column: context */}
         <aside className="order-1 lg:order-2">
           <div className="divide-y divide-border rounded-xl border border-border bg-card lg:sticky lg:top-4">
-            <MetaRow icon={IconLayoutKanban} label="Project">
+            <MetaRow icon={IconLayoutKanban} label="项目">
               <Link
                 to={`/board?project=${encodeURIComponent(item.projectId)}`}
                 className="truncate font-medium text-foreground hover:underline"
@@ -313,7 +313,7 @@ export function WorkItemDetailPage() {
               </Link>
             </MetaRow>
 
-            <MetaRow icon={IconBrandGithub} label="Repo">
+            <MetaRow icon={IconBrandGithub} label="仓库">
               {ghHref ? (
                 <a
                   href={ghHref}
@@ -327,19 +327,19 @@ export function WorkItemDetailPage() {
                 </a>
               ) : (
                 <span className="break-all font-mono text-xs text-muted-foreground">
-                  {ghLabel ?? "no repo configured"}
+                  {ghLabel ?? "未配置仓库"}
                 </span>
               )}
             </MetaRow>
 
-            <MetaRow icon={IconGitBranch} label="Branch">
+            <MetaRow icon={IconGitBranch} label="分支">
               <span className="font-mono text-xs text-foreground/80">
                 {branch}
               </span>
             </MetaRow>
 
             {item.orchestratorThreadId ? (
-              <MetaRow icon={IconMessageCircle} label="Brain">
+              <MetaRow icon={IconMessageCircle} label="大脑">
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -361,7 +361,7 @@ export function WorkItemDetailPage() {
               </MetaRow>
             ) : null}
 
-            <MetaRow icon={IconClock} label="Created">
+            <MetaRow icon={IconClock} label="创建时间">
               <span className="text-xs text-muted-foreground">
                 {fmtDateTime(item.createdAt)}
               </span>

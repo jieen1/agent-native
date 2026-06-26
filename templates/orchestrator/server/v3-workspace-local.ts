@@ -1018,6 +1018,15 @@ export async function commitAndPush(
   };
 
   // ── Optional: open a PR/MR ────────────────────────────────────────────────
+  // A PR only makes sense for a github.com https remote. For a LOCAL remote (a
+  // `file://` URL or a bare repo path the container can clone — the no-GitHub
+  // deployment), the commit + push above already published the branch to the
+  // local source; there is nothing to open a PR against, so skip it silently
+  // instead of throwing. The branch lands in the local bare repo's refs.
+  const isLocalRemote = !/^https:\/\//.test(remote) || !/github\.com/.test(remote);
+  if (opts.createMr && isLocalRemote) {
+    return result;
+  }
   if (opts.createMr) {
     const prUrl = await openPr({
       dir,

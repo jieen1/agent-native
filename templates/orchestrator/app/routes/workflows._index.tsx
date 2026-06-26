@@ -22,7 +22,7 @@ import {
 } from "@tabler/icons-react";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Workflows` }];
+  return [{ title: `${APP_TITLE} — 工作流` }];
 }
 
 export default function V3TemplatesRoute() {
@@ -68,21 +68,21 @@ export default function V3TemplatesRoute() {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            Workflows
+            工作流
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Workflow template definitions.
+            工作流模板定义。
           </p>
         </div>
         <Button size="sm" onClick={() => setCreateOpen(true)}>
           <IconPlus className="mr-1 size-4" />
-          New Template
+          新建模板
         </Button>
       </header>
 
       {error ? (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-          Failed to load templates.
+          加载模板失败。
         </div>
       ) : (
         <DataTable
@@ -92,7 +92,7 @@ export default function V3TemplatesRoute() {
           columns={[
             {
               id: "name",
-              header: "Name",
+              header: "名称",
               cell: (r) => (
                 <span className="font-medium text-sm">
                   {(r as any).name ?? (r as any).id}
@@ -101,7 +101,7 @@ export default function V3TemplatesRoute() {
             },
             {
               id: "version",
-              header: "Version",
+              header: "版本",
               cell: (r) => (
                 <Badge variant="secondary" className="font-mono text-xs">
                   v{(r as any).version ?? 1}
@@ -110,7 +110,7 @@ export default function V3TemplatesRoute() {
             },
             {
               id: "description",
-              header: "Description",
+              header: "描述",
               className: "hidden md:table-cell",
               headClassName: "hidden md:table-cell",
               cell: (r) => (
@@ -141,8 +141,8 @@ export default function V3TemplatesRoute() {
           empty={
             <EmptyState
               icon={IconFile}
-              title="No templates yet"
-              description="Create a workflow template to define DAGs."
+              title="暂无模板"
+              description="创建一个工作流模板来定义 DAG。"
               className="border-0"
               action={
                 <Button size="sm" onClick={() => setCreateOpen(true)}>
@@ -159,21 +159,21 @@ export default function V3TemplatesRoute() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Create Template</DialogTitle>
+            <DialogTitle>创建模板</DialogTitle>
             <DialogDescription>
-              Define a new workflow template with name, schema, and DAG.
+              使用名称、Schema 和 DAG 定义一个新的工作流模板。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Input
-              placeholder="Template name"
+              placeholder="模板名称"
               value={form.name}
               onChange={(e) =>
                 setForm((f) => ({ ...f, name: e.target.value }))
               }
             />
             <Textarea
-              placeholder="Description (optional)"
+              placeholder="描述(可选)"
               value={form.description}
               onChange={(e) =>
                 setForm((f) => ({ ...f, description: e.target.value }))
@@ -181,7 +181,7 @@ export default function V3TemplatesRoute() {
               rows={2}
             />
             <Textarea
-              placeholder="Input JSON Schema (optional)"
+              placeholder="输入 JSON Schema(可选)"
               value={form.inputSchema}
               onChange={(e) =>
                 setForm((f) => ({ ...f, inputSchema: e.target.value }))
@@ -201,13 +201,13 @@ export default function V3TemplatesRoute() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              Cancel
+              取消
             </Button>
             <Button
               onClick={handleCreate}
               disabled={!form.name.trim() || saveAction.isPending}
             >
-              {saveAction.isPending ? "Creating..." : "Create"}
+              {saveAction.isPending ? "创建中..." : "创建"}
             </Button>
           </DialogFooter>
         </DialogContent>

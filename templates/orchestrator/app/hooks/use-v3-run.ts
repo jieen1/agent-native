@@ -211,6 +211,31 @@ export interface V3NodeSummary {
   spawn: V3NodeSpawn | null;
 }
 
+/**
+ * One ordered step in a spawn's INTERMEDIATE execution transcript — assistant
+ * reasoning `text`, a `tool_use` (name + input), or a `tool_result` (name +
+ * result). Drives the Node Inspector "执行过程 / Execution" timeline.
+ */
+export interface V3SpawnEvent {
+  id: string;
+  seq: number;
+  /** "text" | "tool_use" | "tool_result" */
+  type: string;
+  name: string | null;
+  input: unknown;
+  result: unknown;
+  text: string | null;
+}
+
+/** Result shape of the `spawnEvents` action. */
+export interface V3SpawnEventsResult {
+  spawnId: string;
+  runId: string | null;
+  status: string;
+  events: V3SpawnEvent[];
+  total: number;
+}
+
 /** Detailed spawn read (adds the rendered prompt + full log to the summary). */
 export interface V3SpawnDetail {
   id: string;
@@ -292,4 +317,25 @@ export function useV3SpawnDetail(spawnId: string | null | undefined) {
       enabled: !!spawnId,
     },
   ) as { data?: V3SpawnDetail; isLoading: boolean; error?: unknown };
+}
+
+/**
+ * Fetch a spawn's INTERMEDIATE execution transcript (reasoning + tool calls +
+ * results) for the Node Inspector execution timeline. Polls while the spawn is
+ * still running so a live node fills in its steps; stops once terminal.
+ */
+export function useV3SpawnEvents(spawnId: string | null | undefined) {
+  return useActionQuery(
+    "spawnEvents" as any,
+    { spawnId: spawnId ?? "" },
+    {
+      enabled: !!spawnId,
+      refetchInterval: (query: { state: { data?: unknown } }) => {
+        const data = query.state.data as V3SpawnEventsResult | undefined;
+        return data?.status === "running" || data?.status === "pending"
+          ? LIVE_POLL_MS
+          : false;
+      },
+    },
+  ) as { data?: V3SpawnEventsResult; isLoading: boolean; error?: unknown };
 }

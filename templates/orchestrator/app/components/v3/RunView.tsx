@@ -50,7 +50,7 @@ function PatchTimeline({ patches }: { patches: V3Patch[] }) {
   if (patches.length === 0) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-        No live DAG patches were applied to this run.
+        本次运行没有应用任何实时 DAG 补丁。
       </div>
     );
   }
@@ -67,7 +67,7 @@ function PatchTimeline({ patches }: { patches: V3Patch[] }) {
               v{patch.dagVersionBefore} → v{patch.dagVersionAfter}
             </Badge>
             <span className="text-xs text-muted-foreground">
-              by {patch.actor}
+              由 {patch.actor}
             </span>
             {patch.appliedAt ? (
               <span className="ml-auto font-mono text-xs text-muted-foreground">
@@ -82,7 +82,7 @@ function PatchTimeline({ patches }: { patches: V3Patch[] }) {
           ) : null}
           <details className="mt-1.5">
             <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-              View operations
+              查看操作
             </summary>
             <pre className="mt-1 max-h-40 overflow-auto rounded-md bg-muted p-2 font-mono text-[10px]">
               {JSON.stringify(patch.patchOps, null, 2)}
@@ -124,6 +124,16 @@ function StatChip({
 
 // ── Node-count pills ─────────────────────────────────────────────────────────
 
+const NODE_STATUS_LABEL: Record<string, string> = {
+  done: "已完成",
+  running: "运行中",
+  failed: "失败",
+  "awaiting-approval": "待审批",
+  pending: "待处理",
+  skipped: "已跳过",
+  ready: "就绪",
+};
+
 function NodeCountPills({
   counts,
 }: {
@@ -145,7 +155,7 @@ function NodeCountPills({
         <span
           key={k}
           className="inline-flex items-center gap-1 rounded-md border border-border bg-card/50 px-2 py-1 text-xs"
-          title={`${counts[k]} ${k}`}
+          title={`${counts[k]} ${NODE_STATUS_LABEL[k] ?? k}`}
         >
           <Icon
             className={cn(
@@ -157,7 +167,9 @@ function NodeCountPills({
           <span className="font-mono font-medium text-foreground">
             {counts[k]}
           </span>
-          <span className="text-muted-foreground">{k.replace(/-/g, " ")}</span>
+          <span className="text-muted-foreground">
+            {NODE_STATUS_LABEL[k] ?? k.replace(/-/g, " ")}
+          </span>
         </span>
       ))}
     </div>
@@ -299,7 +311,7 @@ export function RunView({ runId }: RunViewProps) {
   if (error || !runState) {
     return (
       <div className="m-4 rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-        Run not found or failed to load.
+        未找到运行记录，或加载失败。
       </div>
     );
   }
@@ -312,7 +324,7 @@ export function RunView({ runId }: RunViewProps) {
           <Button asChild variant="ghost" size="sm" className="-ml-2">
             <Link to="/runs">
               <IconArrowLeft className="size-4" />
-              Runs
+              运行列表
             </Link>
           </Button>
           <h1 className="truncate font-mono text-sm font-semibold sm:text-base">
@@ -328,7 +340,7 @@ export function RunView({ runId }: RunViewProps) {
             >
               <Link to={`/workspaces/${workspaceId}`}>
                 <IconGitBranch className="size-3.5" />
-                Workspace
+                工作区
                 <IconExternalLink className="size-3 opacity-60" />
               </Link>
             </Button>
@@ -339,11 +351,11 @@ export function RunView({ runId }: RunViewProps) {
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 px-2 text-xs"
-              title={`Orchestrator session ${orchestrationSessionId}`}
+              title={`编排会话 ${orchestrationSessionId}`}
             >
               <Link to="/" onClick={openOrchestratorChat}>
                 <IconMessageCircle className="size-3.5" />
-                Orchestrator
+                编排器
                 <IconExternalLink className="size-3 opacity-60" />
               </Link>
             </Button>
@@ -368,18 +380,18 @@ export function RunView({ runId }: RunViewProps) {
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <StatChip
             icon={IconClockHour3}
-            label="Duration"
+            label="耗时"
             value={duration}
           />
           <StatChip
             icon={IconCoin}
-            label="Total tokens"
+            label="Token 总计"
             value={totalTokens != null ? fmtTokens(totalTokens) : "—"}
             tone="text-amber-500"
           />
           <StatChip
             icon={IconStack2}
-            label="Nodes"
+            label="节点数"
             value={String(runState.totalNodes)}
           />
           <div className="mx-1 hidden h-8 w-px bg-border sm:block" />
@@ -387,7 +399,7 @@ export function RunView({ runId }: RunViewProps) {
           <Badge
             variant="secondary"
             className="ml-auto hidden font-mono text-xs sm:inline-flex"
-            title="DAG version"
+            title="DAG 版本"
           >
             <IconHierarchy3 className="mr-1 size-3" />
             DAG v{runState.dagVersion}
@@ -401,9 +413,9 @@ export function RunView({ runId }: RunViewProps) {
         <div className="flex min-h-0 flex-col border-b border-r-0 border-border lg:border-b-0 lg:border-r">
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
             <IconHierarchy3 className="size-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Workflow</span>
+            <span className="text-sm font-medium">工作流</span>
             <span className="ml-auto text-xs text-muted-foreground">
-              {nodes?.length ?? 0} nodes
+              {nodes?.length ?? 0} 个节点
             </span>
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
@@ -437,15 +449,15 @@ export function RunView({ runId }: RunViewProps) {
               <TabsList className="h-8">
                 <TabsTrigger value="dag" className="gap-1.5 text-xs">
                   <IconBox className="size-3.5" />
-                  Node detail
+                  节点详情
                 </TabsTrigger>
                 <TabsTrigger value="events" className="gap-1.5 text-xs">
                   <IconActivity className="size-3.5" />
-                  Events
+                  事件
                 </TabsTrigger>
                 <TabsTrigger value="patches" className="gap-1.5 text-xs">
                   <IconHistory className="size-3.5" />
-                  Patches
+                  补丁
                 </TabsTrigger>
               </TabsList>
             </div>

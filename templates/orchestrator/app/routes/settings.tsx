@@ -37,7 +37,7 @@ import { Input } from "@/components/ui/input";
 import { ClaudeCodeCard } from "@/components/ClaudeCodeCard";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Settings` }];
+  return [{ title: `${APP_TITLE} — 设置` }];
 }
 
 export default function SettingsRoute() {

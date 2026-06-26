@@ -16,7 +16,7 @@ import {
 import { IconList } from "@tabler/icons-react";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Runs` }];
+  return [{ title: `${APP_TITLE} — 运行` }];
 }
 
 const RUN_STATUSES = [
@@ -76,21 +76,21 @@ export default function V3RunsRoute() {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            Runs
+            运行
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Workflow execution history and status.
+            工作流执行历史与状态。
           </p>
         </div>
         {runs.length > 0 ? (
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="h-8 w-[150px]">
-              <SelectValue placeholder="Status" />
+              <SelectValue placeholder="状态" />
             </SelectTrigger>
             <SelectContent>
               {RUN_STATUSES.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {s === "all" ? "All statuses" : s}
+                  {s === "all" ? "全部状态" : s}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -100,7 +100,7 @@ export default function V3RunsRoute() {
 
       {error ? (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-          Failed to load runs.
+          加载运行列表失败。
         </div>
       ) : (
         <DataTable
@@ -111,7 +111,7 @@ export default function V3RunsRoute() {
           columns={[
             {
               id: "id",
-              header: "Run ID",
+              header: "运行 ID",
               cell: (r) => (
                 <span className="font-mono text-xs font-medium">
                   {r.id.slice(0, 14)}
@@ -120,7 +120,7 @@ export default function V3RunsRoute() {
             },
             {
               id: "status",
-              header: "Status",
+              header: "状态",
               cell: (r) => (
                 <Badge
                   variant="secondary"
@@ -132,7 +132,7 @@ export default function V3RunsRoute() {
             },
             {
               id: "template",
-              header: "Template",
+              header: "模板",
               className: "hidden md:table-cell",
               headClassName: "hidden md:table-cell",
               cell: (r) => (
@@ -143,7 +143,7 @@ export default function V3RunsRoute() {
             },
             {
               id: "started",
-              header: "Started",
+              header: "开始时间",
               cell: (r) => (
                 <span className="whitespace-nowrap text-xs text-muted-foreground">
                   {fmtDate(r.startedAt)}
@@ -152,7 +152,7 @@ export default function V3RunsRoute() {
             },
             {
               id: "duration",
-              header: "Duration",
+              header: "时长",
               className: "hidden lg:table-cell",
               headClassName: "hidden lg:table-cell",
               cell: (r) => (
@@ -163,7 +163,7 @@ export default function V3RunsRoute() {
             },
             {
               id: "priority",
-              header: "Priority",
+              header: "优先级",
               className: "hidden lg:table-cell",
               headClassName: "hidden lg:table-cell",
               cell: (r) => (
@@ -174,13 +174,13 @@ export default function V3RunsRoute() {
           empty={
             <EmptyState
               icon={IconList}
-              title={statusFilter !== "all" ? "No runs match filter" : "No runs yet"}
-              description="Runs are created when workflows are started."
+              title={statusFilter !== "all" ? "没有符合筛选条件的运行" : "暂无运行"}
+              description="启动工作流后会创建运行。"
               className="border-0"
               action={
                 statusFilter !== "all" ? (
                   <Button size="sm" variant="outline" onClick={() => setStatusFilter("all")}>
-                    Clear filter
+                    清除筛选
                   </Button>
                 ) : undefined
               }

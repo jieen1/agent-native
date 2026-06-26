@@ -18,7 +18,15 @@ import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import type { FormatName } from "ajv-formats";
 
-import { v3Runs, v3Nodes, v3Spawns, v3Artifacts, v3Events } from "../db/v3-schema.js";
+import {
+  v3Runs,
+  v3Nodes,
+  v3Spawns,
+  v3Artifacts,
+  v3Events,
+  spawnEvents,
+} from "../db/v3-schema.js";
+import type { RuntimeExecStep } from "../runtime/executors/types.js";
 import type { InferSelectModel } from "drizzle-orm";
 import { loadAgent, type AgentConfig } from "../agent-loader.js";
 import { renderTemplate, type ExpressionContext } from "./interpolation.js";
@@ -508,12 +516,33 @@ export class V3Dispatcher {
       runnerNode.runtime.kind = "none";
       runnerNode.runtime.hostDir = localWorkspaceDir;
     }
+    // ── Step 8a: Open the spawn row NOW (status running) + bind it to the node
+    // BEFORE the worker starts, so a RUNNING node has a live row + a growing
+    // transcript the Node Inspector can poll. The terminal writeSpawnRecord below
+    // UPDATEs this same row to done/failed (DESIGN §8.5). Best-effort.
+    await this.openRunningSpawn({
+      spawnId,
+      nodeRow,
+      agentConfig,
+      renderedPrompt,
+      startedAt,
+      workspaceId: resolvedWorkspaceId,
+    });
+
+    // LIVE step sink: append each intermediate step to `spawn_events` AS IT
+    // ARRIVES (idempotent on (spawn_id, seq)). Fire-and-forget so the worker is
+    // never blocked on a DB round-trip; a logging error never fails the node.
+    const onStep = (step: RuntimeExecStep): void => {
+      void this.appendSpawnEvent(spawnId, nodeRow, step);
+    };
+
     const runnerResult = isClaudeCodeRuntime(agentConfig.runtime)
       ? await runClaudeCodeWorker({
           prompt: renderedPrompt,
           model: runnerNode.model,
           cwd: localWorkspaceDir,
           signal: effectiveSignal,
+          onStep,
         })
       : await this.runner.run(
           {
@@ -521,11 +550,21 @@ export class V3Dispatcher {
             deps: context.deps,
             ownerEmail: nodeRow.ownerEmail,
             orgId: nodeRow.orgId,
+            onStep,
           },
           effectiveSignal,
         );
 
     const latencyMs = Date.now() - startedAt.getTime();
+
+    // ── Step 8b: Backstop the INTERMEDIATE transcript (spawn_events) ───────
+    // The live `onStep` sink already streamed steps for a running node. This is
+    // a best-effort BACKSTOP: re-insert the full ordered list so a node whose
+    // live appends were dropped (sink error / fire-and-forget race) still ends
+    // up with a complete transcript. Idempotent on (spawn_id, seq) — already-
+    // written rows are no-ops. A logging failure must NEVER fail the node.
+    await this.writeSpawnEvents(spawnId, nodeRow, runnerResult.steps);
+    const spawnEventCount = runnerResult.steps?.length ?? 0;
 
     // ── Step 9: Extract assistant text before classifyOutput (G13) ────────
     // runnerResult.output is { text, toolCallCount, model } for schema-less
@@ -578,6 +617,7 @@ export class V3Dispatcher {
           error: classifiedOutput.error,
           errorClass: "schema-violation",
           vmName: runnerResult.vmName,
+          spawnEventCount,
         });
 
         await this.failNode(nodeRow, classifiedOutput.error, "schema-violation");
@@ -677,6 +717,7 @@ export class V3Dispatcher {
       error: null,
       errorClass: null,
       vmName: runnerResult.vmName,
+      spawnEventCount,
     });
 
     // ── Step 13: Update v3_nodes status ───────────────────────────────────
@@ -955,6 +996,129 @@ export class V3Dispatcher {
 
   // ── Private: DB writes ───────────────────────────────────────────────────
 
+  /**
+   * Open the spawn row at START (status `running`) and bind it to the node's
+   * `current_spawn_id` BEFORE the worker begins (DESIGN §8.5 — live capture).
+   * Without this, no `v3_spawns` row exists while the node runs, so the Node
+   * Inspector cannot resolve a spawnId to poll its growing transcript. The
+   * terminal {@link writeSpawnRecord} UPDATEs this same row. Idempotent via
+   * `onConflictDoNothing` on the primary key; best-effort (never fails the node).
+   */
+  private async openRunningSpawn(opts: {
+    spawnId: string;
+    nodeRow: NodeRow;
+    agentConfig: AgentConfig;
+    renderedPrompt: string;
+    startedAt: Date;
+    workspaceId: string | null;
+  }): Promise<void> {
+    try {
+      await this.db
+        .insert(v3Spawns)
+        .values({
+          id: opts.spawnId,
+          nodeId: opts.nodeRow.id,
+          attempt: 1,
+          agentName: opts.agentConfig.name,
+          engineRef: opts.agentConfig.engine || null,
+          modelRef: opts.agentConfig.model || null,
+          runtime: opts.agentConfig.runtime,
+          workspaceId: opts.workspaceId,
+          renderedPrompt: opts.renderedPrompt,
+          status: "running",
+          startedAt: opts.startedAt,
+          ownerEmail: opts.nodeRow.ownerEmail,
+          orgId: opts.nodeRow.orgId,
+        })
+        .onConflictDoNothing({ target: v3Spawns.id });
+      // Bind the node to this spawn so the Node Inspector can poll it live.
+      await this.db
+        .update(v3Nodes)
+        .set({ currentSpawnId: opts.spawnId })
+        .where(eq(v3Nodes.id, opts.nodeRow.id));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[spawn-events] openRunningSpawn ${opts.spawnId}: ${msg}`);
+    }
+  }
+
+  /**
+   * Append ONE intermediate step to `spawn_events` AS IT ARRIVES from the live
+   * worker sink (DESIGN §8.5). Idempotent on (spawn_id, seq) so a backstop
+   * re-write is a no-op. Best-effort — a logging error never fails the node.
+   */
+  private async appendSpawnEvent(
+    spawnId: string,
+    nodeRow: NodeRow,
+    step: RuntimeExecStep,
+  ): Promise<void> {
+    try {
+      await this.db
+        .insert(spawnEvents)
+        .values({
+          id: uid(),
+          spawnId,
+          seq: step.seq,
+          type: step.type,
+          name: step.name ?? null,
+          input: step.input !== undefined ? (step.input as unknown) : null,
+          result: step.result !== undefined ? (step.result as unknown) : null,
+          text: step.text ?? null,
+          createdAt: new Date(),
+          ownerEmail: nodeRow.ownerEmail,
+          orgId: nodeRow.orgId,
+        })
+        .onConflictDoNothing({
+          target: [spawnEvents.spawnId, spawnEvents.seq],
+        });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[spawn-events] append ${spawnId}#${step.seq}: ${msg}`);
+    }
+  }
+
+  /**
+   * Persist a spawn's INTERMEDIATE transcript as `spawn_events` rows (DESIGN
+   * §8.5 — the Node Inspector execution timeline). Each step (reasoning text /
+   * tool_use / tool_result) becomes one row keyed by (spawnId, seq). Used as a
+   * BACKSTOP after the live `onStep` sink — the per-row insert is
+   * `onConflictDoNothing` so already-streamed rows are no-ops. Best-effort —
+   * wrapped in try/catch so a re-run never fails the node on a logging error. A
+   * spawn that did no tool calls simply writes no rows.
+   */
+  private async writeSpawnEvents(
+    spawnId: string,
+    nodeRow: NodeRow,
+    steps: RuntimeExecStep[] | undefined,
+  ): Promise<void> {
+    if (!steps || steps.length === 0) return;
+    try {
+      const rows = steps.map((s) => ({
+        id: uid(),
+        spawnId,
+        seq: s.seq,
+        type: s.type,
+        name: s.name ?? null,
+        input: s.input !== undefined ? (s.input as unknown) : null,
+        result: s.result !== undefined ? (s.result as unknown) : null,
+        text: s.text ?? null,
+        createdAt: new Date(),
+        ownerEmail: nodeRow.ownerEmail,
+        orgId: nodeRow.orgId,
+      }));
+      await this.db
+        .insert(spawnEvents)
+        .values(rows)
+        .onConflictDoNothing({
+          target: [spawnEvents.spawnId, spawnEvents.seq],
+        });
+    } catch (err) {
+      // Never fail the node on a logging error (DESIGN §8.5).
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[spawn-events] failed to persist for ${spawnId}: ${msg}`);
+    }
+  }
+
   private async writeSpawnRecord(opts: {
     spawnId: string;
     nodeRow: NodeRow;
@@ -972,8 +1136,19 @@ export class V3Dispatcher {
     error: string | null;
     errorClass: ErrorClass | null;
     vmName: string | null;
+    /**
+     * Count of `spawn_events` rows persisted for this spawn. When > 0 we point
+     * `log_ref` at the spawn_events transcript (`spawn-events://<spawnId>`) so
+     * the column — historically always null — now records that a real
+     * intermediate transcript exists for this spawn (DESIGN §8.5).
+     */
+    spawnEventCount?: number;
   }): Promise<void> {
-    await this.db.insert(v3Spawns).values({
+    const logRef =
+      opts.spawnEventCount && opts.spawnEventCount > 0
+        ? `spawn-events://${opts.spawnId}`
+        : null;
+    const values = {
       id: opts.spawnId,
       nodeId: opts.nodeRow.id,
       attempt: 1,
@@ -983,7 +1158,7 @@ export class V3Dispatcher {
       runtime: opts.agentConfig.runtime,
       workspaceId: opts.workspaceId,
       renderedPrompt: opts.renderedPrompt,
-      logRef: null,
+      logRef,
       vmName: opts.vmName,
       acpSessionId: null,
       status: opts.status,
@@ -999,7 +1174,29 @@ export class V3Dispatcher {
       completedAt: opts.completedAt,
       ownerEmail: opts.nodeRow.ownerEmail,
       orgId: opts.nodeRow.orgId,
-    });
+    };
+    // UPSERT: openRunningSpawn() already inserted this row (status running) so
+    // the live transcript could stream. Update it to the terminal state here.
+    // Fall back to a plain insert when the early open was skipped/failed.
+    await this.db
+      .insert(v3Spawns)
+      .values(values)
+      .onConflictDoUpdate({
+        target: v3Spawns.id,
+        set: {
+          status: opts.status,
+          logRef,
+          vmName: opts.vmName,
+          outputArtifactId: opts.outputArtifactId,
+          outputKind: opts.outputKind,
+          tokensInput: opts.tokensInput,
+          tokensOutput: opts.tokensOutput,
+          latencyMs: opts.latencyMs,
+          error: opts.error,
+          errorClass: opts.errorClass,
+          completedAt: opts.completedAt,
+        },
+      });
   }
 
   private async failNode(

@@ -50,11 +50,7 @@ function CountPill({
   return (
     <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card/50 px-2 py-1 text-xs">
       <span
-        className={cn(
-          "size-1.5 rounded-full",
-          dot,
-          spin && "animate-pulse",
-        )}
+        className={cn("size-1.5 rounded-full", dot, spin && "animate-pulse")}
       />
       <span className="font-mono font-medium text-foreground">{value}</span>
       <span className="text-muted-foreground">{label}</span>
@@ -71,9 +67,9 @@ export function ProjectsPage() {
   const countsByProject = useMemo(() => {
     const map = new Map<string, WorkItem[]>();
     for (const it of items) {
-      (map.get(it.projectId) ?? map.set(it.projectId, []).get(it.projectId)!).push(
-        it,
-      );
+      (
+        map.get(it.projectId) ?? map.set(it.projectId, []).get(it.projectId)!
+      ).push(it);
     }
     return map;
   }, [items]);
@@ -83,16 +79,15 @@ export function ProjectsPage() {
       {/* ── Header ── */}
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">Projects</h2>
+          <h2 className="text-lg font-semibold tracking-tight">项目</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Configure a repo and default branch once per project. Work items
-            inherit that context when dispatched.
+            为每个项目配置一次代码仓库和默认分支。工作项在派发时会继承该上下文。
           </p>
         </div>
         <NewProjectDialog>
           <Button size="sm" className="gap-1.5">
             <IconPlus className="size-4" />
-            New project
+            新建项目
           </Button>
         </NewProjectDialog>
       </div>
@@ -108,15 +103,14 @@ export function ProjectsPage() {
           <div className="rounded-full bg-muted/60 p-3">
             <IconFolders className="size-6 text-muted-foreground" />
           </div>
-          <p className="text-sm font-medium">No projects yet</p>
+          <p className="text-sm font-medium">暂无项目</p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            Create your first project to configure its repo and start adding work
-            items.
+            创建你的第一个项目以配置其代码仓库,并开始添加工作项。
           </p>
           <NewProjectDialog>
             <Button className="mt-1 gap-1.5">
               <IconPlus className="size-4" />
-              New project
+              新建项目
             </Button>
           </NewProjectDialog>
         </div>
@@ -154,7 +148,7 @@ export function ProjectsPage() {
                 <div className="mb-3 space-y-1">
                   <p className="flex items-center gap-1.5 break-all font-mono text-xs text-muted-foreground">
                     <IconBrandGithub className="size-3.5 shrink-0" />
-                    {repoText ?? "no repo configured"}
+                    {repoText ?? "未配置代码仓库"}
                   </p>
                   <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
                     <IconGitBranch className="size-3.5 shrink-0" />
@@ -166,28 +160,28 @@ export function ProjectsPage() {
                 <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">
                   {counts.total === 0 ? (
                     <span className="text-xs text-muted-foreground/70">
-                      No work items yet
+                      暂无工作项
                     </span>
                   ) : (
                     <>
                       <CountPill
                         value={counts.open}
-                        label="open"
+                        label="待处理"
                         dot="bg-zinc-400"
                       />
                       <CountPill
                         value={counts.inFlight}
-                        label="in flight"
+                        label="进行中"
                         dot="bg-blue-500"
                         spin
                       />
                       <CountPill
                         value={counts.done}
-                        label="done"
+                        label="已完成"
                         dot="bg-emerald-500"
                       />
                       <span className="ml-auto font-mono text-xs text-muted-foreground/70">
-                        {counts.total} total
+                        共 {counts.total} 项
                       </span>
                     </>
                   )}

@@ -5,14 +5,14 @@ import { Badge } from "@/components/ui/badge";
 import { IconBolt, IconRobot } from "@tabler/icons-react";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Agents` }];
+  return [{ title: `${APP_TITLE} — 智能体` }];
 }
 
 const AGENT_TYPES = [
-  { type: "agent", label: "Agent" },
-  { type: "parallel_over", label: "Parallel" },
-  { type: "loop", label: "Loop" },
-  { type: "human_gate", label: "Human Gate" },
+  { type: "agent", label: "智能体" },
+  { type: "parallel_over", label: "并行" },
+  { type: "loop", label: "循环" },
+  { type: "human_gate", label: "人工关卡" },
 ];
 
 export default function V3AgentsRoute() {
@@ -20,10 +20,10 @@ export default function V3AgentsRoute() {
     <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-          Agent Directory
+          智能体目录
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Registered agent types and node templates.
+          已注册的智能体类型与节点模板。
         </p>
       </header>
 
@@ -33,7 +33,7 @@ export default function V3AgentsRoute() {
         columns={[
           {
             id: "type",
-            header: "Type",
+            header: "类型",
             cell: (r) => (
               <span className="font-medium text-sm">
                 {(r as any).label}
@@ -42,7 +42,7 @@ export default function V3AgentsRoute() {
           },
           {
             id: "key",
-            header: "Key",
+            header: "键",
             cell: (r) => (
               <Badge variant="secondary" className="font-mono text-xs">
                 {(r as any).type}
@@ -53,8 +53,8 @@ export default function V3AgentsRoute() {
         empty={
           <EmptyState
             icon={IconRobot}
-            title="No agents registered"
-            description="Agent types are defined in the DAG template."
+            title="暂无已注册的智能体"
+            description="智能体类型在 DAG 模板中定义。"
             className="border-0"
             action={undefined}
           />
@@ -63,14 +63,14 @@ export default function V3AgentsRoute() {
 
       <section className="mt-8">
         <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
-          Agent Configuration
+          智能体配置
         </h2>
         <div className="rounded-lg border bg-card p-6">
           <p className="text-sm text-muted-foreground">
-            Agent models are resolved per-node at runtime. Template nodes may specify{" "}
-            <code className="text-xs font-mono">model</code> or inherit from the run-level
-            <code className="text-xs font-mono"> model_override</code>. Use the Runs
-            dashboard to inspect resolved models per execution.
+            智能体模型在运行时按节点解析。模板节点可以指定{" "}
+            <code className="text-xs font-mono">model</code>,或继承运行级的
+            <code className="text-xs font-mono"> model_override</code>。使用「运行」
+            仪表盘查看每次执行解析出的模型。
           </p>
         </div>
       </section>

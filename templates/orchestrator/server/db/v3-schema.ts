@@ -11,6 +11,7 @@ import {
   unique,
   index,
   pgEnum,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 // Reuse the framework ownableColumns pattern. The V3 tables are Postgres,
@@ -159,6 +160,39 @@ export const v3Spawns = pgTable(
   (t) => [index("idx_v3_spawns_node_id").on(t.nodeId)],
 );
 
+// ─── spawn_events ────────────────────────────────────────────────────────────
+// Append-only INTERMEDIATE transcript of a single spawn: the ordered reasoning
+// text + every tool call (name + input) + every tool result the worker brain
+// produced while running the node. Mirrors `brain_events` so the run-detail
+// Node Inspector renders the same reasoning + collapsible tool-call cards.
+// `seq` is monotonic within a spawn so the timeline renders in order. Additive;
+// captured best-effort (a logging failure never fails the node).
+
+export const spawnEvents = pgTable(
+  "spawn_events",
+  {
+    id: text("id").primaryKey(),
+    spawnId: text("spawn_id").notNull(),
+    // Monotonic order within the spawn (0-based).
+    seq: integer("seq").notNull(),
+    // text | tool_use | tool_result
+    type: text("type").notNull(),
+    // Tool name for tool_use / tool_result steps.
+    name: text("name"),
+    // Tool input (tool_use) and result (tool_result) as JSONB.
+    input: jsonb("input"),
+    result: jsonb("result"),
+    // Assistant reasoning/answer text for `text` steps.
+    text: text("text"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    ...ownableColumns(),
+  },
+  (t) => [
+    unique("unique_spawn_event_spawn_seq").on(t.spawnId, t.seq),
+    index("idx_spawn_events_spawn").on(t.spawnId),
+  ],
+);
+
 // ─── v3_artifacts ───────────────────────────────────────────────────────────
 
 export const v3Artifacts = pgTable(
@@ -285,6 +319,11 @@ export const brainThreads = pgTable(
     contextWindow: integer("context_window"),
     contextUsed: integer("context_used"),
     lastUsage: jsonb("last_usage"),
+    // Session-management archive flag: archived threads are hidden from the brain
+    // page's default session list (the "Archived" filter reveals them).
+    // archivedAt records when it was archived. Both additive.
+    archived: boolean("archived").notNull().default(false),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
     ...ownableColumns(),
@@ -292,6 +331,7 @@ export const brainThreads = pgTable(
   (t) => [
     index("idx_brain_threads_owner").on(t.ownerEmail),
     index("idx_brain_threads_updated").on(t.updatedAt),
+    index("idx_brain_threads_archived").on(t.archived),
   ],
 );
 

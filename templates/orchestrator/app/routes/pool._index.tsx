@@ -14,7 +14,7 @@ import { DataTable } from "@/components/board/DataTable";
 import { EmptyState } from "@/components/board/EmptyState";
 
 export function meta() {
-  return [{ title: `${APP_TITLE} — Pool` }];
+  return [{ title: `${APP_TITLE} — 资源池` }];
 }
 
 // ── Stat card ────────────────────────────────────────────────────────────────
@@ -130,22 +130,21 @@ export default function V3PoolRoute() {
     <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-          Pool
+          资源池
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          microVM warm pool status and dispatch queue. Refreshes every 5 seconds.
+          microVM 热池状态与派发队列。每 5 秒刷新一次。
         </p>
       </header>
 
       {/* ── Pool stats ─────────────────────────────────────────────────── */}
       <section className="mb-8">
         <h2 className="mb-3 text-sm font-medium text-muted-foreground uppercase tracking-wide">
-          VM Pool
+          VM 资源池
         </h2>
         {poolError ? (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-            Failed to load pool status. The poolStatus action may not yet be
-            available.
+            加载资源池状态失败。poolStatus action 可能尚不可用。
           </div>
         ) : poolLoading && !vms ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -156,26 +155,26 @@ export default function V3PoolRoute() {
         ) : vms ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatCard
-              label="Warm Idle"
+              label="热机空闲"
               value={vms.warm_idle}
               max={vms.capacity}
               icon={<IconCircleDotted className="size-4 text-emerald-500" />}
               className="border-emerald-200 dark:border-emerald-900/50"
             />
             <StatCard
-              label="Busy"
+              label="忙碌"
               value={vms.busy}
               max={vms.capacity}
               icon={<IconPlayerPlay className="size-4 text-blue-500" />}
               className="border-blue-200 dark:border-blue-900/50"
             />
             <StatCard
-              label="Capacity"
+              label="容量"
               value={vms.capacity}
               icon={<IconStack className="size-4 text-muted-foreground" />}
             />
             <StatCard
-              label="Queue Waiting"
+              label="队列等待"
               value={vms.queue_waiting}
               icon={<IconClock className="size-4 text-amber-500" />}
               className={
@@ -187,13 +186,13 @@ export default function V3PoolRoute() {
           </div>
         ) : (
           <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-            Pool status unavailable.
+            资源池状态不可用。
           </div>
         )}
 
         {poolData?.replenishing && (
           <p className="mt-2 text-xs text-muted-foreground">
-            Pool is replenishing warm VMs…
+            资源池正在补充热机 VM…
           </p>
         )}
       </section>
@@ -201,13 +200,12 @@ export default function V3PoolRoute() {
       {/* ── Dispatch queue ─────────────────────────────────────────────── */}
       <section>
         <h2 className="mb-3 text-sm font-medium text-muted-foreground uppercase tracking-wide">
-          Dispatch Queue
+          派发队列
         </h2>
 
         {queueError ? (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-            Failed to load dispatch queue. The dispatchQueue action may not yet
-            be available.
+            加载派发队列失败。dispatchQueue action 可能尚不可用。
           </div>
         ) : (
           <DataTable<DispatchQueueItem>
@@ -219,7 +217,7 @@ export default function V3PoolRoute() {
             columns={[
               {
                 id: "run",
-                header: "Run ID",
+                header: "运行 ID",
                 cell: (r) =>
                   r.runId ? (
                     <span className="font-mono text-xs font-medium">
@@ -231,7 +229,7 @@ export default function V3PoolRoute() {
               },
               {
                 id: "node",
-                header: "Node ID",
+                header: "节点 ID",
                 className: "hidden md:table-cell",
                 headClassName: "hidden md:table-cell",
                 cell: (r) =>
@@ -245,7 +243,7 @@ export default function V3PoolRoute() {
               },
               {
                 id: "waitingFor",
-                header: "Waiting For",
+                header: "等待项",
                 cell: (r) => (
                   <Badge
                     variant="secondary"
@@ -257,7 +255,7 @@ export default function V3PoolRoute() {
               },
               {
                 id: "queuedAt",
-                header: "Queued At",
+                header: "入队时间",
                 className: "hidden lg:table-cell",
                 headClassName: "hidden lg:table-cell",
                 cell: (r) => (
@@ -270,8 +268,8 @@ export default function V3PoolRoute() {
             empty={
               <EmptyState
                 icon={IconServer}
-                title="Dispatch queue is empty"
-                description="No spawns are waiting for VM, ACP, dependencies, or approval."
+                title="派发队列为空"
+                description="当前没有任务在等待 VM、ACP、依赖或审批。"
                 className="border-0"
               />
             }
