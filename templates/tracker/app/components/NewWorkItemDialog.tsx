@@ -50,11 +50,11 @@ export function NewWorkItemDialog({
 
   function submit() {
     if (!projectId) {
-      toast.error("Pick a project");
+      toast.error("请选择项目");
       return;
     }
     if (!title.trim()) {
-      toast.error("Title is required");
+      toast.error("标题不能为空");
       return;
     }
     create.mutate(
@@ -82,19 +82,18 @@ export function NewWorkItemDialog({
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New work item</DialogTitle>
+          <DialogTitle>新建工作项</DialogTitle>
           <DialogDescription>
-            Describe the requirement. The repo and branch come from the project —
-            work items never carry a repo.
+            描述需求内容。仓库和分支来自项目配置，工作项本身不携带仓库信息。
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Project</Label>
+              <Label>项目</Label>
               <Select value={projectId} onValueChange={setProjectId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Pick a project" />
+                  <SelectValue placeholder="选择项目" />
                 </SelectTrigger>
                 <SelectContent>
                   {projects.map((p) => (
@@ -106,7 +105,7 @@ export function NewWorkItemDialog({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Type</Label>
+              <Label>类型</Label>
               <Select value={type} onValueChange={setType}>
                 <SelectTrigger>
                   <SelectValue />
@@ -122,23 +121,23 @@ export function NewWorkItemDialog({
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="item-title">Title</Label>
+            <Label htmlFor="item-title">标题</Label>
             <Input
               id="item-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Add a health-check endpoint"
+              placeholder="例：添加健康检查接口"
               autoFocus
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="item-req">Requirement</Label>
+            <Label htmlFor="item-req">需求描述</Label>
             <Textarea
               id="item-req"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={5}
-              placeholder="Describe what the orchestrator brain should build. No repo needed — it comes from the project."
+              placeholder="描述编排器 Brain 需要构建的内容，无需仓库——将从项目获取。"
             />
           </div>
         </div>
@@ -148,10 +147,10 @@ export function NewWorkItemDialog({
             onClick={() => setOpen(false)}
             disabled={create.isPending}
           >
-            Cancel
+            取消
           </Button>
           <Button onClick={submit} disabled={create.isPending}>
-            {create.isPending ? "Creating..." : "Create work item"}
+            {create.isPending ? "创建中..." : "创建工作项"}
           </Button>
         </DialogFooter>
       </DialogContent>

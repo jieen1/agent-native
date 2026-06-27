@@ -29,7 +29,7 @@ import {
   IconGitBranch,
   IconLoader2,
   IconMailPlus,
-  IconQueue,
+  IconListCheck,
   IconX,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
@@ -458,7 +458,7 @@ export function NewWorkItemPage() {
                 {createWorkItem.isPending ? (
                   <IconLoader2 className="size-4 animate-spin" />
                 ) : (
-                  <IconQueue className="size-4" />
+                  <IconListCheck className="size-4" />
                 )}
                 创建并入队列
               </Button>

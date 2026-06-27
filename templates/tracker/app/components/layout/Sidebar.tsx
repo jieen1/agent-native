@@ -126,7 +126,7 @@ export function Sidebar() {
             )}
           >
             <IconMessageCircle size={14} className="shrink-0" />
-            <span className="min-w-0 flex-1 basis-0 truncate">Ask Tracker</span>
+            <span className="min-w-0 flex-1 basis-0 truncate">问 Tracker</span>
           </Link>
 
           {navLink(

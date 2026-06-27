@@ -66,25 +66,24 @@ export function NewProjectDialog({ children }: { children: ReactNode }) {
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New project</DialogTitle>
+          <DialogTitle>新建项目</DialogTitle>
           <DialogDescription>
-            Configure the repo and default branch once. Every work item under this
-            project inherits that context when dispatched.
+            配置仓库和默认分支，项目下所有工作项在派发时都会继承这些信息。
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="project-name">Name</Label>
+            <Label htmlFor="project-name">名称</Label>
             <Input
               id="project-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My App"
+              placeholder="我的应用"
               autoFocus
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="project-remote">Git remote</Label>
+            <Label htmlFor="project-remote">Git 远程地址</Label>
             <Input
               id="project-remote"
               value={gitRemote}
@@ -93,7 +92,7 @@ export function NewProjectDialog({ children }: { children: ReactNode }) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="project-branch">Default branch</Label>
+            <Label htmlFor="project-branch">默认分支</Label>
             <Input
               id="project-branch"
               value={defaultBranch}
@@ -102,7 +101,7 @@ export function NewProjectDialog({ children }: { children: ReactNode }) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="project-desc">Description (optional)</Label>
+            <Label htmlFor="project-desc">描述（可选）</Label>
             <Textarea
               id="project-desc"
               value={description}
@@ -117,10 +116,10 @@ export function NewProjectDialog({ children }: { children: ReactNode }) {
             onClick={() => setOpen(false)}
             disabled={create.isPending}
           >
-            Cancel
+            取消
           </Button>
           <Button onClick={submit} disabled={create.isPending}>
-            {create.isPending ? "Creating..." : "Create project"}
+            {create.isPending ? "创建中..." : "创建项目"}
           </Button>
         </DialogFooter>
       </DialogContent>
