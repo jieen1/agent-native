@@ -37,7 +37,7 @@ export default defineAction({
     if (!existing) throw new Error("Work item not found");
 
     const now = new Date().toISOString();
-    const patch: Record<string, unknown> = { updatedAt: now };
+    const patch: Partial<typeof schema.workItems.$inferInsert> = { updatedAt: now };
 
     if (args.title !== undefined) patch.title = args.title;
     if (args.description !== undefined) patch.description = args.description;
@@ -53,7 +53,7 @@ export default defineAction({
 
     await db
       .update(schema.workItems)
-      .set(patch as Parameters<typeof db.update>[0] extends infer T ? any : never)
+      .set(patch)
       .where(and(eq(schema.workItems.id, args.id), ownerScope(schema.workItems)));
 
     const updated = (

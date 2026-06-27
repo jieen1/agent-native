@@ -65,8 +65,8 @@ export default defineAction({
     // Parse JSON fields (deliveryItems is a JSON array string; verdict may be null or a JSON object)
     const result = rows.map((row) => ({
       ...row,
-      deliveryItems: JSON.parse(row.deliveryItems ?? "[]"),
-      verdict: row.verdict ? JSON.parse(row.verdict) : null,
+      deliveryItems: (() => { try { return JSON.parse(row.deliveryItems ?? "[]"); } catch { return []; } })(),
+      verdict: row.verdict ? (() => { try { return JSON.parse(row.verdict); } catch { return null; } })() : null,
     }));
 
     return result;

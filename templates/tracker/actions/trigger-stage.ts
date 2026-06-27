@@ -24,6 +24,9 @@ export default defineAction({
 
     const db = getDb();
     const now = new Date().toISOString();
+    const VALID_STAGES = ['待办','分析','设计','实施','测试','验收','交付'];
+    if (!VALID_STAGES.includes(args.stageName)) throw new Error(`Invalid stage: ${args.stageName}`);
+
 
     // --- Confirm the work item is owned / visible ---
     const item = (

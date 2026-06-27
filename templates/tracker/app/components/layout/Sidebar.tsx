@@ -7,6 +7,8 @@ import {
   IconMessageCircle,
   IconLayoutKanban,
   IconFolders,
+  IconStack2,
+  IconListDetails,
 } from "@tabler/icons-react";
 import { OrgSwitcher } from "@agent-native/core/client/org";
 import { Button } from "@/components/ui/button";
@@ -129,13 +131,25 @@ export function Sidebar() {
 
           {navLink(
             "/board",
-            "Board",
+            "看板",
             <IconLayoutKanban size={14} className="shrink-0" />,
             location.pathname === "/board",
           )}
           {navLink(
+            "/sprints",
+            "Sprint",
+            <IconStack2 size={14} className="shrink-0" />,
+            location.pathname.startsWith("/sprints"),
+          )}
+          {navLink(
+            "/queue",
+            "执行队列",
+            <IconListDetails size={14} className="shrink-0" />,
+            location.pathname === "/queue",
+          )}
+          {navLink(
             "/projects",
-            "Projects",
+            "项目",
             <IconFolders size={14} className="shrink-0" />,
             location.pathname === "/projects",
           )}
