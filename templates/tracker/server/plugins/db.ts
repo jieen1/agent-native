@@ -67,6 +67,136 @@ CREATE INDEX IF NOT EXISTS tracker_work_items_owner_org_idx ON tracker_work_item
       sql: `ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS orchestrator_task_id TEXT;
 ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS orchestrator_run_id TEXT`,
     },
+    {
+      // Additive columns on work_items: sprint binding, item keying, risk, tags,
+      // execution mode, stage tracking, and branch.
+      version: 8,
+      sql: `ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS sprint_id TEXT;
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS item_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS risk TEXT NOT NULL DEFAULT 'medium';
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS execution_mode TEXT NOT NULL DEFAULT 'manual';
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS planned_stages TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS current_stage_name TEXT NOT NULL DEFAULT '待办';
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS branch TEXT`,
+    },
+    {
+      // New tracker tables: sprints, stages, artifacts, activities, comments, links,
+      // rollback_log, exec_queue.
+      version: 9,
+      sql: `CREATE TABLE IF NOT EXISTS tracker_sprints (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  goal TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'planned',
+  start_date TEXT,
+  end_date TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE TABLE IF NOT EXISTS tracker_stages (
+  id TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL,
+  stage_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT '待执行',
+  started_at TEXT,
+  completed_at TEXT,
+  verdict TEXT,
+  delivery_items TEXT NOT NULL DEFAULT '[]',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE TABLE IF NOT EXISTS tracker_artifacts (
+  id TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL,
+  stage_id TEXT NOT NULL,
+  stage_name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  content_ref TEXT NOT NULL DEFAULT '',
+  produced_by_kind TEXT NOT NULL DEFAULT 'agent',
+  supersedes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE TABLE IF NOT EXISTS tracker_activities (
+  id TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL,
+  actor_kind TEXT NOT NULL DEFAULT 'agent',
+  actor_name TEXT NOT NULL DEFAULT '',
+  event_type TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE TABLE IF NOT EXISTS tracker_comments (
+  id TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL,
+  author_kind TEXT NOT NULL DEFAULT 'human',
+  author_name TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE TABLE IF NOT EXISTS tracker_links (
+  id TEXT PRIMARY KEY,
+  from_item_id TEXT NOT NULL,
+  to_item_id TEXT NOT NULL,
+  relation TEXT NOT NULL DEFAULT 'relates_to',
+  created_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE TABLE IF NOT EXISTS tracker_rollback_log (
+  id TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL,
+  from_stage TEXT NOT NULL,
+  to_stage TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  rolled_back_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE TABLE IF NOT EXISTS tracker_exec_queue (
+  id TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  position INTEGER NOT NULL DEFAULT 0,
+  enqueued_at TEXT NOT NULL,
+  dequeued_at TEXT,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+)`,
+    },
+    {
+      // Indexes on new tables for owner-scoped list queries.
+      version: 10,
+      sql: `CREATE INDEX IF NOT EXISTS tracker_sprints_owner_org_idx ON tracker_sprints (owner_email, org_id);
+CREATE INDEX IF NOT EXISTS tracker_stages_work_item_idx ON tracker_stages (work_item_id);
+CREATE INDEX IF NOT EXISTS tracker_artifacts_work_item_idx ON tracker_artifacts (work_item_id);
+CREATE INDEX IF NOT EXISTS tracker_activities_work_item_idx ON tracker_activities (work_item_id, created_at);
+CREATE INDEX IF NOT EXISTS tracker_comments_work_item_idx ON tracker_comments (work_item_id, created_at);
+CREATE INDEX IF NOT EXISTS tracker_links_from_item_idx ON tracker_links (from_item_id);
+CREATE INDEX IF NOT EXISTS tracker_exec_queue_owner_status_idx ON tracker_exec_queue (owner_email, status, position)`,
+    },
   ],
   { table: "tracker_migrations" },
 );
