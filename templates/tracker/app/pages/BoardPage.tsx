@@ -1,52 +1,106 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import {
-  useProjects,
-  useWorkItems,
-  useBulkDispatch,
-  useItemActivityPoll,
-} from "@/hooks/use-tracker";
+import { useWorkItems, useSprints } from "@/hooks/use-tracker";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
-  IconBrandGithub,
-  IconGitBranch,
-  IconInbox,
-  IconLoader2,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  IconSearch,
   IconPlus,
-  IconRobot,
-  IconRocket,
 } from "@tabler/icons-react";
-import { NewWorkItemDialog } from "@/components/NewWorkItemDialog";
 import { cn } from "@/lib/utils";
 import {
-  repoLabel,
   statusPresentation,
   typeChip,
 } from "@/components/tracker-format";
-import type { WorkItem } from "@shared/types";
+import type { TrackerWorkItem, Sprint } from "@shared/types";
 
-// The board groups items into lifecycle lanes. `queued` and `running` reflect
-// the orchestrator's live admission-gate slot state; `dispatched` is the legacy
-// in-flight state for items dispatched before the gate resolved their slot.
-const COLUMNS: Array<{ status: string[]; label: string; accent: string }> = [
-  { status: ["open"], label: "待处理", accent: "bg-zinc-400" },
-  { status: ["queued"], label: "排队中", accent: "bg-amber-500" },
-  { status: ["running", "dispatched"], label: "运行中", accent: "bg-blue-500" },
-  { status: ["done", "failed"], label: "已完成", accent: "bg-emerald-500" },
-];
+// ── Stage constants ──────────────────────────────────────────────────────────
 
-// Keeps a per-item get-activity poll alive while the item is in flight. The
-// action writes the derived status (queued → running → done) back server-side,
-// so mounting this drives the board's lane transitions without opening items.
-function ItemActivityDriver({ workItemId }: { workItemId: string }) {
-  useItemActivityPoll(workItemId, true);
-  return null;
+const STAGE_ORDER = [
+  "待办", "分析", "设计", "实施", "测试", "验收", "交付",
+] as const;
+type StageName = (typeof STAGE_ORDER)[number];
+
+const STAGE_DOT_COLORS: Record<StageName, string> = {
+  "待办": "bg-zinc-400",
+  "分析": "bg-blue-500",
+  "设计": "bg-violet-500",
+  "实施": "bg-indigo-500",
+  "测试": "bg-amber-500",
+  "验收": "bg-emerald-500",
+  "交付": "bg-cyan-500",
+};
+
+// ── Priority helpers ─────────────────────────────────────────────────────────
+
+const PRIORITY_LABELS: Record<number, string> = {
+  1: "P0",
+  2: "P1",
+  3: "P2",
+  4: "P3",
+};
+
+const PRIORITY_COLORS: Record<number, string> = {
+  1: "bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400",
+  2: "bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400",
+  3: "bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-400",
+  4: "bg-zinc-500/10 text-zinc-600 border-zinc-500/30 dark:text-zinc-400",
+};
+
+function PriorityChip({ priority }: { priority: number }) {
+  const label = PRIORITY_LABELS[priority] ?? `P${priority}`;
+  const color =
+    PRIORITY_COLORS[priority] ?? PRIORITY_COLORS[4];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold",
+        color,
+      )}
+    >
+      {label}
+    </span>
+  );
 }
 
-// ── Status chip (card) ───────────────────────────────────────────────────────
+// ── Risk helpers ─────────────────────────────────────────────────────────────
+
+const RISK_LABELS: Record<string, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
+};
+
+const RISK_COLORS: Record<string, string> = {
+  low: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+  medium: "bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400",
+  high: "bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400",
+};
+
+function RiskChip({ risk }: { risk: string }) {
+  const label = RISK_LABELS[risk] ?? risk;
+  const color = RISK_COLORS[risk] ?? RISK_COLORS.low;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
+        color,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ── Status chip (card footer) ────────────────────────────────────────────────
 
 function StatusChip({ status }: { status: string }) {
   const pres = statusPresentation(status);
@@ -71,297 +125,302 @@ function StatusChip({ status }: { status: string }) {
 
 // ── Work item card ───────────────────────────────────────────────────────────
 
-function WorkItemCard({
-  item,
-  projectKey,
-  selectable,
-  selected,
-  onToggle,
-}: {
-  item: WorkItem;
-  projectKey: string;
-  selectable: boolean;
-  selected: boolean;
-  onToggle: () => void;
-}) {
+function WorkItemCard({ item }: { item: TrackerWorkItem }) {
+  const isFailed = item.status === "failed";
+  const statusPres = statusPresentation(item.status);
+
   return (
-    <div
-      className={cn(
-        "group rounded-lg border bg-card p-3 shadow-sm transition-all hover:border-foreground/20 hover:shadow",
-        selected ? "border-primary/60 ring-1 ring-primary/30" : "border-border",
-      )}
-      data-testid={`work-item-${item.id}`}
-      data-status={item.status}
-    >
-      <div className="mb-1.5 flex items-center gap-1.5">
-        {selectable ? (
-          <Checkbox
-            checked={selected}
-            onCheckedChange={onToggle}
-            aria-label={`选择 ${item.title}`}
-            className="shrink-0"
-          />
-        ) : null}
-        {projectKey ? (
-          <span className="font-mono text-[10px] font-medium text-muted-foreground">
-            {projectKey}
-          </span>
-        ) : null}
-        <Badge
-          variant="outline"
-          className={cn(
-            "h-4 px-1 text-[10px] capitalize",
-            typeChip(item.type),
-          )}
-        >
-          {item.type}
-        </Badge>
-        <span className="ml-auto" data-testid={`status-${item.status}`}>
-          <StatusChip status={item.status} />
-        </span>
-      </div>
-
-      <Link to={`/items/${item.id}`} className="block">
-        <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground group-hover:text-foreground">
-          {item.title}
-        </p>
-        {item.description ? (
-          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-            {item.description}
-          </p>
-        ) : null}
-      </Link>
-
-      {item.orchestratorThreadId ? (
-        <div className="mt-2 flex items-center gap-1.5 border-t border-border/60 pt-2">
-          {statusPresentation(item.status).live ? (
-            <IconLoader2 className="size-3 animate-spin text-blue-500" />
-          ) : (
-            <IconRobot className="size-3 text-emerald-500" />
-          )}
-          <span className="font-mono text-[10px] text-muted-foreground">
-            智能体 · {item.orchestratorThreadId.slice(0, 8)}
+    <Link to={`/items/${item.id}`} className="block">
+      <div
+        className={cn(
+          "group rounded-lg border bg-card p-3 shadow-sm transition-all hover:border-foreground/20 hover:shadow",
+          isFailed ? "border-red-300 dark:border-red-700" : "border-border",
+        )}
+        data-testid={`work-item-${item.id}`}
+        data-status={item.status}
+      >
+        {/* Top row: type badge + priority chip + itemKey (right) */}
+        <div className="mb-1.5 flex items-center gap-1.5">
+          <Badge
+            variant="outline"
+            className={cn(
+              "h-4 px-1 text-[10px] capitalize",
+              typeChip(item.type),
+            )}
+          >
+            {item.type}
+          </Badge>
+          <PriorityChip priority={item.priority} />
+          <RiskChip risk={item.risk} />
+          <span className="ml-auto font-mono text-[10px] font-medium text-muted-foreground">
+            {item.itemKey}
           </span>
         </div>
-      ) : null}
-    </div>
+
+        {/* Title (bold) */}
+        <p className="mb-1.5 line-clamp-2 text-sm font-bold leading-snug text-foreground group-hover:text-foreground">
+          {item.title}
+        </p>
+
+        {/* Middle: tags */}
+        {item.tags && item.tags.length > 0 ? (
+          <div className="mb-2 flex flex-wrap gap-1">
+            {item.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Bottom: current stage + status chip */}
+        <div className="flex items-center gap-1.5 border-t border-border/60 pt-2">
+          <span className="text-[10px] text-muted-foreground">
+            当前: {item.currentStageName}
+          </span>
+          <span className="ml-auto">
+            <StatusChip status={item.status} />
+          </span>
+        </div>
+
+        {/* Failed: red bottom strip with error text */}
+        {isFailed && item.description ? (
+          <div className="mt-2 rounded bg-red-500/10 px-2 py-1 text-[10px] leading-relaxed text-red-600 dark:text-red-400">
+            {item.description}
+          </div>
+        ) : null}
+      </div>
+    </Link>
   );
 }
+
+// ── Board page ───────────────────────────────────────────────────────────────
 
 export function BoardPage() {
   const [params] = useSearchParams();
   const projectId = params.get("project") ?? undefined;
-  const { data: projectsData } = useProjects();
-  const projects = Array.isArray(projectsData) ? projectsData : [];
-  const { data: itemsData, isLoading } = useWorkItems(projectId);
-  const items = Array.isArray(itemsData) ? itemsData : [];
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const bulkDispatch = useBulkDispatch();
+  const { data: itemsRaw, isLoading } = useWorkItems(projectId);
+  const items = (itemsRaw ?? []) as TrackerWorkItem[];
 
-  const activeProject = projectId
-    ? projects.find((p) => p.id === projectId)
-    : undefined;
+  const { data: sprintsRaw } = useSprints();
+  const sprints = (sprintsRaw ?? []) as Sprint[];
 
-  const grouped = useMemo(() => {
-    const byStatus: Record<string, WorkItem[]> = {
-      open: [],
-      queued: [],
-      running: [],
-      done: [],
-    };
-    for (const it of items) {
-      const col = COLUMNS.find((c) => c.status.includes(it.status));
-      const key = col ? col.status[0] : "open";
-      (byStatus[key] ?? (byStatus[key] = [])).push(it);
-    }
-    return byStatus;
+  // Current (in-progress) sprint — shown as badge in header
+  const currentSprint = sprints.find((s) => s.status === "进行中");
+
+  // Filter state
+  const [selectedSprintId, setSelectedSprintId] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("");
+  const [riskFilter, setRiskFilter] = useState("");
+  const [search, setSearch] = useState("");
+
+  // Derive unique filter values from items
+  const uniqueTypes = useMemo(() => {
+    const set = new Set(items.map((it) => it.type));
+    return Array.from(set).sort();
   }, [items]);
 
-  const projectKeyById = useMemo(
-    () => new Map(projects.map((p) => [p.id, p.key])),
-    [projects],
-  );
+  const uniquePriorities = useMemo(() => {
+    const set = new Set(items.map((it) => it.priority));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [items]);
 
-  // Items still in flight — drive their status writeback by polling get-activity.
-  const inFlight = useMemo(
-    () =>
-      items.filter((it) =>
-        ["queued", "running", "dispatched"].includes(it.status),
-      ),
-    [items],
-  );
+  const uniqueRisks = useMemo(() => {
+    const set = new Set(items.map((it) => it.risk));
+    return Array.from(set).sort();
+  }, [items]);
 
-  // Selection is only meaningful for not-yet-dispatched (open) items.
-  const selectableIds = useMemo(
-    () => items.filter((it) => it.status === "open").map((it) => it.id),
-    [items],
-  );
-  const selectedCount = selected.size;
-
-  function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
+  // Apply all filters
+  const filteredItems = useMemo(() => {
+    return items.filter((it) => {
+      if (selectedSprintId && it.sprintId !== selectedSprintId) return false;
+      if (typeFilter && it.type !== typeFilter) return false;
+      if (priorityFilter && it.priority !== Number(priorityFilter))
+        return false;
+      if (riskFilter && it.risk !== riskFilter) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        if (
+          !it.title.toLowerCase().includes(q) &&
+          !it.itemKey.toLowerCase().includes(q) &&
+          !it.description.toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+      }
+      return true;
     });
-  }
+  }, [items, selectedSprintId, typeFilter, priorityFilter, riskFilter, search]);
 
-  function toggleAll() {
-    setSelected((prev) =>
-      prev.size === selectableIds.length ? new Set() : new Set(selectableIds),
-    );
-  }
-
-  async function dispatchSelected() {
-    if (!selectedCount) return;
-    const ids = Array.from(selected);
-    await bulkDispatch.mutateAsync({ workItemIds: ids });
-    setSelected(new Set());
-  }
-
-  const repoText = activeProject ? repoLabel(activeProject.gitRemote) : null;
+  // Group by currentStageName
+  const grouped = useMemo(() => {
+    const map: Record<string, TrackerWorkItem[]> = {};
+    for (const stage of STAGE_ORDER) {
+      map[stage] = [];
+    }
+    for (const it of filteredItems) {
+      const stage = it.currentStageName as StageName;
+      if (STAGE_ORDER.includes(stage)) {
+        map[stage].push(it);
+      } else {
+        // Unknown stage falls into 待办
+        map["待办"].push(it);
+      }
+    }
+    return map;
+  }, [filteredItems]);
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Mount invisible drivers that poll get-activity for in-flight items so
-          the board lanes auto-advance (queued → running → done). */}
-      {inFlight.map((it) => (
-        <ItemActivityDriver key={`drv-${it.id}`} workItemId={it.id} />
-      ))}
-
-      {/* ── Toolbar ── */}
-      <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold tracking-tight">
-            {activeProject ? activeProject.name : "全部工作项"}
-          </h2>
-          {activeProject ? (
-            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1 truncate">
-                <IconBrandGithub className="size-3 shrink-0" />
-                {repoText ?? "未配置仓库"}
-              </span>
-              <span className="flex items-center gap-1">
-                <IconGitBranch className="size-3 shrink-0" />
-                {activeProject.defaultBranch}
-              </span>
-            </div>
+    <div className="flex h-screen flex-col overflow-hidden">
+      {/* ── Header ── */}
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-6 py-3">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold tracking-tight">看板</h1>
+          {currentSprint ? (
+            <Badge
+              variant="secondary"
+              className="h-6 cursor-default px-2.5 text-xs font-medium"
+            >
+              {currentSprint.name}
+            </Badge>
           ) : (
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {items.length} 个工作项 · 覆盖所有项目
-            </p>
+            <Badge
+              variant="secondary"
+              className="h-6 px-2.5 text-xs font-medium text-muted-foreground"
+            >
+              全部 Sprint
+            </Badge>
           )}
         </div>
-        <NewWorkItemDialog defaultProjectId={projectId}>
-          <Button size="sm" className="gap-1.5" disabled={projects.length === 0}>
+        <Button asChild size="sm" className="gap-1.5">
+          <Link to="/items/new">
             <IconPlus className="size-4" />
             新建工作项
-          </Button>
-        </NewWorkItemDialog>
+          </Link>
+        </Button>
+      </header>
+
+      {/* ── Filter bar ── */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-6 py-2">
+        <Select value={selectedSprintId} onValueChange={setSelectedSprintId}>
+          <SelectTrigger className="h-8 w-[160px] text-xs">
+            <SelectValue placeholder="全部 Sprint" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">全部 Sprint</SelectItem>
+            {sprints.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="h-8 w-[130px] text-xs">
+            <SelectValue placeholder="全部类型" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">全部类型</SelectItem>
+            {uniqueTypes.map((t) => (
+              <SelectItem key={t} value={t}>
+                {t}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+          <SelectTrigger className="h-8 w-[130px] text-xs">
+            <SelectValue placeholder="全部优先级" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">全部优先级</SelectItem>
+            {uniquePriorities.map((p) => (
+              <SelectItem key={p} value={String(p)}>
+                {PRIORITY_LABELS[p] ?? `P${p}`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={riskFilter} onValueChange={setRiskFilter}>
+          <SelectTrigger className="h-8 w-[130px] text-xs">
+            <SelectValue placeholder="全部风险" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">全部风险</SelectItem>
+            <SelectItem value="low">低</SelectItem>
+            <SelectItem value="medium">中</SelectItem>
+            <SelectItem value="high">高</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          <IconSearch className="size-3.5 text-muted-foreground" />
+          <Input
+            placeholder="搜索标题/编号…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-[200px] text-xs"
+          />
+        </div>
       </div>
 
-      {/* ── Bulk-dispatch action bar ── */}
-      {selectableIds.length > 0 ? (
-        <div className="flex items-center gap-3 border-b border-border bg-muted/40 px-6 py-2">
-          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
-            <Checkbox
-              checked={
-                selectedCount > 0 && selectedCount === selectableIds.length
-              }
-              onCheckedChange={toggleAll}
-              aria-label="全选待处理工作项"
-            />
-            全选待处理 ({selectableIds.length})
-          </label>
-          <div className="ml-auto flex items-center gap-3">
-            {selectedCount > 0 ? (
-              <span className="text-xs font-medium text-foreground">
-                已选 {selectedCount} 项
-              </span>
-            ) : null}
-            <Button
-              size="sm"
-              className="gap-1.5"
-              disabled={selectedCount === 0 || bulkDispatch.isPending}
-              onClick={dispatchSelected}
+      {/* ── Board columns ── */}
+      <div className="flex flex-1 gap-4 overflow-hidden p-4">
+        {STAGE_ORDER.map((stage) => {
+          const colItems = grouped[stage] ?? [];
+          return (
+            <div
+              key={stage}
+              className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-muted/20"
             >
-              {bulkDispatch.isPending ? (
-                <IconLoader2 className="size-4 animate-spin" />
-              ) : (
-                <IconRocket className="size-4" />
-              )}
-              {bulkDispatch.isPending
-                ? "派发中…"
-                : `派发所选${selectedCount ? ` (${selectedCount})` : ""}`}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {/* ── Board ── */}
-      {projects.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center p-8 text-center">
-          <div className="max-w-sm">
-            <div className="mx-auto mb-3 w-fit rounded-full bg-muted/60 p-3">
-              <IconInbox className="size-6 text-muted-foreground" />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              还没有项目。先创建一个项目并一次性设置好仓库与分支,即可开始添加工作项。
-            </p>
-            <Button asChild className="mt-4">
-              <Link to="/projects">前往项目</Link>
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="grid flex-1 grid-cols-1 gap-4 overflow-auto p-6 md:grid-cols-2 xl:grid-cols-4">
-          {COLUMNS.map((col) => {
-            const colItems = grouped[col.status[0]] ?? [];
-            return (
-              <div key={col.label} className="flex min-w-0 flex-col">
-                {/* Column header */}
-                <div className="mb-3 flex items-center gap-2">
-                  <span className={cn("size-2 rounded-full", col.accent)} />
-                  <h3 className="text-sm font-semibold">{col.label}</h3>
-                  <Badge
-                    variant="secondary"
-                    className="h-5 min-w-5 justify-center px-1.5 font-mono text-[11px]"
-                  >
-                    {colItems.length}
-                  </Badge>
-                </div>
-
-                {/* Cards */}
-                <div className="flex flex-col gap-2.5 rounded-xl bg-muted/30 p-2">
-                  {isLoading &&
-                  colItems.length === 0 &&
-                  col.status.includes("open")
-                    ? Array.from({ length: 2 }).map((_, i) => (
-                        <Skeleton key={i} className="h-24 w-full rounded-lg" />
-                      ))
-                    : null}
-                  {colItems.map((it) => (
-                    <WorkItemCard
-                      key={it.id}
-                      item={it}
-                      projectKey={projectKeyById.get(it.projectId) ?? ""}
-                      selectable={it.status === "open"}
-                      selected={selected.has(it.id)}
-                      onToggle={() => toggle(it.id)}
-                    />
-                  ))}
-                  {!isLoading && colItems.length === 0 ? (
-                    <p className="px-2 py-6 text-center text-xs text-muted-foreground/60">
-                      暂无内容。
-                    </p>
-                  ) : null}
-                </div>
+              {/* Column header: colored dot + stage name + count */}
+              <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+                <span
+                  className={cn(
+                    "size-2 rounded-full",
+                    STAGE_DOT_COLORS[stage],
+                  )}
+                />
+                <h3 className="text-sm font-semibold">{stage}</h3>
+                <Badge
+                  variant="secondary"
+                  className="h-5 min-w-5 justify-center px-1.5 font-mono text-[11px]"
+                >
+                  {colItems.length}
+                </Badge>
               </div>
-            );
-          })}
-        </div>
-      )}
+
+              {/* Cards — internally scrollable */}
+              <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-2">
+                {isLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="h-24 animate-pulse rounded-lg bg-muted/40"
+                    />
+                  ))
+                ) : colItems.length === 0 ? (
+                  <p className="py-6 text-center text-xs text-muted-foreground/60">
+                    暂无内容
+                  </p>
+                ) : (
+                  colItems.map((it) => (
+                    <WorkItemCard key={it.id} item={it} />
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

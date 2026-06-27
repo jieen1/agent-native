@@ -121,3 +121,24 @@ export interface ActivityResponse {
   queue?: BrainQueueStatus | null;
   errors?: Record<string, string>;
 }
+
+// Sprint / stage / artifact tracker types.
+
+export type ItemType = '需求' | '任务' | '缺陷' | '测试' | '生产问题';
+export type ItemRisk = 'low' | 'medium' | 'high';
+export type ExecutionMode = 'manual' | 'auto';
+export type SprintStatus = '规划' | '进行中' | '已完成' | '已发布';
+export type StageStatus = '待执行' | '执行中' | '已完成' | '已驳回' | '跳过';
+export type StageName = '待办' | '分析' | '设计' | '实施' | '测试' | '验收' | '交付';
+export const STAGE_ORDER: StageName[] = ['待办','分析','设计','实施','测试','验收','交付'];
+
+export interface Sprint { id:string; projectId:string; name:string; goal:string; status:SprintStatus|string; branch:string; startDate:string; endDate:string; createdAt:string; updatedAt:string; }
+export interface SprintDetail extends Sprint { items: TrackerWorkItem[]; itemCount: number; }
+export interface TrackerWorkItem { id:string; projectId:string; sprintId:string|null; itemKey:string; type:ItemType|string; title:string; description:string; status:string; priority:number; risk:ItemRisk|string; tags:string[]; executionMode:ExecutionMode; currentStageName:StageName|string; plannedStages:string[]; branch:string|null; orchestratorThreadId:string|null; createdAt:string; updatedAt:string; }
+export interface Stage { id:string; workItemId:string; stageName:StageName|string; stageStatus:StageStatus|string; deliveryItems:string[]; verdict:{result:'通过'|'驳回';reason:string;rootCauseStage:string}|null; startedAt:string|null; completedAt:string|null; createdAt:string; updatedAt:string; }
+export interface Artifact { id:string; workItemId:string; stageId:string; stageName:string; kind:string; name:string; version:number; contentRef:string; producedByKind:'agent'|'human'; supersedes:string|null; createdAt:string; }
+export interface TrackerActivity { id:string; workItemId:string; actorKind:'agent'|'human'; actorName:string; eventType:string; payload:Record<string,unknown>; createdAt:string; }
+export interface TrackerComment { id:string; workItemId:string; authorKind:'agent'|'human'; authorName:string; body:string; createdAt:string; }
+export interface ItemLink { id:string; fromItemId:string; toItemId:string; linkType:string; otherItemId:string; otherItemTitle:string; direction:'from'|'to'; }
+export interface QueueItem { id:string; workItemId:string; priority:number; status:string; currentStage:string; enqueuedAt:string; startedAt:string|null; workItem:TrackerWorkItem; }
+export interface QueueStats { queued:number; running:number; paused:number; }

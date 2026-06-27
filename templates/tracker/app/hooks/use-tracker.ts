@@ -125,3 +125,172 @@ function messageOf(err: unknown, action: string, fallback: string): string {
   }
   return fallback;
 }
+
+// Sprint hooks.
+export function useSprints() {
+  return useActionQuery("list-sprints", {}) as { data?: any; isLoading: boolean };
+}
+
+export function useSprint(id: string) {
+  return useActionQuery("get-sprint", { id }, { enabled: !!id }) as { data?: any; isLoading: boolean };
+}
+
+export function useCreateSprint() {
+  const qc = useQueryClient();
+  return useActionMutation("create-sprint", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-sprints"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "create-sprint", "Failed to create sprint"));
+    },
+  });
+}
+
+export function useUpdateSprint() {
+  const qc = useQueryClient();
+  return useActionMutation("update-sprint", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-sprints"] });
+      qc.invalidateQueries({ queryKey: ["action", "get-sprint"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "update-sprint", "Failed to update sprint"));
+    },
+  });
+}
+
+// Stage hooks.
+export function useStages(workItemId: string) {
+  return useActionQuery("list-stages", { workItemId }, { enabled: !!workItemId }) as { data?: any; isLoading: boolean };
+}
+
+export function useTriggerStage() {
+  const qc = useQueryClient();
+  return useActionMutation("trigger-stage", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-stages"] });
+      qc.invalidateQueries({ queryKey: ["action", "get-work-item"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "trigger-stage", "Failed to trigger stage"));
+    },
+  });
+}
+
+export function useRollbackStage() {
+  const qc = useQueryClient();
+  return useActionMutation("rollback-stage", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-stages"] });
+      qc.invalidateQueries({ queryKey: ["action", "get-work-item"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "rollback-stage", "Failed to rollback stage"));
+    },
+  });
+}
+
+// Artifact hooks.
+export function useArtifacts(workItemId: string) {
+  return useActionQuery("list-artifacts", { workItemId }, { enabled: !!workItemId }) as { data?: any; isLoading: boolean };
+}
+
+export function useCreateArtifact() {
+  const qc = useQueryClient();
+  return useActionMutation("create-artifact", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-artifacts"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "create-artifact", "Failed to create artifact"));
+    },
+  });
+}
+
+// Tracker activity hooks.
+export function useTrackerActivities(workItemId: string, enabled: boolean) {
+  return useActionQuery(
+    "list-tracker-activities",
+    { workItemId },
+    { enabled, refetchInterval: enabled ? 4000 : false },
+  ) as { data?: any; isLoading: boolean };
+}
+
+// Comment hooks.
+export function useAddComment() {
+  const qc = useQueryClient();
+  return useActionMutation("add-comment", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-comments"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "add-comment", "Failed to add comment"));
+    },
+  });
+}
+
+export function useComments(workItemId: string) {
+  return useActionQuery("list-comments", { workItemId }, { enabled: !!workItemId }) as { data?: any; isLoading: boolean };
+}
+
+// Queue hooks.
+export function useQueue() {
+  return useActionQuery("list-queue", {}, { refetchInterval: 3000 }) as { data?: any; isLoading: boolean };
+}
+
+export function useEnqueueWorkItem() {
+  const qc = useQueryClient();
+  return useActionMutation("enqueue-work-item", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-queue"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "enqueue-work-item", "Failed to enqueue work item"));
+    },
+  });
+}
+
+export function useDequeueWorkItem() {
+  const qc = useQueryClient();
+  return useActionMutation("dequeue-work-item", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-queue"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "dequeue-work-item", "Failed to dequeue work item"));
+    },
+  });
+}
+
+// Link hooks.
+export function useLinks(workItemId: string) {
+  return useActionQuery("list-links", { workItemId }, { enabled: !!workItemId }) as { data?: any; isLoading: boolean };
+}
+
+export function useAddLink() {
+  const qc = useQueryClient();
+  return useActionMutation("add-link", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-links"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "add-link", "Failed to add link"));
+    },
+  });
+}
+
+// Work item update hook.
+export function useUpdateWorkItem() {
+  const qc = useQueryClient();
+  return useActionMutation("update-work-item", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "get-work-item"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "update-work-item", "Failed to update work item"));
+    },
+  });
+}
