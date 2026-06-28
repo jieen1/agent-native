@@ -506,13 +506,68 @@ export class V3Dispatcher {
     const localWorkspaceDir = resolvedWorkspaceRef
       ? ((await getLocalWorkspaceDir(resolvedWorkspaceRef)) ?? undefined)
       : undefined;
-    // Engine (vLLM/API) nodes also run IN the shared workspace: NoneRuntime
-    // symlinks /work → hostDir, so their tool edits persist for downstream
-    // nodes. (The Claude branch gets the dir as cwd directly, below.)
-    if (localWorkspaceDir && runnerNode.runtime) {
-      // A local git checkout → run host-native IN it (NoneRuntime symlinks
-      // /work → hostDir). The DAG `workspace` field otherwise routes the node to
-      // MicrosandboxRuntime (wsl/msb), which isn't available in this deployment.
+    // MICROVM OPT-IN (msb bridge): when ORCH_FORCE_MICROVM=1 AND the host msb
+    // bridge is configured (ORCH_MSB_BRIDGE_URL), an engine (vLLM/API) node runs
+    // its tool side-effects inside a REAL libkrun microVM instead of host-native.
+    // The agent loop still runs in THIS container (so spawn_events stream live);
+    // only the bash/read/write tools + the clone/commit/push delivery cross the
+    // bridge into the VM. We hand the runtime the workspace's repo/branch so the
+    // NodeRunner clones the project in-VM and pushes the run branch on success.
+    const forceMicrovm =
+      process.env.ORCH_FORCE_MICROVM === "1" &&
+      !!process.env.ORCH_MSB_BRIDGE_URL &&
+      process.env.ORCH_MSB_BRIDGE_URL.trim() !== "";
+    // A node is microvm-eligible when it would otherwise run as an engine node
+    // bound to a workspace: either its agent declares runtime:microvm, OR the
+    // DAG node assigned it a workspace (which made v3ToNodeRunnerInput set the
+    // runner runtime kind to "microvm"). Claude Code is always excluded — it
+    // runs via the container's managed login, never in a VM.
+    const microvmEligible =
+      forceMicrovm &&
+      !isClaudeCodeRuntime(agentConfig.runtime) &&
+      (agentConfig.runtime === "microvm" ||
+        runnerNode.runtime?.kind === "microvm" ||
+        !!resolvedWorkspaceRef);
+    if (microvmEligible && runnerNode.runtime) {
+      // Route to MicrosandboxRuntime over the bridge. Pull the repo/branch from
+      // the resolved workspace row so the in-VM clone + delivery target the real
+      // project (NOT the host checkout dir — the VM clones its own copy).
+      let wsRepo: string | undefined;
+      let wsBranch: string | undefined;
+      let wsBase: string | undefined;
+      if (resolvedWorkspaceRef) {
+        try {
+          const ws = await getWorkspace(resolvedWorkspaceRef);
+          wsRepo = ws.repoUrl ?? undefined;
+          wsBranch = ws.branch ?? undefined;
+          wsBase =
+            (ws.tags && (ws.tags as Record<string, string>).base_ref) ||
+            undefined;
+        } catch {
+          // fall through — without a repo the node still runs, just no delivery.
+        }
+      }
+      runnerNode.runtime.kind = "microvm";
+      runnerNode.runtime.hostDir = undefined;
+      if (wsRepo) runnerNode.runtime.gitRemote = wsRepo;
+      if (wsBranch) runnerNode.runtime.branch = wsBranch;
+      if (wsBase) runnerNode.runtime.baseRef = wsBase;
+      // Pin the prebaked worker image (the runtime default is the same, but be
+      // explicit so the spec records exactly what booted).
+      if (!runnerNode.runtime.image) {
+        runnerNode.runtime.image =
+          process.env.ORCH_WORKER_IMAGE || "localhost:5000/an-worker:latest";
+      }
+      // eslint-disable-next-line no-console
+      console.log(
+        `[microvm] node=${nodeRow.nodeIdInDag} routed to MicrosandboxRuntime ` +
+          `via msb bridge (image=${runnerNode.runtime.image}, repo=${wsRepo ?? "(none)"}, branch=${wsBranch ?? "(none)"})`,
+      );
+    } else if (localWorkspaceDir && runnerNode.runtime) {
+      // DEFAULT (no msb bridge / not forced): a local git checkout → run
+      // host-native IN it (NoneRuntime symlinks /work → hostDir). The DAG
+      // `workspace` field otherwise routes the node to MicrosandboxRuntime
+      // (wsl/msb), which isn't available in a plain Docker deployment.
       runnerNode.runtime.kind = "none";
       runnerNode.runtime.hostDir = localWorkspaceDir;
     }
@@ -867,8 +922,9 @@ export class V3Dispatcher {
   }
 
   /**
-   * Write full content to a side file and return a ref pointer (G33).
-   * For now uses a filesystem path under /tmp; callers can swap for S3/FS.
+   * Write full content as a secondary v3_artifacts row in SQL and return a
+   * `sql:<artifactId>` ref pointer (G33). Replaces the previous /tmp approach
+   * which was lost on container restart and not shared across replicas.
    */
   private async writeFullContentRef(
     spawnId: string,
@@ -876,13 +932,20 @@ export class V3Dispatcher {
     nodeRow: NodeRow,
   ): Promise<string | null> {
     try {
-      const { writeFile, mkdir } = await import("node:fs/promises");
-      const { join } = await import("node:path");
-      const dir = `/tmp/v3-artifacts/${nodeRow.ownerEmail.replace(/[^a-z0-9]/g, "_")}`;
-      await mkdir(dir, { recursive: true });
-      const filePath = join(dir, `${spawnId}-full.txt`);
-      await writeFile(filePath, content, "utf-8");
-      return `file://${filePath}`;
+      const artifactId = uid();
+      await this.db.insert(v3Artifacts).values({
+        id: artifactId,
+        spawnId,
+        kind: "full_content",
+        textContent: content,
+        objectContent: null,
+        fullContentRef: null,
+        byteSize: new TextEncoder().encode(content).length,
+        truncated: 0,
+        ownerEmail: nodeRow.ownerEmail,
+        orgId: nodeRow.orgId,
+      });
+      return `sql:${artifactId}`;
     } catch {
       // Full content ref is best-effort; never block the spawn write.
       return null;

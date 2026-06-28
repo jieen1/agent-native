@@ -1,29 +1,35 @@
 /**
  * spawn.once — ad-hoc spawn (design §8.1).
  *
- * Inserts a v3_spawns row with node_id NULL (ad-hoc, not run-scoped).
- * The actual worker dispatch is deferred to the reconciler / dispatcher;
- * this action records the intent and returns the spawnId so the caller
- * can poll via spawn.get.
+ * Creates a minimal single-agent workflow run under the hood so the V3
+ * reconciler can dispatch it immediately. Returns a runId the caller can
+ * poll via runState / v3RunEvents, plus a synthetic spawnId for compatibility.
  *
- * G21: new action file for missing spawn.once tool.
+ * Previous implementation only inserted a v3_spawns row (node_id=NULL) which
+ * the orphan-reconciler later cancelled — the dispatch was never wired. This
+ * implementation creates a real run so the reconciler picks it up.
  */
 
 import { defineAction } from "@agent-native/core";
+import {
+  getRequestUserEmail,
+  getRequestOrgId,
+} from "@agent-native/core/server/request-context";
 import { z } from "zod";
 import { getV3Db, v3Schema } from "../server/db/v3.js";
 import { newId } from "./_util.js";
+import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";
 
 export const spawnOnce = defineAction({
   description:
-    "Ad-hoc spawn: dispatch a single agent invocation outside of any workflow run. " +
-    "Inserts a v3_spawns row with node_id NULL and returns spawnId. " +
-    "Poll via spawn.get to check completion. " +
+    "Ad-hoc spawn: dispatch a single agent invocation outside of any named workflow. " +
+    "Creates a minimal single-node run that the V3 reconciler dispatches immediately. " +
+    "Poll runState with the returned runId to track completion. " +
     "Accepts optional tags for cross-app traceability (design §16).",
   schema: z.object({
     /** Agent name (matches .claude/agents/<name>.md). */
     agent: z.string().min(1),
-    /** The full prompt string — no {{ }} interpolation (no DAG context for ad-hoc spawns). */
+    /** The full prompt string — no {{ }} interpolation for ad-hoc spawns. */
     prompt: z.string().min(1),
     /** Override the agent's declared engine. */
     engineOverride: z.string().optional(),
@@ -51,43 +57,71 @@ export const spawnOnce = defineAction({
      * E.g. { source: "tracker", item_id: "PAY-14" }.
      */
     tags: z.record(z.string(), z.string()).optional(),
-    /**
-     * If true, return immediately with { spawnId } without waiting for completion.
-     * Poll spawn.get for the result. Default: false (synchronous, best-effort).
-     */
-    async: z.boolean().default(false),
   }),
   run: async (args) => {
     const db = getV3Db();
+    const ownerEmail = getRequestUserEmail() ?? "local@localhost";
+    const orgId = getRequestOrgId() ?? null;
 
-    const spawnId = newId("sp");
+    const nodeId = "spawn_agent";
+    const dag = {
+      nodes: [
+        {
+          id: nodeId,
+          type: "agent" as const,
+          agent: args.agent,
+          prompt: args.prompt,
+          ...(args.engineOverride ? { engine_override: args.engineOverride } : {}),
+          ...(args.modelOverride ? { model_override: args.modelOverride } : {}),
+          ...(args.workspace ? { workspace: args.workspace } : {}),
+          ...(args.outputSchema ? { output_schema: args.outputSchema } : {}),
+          ...(args.maxSummaryTokens !== 2000 ? { max_summary_tokens: args.maxSummaryTokens } : {}),
+          ...(args.timeoutSeconds !== 120 ? { timeout_seconds: args.timeoutSeconds } : {}),
+          ...(args.retry ? { retry: args.retry } : {}),
+          deps: [],
+        },
+      ],
+    };
 
-    await db.insert(v3Schema.v3Spawns).values({
-      id: spawnId,
-      nodeId: null,       // ad-hoc — no node association
-      attempt: 1,
-      agentName: args.agent,
-      engineRef: args.engineOverride ?? null,
-      modelRef: args.modelOverride ?? null,
-      runtime: args.runtimeOverride ?? "microvm",
-      workspaceId: args.workspace ?? null,
-      renderedPrompt: args.prompt,
+    const runId = newId("v3r");
+
+    await db.insert(v3Schema.v3Runs).values({
+      id: runId,
+      templateId: null,
+      templateVersion: null,
+      inputs: null,
+      dag,
+      dagVersion: 1,
       status: "pending",
+      priority: 0,
       tags: args.tags ? (args.tags as any) : null,
-      startedAt: new Date(),
+      ownerEmail,
+      orgId,
     });
 
-    // Note: actual worker dispatch is not yet wired to a live microVM/ACP executor
-    // in this environment. The spawn row is created with status=pending so the
-    // reconciler / external dispatcher can pick it up. When the full dispatcher is
-    // wired, it will transition the status to running → done/failed.
+    const nodeRowId = newId("v3n");
+    await db.insert(v3Schema.v3Nodes).values({
+      id: nodeRowId,
+      runId,
+      nodeIdInDag: nodeId,
+      type: "agent",
+      status: "pending",
+      iteration: 0,
+      fanoutIndex: 0,
+      ownerEmail,
+      orgId,
+    });
+
+    // Trigger reconciler immediately so the node advances without waiting for
+    // the next periodic tick.
+    triggerTickSafe(runId).catch(() => {});
 
     return {
-      spawnId,
+      runId,
+      nodeRowId,
       status: "pending",
       agent: args.agent,
-      async: args.async,
-      note: "Spawn enqueued. Poll spawn.get for completion. Full microVM/ACP dispatch requires the runtime pool to be configured.",
+      note: "Spawned as a single-node run. Poll runState with runId for completion.",
     };
   },
 });
