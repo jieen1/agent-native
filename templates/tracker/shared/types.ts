@@ -38,6 +38,15 @@ export interface WorkItem {
 }
 
 export interface WorkItemDetail extends WorkItem {
+  sprintId?: string | null;
+  itemKey?: string;
+  risk?: string;
+  tags?: string[];
+  executionMode?: string;
+  currentStageName?: string;
+  plannedStages?: string[];
+  branch?: string | null;
+  sprint?: { id: string; name: string; status: string } | null;
   project: Pick<
     Project,
     "id" | "key" | "name" | "gitRemote" | "defaultBranch"

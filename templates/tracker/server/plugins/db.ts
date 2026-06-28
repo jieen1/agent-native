@@ -197,6 +197,21 @@ CREATE INDEX IF NOT EXISTS tracker_comments_work_item_idx ON tracker_comments (w
 CREATE INDEX IF NOT EXISTS tracker_links_from_item_idx ON tracker_links (from_item_id);
 CREATE INDEX IF NOT EXISTS tracker_exec_queue_owner_status_idx ON tracker_exec_queue (owner_email, status, position)`,
     },
+    {
+      // Fix column name mismatches between migration v9 SQL and schema.ts.
+      // v9 used wrong names; add the correct columns the Drizzle schema expects.
+      // Old columns are kept (additive only) but won't be queried by Drizzle.
+      version: 11,
+      sql: `ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT '';
+ALTER TABLE tracker_stages ADD COLUMN IF NOT EXISTS stage_status TEXT NOT NULL DEFAULT '待执行';
+ALTER TABLE tracker_stages ADD COLUMN IF NOT EXISTS workflow_run_ref TEXT;
+ALTER TABLE tracker_links ADD COLUMN IF NOT EXISTS link_type TEXT NOT NULL DEFAULT 'relates_to';
+ALTER TABLE tracker_rollback_log ADD COLUMN IF NOT EXISTS by_kind TEXT NOT NULL DEFAULT 'agent';
+ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS current_stage TEXT NOT NULL DEFAULT '';
+ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS started_at TEXT`,
+    },
   ],
   { table: "tracker_migrations" },
 );

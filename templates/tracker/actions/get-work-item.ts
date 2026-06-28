@@ -35,6 +35,20 @@ export default defineAction({
         .limit(1)
     )[0];
 
+    const sprint = item.sprintId
+      ? (
+          await db
+            .select({
+              id: schema.sprints.id,
+              name: schema.sprints.name,
+              status: schema.sprints.status,
+            })
+            .from(schema.sprints)
+            .where(eq(schema.sprints.id, item.sprintId))
+            .limit(1)
+        )[0] ?? null
+      : null;
+
     return {
       id: item.id,
       projectId: item.projectId,
@@ -44,10 +58,21 @@ export default defineAction({
       status: item.status,
       priority: item.priority,
       orchestratorThreadId: item.orchestratorThreadId,
+      orchestratorTaskId: item.orchestratorTaskId,
+      orchestratorRunId: item.orchestratorRunId,
       orchestratorWorkspaceId: item.orchestratorWorkspaceId,
       dispatchedAt: item.dispatchedAt,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
+      sprintId: item.sprintId,
+      itemKey: item.itemKey,
+      risk: item.risk,
+      tags: (() => { try { return JSON.parse(item.tags ?? "[]"); } catch { return []; } })(),
+      executionMode: item.executionMode,
+      currentStageName: item.currentStageName,
+      plannedStages: (() => { try { return JSON.parse(item.plannedStages ?? "[]"); } catch { return []; } })(),
+      branch: item.branch,
+      sprint: sprint ?? null,
       project: project ?? null,
     };
   },

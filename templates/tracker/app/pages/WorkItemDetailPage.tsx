@@ -13,15 +13,21 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  IconAlertTriangle,
   IconArrowLeft,
   IconBrandGithub,
   IconClock,
   IconExternalLink,
+  IconFlag,
   IconGitBranch,
+  IconHash,
   IconLayoutKanban,
+  IconListCheck,
   IconLoader2,
   IconMessageCircle,
   IconRocket,
+  IconStack2,
+  IconTag,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -145,6 +151,16 @@ export function WorkItemDetailPage() {
   const branch = item.project?.defaultBranch ?? "main";
   const ghHref = repoHref(remote);
   const ghLabel = repoLabel(remote);
+
+  const RISK_MAP: Record<string, string> = { low: "低", medium: "中", high: "高" };
+  const PRIORITY_MAP: Record<number, string> = { 1: "P0", 2: "P1", 3: "P2", 4: "P3" };
+  const riskVal = (item as { risk?: string }).risk ?? "medium";
+  const riskLabel = RISK_MAP[riskVal] ?? riskVal;
+  const priorityLabel = PRIORITY_MAP[item.priority] ?? `P${item.priority}`;
+  const tags = (item as { tags?: string[] }).tags ?? [];
+  const sprint = (item as { sprint?: { id: string; name: string; status: string } | null }).sprint;
+  const itemKey = (item as { itemKey?: string }).itemKey;
+  const currentStageName = (item as { currentStageName?: string }).currentStageName ?? "待办";
 
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-6">
@@ -304,6 +320,54 @@ export function WorkItemDetailPage() {
         {/* Right column: context */}
         <aside className="order-1 lg:order-2">
           <div className="divide-y divide-border rounded-xl border border-border bg-card lg:sticky lg:top-4">
+            {itemKey ? (
+              <MetaRow icon={IconHash} label="编号">
+                <span className="font-mono text-xs">{itemKey}</span>
+              </MetaRow>
+            ) : null}
+
+            {sprint ? (
+              <MetaRow icon={IconStack2} label="Sprint">
+                <span className="text-sm font-medium">{sprint.name}</span>
+                <Badge variant="secondary" className="ml-2 h-4 px-1.5 text-[10px]">
+                  {sprint.status}
+                </Badge>
+              </MetaRow>
+            ) : null}
+
+            <MetaRow icon={IconListCheck} label="当前阶段">
+              <span className="text-sm">{currentStageName}</span>
+            </MetaRow>
+
+            <MetaRow icon={IconFlag} label="优先级">
+              <span className="text-sm">{priorityLabel}</span>
+            </MetaRow>
+
+            <MetaRow icon={IconAlertTriangle} label="风险">
+              <span className={cn(
+                "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
+                riskVal === "high"
+                  ? "border-red-300 bg-red-50 text-red-600 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400"
+                  : riskVal === "medium"
+                  ? "border-amber-300 bg-amber-50 text-amber-600 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+                  : "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+              )}>
+                {riskLabel}
+              </span>
+            </MetaRow>
+
+            {tags.length > 0 ? (
+              <MetaRow icon={IconTag} label="标签">
+                <div className="flex flex-wrap gap-1">
+                  {tags.map((tag: string) => (
+                    <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </MetaRow>
+            ) : null}
+
             <MetaRow icon={IconLayoutKanban} label="项目">
               <Link
                 to={`/board?project=${encodeURIComponent(item.projectId)}`}
