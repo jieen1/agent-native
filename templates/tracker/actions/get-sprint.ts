@@ -26,6 +26,15 @@ export default defineAction({
       .from(schema.workItems)
       .where(eq(schema.workItems.sprintId, args.id));
 
+    const { inArray } = await import("drizzle-orm");
+    const stages =
+      items.length > 0
+        ? await db
+            .select()
+            .from(schema.stages)
+            .where(inArray(schema.stages.workItemId, items.map((i) => i.id)))
+        : [];
+
     return {
       id: sprint.id,
       projectId: sprint.projectId,
@@ -38,7 +47,9 @@ export default defineAction({
       createdAt: sprint.createdAt,
       updatedAt: sprint.updatedAt,
       items,
+      stages,
       itemCount: items.length,
+      delivered: items.filter((i) => i.status === "done").length,
     };
   },
 });

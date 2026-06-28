@@ -22,6 +22,7 @@ import {
   IconCheck,
   IconClock,
   IconGitBranch,
+  IconRepeat,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { QueueItem, TrackerWorkItem } from "@shared/types";

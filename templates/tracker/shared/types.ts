@@ -141,8 +141,8 @@ export type StageStatus = '待执行' | '执行中' | '已完成' | '已驳回' 
 export type StageName = '待办' | '分析' | '设计' | '实施' | '测试' | '验收' | '交付';
 export const STAGE_ORDER: StageName[] = ['待办','分析','设计','实施','测试','验收','交付'];
 
-export interface Sprint { id:string; projectId:string; name:string; goal:string; status:SprintStatus|string; branch:string; startDate:string; endDate:string; createdAt:string; updatedAt:string; }
-export interface SprintDetail extends Sprint { items: TrackerWorkItem[]; itemCount: number; }
+export interface Sprint { id:string; projectId:string; name:string; goal:string; status:SprintStatus|string; branch:string; startDate:string; endDate:string; createdAt:string; updatedAt:string; itemCount?:number; delivered?:number; }
+export interface SprintDetail extends Sprint { items: TrackerWorkItem[]; itemCount: number; delivered: number; stages: Stage[]; }
 export interface TrackerWorkItem { id:string; projectId:string; sprintId:string|null; itemKey:string; type:ItemType|string; title:string; description:string; status:string; priority:number; risk:ItemRisk|string; tags:string[]; executionMode:ExecutionMode; currentStageName:StageName|string; plannedStages:string[]; branch:string|null; orchestratorThreadId:string|null; createdAt:string; updatedAt:string; }
 export interface Stage { id:string; workItemId:string; stageName:StageName|string; stageStatus:StageStatus|string; deliveryItems:string[]; verdict:{result:'通过'|'驳回';reason:string;rootCauseStage:string}|null; startedAt:string|null; completedAt:string|null; createdAt:string; updatedAt:string; }
 export interface Artifact { id:string; workItemId:string; stageId:string; stageName:string; kind:string; name:string; version:number; contentRef:string; producedByKind:'agent'|'human'; supersedes:string|null; createdAt:string; }
