@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router";
-import { useActivity, useDispatch, useWorkItem } from "@/hooks/use-tracker";
+import { useActivity, useDispatch, useStages, useWorkItem } from "@/hooks/use-tracker";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ import {
   IconAlertTriangle,
   IconArrowLeft,
   IconBrandGithub,
+  IconCheck,
   IconClock,
   IconExternalLink,
   IconFlag,
@@ -28,6 +29,7 @@ import {
   IconRocket,
   IconStack2,
   IconTag,
+  IconX,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -40,6 +42,137 @@ import {
   statusPresentation,
   typeChip,
 } from "@/components/tracker-format";
+
+// ── Stage stepper ────────────────────────────────────────────────────────────
+
+const STAGE_NODES = ["待办", "分析", "设计", "实施", "测试", "验收", "交付"] as const;
+
+function StageNode({ status, name }: { status: string; name: string }) {
+  if (status === "已完成") {
+    return (
+      <div className="flex flex-col items-center gap-1.5 relative z-10">
+        <div className="size-5 rounded-full bg-emerald-500 flex items-center justify-center">
+          <IconCheck className="size-3 text-white" strokeWidth={3} />
+        </div>
+        <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">{name}</span>
+      </div>
+    );
+  }
+  if (status === "执行中") {
+    return (
+      <div className="flex flex-col items-center gap-1.5 relative z-10">
+        <div className="size-5 rounded-full bg-blue-500 flex items-center justify-center ring-4 ring-blue-500/20">
+          <span className="size-2 rounded-full bg-white animate-pulse" />
+        </div>
+        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{name}</span>
+      </div>
+    );
+  }
+  if (status === "已驳回") {
+    return (
+      <div className="flex flex-col items-center gap-1.5 relative z-10">
+        <div className="size-5 rounded-full bg-red-400 flex items-center justify-center">
+          <IconX className="size-3 text-white" strokeWidth={3} />
+        </div>
+        <span className="text-[10px] font-medium text-red-500">{name}</span>
+      </div>
+    );
+  }
+  if (status === "跳过") {
+    return (
+      <div className="flex flex-col items-center gap-1.5 relative z-10">
+        <div className="size-5 rounded-full border-2 border-dashed border-slate-400 flex items-center justify-center">
+          <span className="text-[10px] text-slate-400">—</span>
+        </div>
+        <span className="text-[10px] font-medium text-slate-400 line-through">{name}</span>
+      </div>
+    );
+  }
+  // 待执行 / unknown
+  return (
+    <div className="flex flex-col items-center gap-1.5 relative z-10">
+      <div className="size-5 rounded-full border-2 border-slate-300 dark:border-slate-600" />
+      <span className="text-[10px] font-medium text-muted-foreground">{name}</span>
+    </div>
+  );
+}
+
+function StageLine({ prevDone }: { prevDone: boolean }) {
+  return prevDone
+    ? <div className="flex-1 h-px bg-emerald-500 my-2.5" />
+    : <div className="flex-1 h-px border border-dashed border-slate-300 dark:border-slate-600 my-2.5" />;
+}
+
+function StageProgressCard({ workItemId, currentStageName }: { workItemId: string; currentStageName: string }) {
+  const { data, isLoading } = useStages(workItemId);
+  const stages: any[] = Array.isArray(data) ? data : [];
+  const stageMap: Record<string, string> = {};
+  for (const s of stages) stageMap[s.stageName] = s.stageStatus;
+
+  // 待办 is completed once any real stage exists or currentStageName != 待办
+  const pendingDone = currentStageName !== "待办" || stages.length > 0;
+  const nodeStatuses: Record<string, string> = {
+    待办: pendingDone ? "已完成" : "执行中",
+    分析: stageMap["分析"] ?? "待执行",
+    设计: stageMap["设计"] ?? "待执行",
+    实施: stageMap["实施"] ?? "待执行",
+    测试: stageMap["测试"] ?? "待执行",
+    验收: stageMap["验收"] ?? "待执行",
+    交付: stageMap["交付"] ?? "待执行",
+  };
+
+  const currentLabel = nodeStatuses[currentStageName] === "执行中"
+    ? `${currentStageName} · 执行中`
+    : currentStageName === "交付" && nodeStatuses["交付"] === "已完成"
+      ? "交付 · 已完成"
+      : `${currentStageName}`;
+
+  const currentBadgeClass = nodeStatuses[currentStageName] === "已完成" || currentStageName === "交付"
+    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-500/30"
+    : "bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-1 ring-inset ring-blue-500/30";
+
+  const currentDot = nodeStatuses[currentStageName] === "已完成"
+    ? "bg-emerald-500"
+    : "bg-blue-500 animate-pulse";
+
+  if (isLoading) {
+    return (
+      <div className="rounded-lg border border-border bg-card shadow-sm p-5 animate-pulse h-24" />
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-card shadow-sm p-5">
+      <div className="flex items-center justify-between mb-5">
+        <h3 className="text-sm font-semibold">阶段进度</h3>
+        <span className="text-xs text-muted-foreground">仅展示状态</span>
+      </div>
+
+      {/* Horizontal stepper */}
+      <div className="flex items-start">
+        {STAGE_NODES.map((name, i) => {
+          const st = nodeStatuses[name];
+          const prevDone = i === 0 ? false : nodeStatuses[STAGE_NODES[i - 1]] === "已完成";
+          return (
+            <>
+              {i > 0 && <StageLine key={`line-${i}`} prevDone={prevDone} />}
+              <StageNode key={name} name={name} status={st} />
+            </>
+          );
+        })}
+      </div>
+
+      {/* Current stage badge */}
+      <div className="mt-4 flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">当前:</span>
+        <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium", currentBadgeClass)}>
+          <span className={cn("size-1.5 rounded-full", currentDot)} />
+          {currentLabel}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 // ── Small status chip (header) ───────────────────────────────────────────────
 
@@ -269,6 +402,9 @@ export function WorkItemDetailPage() {
       <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
         {/* Left column */}
         <div className="order-2 min-w-0 space-y-6 lg:order-1">
+          {/* Stage progress card */}
+          <StageProgressCard workItemId={id} currentStageName={currentStageName} />
+
           {/* Requirement */}
           <section>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
