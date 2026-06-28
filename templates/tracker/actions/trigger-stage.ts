@@ -68,7 +68,7 @@ export default defineAction({
       const newStageId =
         existingStage && existingStage.id
           ? existingStage.id
-          : `stage_${args.workItemId.slice(0, 4)}_${args.stageName.slice(0, 4)}_${now.replace(/[:.]/g, "").slice(0, 8)}`;
+          : `stage_${args.workItemId.slice(0, 4)}_${args.stageName}_${now.replace(/\D/g, "").slice(0, 14)}`;
 
       await db.insert(schema.stages).values({
         id: newStageId,
@@ -99,7 +99,7 @@ export default defineAction({
 
     // --- Insert an activity row ---
     await db.insert(schema.activities).values({
-      id: `act_trigger_${args.workItemId.slice(0, 8)}_${now.replace(/[:.]/g, "").slice(0, 8)}`,
+      id: `act_trg_${args.workItemId.slice(0, 6)}_${args.stageName}_${now.replace(/\D/g, "").slice(0, 14)}`,
       workItemId: args.workItemId,
       actorKind: "human",
       actorName: ownerEmail,
