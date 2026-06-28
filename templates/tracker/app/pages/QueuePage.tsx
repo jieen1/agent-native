@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   useQueue,
   useDequeueWorkItem,
+  useWorkItems,
 } from "@/hooks/use-tracker";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -300,6 +301,7 @@ function HumanGateCard({
 
 export function QueuePage() {
   const { data: queueData, isLoading } = useQueue();
+  const { data: allItemsData } = useWorkItems();
   const dequeue = useDequeueWorkItem();
 
   const items: QueueItem[] = useMemo(
@@ -321,6 +323,16 @@ export function QueuePage() {
   const failedCount = items.filter(
     (it) => it.status === "failed" || it.status === "待审批",
   ).length;
+  const todayDoneCount = useMemo(() => {
+    const allItems = Array.isArray(allItemsData) ? allItemsData : [];
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    return allItems.filter((it: any) => {
+      if (it.status !== "done") return false;
+      const updatedAt = it.updatedAt ? new Date(it.updatedAt) : null;
+      return updatedAt && updatedAt >= todayStart;
+    }).length;
+  }, [allItemsData]);
 
   // Human gate items (paused items awaiting approval)
   const humanGateItems = items.filter(
@@ -419,7 +431,7 @@ export function QueuePage() {
           />
           <StatCard
             label="今日完成"
-            value="0"
+            value={String(todayDoneCount)}
             accent="bg-emerald-500"
           />
           <StatCard

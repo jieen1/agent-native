@@ -1,7 +1,15 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import { useSprints } from "@/hooks/use-tracker";
+import { useSprints, useCreateSprint, useProjects } from "@/hooks/use-tracker";
 import type { Sprint } from "@/shared/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -175,9 +183,25 @@ function SprintCard({ sprint }: { sprint: Sprint }) {
 export function SprintsPage() {
   const { data, isLoading } = useSprints();
   const sprints = Array.isArray(data) ? data : [];
+  const { data: projectsData } = useProjects();
+  const projects = Array.isArray(projectsData) ? projectsData : [];
+  const createSprint = useCreateSprint();
 
   const [statusFilter, setStatusFilter] = useState<string>("全部");
   const [search, setSearch] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newGoal, setNewGoal] = useState("");
+  const [newProjectId, setNewProjectId] = useState("");
+
+  async function handleCreateSprint() {
+    const projectId = newProjectId || projects[0]?.id;
+    if (!projectId || !newName.trim()) return;
+    await createSprint.mutateAsync({ projectId, name: newName.trim(), goal: newGoal.trim() || undefined });
+    setCreateOpen(false);
+    setNewName("");
+    setNewGoal("");
+  }
 
   const stats = useMemo(() => {
     let inProgress = 0;
@@ -215,6 +239,60 @@ export function SprintsPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-5 sm:p-6">
+      {/* ── Create Sprint Dialog ── */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>新建 Sprint</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            {projects.length > 1 && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="sprint-project">项目</Label>
+                <Select value={newProjectId} onValueChange={setNewProjectId}>
+                  <SelectTrigger id="sprint-project">
+                    <SelectValue placeholder="选择项目" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects.map((p: any) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="sprint-name">Sprint 名称 *</Label>
+              <Input
+                id="sprint-name"
+                placeholder="例：v2.1 迭代"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleCreateSprint()}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="sprint-goal">目标（选填）</Label>
+              <Input
+                id="sprint-goal"
+                placeholder="这个 Sprint 要完成什么？"
+                value={newGoal}
+                onChange={(e) => setNewGoal(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button
+              onClick={handleCreateSprint}
+              disabled={!newName.trim() || createSprint.isPending}
+            >
+              {createSprint.isPending ? "创建中…" : "创建"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Header ── */}
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -223,7 +301,7 @@ export function SprintsPage() {
             跟踪每个 Sprint 的目标、进度与交付情况。
           </p>
         </div>
-        <Button size="sm" className="gap-1.5">
+        <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
           <IconPlus className="size-4" />
           新建 Sprint
         </Button>
@@ -299,7 +377,7 @@ export function SprintsPage() {
           <p className="max-w-sm text-sm text-muted-foreground">
             点击「新建 Sprint」开始创建第一个迭代。
           </p>
-          <Button size="sm" className="mt-1 gap-1.5">
+          <Button size="sm" className="mt-1 gap-1.5" onClick={() => setCreateOpen(true)}>
             <IconPlus className="size-4" />
             新建 Sprint
           </Button>

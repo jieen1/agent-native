@@ -29,6 +29,15 @@ const RUN_STATUSES = [
   "cancelled",
 ];
 
+const STATUS_LABELS: Record<string, string> = {
+  pending: "等待中",
+  running: "运行中",
+  paused: "已暂停",
+  done: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+};
+
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400",
   running: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
@@ -90,7 +99,7 @@ export default function V3RunsRoute() {
             <SelectContent>
               {RUN_STATUSES.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {s === "all" ? "全部状态" : s}
+                  {s === "all" ? "全部状态" : (STATUS_LABELS[s] ?? s)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -126,7 +135,7 @@ export default function V3RunsRoute() {
                   variant="secondary"
                   className={STATUS_COLORS[r.status] ?? ""}
                 >
-                  {r.status}
+                  {STATUS_LABELS[r.status] ?? r.status}
                 </Badge>
               ),
             },

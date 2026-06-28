@@ -151,7 +151,7 @@ function WorkItemCard({ item }: { item: TrackerWorkItem }) {
             {item.type}
           </Badge>
           <PriorityChip priority={item.priority} />
-          <RiskChip risk={item.risk} />
+          {item.risk ? <RiskChip risk={item.risk} /> : null}
           <span className="ml-auto font-mono text-[10px] font-medium text-muted-foreground">
             {item.itemKey}
           </span>
@@ -247,8 +247,8 @@ export function BoardPage() {
         const q = search.toLowerCase();
         if (
           !it.title.toLowerCase().includes(q) &&
-          !it.itemKey.toLowerCase().includes(q) &&
-          !it.description.toLowerCase().includes(q)
+          !(it.itemKey ?? "").toLowerCase().includes(q) &&
+          !(it.description ?? "").toLowerCase().includes(q)
         ) {
           return false;
         }
