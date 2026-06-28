@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+
 import { cn } from "../../utils.js";
 import { ltrCodeBlockProps } from "../code-block-direction.js";
 import type { BlockRenderContext } from "../types.js";
@@ -26,11 +27,10 @@ import type { BlockRenderContext } from "../types.js";
  *    into stable, marker-numbered, range-resolved records and a line→markers map.
  *  - `rangeLabel` — the human "Line 8" / "Lines 3–6" label.
  *  - `AnnotationGutterMarker` — the numbered amber pip placed on an annotated row
- *    (used by the diff grid; the annotated-code surface uses its own rail bar).
+ *    by both the diff grid and the annotated-code gutter.
  *  - `AnnotationNoteRail` — the responsive list of note cards with two-way hover.
- *    `showMarker` opts the diff block into a leading numbered pip on each card so
- *    a note can be matched to its `①`/`②` row marker; annotated-code omits it to
- *    keep its original card chrome.
+ *    `showMarker` opts blocks into a leading numbered pip on each card so a note
+ *    can be matched to its `①`/`②` row marker.
  *
  * `AnnotatedCodeBlock` annotates a single code surface; `DiffBlock` annotates a
  * before/after grid (each annotation also carries a `side`). The shared types
@@ -752,6 +752,7 @@ export function AnnotationHoverCard<A extends RailAnnotation>({
   onMouseEnter,
   onMouseLeave,
   onClose,
+  onInteractOutside,
 }: {
   item: ResolvedAnnotation<A>;
   anchor: AnnotationAnchor;
@@ -763,6 +764,8 @@ export function AnnotationHoverCard<A extends RailAnnotation>({
   onMouseLeave?: () => void;
   /** Called when the card should be dismissed (e.g. on scroll). */
   onClose?: () => void;
+  /** Called when focus or pointer intent moves to the surrounding UI. */
+  onInteractOutside?: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -796,8 +799,9 @@ export function AnnotationHoverCard<A extends RailAnnotation>({
     preferredSide,
   ]);
 
-  // Close the card when the user scrolls so it doesn't float detached. Scrolls
-  // inside a long hover card are local to the card and should not dismiss it.
+  // Close the card when the user scrolls or changes layout so it doesn't float
+  // detached. Scrolls inside a long hover card are local to the card and should
+  // not dismiss it.
   useEffect(() => {
     if (!onClose || typeof window === "undefined") return;
     const handler = (event: Event) => {
@@ -815,9 +819,35 @@ export function AnnotationHoverCard<A extends RailAnnotation>({
       capture: true,
       passive: true,
     });
-    return () =>
+    window.addEventListener("resize", handler, { passive: true });
+    return () => {
       window.removeEventListener("scroll", handler, { capture: true });
+      window.removeEventListener("resize", handler);
+    };
   }, [onClose]);
+
+  useEffect(() => {
+    const closeOutside = onInteractOutside ?? onClose;
+    if (!closeOutside || typeof window === "undefined") return;
+    const handler = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (cardRef.current?.contains(target)) return;
+      if (
+        target instanceof Element &&
+        target.closest("[data-code-line],[data-annotated-code-marker]")
+      ) {
+        return;
+      }
+      closeOutside();
+    };
+    window.addEventListener("pointerdown", handler, { capture: true });
+    window.addEventListener("focusin", handler, { capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", handler, { capture: true });
+      window.removeEventListener("focusin", handler, { capture: true });
+    };
+  }, [onClose, onInteractOutside]);
 
   if (typeof document === "undefined") return null;
 

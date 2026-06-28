@@ -307,6 +307,8 @@ export interface BlockReadProps<TData> {
   summary?: string;
   /** Injected app capabilities. */
   ctx: BlockRenderContext;
+  /** Tighten embedded visuals in dense contexts such as tabs and question cards. */
+  compactVisuals?: boolean;
 }
 
 /** Props passed to a block's editor (custom or schema-generated). */
@@ -366,12 +368,15 @@ export interface BlockSpec<TData = unknown> {
    * - `"container"` — the block renders its `Edit` in place, and that editor
    *   may call `ctx.renderBlocksEditor` for nested block regions with normal
    *   slash commands and nested structured blocks.
+   * - `"none"` — the block renders its `Read` view in edit mode and exposes no
+   *   block data form. Use for blocks whose whole-block operations live in the
+   *   editor chrome/menu rather than a custom or schema-generated editor.
    * Defaults to `"inline"` when a custom `Edit` is supplied, else `"panel"`
    * (auto-form blocks are property forms, ideal for a panel). The app must wire
    * `ctx.renderEditSurface` for `"panel"` to take effect; otherwise it falls
    * back to inline.
    */
-  editSurface?: "inline" | "panel" | "container";
+  editSurface?: "inline" | "panel" | "container" | "none";
   /**
    * Optional generic contract for content-bearing container blocks. Keep this
    * runtime-oriented: it describes editable regions over normalized block arrays;

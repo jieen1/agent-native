@@ -5,19 +5,20 @@ import {
   getRequestUserName,
 } from "@agent-native/core/server/request-context";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
-import {
-  createUiPlanContent,
-  normalizePlanContent,
-  serializePlanContent,
-} from "../server/plan-content.js";
+import { assertGuestCreateWithinLimits } from "../server/lib/guest-abuse.js";
 import {
   isLocalPlanRuntime,
   resolvePlanOrgIdForWrite,
   requirePlanOwnerEmailForWrite,
 } from "../server/lib/local-identity.js";
-import { assertGuestCreateWithinLimits } from "../server/lib/guest-abuse.js";
 import { writePlanLocalFiles } from "../server/lib/local-plan-files.js";
+import {
+  createUiPlanContent,
+  normalizePlanContent,
+  serializePlanContent,
+} from "../server/plan-content.js";
 import {
   buildPlanHtml,
   commentInputSchema,
@@ -71,7 +72,7 @@ export default defineAction({
       content: planContentSchema
         .optional()
         .describe(
-          "Structured editable UI plan content. Prefer this for app-owned top canvas wireframes (HTML mockups: set the wireframe's data.html to a semantic HTML fragment of the screen and pick a surface — the renderer owns the theme, footprint/aspect, hand-drawn font, and sketch overlay; use --wf-* CSS tokens for any custom color, never hex), sketch diagrams, rich text, code blocks (grouped in a vertical tabs block for a file map), annotated code for key files, validation checklists, and bounded custom HTML fragments. Diagram data.html/data.css should use renderer-owned .diagram-* primitives plus --wf-* tokens, not custom fonts or hard-coded hex/rgb/hsl colors, so light/dark and sketchy Excalifont/rough.js modes remain correct. The canvas should carry Claude-style flex/grid wireframe artboards and designer annotations; the document should add implementation substance instead of duplicating the same wireframes. The renderer owns all visual styling; emit lean content, not pixels.",
+          "Structured editable UI plan content. Prefer this for app-owned top canvas wireframes (HTML mockups: set the wireframe's data.html to a semantic HTML fragment of the screen and pick a surface — the renderer owns the theme, footprint/aspect, hand-drawn font, and sketch overlay; use --wf-* CSS tokens for any custom color, never hex). Do not use legacy kit-tree screen arrays or nested FrameScreen/Card/Row/Btn-style children for new canvas artboards. Use sketch diagrams, rich text, code blocks (grouped in a vertical tabs block for a file map), annotated code for key files, validation checklists, and bounded custom HTML fragments. Diagram data.html/data.css should use renderer-owned .diagram-* primitives plus --wf-* tokens, not custom fonts or hard-coded hex/rgb/hsl colors, so light/dark and sketchy Excalifont/rough.js modes remain correct. The canvas should carry Claude-style flex/grid wireframe artboards and designer annotations; the document should add implementation substance instead of duplicating the same wireframes. The renderer owns all visual styling; emit lean content, not pixels.",
         ),
       markdown: z
         .string()

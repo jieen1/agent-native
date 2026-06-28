@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import {
   BUILDER_SPACE_SETTINGS_URL,
   NEW_CHAT_ACTION_HREF,
@@ -7,6 +8,9 @@ import {
 } from "./error-format.js";
 
 describe("formatChatErrorText", () => {
+  const agentNativeUpgradeUrl =
+    "https://builder.io/account/subscription?signupSource=agent-native&agentNativeConnectSource=gateway_quota_upgrade&agentNativeFlow=connect_llm&framework=agent-native";
+
   it("adds a Builder space settings CTA for disabled gateway errors", () => {
     expect(
       formatChatErrorText(
@@ -31,11 +35,11 @@ describe("formatChatErrorText", () => {
     expect(
       formatChatErrorText(
         "Monthly credits limit reached.",
-        "https://builder.io/account/billing",
+        agentNativeUpgradeUrl,
         "credits-limit-monthly",
       ),
     ).toBe(
-      "Error: Monthly credits limit reached.\n\n[Upgrade at builder.io](https://builder.io/account/billing)",
+      `Error: Monthly credits limit reached.\n\n[Upgrade at builder.io](${agentNativeUpgradeUrl})`,
     );
   });
 
@@ -87,5 +91,29 @@ describe("formatChatErrorText", () => {
     expect(normalized.message).not.toMatch(/another model/i);
     expect(normalized.message).toMatch(/gateway/i);
     expect(normalized.message).toMatch(/new chat|retry|wait/i);
+  });
+
+  it("normalizes provider rate limits without exposing raw status-only text", () => {
+    const normalized = normalizeChatError(
+      "429 status code (no body)",
+      "provider_rate_limited",
+    );
+    expect(normalized.message).toBe(
+      "The model provider is rate-limiting this chat right now. Wait a moment, then retry.",
+    );
+    expect(normalized.details).toBe("429 status code (no body)");
+    expect(normalized.message).not.toContain("no body");
+  });
+
+  it("formats provider rate limits as a plain retryable user message", () => {
+    expect(
+      formatChatErrorText(
+        "429 status code (no body)",
+        undefined,
+        "provider_rate_limited",
+      ),
+    ).toBe(
+      "Error: The model provider is rate-limiting this chat right now. Wait a moment, then retry.",
+    );
   });
 });

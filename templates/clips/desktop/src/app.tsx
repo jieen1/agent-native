@@ -1,19 +1,58 @@
 import {
+  IconAlertTriangle,
+  IconArrowLeft,
+  IconCircleCheck,
+  IconDownload,
+  IconExternalLink,
+  IconFolderOpen,
+  IconPencil,
+  IconInfoCircle,
+  IconRefresh,
+  IconTrash,
+  IconUpload,
+} from "@tabler/icons-react";
+import { invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
+import {
   type RefObject,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
-import { open as openExternal } from "@tauri-apps/plugin-shell";
-import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+
+import { FeedbackButton } from "./components/FeedbackButton";
+import {
+  CamIcon,
+  ClockIcon,
+  CloseIcon,
+  GoogleIcon,
+  LibraryIcon,
+  ScreenCamIcon,
+  ScreenIcon,
+  SettingsIcon,
+} from "./components/Icons";
+import { MediaDeviceRow } from "./components/MediaDeviceRow";
+import { ReadinessPanel } from "./components/ReadinessPanel";
+import { SourceRow, type CaptureSource } from "./components/SourceRow";
+import { Switch } from "./components/Switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./components/Tooltip";
+import { UpdateBanner } from "./components/UpdateBanner";
+import { useMediaDevices } from "./hooks/useMediaDevices";
+import { useMeetingTranscription } from "./hooks/useMeetingTranscription";
 import { startBubbleFramePump } from "./lib/bubble-pump";
 import {
   startBubbleWebrtc,
   type BubbleWebrtcHandle,
 } from "./lib/bubble-webrtc";
+import {
+  isHardCapturePermissionError,
+  MACOS_CAPTURE_PERMISSION_MESSAGE,
+  MACOS_SPEECH_PERMISSION_MESSAGE,
+} from "./lib/permissions";
+import { isMacPlatform, isWindowsPlatform } from "./lib/platform";
 import {
   discardBrowserRecordingBackup,
   exportBrowserRecordingBackup,
@@ -27,57 +66,20 @@ import {
   type RecorderStopResult,
 } from "./lib/recorder";
 import {
-  installDesktopVoiceDictation,
-  type VoiceMode,
-  type VoiceProvider,
-  type VoiceShortcutPreference,
-} from "./lib/voice-dictation";
-import { UpdateBanner } from "./components/UpdateBanner";
-import { FeedbackButton } from "./components/FeedbackButton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./components/Tooltip";
-import { SourceRow, type CaptureSource } from "./components/SourceRow";
-import { MediaDeviceRow } from "./components/MediaDeviceRow";
-import { Switch } from "./components/Switch";
-import { ReadinessPanel } from "./components/ReadinessPanel";
-import {
-  CamIcon,
-  ClockIcon,
-  CloseIcon,
-  GoogleIcon,
-  LibraryIcon,
-  ScreenCamIcon,
-  ScreenIcon,
-  SettingsIcon,
-} from "./components/Icons";
-import { useFeatureConfig, type LocalRecordingMode } from "./shared/config";
-import { useMeetingTranscription } from "./hooks/useMeetingTranscription";
-import { useMediaDevices } from "./hooks/useMediaDevices";
-import {
   loadBool,
   loadString,
   loadStringAllowEmpty,
   saveBool,
   saveString,
 } from "./lib/storage";
-import {
-  isHardCapturePermissionError,
-  MACOS_CAPTURE_PERMISSION_MESSAGE,
-  MACOS_SPEECH_PERMISSION_MESSAGE,
-} from "./lib/permissions";
 import { normalizeServerUrl } from "./lib/url";
-import { isMacPlatform, isWindowsPlatform } from "./lib/platform";
 import {
-  IconAlertTriangle,
-  IconArrowLeft,
-  IconCircleCheck,
-  IconDownload,
-  IconFolderOpen,
-  IconPencil,
-  IconInfoCircle,
-  IconRefresh,
-  IconTrash,
-  IconUpload,
-} from "@tabler/icons-react";
+  installDesktopVoiceDictation,
+  type VoiceMode,
+  type VoiceProvider,
+  type VoiceShortcutPreference,
+} from "./lib/voice-dictation";
+import { useFeatureConfig, type LocalRecordingMode } from "./shared/config";
 
 interface RecordingSummary {
   id: string;
@@ -102,6 +104,7 @@ interface PendingNativeUpload {
   lastAttemptAt?: string | null;
   lastError?: string | null;
   retryCount: number;
+  corrupt?: boolean;
 }
 
 type PendingDesktopUpload = PendingNativeUpload | PendingBrowserRecordingUpload;
@@ -114,6 +117,16 @@ interface LocalRecordingNotice {
 type MeetingTranscriptionMode = "manual" | "ask" | "auto";
 
 type CaptureMode = "screen" | "screen-camera" | "camera";
+type VideoStorageStatus = "checking" | "configured" | "missing";
+
+const STORAGE_SETUP_HELP_TEXT =
+  "Clips is 100% free and open source, so you need to hook up a way to store your clips. Connect storage with Builder.io for free-tier storage and AI, or use S3-compatible object storage and your own LLM keys.";
+const STORAGE_SETUP_FAILURE_RE =
+  /video storage is not connected|no video storage configured|file upload provider|storage provider|connect builder|s3-compatible/i;
+
+function isStorageSetupFailureMessage(message: string | null | undefined) {
+  return STORAGE_SETUP_FAILURE_RE.test(message ?? "");
+}
 
 const STORAGE_KEY = "clips:server-url";
 const MODE_KEY = "clips:last-mode";
@@ -160,6 +173,7 @@ function resolveDesktopThumbnailUrl(
 }
 
 function normalizeCaptureSource(value: string): CaptureSource {
+  if (value === "region" && isMacPlatform()) return "region";
   return value === "window" ? "window" : "full-screen";
 }
 
@@ -188,6 +202,63 @@ function serverUrlForPendingUpload(
 ): string {
   const normalizedCurrent = normalizeServerUrl(currentServerUrl);
   return normalizedCurrent || normalizeServerUrl(upload.serverUrl || "");
+}
+
+// "configured"/"missing" are definitive answers from the server; "unknown"
+// means the check could not be completed (network error, unreachable server, or
+// an unparseable/non-OK response). An "unknown" result must never downgrade an
+// already-connected user to the setup flow.
+type VideoStorageProbe = "configured" | "missing" | "unknown";
+
+async function hasConfiguredVideoStorage(
+  serverUrl: string,
+): Promise<VideoStorageProbe> {
+  const base = serverUrl.replace(/\/+$/, "");
+
+  // Track whether any endpoint gave a definitive answer. If both checks throw
+  // or return non-OK/unparseable responses, we can't tell and return "unknown".
+  let sawDefinitiveAnswer = false;
+
+  try {
+    const uploadStatus = await fetch(
+      `${base}/_agent-native/file-upload/status`,
+      {
+        credentials: "include",
+        cache: "no-store",
+      },
+    );
+    if (uploadStatus.ok) {
+      const body = (await uploadStatus.json().catch(() => null)) as {
+        configured?: boolean;
+      } | null;
+      if (body) {
+        sawDefinitiveAnswer = true;
+        if (body.configured) return "configured";
+      }
+    }
+  } catch {
+    // Fall through to the Builder status endpoint.
+  }
+
+  try {
+    const builderStatus = await fetch(`${base}/_agent-native/builder/status`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (builderStatus.ok) {
+      const body = (await builderStatus.json().catch(() => null)) as {
+        configured?: boolean;
+      } | null;
+      if (body) {
+        sawDefinitiveAnswer = true;
+        if (body.configured) return "configured";
+      }
+    }
+  } catch {
+    // Network error or unreachable server — treat as indeterminate below.
+  }
+
+  return sawDefinitiveAnswer ? "missing" : "unknown";
 }
 
 function authTokenStorageKey(serverUrl: string): string {
@@ -256,7 +327,7 @@ function installAuthFetchInterceptor(): void {
 }
 
 type ByokVoiceProvider = Extract<VoiceProvider, "gemini" | "groq">;
-type VoiceProviderMode = "native" | "builder" | "byok";
+type VoiceProviderMode = "native" | "whisper" | "builder" | "byok";
 type MacosPrivacyPane =
   | "camera"
   | "microphone"
@@ -329,6 +400,7 @@ function isByokVoiceProvider(value: VoiceProvider): value is ByokVoiceProvider {
 function voiceProviderMode(value: VoiceProvider): VoiceProviderMode {
   if (isByokVoiceProvider(value)) return "byok";
   if (value === "builder" || value === "builder-gemini") return "builder";
+  if (value === "whisper") return "whisper";
   return "native";
 }
 
@@ -339,6 +411,7 @@ function normalizeVoiceProvider(value: string): VoiceProvider {
   if (value === "macos-native" && !isMacPlatform()) return "browser";
   return value === "browser" ||
     value === "macos-native" ||
+    value === "whisper" ||
     value === "builder-gemini" ||
     value === "gemini" ||
     value === "groq"
@@ -548,6 +621,8 @@ export function App() {
   const [authStatus, setAuthStatus] = useState<"unknown" | "authed" | "anon">(
     "unknown",
   );
+  const [videoStorageStatus, setVideoStorageStatus] =
+    useState<VideoStorageStatus>("checking");
   const [signedInAs, setSignedInAs] = useState<string | null>(null);
   const [signInPending, setSignInPending] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
@@ -575,8 +650,6 @@ export function App() {
     selectedMicLabel,
     cameraDevices,
     micDevices,
-    setBubbleCameras,
-    setBubbleMics,
     loadDevices,
     requestDeviceAccess,
   } = useMediaDevices({
@@ -598,6 +671,56 @@ export function App() {
     installAuthFetchInterceptor();
     setDesktopAuthContext(serverUrl, loadDesktopAuthToken(serverUrl));
   }, [serverUrl]);
+
+  const refreshVideoStorageStatus = useCallback(async () => {
+    if (authStatus !== "authed" || localRecordingMode !== "off") {
+      setVideoStorageStatus("configured");
+      return true;
+    }
+
+    setVideoStorageStatus((prev) => (prev === "missing" ? prev : "checking"));
+    const probe = await hasConfiguredVideoStorage(serverUrl);
+    if (probe === "unknown") {
+      // The check couldn't be completed (offline/unreachable). Never downgrade
+      // an already-connected user to "missing" on an indeterminate result;
+      // preserve the last known status and let the poll retry. If we never
+      // determined a status, fall back to "checking" so the poll keeps trying
+      // rather than hard-blocking the record button.
+      setVideoStorageStatus((prev) =>
+        prev === "configured" || prev === "missing" ? prev : "checking",
+      );
+      return false;
+    }
+    setVideoStorageStatus(probe);
+    return probe === "configured";
+  }, [authStatus, localRecordingMode, serverUrl]);
+
+  useEffect(() => {
+    void refreshVideoStorageStatus();
+  }, [refreshVideoStorageStatus]);
+
+  useEffect(() => {
+    if (
+      authStatus !== "authed" ||
+      localRecordingMode !== "off" ||
+      // Re-poll while storage is "missing" (server may become configured) and
+      // while still "checking" (an indeterminate/unreachable first probe should
+      // keep retrying instead of hard-blocking the record button).
+      (videoStorageStatus !== "missing" && videoStorageStatus !== "checking")
+    ) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshVideoStorageStatus();
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [
+    authStatus,
+    localRecordingMode,
+    refreshVideoStorageStatus,
+    videoStorageStatus,
+  ]);
 
   useEffect(() => {
     return installDesktopVoiceDictation({
@@ -1041,30 +1164,19 @@ export function App() {
       }),
     );
     // The bubble window emits `clips:bubble-closed` when the user clicks
-    // the X on the hover controls. Treat that as "camera off" — the
-    // bubble-session effect then tears down the stream + pump.
+    // the X on the hover controls. Treat that as "camera off": stop the
+    // popover-owned camera track now so the hardware light goes off
+    // immediately, and clear `cameraOn` so the bubble-session effect tears
+    // down the rest (pump/window) and the toggle reflects the new state.
     track(
       listen("clips:bubble-closed", () => {
         console.log(
-          "[clips-popover] bubble-closed received — clearing cameraOn",
+          "[clips-popover] bubble-closed received — stopping camera + clearing cameraOn",
         );
+        bubbleStreamRef.current?.getTracks().forEach((t) => t.stop());
         setCameraOn(false);
       }),
     );
-    // The bubble relays its device lists (it holds the grant in the
-    // local-camera path). Used by the picker when our own enumeration is empty.
-    const trackRelay = (
-      event: string,
-      set: (devices: MediaDeviceInfo[]) => void,
-    ) =>
-      track(
-        listen<{ devices?: Array<{ deviceId: string; label: string }> }>(
-          event,
-          (ev) => set((ev.payload?.devices ?? []) as MediaDeviceInfo[]),
-        ),
-      );
-    trackRelay("clips:camera-devices", setBubbleCameras);
-    trackRelay("clips:mic-devices", setBubbleMics);
     // Query the CURRENT visibility on mount in case the event already
     // fired before React subscribed.
     getCurrentWindow()
@@ -1138,8 +1250,6 @@ export function App() {
   const wantsCamera = mode !== "screen" && cameraOn;
   const nativeFullscreenRecordingActive =
     mode !== "camera" && shouldUseNativeFullscreenRecording(source);
-  const bubbleUsesLocalCamera =
-    nativeFullscreenRecordingActive && localRecordingMode !== "separate";
   // Ref mirror of `isRecording || recordingFlowActive` so cleanup (which
   // captures the dep-snapshot value) can still see the CURRENT flow state
   // at the moment it actually runs. Without this, if `recordingFlowActive`
@@ -1214,85 +1324,6 @@ export function App() {
     console.log(
       "[clips-popover] bubble session start — acquiring camera + showing bubble",
     );
-
-    if (bubbleUsesLocalCamera) {
-      const localStartTimers: Array<ReturnType<typeof setTimeout>> = [];
-      let localReadyUnlisten: (() => void) | null = null;
-      const emitLocalCameraStart = (reason: string) => {
-        if (cancelled) return;
-        console.log(
-          "[clips-popover] starting local bubble camera — %s",
-          reason,
-        );
-        emit("clips:bubble-start-local-camera", {
-          cameraId: cameraId || null,
-        }).catch((err) => {
-          if (!cancelled) {
-            console.warn(
-              "[clips-popover] emit local bubble camera start failed:",
-              err,
-            );
-          }
-        });
-      };
-
-      listen("clips:bubble-ready", () => emitLocalCameraStart("ready"))
-        .then((u) => {
-          if (cancelled) {
-            try {
-              u();
-            } catch {
-              // ignore
-            }
-          } else {
-            localReadyUnlisten = u;
-          }
-        })
-        .catch(() => {});
-
-      invoke("show_bubble")
-        .then(() => {
-          // The bubble's React listener may mount just after the Rust window
-          // reports as shown. Send a few idempotent starts; the bubble ignores
-          // repeats for the same camera but this avoids a first-show race.
-          for (const delay of [100, 500, 1000]) {
-            localStartTimers.push(
-              setTimeout(
-                () => emitLocalCameraStart(`show-bubble+${delay}ms`),
-                delay,
-              ),
-            );
-          }
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            console.error("[clips-popover] local bubble start failed:", err);
-            setCameraError(`Camera unavailable: ${err?.message ?? err}`);
-          }
-        });
-
-      return () => {
-        cancelled = true;
-        for (const timer of localStartTimers) clearTimeout(timer);
-        try {
-          localReadyUnlisten?.();
-        } catch {
-          // ignore
-        }
-        emit("clips:bubble-stop-local-camera", {}).catch(() => {});
-        const recordingInFlight = recordingFlowGateRef.current;
-        console.log(
-          "[clips-popover] local bubble session end — recordingInFlight=%o stillActive=%o",
-          recordingInFlight,
-          bubbleActiveRef.current,
-        );
-        // Skip teardown when the bubble is still wanted (only the capture
-        // source changed). Hiding here would race the re-run's show_bubble.
-        if (!recordingInFlight && !bubbleActiveRef.current) {
-          invoke("hide_overlays").catch(() => {});
-        }
-      };
-    }
 
     navigator.mediaDevices
       .getUserMedia({
@@ -1411,14 +1442,31 @@ export function App() {
       // the bubble correctly). Hiding here mid-flow would kill the
       // on-screen bubble window the user sees during the recording.
       // Also skip when the bubble is still wanted and only the capture
-      // source changed (window ↔ full-screen flips `bubbleUsesLocalCamera`,
-      // re-running this effect): hiding would race the re-run's show_bubble
-      // and close the window out from under it.
+      // source changed (e.g. cameraId flip re-runs this effect): hiding
+      // would race the re-run's show_bubble and close the window out from under it.
       if (!recordingInFlight && !bubbleActiveRef.current) {
         invoke("hide_overlays").catch(() => {});
       }
     };
-  }, [bubbleActive, bubbleUsesLocalCamera, cameraId]);
+  }, [bubbleActive, cameraId]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    listen("clips:release-camera", () => {
+      console.log(`[popover] releasing camera`);
+      bubbleStreamRef.current?.getTracks().forEach((t) => t.stop());
+    })
+      .then((u) => {
+        if (cancelled) u();
+        else unlisten = u;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // ---- auto-size popover to content --------------------------------------
   // The Tauri window is fixed-size via tauri.conf.json, but our content
@@ -1555,7 +1603,11 @@ export function App() {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[clips-tray] retry saved upload failed:", err);
-      setRecError(message);
+      setRecError(
+        isStorageSetupFailureMessage(message)
+          ? "Connect storage to finish uploading this saved clip: Builder.io (free tier storage + AI) or S3-compatible storage."
+          : message,
+      );
       await loadPendingUploads();
     } finally {
       setRetryingUploadId(null);
@@ -1632,10 +1684,36 @@ export function App() {
     });
   }
 
+  const openVideoStorageSetup = useCallback(
+    (targetServerUrl?: string) => {
+      const base = (targetServerUrl?.trim() || serverUrl).replace(/\/+$/, "");
+      setRecError(STORAGE_SETUP_HELP_TEXT);
+      void openExternal(`${base}/record`).catch((err) => {
+        setRecError(
+          err instanceof Error
+            ? err.message
+            : "Could not open Clips storage setup.",
+        );
+      });
+      void refreshVideoStorageStatus();
+    },
+    [refreshVideoStorageStatus, serverUrl],
+  );
+
   async function handleStartRecording(options?: {
     ignoreActiveRecorder?: boolean;
   }) {
     if (recorder && !options?.ignoreActiveRecorder) return;
+    if (localRecordingMode === "off") {
+      if (videoStorageStatus === "checking") {
+        setRecError("Checking video storage. Try again in a moment.");
+        return;
+      }
+      if (videoStorageStatus === "missing") {
+        openVideoStorageSetup();
+        return;
+      }
+    }
     setRecError(null);
     setLocalRecordingNotice(null);
     console.log("[clips-popover] handleStartRecording clicked", {
@@ -1685,9 +1763,7 @@ export function App() {
     // effect's deps still include `isRecording`, so the stream + bubble
     // + pump stay alive for the entire recording.
     const preAcquiredCameraStream =
-      mode !== "screen" && cameraOn && !bubbleUsesLocalCamera
-        ? bubbleStreamRef.current
-        : null;
+      mode !== "screen" && cameraOn ? bubbleStreamRef.current : null;
     // Flip the ownership flag BEFORE kicking off the recorder. Any
     // bubble-session cleanup that fires after this point must leave the
     // tracks alone — the recorder now owns them. Cleared in the stop /
@@ -1735,7 +1811,11 @@ export function App() {
         source,
         cameraId,
         micId: selectedMicId || undefined,
-        micLabel: selectedMicLabel || undefined,
+        // Live label is empty when the stored hashed deviceId no longer
+        // resolves in the current device list; fall back to the persisted label
+        // so the native recorder always has a name to match. recorder.ts also
+        // probes the live track.label at start as the authoritative source.
+        micLabel: selectedMicLabel || micLabel || undefined,
         authToken: loadDesktopAuthToken(serverUrl),
         cookie: typeof document !== "undefined" ? document.cookie || "" : "",
         cameraOn,
@@ -1826,7 +1906,10 @@ export function App() {
         : "";
     const message =
       startError instanceof Error ? startError.message : String(startError);
-    if (errName === "AbortError" || /was cancelled|dismissed/i.test(message)) {
+    if (
+      errName === "AbortError" ||
+      /was cancelled|dismissed|region selection cancelled/i.test(message)
+    ) {
       return;
     }
     if (
@@ -1837,6 +1920,11 @@ export function App() {
     }
     if (isHardCapturePermissionError(message)) {
       setRecError(MACOS_CAPTURE_PERMISSION_MESSAGE);
+      return;
+    }
+    if (isStorageSetupFailureMessage(message)) {
+      setRecError(STORAGE_SETUP_HELP_TEXT);
+      openVideoStorageSetup();
       return;
     }
     setRecError(message);
@@ -2114,6 +2202,7 @@ export function App() {
           onRetry={retryPendingUpload}
           onDiscard={discardPendingUpload}
           onOpenFolder={openPendingUploadFolder}
+          onConnectStorage={(upload) => openVideoStorageSetup(upload.serverUrl)}
         />
       ) : null}
 
@@ -2138,7 +2227,11 @@ export function App() {
 
       <div className="panel">
         {showSourceRow ? (
-          <SourceRow value={source} onChange={setSource} />
+          <SourceRow
+            value={source}
+            onChange={setSource}
+            includeRegion={isMacPlatform()}
+          />
         ) : null}
 
         {showCameraRow ? (
@@ -2171,6 +2264,7 @@ export function App() {
           onToggle={setMicOn}
           systemAudio={systemAudioOn}
           onSystemAudioToggle={setSystemAudioOn}
+          meterActive={popoverVisible && !isRecording}
         />
       </div>
 
@@ -2187,13 +2281,18 @@ export function App() {
 
       <button
         className="primary start"
+        disabled={
+          localRecordingMode === "off" && videoStorageStatus === "checking"
+        }
         onClick={() => {
           void handleStartRecording();
         }}
       >
-        {localRecordingMode === "off"
-          ? "Start recording"
-          : "Start local recording"}
+        {localRecordingMode === "off" && videoStorageStatus === "checking"
+          ? "Checking storage..."
+          : localRecordingMode === "off"
+            ? "Start recording"
+            : "Start local recording"}
       </button>
       {recError ? (
         recError === MACOS_CAPTURE_PERMISSION_MESSAGE ? (
@@ -2210,6 +2309,8 @@ export function App() {
             panes={["speech", "microphone"]}
             onRetry={handleStartRecording}
           />
+        ) : isStorageSetupFailureMessage(recError) ? (
+          <StorageConnectionBanner onConnect={() => openVideoStorageSetup()} />
         ) : (
           <div className="error-banner">{recError}</div>
         )
@@ -2354,6 +2455,30 @@ function PermissionRecoveryBanner({
   );
 }
 
+function StorageConnectionBanner({ onConnect }: { onConnect: () => void }) {
+  return (
+    <div className="storage-flow-banner">
+      <div className="storage-flow-icon" aria-hidden>
+        <IconUpload size={17} stroke={1.8} />
+      </div>
+      <div className="storage-flow-copy">
+        <div className="storage-flow-title">
+          Connect storage to keep recording
+        </div>
+        <div className="storage-flow-sub">{STORAGE_SETUP_HELP_TEXT}</div>
+      </div>
+      <button
+        type="button"
+        className="storage-flow-connect"
+        onClick={onConnect}
+      >
+        <IconExternalLink size={14} stroke={2} />
+        Connect
+      </button>
+    </div>
+  );
+}
+
 function PendingUploadBanner({
   uploads,
   retryingUploadId,
@@ -2363,6 +2488,7 @@ function PendingUploadBanner({
   onRetry,
   onDiscard,
   onOpenFolder,
+  onConnectStorage,
 }: {
   uploads: PendingDesktopUpload[];
   retryingUploadId: string | null;
@@ -2372,11 +2498,13 @@ function PendingUploadBanner({
   onRetry: (upload: PendingDesktopUpload) => void;
   onDiscard: (upload: PendingDesktopUpload) => void;
   onOpenFolder: (upload: PendingDesktopUpload) => void;
+  onConnectStorage: (upload: PendingDesktopUpload) => void;
 }) {
   const latest = uploads[0];
   if (!latest) return null;
 
   const retrying = retryingUploadId === latest.recordingId;
+  const storageSetupFailure = isStorageSetupFailureMessage(latest.lastError);
   const exporting = exportingUploadId === latest.recordingId;
   const canOpenFolder = latest.kind === "native" && !!latest.folderPath;
   const canExport = latest.kind === "browser";
@@ -2386,6 +2514,16 @@ function PendingUploadBanner({
     uploads.length === 1
       ? "1 Clip saved locally"
       : `${uploads.length} Clips saved locally`;
+  const nativeCorrupt = latest.kind === "native" && !!latest.corrupt;
+  const title = nativeCorrupt
+    ? uploads.length === 1
+      ? "Clip could not be finalized"
+      : "Some Clips could not be finalized"
+    : storageSetupFailure
+      ? uploads.length === 1
+        ? "Connect storage to upload saved Clip"
+        : "Connect storage to upload saved Clips"
+      : savedLabel;
   const details = [
     latest.savedAt ? `saved ${formatAgo(latest.savedAt)}` : null,
     formatFileSize(latest.bytes),
@@ -2400,11 +2538,36 @@ function PendingUploadBanner({
         <IconUpload size={17} stroke={1.8} />
       </div>
       <div className="pending-upload-copy">
-        <div className="pending-upload-title">{savedLabel}</div>
-        <div className="pending-upload-sub">
-          {details.join(" · ")}
-          {errorText ? ` · ${errorText}` : ""}
+        <div className="pending-upload-title">{title}</div>
+        <div
+          className={
+            storageSetupFailure
+              ? "pending-upload-sub pending-upload-sub-wrap"
+              : "pending-upload-sub"
+          }
+        >
+          {nativeCorrupt
+            ? `${details.join(" · ")} · discard and record again`
+            : storageSetupFailure
+              ? `${details.join(" · ")} · your clip is safe locally`
+              : `${details.join(" · ")}${errorText ? ` · ${errorText}` : ""}`}
         </div>
+        {storageSetupFailure ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="pending-upload-why">
+                Why am I seeing this?
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="bottom"
+              align="start"
+              className="tooltip-content-wide"
+            >
+              {STORAGE_SETUP_HELP_TEXT}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
       </div>
       <div className="pending-upload-actions">
         {canOpenFolder ? (
@@ -2431,25 +2594,51 @@ function PendingUploadBanner({
             <IconDownload size={14} stroke={2} />
           </button>
         ) : null}
-        <button
-          type="button"
-          className="pending-upload-retry"
-          disabled={actionsDisabled}
-          onClick={() => onRetry(latest)}
-        >
-          <IconRefresh size={14} stroke={2} />
-          {retrying ? "Retrying" : "Retry"}
-        </button>
-        <button
-          type="button"
-          className="pending-upload-discard"
-          disabled={actionsDisabled}
-          onClick={() => onDiscard(latest)}
-          aria-label="Discard saved local clip"
-          title="Discard saved local clip"
-        >
-          <IconTrash size={14} stroke={2} />
-        </button>
+        {latest.kind === "native" && latest.corrupt ? (
+          <button
+            type="button"
+            className="pending-upload-discard"
+            disabled={actionsDisabled}
+            onClick={() => onDiscard(latest)}
+            aria-label="Discard corrupted clip"
+            title="This clip is corrupted and cannot be recovered. Discard it and record again."
+          >
+            <IconTrash size={14} stroke={2} />
+          </button>
+        ) : (
+          <>
+            {storageSetupFailure ? (
+              <button
+                type="button"
+                className="pending-upload-connect"
+                disabled={actionsDisabled}
+                onClick={() => onConnectStorage(latest)}
+              >
+                <IconExternalLink size={14} stroke={2} />
+                Connect
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="pending-upload-retry"
+              disabled={actionsDisabled}
+              onClick={() => onRetry(latest)}
+            >
+              <IconRefresh size={14} stroke={2} />
+              {retrying ? "Retrying" : "Retry"}
+            </button>
+            <button
+              type="button"
+              className="pending-upload-discard"
+              disabled={actionsDisabled}
+              onClick={() => onDiscard(latest)}
+              aria-label="Discard saved local clip"
+              title="Discard saved local clip"
+            >
+              <IconTrash size={14} stroke={2} />
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -2947,7 +3136,11 @@ function Setup({
     }).catch((err) =>
       console.error("[settings] set_feature_config failed", err),
     );
-    if (enabled) triggerWhisperDownload();
+    if (enabled) {
+      triggerWhisperDownload();
+    } else if (voiceProvider === "whisper") {
+      onVoiceProviderChange(nativeVoiceProvider());
+    }
   }
 
   function setLaunchAtLoginEnabled(enabled: boolean) {
@@ -3183,6 +3376,7 @@ function Setup({
     native: isMacPlatform()
       ? "Uses macOS on-device speech recognition for the fastest free dictation."
       : "Uses the browser's built-in speech recognition when available.",
+    whisper: "Uses the local Whisper model for offline AI transcription.",
     builder:
       "Uses Builder.io for fast cleanup. No separate provider key needed.",
     byok: "Use your own provider key for cleanup.",
@@ -3205,6 +3399,9 @@ function Setup({
     setApiKeyMessage(null);
     if (mode === "native") {
       onVoiceProviderChange(nativeVoiceProvider());
+    } else if (mode === "whisper") {
+      onVoiceProviderChange("whisper");
+      if (!whisperModelEnabled) setWhisperModelEnabled(true);
     } else if (mode === "builder") {
       onVoiceProviderChange("builder-gemini");
     } else {
@@ -3293,6 +3490,7 @@ function Setup({
   const providerWarning: string | null = (() => {
     if (providerStatusLoading || !providerStatus) return null;
     if (selectedMode === "native") return null;
+    if (selectedMode === "whisper") return null;
     if (selectedMode === "builder") {
       return providerStatus.builder
         ? null
@@ -3317,6 +3515,8 @@ function Setup({
         ) : null}
         <h2>Settings</h2>
       </div>
+
+      <div className="setup-section-heading">General</div>
 
       <div className="setup-section">
         <SettingLabel
@@ -3378,6 +3578,23 @@ function Setup({
           />
         </div>
       </div>
+
+      <div className="setup-section-heading">Permissions</div>
+
+      <div className="setup-section">
+        <ReadinessPanel
+          mode="screen-camera"
+          cameraOn={true}
+          micOn={true}
+          includeVoicePaste={voiceEnabled}
+          includeFnMonitoring={fnShortcutSelected}
+          open={readinessOpen}
+          onOpenChange={setReadinessOpen}
+          onOpenPermission={openPrivacySettings}
+        />
+      </div>
+
+      <div className="setup-section-heading">Recording</div>
 
       <details className="setup-advanced">
         <summary className="setup-advanced-summary">Advanced recording</summary>
@@ -3462,18 +3679,25 @@ function Setup({
       </details>
 
       <div className="setup-section">
-        <div className="setup-toggle-row">
-          <SettingLabel
-            label="Voice dictation"
-            hint="Speak to type anywhere on your Mac. Turn off to disable globally and remove the keyboard shortcuts."
-          />
-          <Switch
-            on={voiceEnabled}
-            onChange={setVoiceEnabled}
-            label="Enable voice dictation"
-          />
-        </div>
+        <SettingLabel
+          label="Open Clips shortcut"
+          hint="Optional extra global shortcut for opening the tray popover. Cmd+Shift+L remains available."
+        />
+        <ShortcutRecorder
+          value={popoverCustomShortcut}
+          placeholder="Record shortcut"
+          onChange={onPopoverCustomShortcutChange}
+        />
+        <p className="setup-hint">
+          Use a modifier combination like Cmd+Shift+K. Leave empty to use only
+          Cmd+Shift+L.
+        </p>
+        {shortcutRegistrationError ? (
+          <p className="setup-warning">{shortcutRegistrationError}</p>
+        ) : null}
       </div>
+
+      <div className="setup-section-heading">Meetings</div>
 
       <div className="setup-section">
         <div className="setup-toggle-row">
@@ -3520,25 +3744,6 @@ function Setup({
           <div className="setup-section">
             <div className="setup-toggle-row">
               <SettingLabel
-                label="Whisper model"
-                hint="Local AI model for offline meeting transcription. Captures both your mic and other speakers — no API key required."
-              />
-              <Switch
-                on={whisperModelEnabled}
-                onChange={setWhisperModelEnabled}
-                label="Enable Whisper model"
-              />
-            </div>
-            <WhisperModelStatusRow
-              status={whisperStatus}
-              enabled={whisperModelEnabled}
-              onDownload={triggerWhisperDownload}
-            />
-          </div>
-
-          <div className="setup-section">
-            <div className="setup-toggle-row">
-              <SettingLabel
                 label="Meeting widget"
                 hint="Show the on-screen meeting widget near calendar start times, even when macOS notifications are hidden."
               />
@@ -3552,40 +3757,41 @@ function Setup({
         </>
       ) : null}
 
-      <div className="setup-section">
-        <SettingLabel
-          label="Open Clips shortcut"
-          hint="Optional extra global shortcut for opening the tray popover. Cmd+Shift+L remains available."
-        />
-        <ShortcutRecorder
-          value={popoverCustomShortcut}
-          placeholder="Record shortcut"
-          onChange={onPopoverCustomShortcutChange}
-        />
-        <p className="setup-hint">
-          Use a modifier combination like Cmd+Shift+K. Leave empty to use only
-          Cmd+Shift+L.
-        </p>
-        {shortcutRegistrationError ? (
-          <p className="setup-warning">{shortcutRegistrationError}</p>
-        ) : null}
-      </div>
+      <div className="setup-section-heading">Whisper</div>
 
       <div className="setup-section">
-        <SettingLabel
-          label="Privacy permissions"
-          hint="Open the exact Privacy & Security pane for each permission Clips can need."
+        <div className="setup-toggle-row">
+          <SettingLabel
+            label="Whisper model"
+            hint="Local AI model for offline transcription (dictation and meetings). No API key required."
+          />
+          <Switch
+            on={whisperModelEnabled}
+            onChange={setWhisperModelEnabled}
+            label="Enable Whisper model"
+          />
+        </div>
+        <WhisperModelStatusRow
+          status={whisperStatus}
+          enabled={whisperModelEnabled}
+          onDownload={triggerWhisperDownload}
         />
-        <ReadinessPanel
-          mode="screen-camera"
-          cameraOn={true}
-          micOn={true}
-          includeVoicePaste={voiceEnabled}
-          includeFnMonitoring={fnShortcutSelected}
-          open={readinessOpen}
-          onOpenChange={setReadinessOpen}
-          onOpenPermission={openPrivacySettings}
-        />
+      </div>
+
+      <div className="setup-section-heading">Dictation</div>
+
+      <div className="setup-section">
+        <div className="setup-toggle-row">
+          <SettingLabel
+            label="Voice dictation"
+            hint="Speak to type anywhere on your Mac. Turn off to disable globally and remove the keyboard shortcuts."
+          />
+          <Switch
+            on={voiceEnabled}
+            onChange={setVoiceEnabled}
+            label="Enable voice dictation"
+          />
+        </div>
       </div>
 
       {voiceEnabled ? (
@@ -3605,10 +3811,21 @@ function Setup({
               }
             >
               <option value="native">On-device (free, fast)</option>
+              <option value="whisper" disabled={!whisperModelEnabled}>
+                {whisperModelEnabled
+                  ? "Local Whisper (offline AI)"
+                  : "Local Whisper — enable Whisper model first"}
+              </option>
               <option value="builder">Builder.io</option>
               <option value="byok">Add your own key</option>
             </select>
             <p className="setup-hint">{providerHint[selectedMode]}</p>
+            {selectedMode === "whisper" && !whisperModelEnabled ? (
+              <p className="setup-warning">
+                Whisper model is disabled. Enable it in the Whisper section
+                above.
+              </p>
+            ) : null}
             {providerWarning ? (
               <p className="setup-warning">{providerWarning}</p>
             ) : null}
@@ -3618,7 +3835,7 @@ function Setup({
                 className="secondary"
                 onClick={connectBuilder}
               >
-                Connect Builder.io
+                Use Builder.io (free)
               </button>
             ) : null}
           </div>
@@ -3657,9 +3874,10 @@ function Setup({
                   }}
                   placeholder={
                     providerStatus?.[byokProvider]
-                      ? "Paste a new key to rotate"
-                      : `Paste ${keyForByokProvider(byokProvider)}`
+                      ? "Key is saved — paste to rotate"
+                      : `Paste ${keyForByokProvider(byokProvider)} here`
                   }
+                  className="setup-key-input"
                 />
                 <button
                   type="button"
@@ -3693,7 +3911,7 @@ function Setup({
             </div>
           ) : null}
 
-          {selectedMode !== "native" ? (
+          {selectedMode !== "native" && selectedMode !== "whisper" ? (
             <div className="setup-section">
               <SettingLabel
                 label="Custom instructions"
@@ -3779,7 +3997,10 @@ function Setup({
           </div>
         </>
       ) : null}
-      <div className="setup-account">
+
+      <div className="setup-section-heading">Debug</div>
+
+      <div className="setup-account setup-account--no-border">
         <button
           type="button"
           className="link-button"
@@ -3866,10 +4087,8 @@ function WhisperModelStatusRow({
     return (
       <div className="whisper-status whisper-status-ready">
         <IconCircleCheck size={13} className="whisper-status-icon" />
-        <span>
-          Ready · {status.totalMb} MB
-          <span className="whisper-status-path">{status.path}</span>
-        </span>
+        <span>Ready · {status.totalMb} MB</span>
+        <span className="whisper-status-path">{status.path}</span>
       </div>
     );
   }

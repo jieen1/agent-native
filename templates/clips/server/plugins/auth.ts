@@ -22,6 +22,7 @@ export default createAuthPlugin({
     "/r",
     "/embed",
     "/download",
+    "/bug-report",
     // React Router's lazy route-discovery endpoint. If this is gated by
     // auth it returns an HTML login page; the client tries to parse it
     // as JSON, fails, and can't resolve any public route the user lands
@@ -29,6 +30,7 @@ export default createAuthPlugin({
     "/__manifest",
     "/api/view-event",
     "/api/public-recording",
+    "/api/slack",
     "/api/agent-context.json",
     "/api/agent-transcript.json",
     "/api/agent-frame.jpg",

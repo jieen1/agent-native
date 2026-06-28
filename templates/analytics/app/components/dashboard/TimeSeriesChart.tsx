@@ -1,3 +1,4 @@
+import { useT } from "@agent-native/core/client";
 import {
   Area,
   AreaChart,
@@ -7,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate as formatDateLocale } from "locale-kit/format";
@@ -32,6 +34,7 @@ export function TimeSeriesChart({
   error,
   yFormatter,
 }: TimeSeriesChartProps) {
+  const t = useT();
   const formatXLabel = (value: any) => {
     try {
       const d = new Date(value);
@@ -53,7 +56,7 @@ export function TimeSeriesChart({
           <p className="text-sm text-red-400 py-8 text-center">{error}</p>
         ) : data.length === 0 ? (
           <p className="text-sm text-muted-foreground py-8 text-center">
-            No data available
+            {t("common.noDataAvailable")}
           </p>
         ) : (
           <div className="h-[300px] w-full">

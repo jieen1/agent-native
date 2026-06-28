@@ -18,18 +18,53 @@
  */
 
 import { defineAction, embedApp } from "@agent-native/core";
-import { buildDeepLink } from "@agent-native/core/server";
-import { z } from "zod";
-import { asc, eq } from "drizzle-orm";
-import { getDb, schema } from "../server/db/index.js";
-import { parseSpaceIds } from "../server/lib/recordings.js";
-import { resolveAccess, ForbiddenError } from "@agent-native/core/sharing";
 import { readAppState } from "@agent-native/core/application-state";
+import { buildDeepLink } from "@agent-native/core/server";
+import { resolveAccess, ForbiddenError } from "@agent-native/core/sharing";
+import { asc, eq } from "drizzle-orm";
+import { z } from "zod";
+
+import { getDb, schema } from "../server/db/index.js";
+import { resolvePlayerVideoUrl } from "../server/lib/player-video-url.js";
+import { parseSpaceIds } from "../server/lib/recordings.js";
+import { parseBrowserDiagnosticsRow } from "../shared/browser-diagnostics.js";
 import {
   normalizeTranscriptSegments,
   parseTranscriptSegments,
 } from "../shared/transcript-segments.js";
-import { resolvePlayerVideoUrl } from "../server/lib/player-video-url.js";
+
+function safeJsonObject(raw: string | null | undefined) {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function mapBugReport(row: typeof schema.recordingBugReports._.inferSelect) {
+  return {
+    recordingId: row.recordingId,
+    projectId: row.projectId,
+    title: row.title,
+    description: row.description,
+    severity: row.severity,
+    sourceUrl: row.sourceUrl,
+    pageTitle: row.pageTitle,
+    appVersion: row.appVersion,
+    environment: row.environment,
+    reporterEmail: row.reporterEmail,
+    reporterName: row.reporterName,
+    reporterId: row.reporterId,
+    metadata: safeJsonObject(row.metadataJson),
+    submittedAt: row.submittedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
 
 function recordingDeepLink(recordingId: string): string {
   return buildDeepLink({
@@ -99,6 +134,26 @@ export default defineAction({
       .from(schema.recordingCtas)
       .where(eq(schema.recordingCtas.recordingId, args.recordingId))
       .orderBy(asc(schema.recordingCtas.createdAt));
+
+    const [browserDiagnosticsRow] = await db
+      .select()
+      .from(schema.recordingBrowserDiagnostics)
+      .where(
+        eq(schema.recordingBrowserDiagnostics.recordingId, args.recordingId),
+      )
+      .limit(1);
+    const browserDiagnostics = parseBrowserDiagnosticsRow(
+      browserDiagnosticsRow,
+    );
+    const canInspectSensitiveContext =
+      access.role === "owner" ||
+      access.role === "admin" ||
+      access.role === "editor";
+    const [bugReportRow] = await db
+      .select()
+      .from(schema.recordingBugReports)
+      .where(eq(schema.recordingBugReports.recordingId, args.recordingId))
+      .limit(1);
 
     // Reverse-lookup: if a meeting captured this recording, surface it so the
     // player can show a "From meeting: <title>" badge linking back to the
@@ -271,6 +326,15 @@ export default defineAction({
         color: c.color,
         placement: c.placement,
       })),
+      browserDiagnostics: browserDiagnostics
+        ? canInspectSensitiveContext
+          ? browserDiagnostics
+          : { summary: browserDiagnostics.summary }
+        : null,
+      bugReport:
+        bugReportRow && canInspectSensitiveContext
+          ? mapBugReport(bugReportRow)
+          : null,
       meeting,
     };
   },

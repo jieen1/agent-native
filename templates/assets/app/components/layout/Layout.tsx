@@ -1,22 +1,26 @@
-import { useState, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router";
-import { IconMenu2 } from "@tabler/icons-react";
-import { Sidebar } from "./Sidebar";
-import { Header } from "./Header";
-import { HeaderActionsProvider } from "./HeaderActions";
 import {
   AgentSidebar,
   focusAgentChat,
+  getBrowserTabId,
   isEmbedAuthActive,
   navigateWithAgentChatViewTransition,
   useAgentChatHomeHandoff,
   useAgentChatHomeHandoffLinks,
+  useT,
 } from "@agent-native/core/client";
 import { InvitationBanner } from "@agent-native/core/client/org";
+import { IconMenu2 } from "@tabler/icons-react";
+import { useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router";
+
+import { GenerationResults } from "@/components/generation/GenerationResults";
 import { useNavigationState } from "@/hooks/use-navigation-state";
 import { ASSETS_CHAT_STORAGE_KEY } from "@/lib/chat";
-import { TAB_ID } from "@/lib/tab-id";
 import { cn } from "@/lib/utils";
+
+import { Header } from "./Header";
+import { HeaderActionsProvider } from "./HeaderActions";
+import { Sidebar } from "./Sidebar";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -35,8 +39,10 @@ export function Layout({ children }: LayoutProps) {
   useNavigationState();
   const location = useLocation();
   const navigate = useNavigate();
+  const t = useT();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const isCreateRoute = location.pathname === "/";
+  const isCreateRoute =
+    location.pathname === "/" || location.pathname.startsWith("/chat/");
   const chatHomeHandoffActive = useAgentChatHomeHandoff({
     storageKey: ASSETS_CHAT_STORAGE_KEY,
     activePath: location.pathname,
@@ -44,7 +50,7 @@ export function Layout({ children }: LayoutProps) {
   });
   useAgentChatHomeHandoffLinks({
     storageKey: ASSETS_CHAT_STORAGE_KEY,
-    chatPath: "/",
+    isChatPath: (pathname) => pathname === "/" || pathname.startsWith("/chat/"),
   });
 
   useEffect(() => {
@@ -54,6 +60,7 @@ export function Layout({ children }: LayoutProps) {
   const isPicker = location.pathname === "/library";
   const hideHeader =
     location.pathname === "/library" ||
+    location.pathname.startsWith("/library/") ||
     location.pathname === "/extensions" ||
     location.pathname.startsWith("/extensions/");
   const chromeless =
@@ -71,7 +78,7 @@ export function Layout({ children }: LayoutProps) {
   }
 
   const appFrame = (
-    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+    <div className="agent-layout-shell flex h-screen w-full overflow-hidden bg-background text-foreground">
       {mobileSidebarOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/50 md:hidden"
@@ -80,7 +87,7 @@ export function Layout({ children }: LayoutProps) {
       )}
       <div
         className={cn(
-          "fixed inset-y-0 left-0 z-50 md:static md:z-auto",
+          "agent-layout-left-drawer fixed inset-y-0 start-0 z-50 transition-transform duration-200 ease-out md:static md:z-auto md:transition-none",
           mobileSidebarOpen
             ? "translate-x-0"
             : "-translate-x-full md:translate-x-0",
@@ -88,17 +95,19 @@ export function Layout({ children }: LayoutProps) {
       >
         <Sidebar />
       </div>
-      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="agent-layout-main-surface flex h-full min-w-0 flex-1 flex-col overflow-hidden">
         {/* Mobile-only top bar with hamburger */}
         <div className="flex h-12 shrink-0 items-center border-b border-border bg-sidebar px-4 md:hidden">
           <button
             onClick={() => setMobileSidebarOpen(true)}
-            className="-ml-1 mr-3 cursor-pointer rounded-md p-2.5 hover:bg-sidebar-accent/50"
-            aria-label="Open navigation"
+            className="-ms-1 me-3 cursor-pointer rounded-md p-2.5 hover:bg-sidebar-accent/50"
+            aria-label={t("navigation.openNavigation")}
           >
             <IconMenu2 className="h-5 w-5 text-foreground" />
           </button>
-          <span className="text-base font-bold tracking-tight">Assets</span>
+          <span className="text-base font-bold tracking-tight">
+            {t("navigation.brand")}
+          </span>
         </div>
         {!hideHeader && <Header />}
         <InvitationBanner />
@@ -122,15 +131,18 @@ export function Layout({ children }: LayoutProps) {
         position="right"
         chatViewTransition
         storageKey={ASSETS_CHAT_STORAGE_KEY}
-        browserTabId={TAB_ID}
+        browserTabId={getBrowserTabId()}
         openOnChatRunning={chatHomeHandoffActive}
         onFullscreenRequest={openCreateChatFullscreen}
-        emptyStateText="Describe the asset you want to make"
+        emptyStateText={t("chat.emptyState")}
         suggestions={[
-          "Generate 3 blog heroes from this brand kit",
-          "Make an 8-second product reveal video",
-          "Match the style of my reference assets",
+          t("chat.suggestionBlogHeroes"),
+          t("chat.suggestionProductVideo"),
+          t("chat.suggestionReferenceStyle"),
         ]}
+        threadFooterSlot={({ threadId }) => (
+          <GenerationResults threadId={threadId} />
+        )}
       >
         {appFrame}
       </AgentSidebar>

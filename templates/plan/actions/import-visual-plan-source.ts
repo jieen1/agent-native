@@ -5,22 +5,23 @@ import {
 } from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
-import { parsePlanMdxFolder, planMdxFileSchema } from "../server/plan-mdx.js";
-import { serializePlanContent } from "../server/plan-content.js";
+import { assertGuestCreateWithinLimits } from "../server/lib/guest-abuse.js";
 import {
   isLocalPlanRuntime,
   resolvePlanOrgIdForWrite,
   requirePlanOwnerEmailForWrite,
 } from "../server/lib/local-identity.js";
-import { assertGuestCreateWithinLimits } from "../server/lib/guest-abuse.js";
 import { writePlanLocalFiles } from "../server/lib/local-plan-files.js";
-import { createPlanVersionSnapshot } from "../server/lib/plan-versions.js";
-import { assertRecapWireframesHaveContent } from "../server/lib/visual-recap-validation.js";
 import {
   importPlanAssets,
   applyImportedAssets,
 } from "../server/lib/plan-assets.js";
+import { createPlanVersionSnapshot } from "../server/lib/plan-versions.js";
+import { assertRecapWireframesHaveContent } from "../server/lib/visual-recap-validation.js";
+import { serializePlanContent } from "../server/plan-content.js";
+import { parsePlanMdxFolder, planMdxFileSchema } from "../server/plan-mdx.js";
 import {
   assertPlanEditor,
   buildPlanHtml,
@@ -71,7 +72,7 @@ export default defineAction({
         "Stable recap retry key. Only used when kind='recap' so create-visual-recap can reserve the key during initial insert.",
       ),
     mdx: planMdxFileSchema.describe(
-      "Plan source files. plan.mdx holds frontmatter plus markdown/document blocks; canvas.mdx holds optional DesignBoard/Section/Artboard/Screen/Annotation/Connector components. Optional assets/ holds base64-encoded image assets keyed by filename (png, jpg, gif, webp, svg). Size caps: 2 MB per asset, 10 MB total per plan.",
+      "Plan source files. plan.mdx holds frontmatter plus markdown/document blocks; canvas.mdx holds optional DesignBoard/Section/Artboard/Screen/Annotation/Connector components. New canvas Screen components must use html/data.html semantic HTML wireframes; nested kit-tree children like FrameScreen/Card/Row/Btn are legacy compatibility only. Optional assets/ holds base64-encoded image assets keyed by filename (png, jpg, gif, webp, svg). Size caps: 2 MB per asset, 10 MB total per plan.",
     ),
   }),
   publicAgent: {

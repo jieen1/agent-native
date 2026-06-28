@@ -1,18 +1,18 @@
-import { useEffect, useMemo, useRef } from "react";
 import type { PlanBlock } from "@shared/plan-content";
+import { useEffect, useMemo, useRef } from "react";
+
 import {
   collectPlanTocItems,
   resolvePlanTocElements,
   type PlanTocItem,
 } from "./PlanTableOfContents.utils";
 
-// Query the flow directly (not via the TOC nav) so deep links still resolve
-// when the contents rail is hidden.
-function findDocumentFlowRoot(): HTMLElement | null {
+// Query the whole shell (not via the TOC nav) so deep links still resolve when
+// the contents rail is hidden and when wide blocks render in a breakout flow.
+function findDocumentRoot(): HTMLElement | null {
   return (
-    document.querySelector<HTMLElement>(
-      ".plan-document-shell .plan-document-flow",
-    ) ?? document.querySelector<HTMLElement>(".plan-document-flow")
+    document.querySelector<HTMLElement>(".plan-document-shell") ??
+    document.querySelector<HTMLElement>(".plan-document-flow")
   );
 }
 
@@ -74,7 +74,7 @@ export function usePlanHashScroll(blocks: PlanBlock[]) {
       const id = readHashTarget();
       const item = itemFor(id);
       if (!item) return null;
-      const root = findDocumentFlowRoot();
+      const root = findDocumentRoot();
       if (!root) return null;
       const target = resolvePlanTocElements(root, [item]).get(id) ?? null;
       if (target && !target.id) target.id = id;

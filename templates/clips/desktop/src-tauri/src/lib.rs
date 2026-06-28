@@ -16,6 +16,7 @@ mod native_speech;
 mod notifications;
 mod permission_status;
 mod recording_indicator;
+mod sentry_report;
 mod shortcuts;
 mod silence_detector;
 mod state;
@@ -33,7 +34,10 @@ use state::{
     DictationActive, DictationEnabled, LastTranscript, MeetingActive, PopoverShownAt,
     RecordingActive, TrayAnchor, TrayMeetings, VoiceTargetBundle, VoiceWakePopover,
 };
-use util::{configure_overlay_behavior, is_recording_active, set_capture_included};
+use util::{
+    configure_overlay_behavior, is_recording_active, present_interactive_window,
+    set_capture_included,
+};
 
 // Embedded fallback icon — a tiny 16x16 solid purple PNG so the binary always
 // has *something* to display even if `icons/tray.png` is missing on disk. The
@@ -43,6 +47,8 @@ pub(crate) const TRAY_PNG: &[u8] = include_bytes!("../icons/tray.png");
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    sentry_report::init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Second launch just focuses the popover of the already-running
@@ -52,8 +58,7 @@ pub fn run() {
                 set_capture_included(&window);
                 configure_overlay_behavior(&window);
                 position_popover(app, &window);
-                let _ = window.show();
-                let _ = window.set_focus();
+                present_interactive_window(&window);
             }
         }))
         .invoke_handler(tauri::generate_handler![
@@ -68,7 +73,10 @@ pub fn run() {
             clips::hide_recording_chrome,
             clips::show_region_guides,
             clips::hide_region_guides,
+            clips::show_region_record_border,
+            clips::hide_region_record_border,
             clips::show_region_guide_editor,
+            clips::show_region_capture_selector,
             clips::close_bubble,
             clips::show_popover,
             clips::park_popover_offscreen,
@@ -84,6 +92,9 @@ pub fn run() {
             clips::set_recording_state,
             clips::reset_state,
             clips::save_bubble_position,
+            clips::bubble_drag_start,
+            clips::bubble_drag_move,
+            clips::bubble_drag_end,
             clips::set_bubble_size,
             clips::load_bubble_size,
             // config commands
@@ -97,13 +108,15 @@ pub fn run() {
             native_speech::native_speech_request_permission,
             // native full-screen recording (macOS screencapture, no picker)
             native_screen::native_fullscreen_recording_available,
-            native_screen::native_fullscreen_recording_start,
+            native_screen::native_fullscreen_recording_warm,
+            native_screen::native_fullscreen_recording_begin,
             native_screen::native_fullscreen_capture_thumbnail,
             native_screen::native_fullscreen_recording_stop_and_upload,
             native_screen::native_fullscreen_recording_stop_and_save,
             native_screen::native_fullscreen_recording_cancel,
             native_screen::native_fullscreen_recording_pause,
             native_screen::native_fullscreen_recording_resume,
+            native_screen::native_fullscreen_recording_rotate_segment,
             native_screen::native_fullscreen_pending_uploads,
             native_screen::native_fullscreen_recording_retry_upload,
             native_screen::native_fullscreen_recording_discard_upload,
@@ -155,6 +168,9 @@ pub fn run() {
         .plugin(
             tauri_plugin_autostart::Builder::new()
                 .app_name("Clips")
+                // Tag login-launched processes so startup can stay quiet in the
+                // tray, while a manual launch auto-opens the popover.
+                .args(["--autostart"])
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -302,6 +318,14 @@ pub fn run() {
                         }
                     }
                 });
+            }
+
+            // Auto-open the popover on a manual launch so the app doesn't sit
+            // silently in the tray waiting for a click. Skipped when launched at
+            // login (tagged with `--autostart`) so it doesn't pop up every boot.
+            let launched_at_login = std::env::args().any(|arg| arg == "--autostart");
+            if !launched_at_login {
+                toggle_popover(app.handle());
             }
 
             Ok(())

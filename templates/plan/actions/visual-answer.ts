@@ -15,19 +15,20 @@ import {
 import setResourceVisibilityAction from "@agent-native/core/sharing/actions/set-resource-visibility";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import importVisualPlanSourceAction from "./import-visual-plan-source.js";
-import { planMdxFileSchema } from "../server/plan-mdx.js";
-import {
-  planDeepLink,
-  planSourceSchema,
-  planStatusSchema,
-} from "../server/plans.js";
+
 import { getDb, schema } from "../server/db/index.js";
 import {
   requirePlanOwnerEmailForWrite,
   resolvePlanAccessContext,
   resolvePlanOrgIdForWrite,
 } from "../server/lib/local-identity.js";
+import { planMdxFileSchema } from "../server/plan-mdx.js";
+import {
+  planDeepLink,
+  planSourceSchema,
+  planStatusSchema,
+} from "../server/plans.js";
+import importVisualPlanSourceAction from "./import-visual-plan-source.js";
 
 const sourceUrlSchema = z
   .string()
@@ -162,7 +163,7 @@ export default defineAction({
       .describe("Current focus for the review surface."),
     status: planStatusSchema.optional().default("review"),
     mdx: planMdxFileSchema.describe(
-      "Visual answer source files. Call get-plan-blocks FIRST for the current block catalog and schemas. Derive claims from inspected code only. Use openapi-spec/api-endpoint blocks for API contracts, data-model for schema shape, wireframe for UI answers, diagram for architecture/flows, and annotated-code/file-tree/tabs for code evidence.",
+      "Visual answer source files. Call get-plan-blocks FIRST for the current block catalog and schemas. Derive claims from inspected code only. For multi-state UI/product flows, include canvas.mdx with DesignBoard artboards and Screen HTML wireframes; each canvas Screen must use html/data.html, not nested legacy kit-tree children like FrameScreen/Card/Row/Btn. Use openapi-spec/api-endpoint blocks for API contracts, data-model for schema shape, wireframe for single inline UI answers, diagram for architecture/data-flow mechanics, and annotated-code/file-tree/tabs for code evidence.",
     ),
   }),
   publicAgent: {

@@ -5,20 +5,21 @@ import {
   getRequestUserName,
 } from "@agent-native/core/server/request-context";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
+import { assertGuestCreateWithinLimits } from "../server/lib/guest-abuse.js";
+import {
+  isLocalPlanRuntime,
+  resolvePlanOrgIdForWrite,
+  requirePlanOwnerEmailForWrite,
+} from "../server/lib/local-identity.js";
+import { writePlanLocalFiles } from "../server/lib/local-plan-files.js";
 import {
   createPlanContentFromSections,
   normalizePlanContent,
   sanitizeStoredPlanHtml,
   serializePlanContent,
 } from "../server/plan-content.js";
-import {
-  isLocalPlanRuntime,
-  resolvePlanOrgIdForWrite,
-  requirePlanOwnerEmailForWrite,
-} from "../server/lib/local-identity.js";
-import { assertGuestCreateWithinLimits } from "../server/lib/guest-abuse.js";
-import { writePlanLocalFiles } from "../server/lib/local-plan-files.js";
 import {
   buildPlanHtml,
   commentInputSchema,
@@ -83,7 +84,7 @@ export default defineAction({
       content: planContentSchema
         .optional()
         .describe(
-          "Structured editable plan content. Prefer this for rich text, inline diagrams, annotated code, question-form open questions, and optional canvas/prototype UI surfaces. Call the get-plan-blocks tool FIRST for the authoritative block catalog, authoring rules, and style tokens — do not author from memory. Key rules: use diagram blocks with .diagram-* primitives and --wf-* tokens (no hex/rgb/hsl, no custom fonts); for file maps use annotated-code blocks in a vertical tabs block; put unresolved decisions in a bottom question-form block.",
+          "Structured editable plan content. Prefer this for rich text, inline diagrams, annotated code, question-form open questions, and optional canvas/prototype UI surfaces. Call the get-plan-blocks tool FIRST for the authoritative block catalog, authoring rules, and style tokens — do not author from memory. Key rules: canvas frames use wireframe data.html/html semantic HTML, not legacy kit-tree screen arrays; use diagram blocks with .diagram-* primitives and --wf-* tokens (no hex/rgb/hsl, no custom fonts); for file maps use annotated-code blocks in a vertical tabs block; put unresolved decisions in a bottom question-form block.",
         ),
       markdown: z
         .string()

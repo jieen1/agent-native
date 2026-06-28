@@ -87,6 +87,26 @@ export function useRecordings(args: ListRecordingsArgs = {}) {
   );
 }
 
+/**
+ * Count-only variant for surfaces like the sidebar badge that need a total but
+ * not the rows. Hits `list-recordings` with `countOnly`, so it skips the row
+ * payload server-side and doesn't share (or pay for) the full-list query or its
+ * title polling.
+ */
+export function useRecordingsCount(
+  args: Omit<ListRecordingsArgs, "limit" | "offset"> = {},
+) {
+  return useActionQuery<number>(
+    "list-recordings",
+    { ...args, countOnly: true } as any,
+    {
+      select: (data: any) => (typeof data?.total === "number" ? data.total : 0),
+      retry: false,
+      throwOnError: false,
+    },
+  );
+}
+
 export interface SearchHit {
   id: string;
   title: string;
@@ -149,9 +169,10 @@ export function useDeleteFolder() {
 }
 
 export function useMoveRecording() {
-  return useActionMutation<any, { id: string; folderId?: string | null }>(
-    "move-recording",
-  );
+  return useActionMutation<
+    any,
+    { id?: string; ids?: string[]; folderId?: string | null }
+  >("move-recording");
 }
 
 export function useTrashRecording() {
@@ -191,17 +212,26 @@ export function useTagRecording() {
 // three hooks hit the same endpoint and slice — React Query dedupes identical
 // keys.
 
-export function useOrganizationState(organizationId?: string) {
+export function useOrganizationState(
+  organizationId?: string,
+  options: { enabled?: boolean } = {},
+) {
   return useActionQuery<any>(
     "list-organization-state",
     organizationId ? { organizationId } : undefined,
+    {
+      enabled: options.enabled ?? true,
+    },
   );
 }
 
 export function useFolders(
   args: { organizationId?: string; spaceId?: string | null } = {},
+  options: { enabled?: boolean } = {},
 ) {
-  const { data, isLoading } = useOrganizationState(args.organizationId);
+  const { data, isLoading } = useOrganizationState(args.organizationId, {
+    enabled: options.enabled ?? Boolean(args.organizationId),
+  });
   const all = Array.isArray(data?.folders) ? (data.folders as any[]) : [];
   const folders =
     args.spaceId !== undefined
@@ -212,17 +242,22 @@ export function useFolders(
   return { data: { folders }, isLoading };
 }
 
-export function useSpaces(organizationId?: string) {
-  const { data, isLoading } = useOrganizationState(organizationId);
+export function useSpaces(
+  organizationId?: string,
+  options: { enabled?: boolean } = {},
+) {
+  const { data, isLoading } = useOrganizationState(organizationId, {
+    enabled: options.enabled ?? Boolean(organizationId),
+  });
   const spaces = Array.isArray(data?.spaces) ? (data.spaces as any[]) : [];
   return { data: { spaces }, isLoading };
 }
 
-export function useOrganizations() {
+export function useOrganizations(options: { enabled?: boolean } = {}) {
   // list-organization-state only returns the current organization. We surface
   // it as a single-item list so the switcher has something to render; the
   // framework team will replace this with a proper `list-organizations` later.
-  const { data, isLoading } = useOrganizationState();
+  const { data, isLoading } = useOrganizationState(undefined, options);
   const organizations = data?.organization ? [data.organization] : [];
   return {
     data: { organizations, currentId: data?.organization?.id },
