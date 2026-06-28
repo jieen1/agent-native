@@ -78,6 +78,14 @@ export default defineAction({
       })
       .where(eq(schema.stages.id, stage.id));
 
+    // When the final 交付 stage completes, mark the work item as done
+    if (args.stageName === "交付") {
+      await db
+        .update(schema.workItems)
+        .set({ status: "done", updatedAt: now })
+        .where(eq(schema.workItems.id, args.workItemId));
+    }
+
     // Activity log
     await db.insert(schema.activities).values({
       id: `act_cmp_${args.workItemId.slice(0, 6)}_${args.stageName}_${now.replace(/\D/g, "").slice(0, 14)}`,

@@ -2,13 +2,13 @@ import { createAuthPlugin } from "@agent-native/core/server";
 
 export default createAuthPlugin({
   marketing: {
-    appName: "Agent-Native Forms",
+    appName: "Tracker",
     tagline:
-      "Your AI agent builds, publishes, and analyzes forms alongside you.",
+      "AI-powered project and work-item tracker with autonomous execution.",
     features: [
-      "Create complete forms from a single sentence",
-      "Instant publishing with shareable links and captcha",
-      "Response summaries, exports, and trend analysis on demand",
+      "Create projects, sprints, and work items in seconds",
+      "Dispatch tasks to the Orchestrator brain for autonomous execution",
+      "Track progress, activity, and completion across your team",
     ],
   },
   publicPaths: ["/f", "/api/forms/public", "/api/forms/og", "/api/submit"],
