@@ -3,7 +3,8 @@
 // nodes, spawns, artifacts, and events.
 
 import { defineAction } from "@agent-native/core";
-import { eq, sql } from "drizzle-orm";
+import { getRequestUserEmail } from "@agent-native/core/server/request-context";
+import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getV3Db, v3Schema } from "../server/db/v3.js";
 
@@ -18,7 +19,11 @@ export const runArchive = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    // Verify the run exists and is in a terminal state
+    // Verify the run exists and is in a terminal state — scope to caller.
+    const callerEmail = getRequestUserEmail();
+    const runFilter = callerEmail
+      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
+      : eq(v3Schema.v3Runs.id, args.runId);
     const runRows = await db
       .select({
         id: v3Schema.v3Runs.id,
@@ -26,7 +31,7 @@ export const runArchive = defineAction({
         archived: v3Schema.v3Runs.archived,
       })
       .from(v3Schema.v3Runs)
-      .where(eq(v3Schema.v3Runs.id, args.runId))
+      .where(runFilter)
       .limit(1);
 
     if (!runRows.length) {

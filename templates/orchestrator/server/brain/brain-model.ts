@@ -14,6 +14,66 @@ import { getSetting, putSetting } from "@agent-native/core/settings";
 export const BRAIN_MODEL_KEY = "brain-model";
 
 /**
+ * Settings key controlling which model tier is permitted for the CC subscription
+ * brain. Defaults to "sonnet" (Opus blocked); can be relaxed to "all".
+ */
+export const BRAIN_MODEL_TIER_KEY = "brain-model-tier";
+
+/** Tier values: "sonnet" = Sonnet + Haiku only; "all" = full model list. */
+export type BrainModelTier = "sonnet" | "all";
+
+const OPUS_MODELS = new Set([
+  "claude-opus-4-8",
+  "claude-opus-4-8[1m]",
+  "claude-opus-4-7[1m]",
+  "claude-opus-4-6[1m]",
+  "claude-opus-4-5",
+  "opus",
+  "opus[1m]",
+]);
+
+/** Return the subset of ACCEPTED_BRAIN_MODELS allowed for the given tier. */
+export function getAllowedBrainModels(
+  tier: BrainModelTier,
+): readonly string[] {
+  if (tier === "all") return ACCEPTED_BRAIN_MODELS;
+  return ACCEPTED_BRAIN_MODELS.filter((m) => !OPUS_MODELS.has(m));
+}
+
+/** True if `model` is allowed under `tier`. */
+export function isModelAllowedInTier(
+  model: string,
+  tier: BrainModelTier,
+): boolean {
+  if (tier === "all") return true;
+  return !OPUS_MODELS.has(model);
+}
+
+/**
+ * Read the saved model tier. Defaults to "sonnet" (Opus blocked) when unset.
+ */
+export async function getBrainModelTier(): Promise<BrainModelTier> {
+  let raw: unknown = null;
+  try {
+    raw = await getSetting(BRAIN_MODEL_TIER_KEY);
+  } catch {
+    return "sonnet";
+  }
+  const value =
+    raw && typeof raw === "object" ? (raw as { tier?: unknown }).tier : raw;
+  if (value === "all") return "all";
+  return "sonnet";
+}
+
+/** Persist the model tier. */
+export async function setBrainModelTier(
+  tier: BrainModelTier,
+): Promise<BrainModelTier> {
+  await putSetting(BRAIN_MODEL_TIER_KEY, { tier });
+  return tier;
+}
+
+/**
  * The model ids + aliases the local `claude` CLI accepts (verified against the
  * an-orchestrator container). Concrete ids carry the `[1m]` context-window
  * suffix where the CLI exposes the 1M window; the bare aliases (`opus`,
@@ -22,6 +82,7 @@ export const BRAIN_MODEL_KEY = "brain-model";
  */
 export const ACCEPTED_BRAIN_MODELS = [
   "claude-opus-4-8",
+  "claude-opus-4-8[1m]",
   "claude-opus-4-7[1m]",
   "claude-opus-4-6[1m]",
   "claude-opus-4-5",
@@ -42,7 +103,8 @@ export type BrainModelId = (typeof ACCEPTED_BRAIN_MODELS)[number];
 export const BRAIN_MODEL_LABELS: Record<string, string> = {
   "": "CLI default",
   default: "CLI default (alias)",
-  "claude-opus-4-8": "Opus 4.8 (1M)",
+  "claude-opus-4-8": "Opus 4.8",
+  "claude-opus-4-8[1m]": "Opus 4.8 (1M)",
   "claude-opus-4-7[1m]": "Opus 4.7 (1M)",
   "claude-opus-4-6[1m]": "Opus 4.6 (1M)",
   "claude-opus-4-5": "Opus 4.5",

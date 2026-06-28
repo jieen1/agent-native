@@ -3,6 +3,7 @@ name: claude-code
 description: General coding/reasoning agent powered by the connected Claude Code subscription.
 runtime: acp:claude-code
 engine: claude-code
+model: claude-sonnet-4-6
 tools: [Read, Edit, Write, Bash, Glob, Grep]
 max_summary_tokens: 2000
 ---

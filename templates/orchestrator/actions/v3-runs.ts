@@ -1,4 +1,5 @@
 import { defineAction } from "@agent-native/core";
+import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { z } from "zod";
 import { getV3Db, v3Schema } from "../server/db/v3.js";
@@ -28,6 +29,14 @@ export const runsList = defineAction({
   run: async (args) => {
     const db = getV3Db();
     const conditions: Array<import("drizzle-orm").SQL> = [];
+
+    // Scope to the authenticated caller — prevents cross-tenant run enumeration.
+    // Unauthenticated A2A callers (requiresAuth: false) see all runs for
+    // backwards-compatible cross-app tag-match read-back (design §16).
+    const callerEmail = getRequestUserEmail();
+    if (callerEmail) {
+      conditions.push(eq(v3Schema.v3Runs.ownerEmail, callerEmail));
+    }
 
     if (args.status) {
       conditions.push(eq(v3Schema.v3Runs.status, args.status as any));
@@ -87,10 +96,15 @@ export const runState = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
+    const callerEmail = getRequestUserEmail();
+    const runFilter = callerEmail
+      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
+      : eq(v3Schema.v3Runs.id, args.runId);
+
     const runRows = await db
       .select()
       .from(v3Schema.v3Runs)
-      .where(eq(v3Schema.v3Runs.id, args.runId))
+      .where(runFilter)
       .limit(1);
     if (!runRows.length) throw new Error(`Run '${args.runId}' not found`);
     const run = runRows[0];
@@ -134,10 +148,14 @@ export const runCancel = defineAction({
   }),
   run: async (args) => {
     const db = getV3Db();
+    const callerEmail = getRequestUserEmail();
+    const runFilter = callerEmail
+      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
+      : eq(v3Schema.v3Runs.id, args.runId);
     const rows = await db
       .select({ id: v3Schema.v3Runs.id, status: v3Schema.v3Runs.status })
       .from(v3Schema.v3Runs)
-      .where(eq(v3Schema.v3Runs.id, args.runId))
+      .where(runFilter)
       .limit(1);
 
     if (!rows.length) throw new Error(`Run '${args.runId}' not found`);
@@ -195,10 +213,14 @@ async function updateRunStatus(
   allowedPrevious: string[],
 ): Promise<void> {
   const db = getV3Db();
+  const callerEmail = getRequestUserEmail();
+  const runFilter = callerEmail
+    ? and(eq(v3Schema.v3Runs.id, runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
+    : eq(v3Schema.v3Runs.id, runId);
   const rows = await db
     .select({ id: v3Schema.v3Runs.id, status: v3Schema.v3Runs.status })
     .from(v3Schema.v3Runs)
-    .where(eq(v3Schema.v3Runs.id, runId))
+    .where(runFilter)
     .limit(1);
 
   if (!rows.length) throw new Error(`Run '${runId}' not found`);

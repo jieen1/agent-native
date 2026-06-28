@@ -1,7 +1,26 @@
 import { defineAction } from "@agent-native/core";
+import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, desc, asc, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getV3Db, v3Schema } from "../server/db/v3.js";
+
+/** Returns a WHERE clause that constrains runId + owner when authenticated. */
+function runOwnerFilter(runId: string) {
+  const callerEmail = getRequestUserEmail();
+  return callerEmail
+    ? and(eq(v3Schema.v3Runs.id, runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
+    : eq(v3Schema.v3Runs.id, runId);
+}
+
+/** Verifies run exists and belongs to caller; throws if not found. */
+async function assertRunAccess(db: ReturnType<typeof getV3Db>, runId: string): Promise<void> {
+  const rows = await db
+    .select({ id: v3Schema.v3Runs.id })
+    .from(v3Schema.v3Runs)
+    .where(runOwnerFilter(runId))
+    .limit(1);
+  if (!rows.length) throw new Error(`Run '${runId}' not found`);
+}
 
 /**
  * List all node rows for a V3 run. Returns node id, nodeIdInDag, type, status,
@@ -17,6 +36,7 @@ export const v3RunNodes = defineAction({
   http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
+    await assertRunAccess(db, args.runId);
 
     const rows = await db
       .select({
@@ -75,7 +95,7 @@ export const v3RunDag = defineAction({
     const runRows = await db
       .select({ dag: v3Schema.v3Runs.dag })
       .from(v3Schema.v3Runs)
-      .where(eq(v3Schema.v3Runs.id, args.runId))
+      .where(runOwnerFilter(args.runId))
       .limit(1);
 
     if (!runRows.length) {
@@ -116,6 +136,7 @@ export const v3RunPatches = defineAction({
   http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
+    await assertRunAccess(db, args.runId);
 
     const rows = await db
       .select({
@@ -159,6 +180,7 @@ export const v3RunEvents = defineAction({
   http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
+    await assertRunAccess(db, args.runId);
 
     const rows = await db
       .select({
@@ -192,6 +214,7 @@ export const nodeRetry = defineAction({
   }),
   run: async (args) => {
     const db = getV3Db();
+    await assertRunAccess(db, args.runId);
     const rows = await db
       .select({ id: v3Schema.v3Nodes.id, status: v3Schema.v3Nodes.status })
       .from(v3Schema.v3Nodes)
@@ -233,6 +256,7 @@ export const nodeSkip = defineAction({
   }),
   run: async (args) => {
     const db = getV3Db();
+    await assertRunAccess(db, args.runId);
     const rows = await db
       .select({ id: v3Schema.v3Nodes.id, status: v3Schema.v3Nodes.status })
       .from(v3Schema.v3Nodes)
@@ -277,6 +301,7 @@ export const nodeResolveGate = defineAction({
   }),
   run: async (args) => {
     const db = getV3Db();
+    await assertRunAccess(db, args.runId);
 
     // Load node row
     const rows = await db

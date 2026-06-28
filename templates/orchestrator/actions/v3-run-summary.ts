@@ -9,6 +9,7 @@
  */
 
 import { defineAction } from "@agent-native/core";
+import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getV3Db, v3Schema } from "../server/db/v3.js";
@@ -26,7 +27,11 @@ export const runSummary = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    // Load run row
+    // Load run row — scope to caller to prevent cross-tenant reads.
+    const callerEmail = getRequestUserEmail();
+    const runFilter = callerEmail
+      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
+      : eq(v3Schema.v3Runs.id, args.runId);
     const runRows = await db
       .select({
         id: v3Schema.v3Runs.id,
@@ -40,7 +45,7 @@ export const runSummary = defineAction({
         completedAt: v3Schema.v3Runs.completedAt,
       })
       .from(v3Schema.v3Runs)
-      .where(eq(v3Schema.v3Runs.id, args.runId))
+      .where(runFilter)
       .limit(1);
 
     if (!runRows.length) throw new Error(`Run '${args.runId}' not found`);

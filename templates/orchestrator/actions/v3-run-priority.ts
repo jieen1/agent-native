@@ -9,7 +9,8 @@
  */
 
 import { defineAction } from "@agent-native/core";
-import { eq } from "drizzle-orm";
+import { getRequestUserEmail } from "@agent-native/core/server/request-context";
+import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { getV3Db, v3Schema } from "../server/db/v3.js";
 
@@ -26,10 +27,14 @@ export const runPriority = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
+    const callerEmail = getRequestUserEmail();
+    const runFilter = callerEmail
+      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
+      : eq(v3Schema.v3Runs.id, args.runId);
     const rows = await db
       .select({ id: v3Schema.v3Runs.id, status: v3Schema.v3Runs.status, priority: v3Schema.v3Runs.priority })
       .from(v3Schema.v3Runs)
-      .where(eq(v3Schema.v3Runs.id, args.runId))
+      .where(runFilter)
       .limit(1);
 
     if (!rows.length) throw new Error(`Run '${args.runId}' not found`);
