@@ -213,10 +213,10 @@ export function BoardPage() {
   const currentSprint = sprints.find((s) => s.status === "进行中");
 
   // Filter state
-  const [selectedSprintId, setSelectedSprintId] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState("");
-  const [riskFilter, setRiskFilter] = useState("");
+  const [selectedSprintId, setSelectedSprintId] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [riskFilter, setRiskFilter] = useState("all");
   const [search, setSearch] = useState("");
 
   // Derive unique filter values from items
@@ -238,11 +238,11 @@ export function BoardPage() {
   // Apply all filters
   const filteredItems = useMemo(() => {
     return items.filter((it) => {
-      if (selectedSprintId && it.sprintId !== selectedSprintId) return false;
-      if (typeFilter && it.type !== typeFilter) return false;
-      if (priorityFilter && it.priority !== Number(priorityFilter))
+      if (selectedSprintId !== "all" && it.sprintId !== selectedSprintId) return false;
+      if (typeFilter !== "all" && it.type !== typeFilter) return false;
+      if (priorityFilter !== "all" && it.priority !== Number(priorityFilter))
         return false;
-      if (riskFilter && it.risk !== riskFilter) return false;
+      if (riskFilter !== "all" && it.risk !== riskFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         if (
@@ -312,7 +312,7 @@ export function BoardPage() {
             <SelectValue placeholder="全部 Sprint" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">全部 Sprint</SelectItem>
+            <SelectItem value="all">全部 Sprint</SelectItem>
             {sprints.map((s) => (
               <SelectItem key={s.id} value={s.id}>
                 {s.name}
@@ -326,7 +326,7 @@ export function BoardPage() {
             <SelectValue placeholder="全部类型" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">全部类型</SelectItem>
+            <SelectItem value="all">全部类型</SelectItem>
             {uniqueTypes.map((t) => (
               <SelectItem key={t} value={t}>
                 {t}
@@ -340,7 +340,7 @@ export function BoardPage() {
             <SelectValue placeholder="全部优先级" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">全部优先级</SelectItem>
+            <SelectItem value="all">全部优先级</SelectItem>
             {uniquePriorities.map((p) => (
               <SelectItem key={p} value={String(p)}>
                 {PRIORITY_LABELS[p] ?? `P${p}`}
@@ -354,7 +354,7 @@ export function BoardPage() {
             <SelectValue placeholder="全部风险" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">全部风险</SelectItem>
+            <SelectItem value="all">全部风险</SelectItem>
             <SelectItem value="low">低</SelectItem>
             <SelectItem value="medium">中</SelectItem>
             <SelectItem value="high">高</SelectItem>
