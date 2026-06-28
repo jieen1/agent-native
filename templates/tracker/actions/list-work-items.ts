@@ -22,11 +22,16 @@ export default defineAction({
       .select({
         id: schema.workItems.id,
         projectId: schema.workItems.projectId,
+        sprintId: schema.workItems.sprintId,
+        itemKey: schema.workItems.itemKey,
         type: schema.workItems.type,
         title: schema.workItems.title,
         description: schema.workItems.description,
         status: schema.workItems.status,
         priority: schema.workItems.priority,
+        risk: schema.workItems.risk,
+        tags: schema.workItems.tags,
+        currentStageName: schema.workItems.currentStageName,
         orchestratorThreadId: schema.workItems.orchestratorThreadId,
         dispatchedAt: schema.workItems.dispatchedAt,
         createdAt: schema.workItems.createdAt,
@@ -35,6 +40,9 @@ export default defineAction({
       .from(schema.workItems)
       .where(where)
       .orderBy(desc(schema.workItems.updatedAt));
-    return rows;
+    return rows.map((r) => ({
+      ...r,
+      tags: (() => { try { return JSON.parse(r.tags ?? "[]"); } catch { return []; } })(),
+    }));
   },
 });
