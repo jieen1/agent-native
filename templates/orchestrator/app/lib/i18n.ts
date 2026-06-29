@@ -67,6 +67,8 @@ const en = {
     claudeConnect: "Connect",
     claudeDisconnect: "Disconnect",
     claudeConnectTitle: "Connect Claude Code",
+    claudeSessionWarning:
+      "⚠ Important: Use a dedicated Claude account for this orchestrator — do NOT use the same account as your local Claude Code CLI. The two share the same OAuth client ID, so logging in here will invalidate your local CLI session.",
     claudeOpenAuth: "Open authorization page",
     claudeCodePlaceholder: "Authorization code",
     claudeComplete: "Complete",
@@ -772,6 +774,8 @@ const zh: typeof en = {
     claudeConnect: "连接",
     claudeDisconnect: "断开",
     claudeConnectTitle: "连接 Claude Code",
+    claudeSessionWarning:
+      "⚠ 重要提示：请为此 orchestrator 使用专用的 Claude 账号，不要使用与本地 Claude Code CLI 相同的账号。两者共用同一个 OAuth client ID，在此登录会使本地 CLI 的会话失效。",
     claudeOpenAuth: "打开授权页面",
     claudeCodePlaceholder: "授权码",
     claudeComplete: "完成",
