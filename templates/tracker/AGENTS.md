@@ -1,87 +1,75 @@
-# Forms — Agent Guide
+# Tracker — Agent Guide
 
-Forms is an agent-native form builder and response workspace. The agent creates,
-edits, publishes, shares, and analyzes forms through actions and SQL-backed state.
-The first screen is the chat: start by helping the user build, set up, inspect,
-or analyze their form workspace, then navigate into app views when a richer
-editor or table is useful.
+Tracker is an agent-native project management app for tracking requirements,
+defects, tasks, and incidents through a 7-stage pipeline:
+**待办 → 分析 → 设计 → 实施 → 测试 → 验收 → 交付**
 
-Detailed building, publishing, response, storage, and UI rules live in
-`.agents/skills/`.
+Status moves only by explicit human or agent action. No automatic inference.
 
-## Core Rules
+## Action Surface
 
-- Never hardcode API keys, tokens, webhook URLs, signing secrets, private Builder/internal data, customer data, or credential-looking literals. Use secrets/OAuth/runtime configuration and obvious placeholders in examples.
-- Use actions for form lifecycle, fields, publishing, responses, navigation,
-  sharing, and database work. Do not bypass ownable access checks.
-- In dev, call actions with `pnpm action <name>`; in production, use native
-  tools. The action schema is authoritative.
-- Use `view-screen` when the active form, selected field, publish state, or
-  response table is unclear.
-- For response analytics, call `response-insights` instead of inventing SQL.
-  Pass `displayMode: "chart"` for chart-only requests, `displayMode: "table"`
-  only when the user asks for a table/rows, and `displayMode: "insights"` for
-  combined dashboard/report requests.
-- For form setup/configuration previews, call `preview-form`. It returns a
-  native inline summary/table and an "Open editor" expansion path.
-- Form UX should stay focused: clear labels, sensible validation, minimal
-  required fields, and progressive disclosure for advanced settings.
-- Public form submission endpoints must be intentionally public; keep management
-  routes authenticated.
-- Use framework sharing actions for forms and response resources.
+**Projects & Work Items:**
+- `create-project`, `list-projects` — project management
+- `create-work-item`, `get-work-item`, `list-work-items`, `update-work-item`, `delete-work-item` — CRUD
+- `view-screen`, `navigate`, `refresh-list` — understand what the user is looking at
 
-## Response Language
+**7-Stage Pipeline:**
+- `trigger-stage` — advance to the next stage (creates a stage run)
+- `complete-stage` — mark current stage complete and advance status
+- `rollback-stage` — revert to prior stage
+- `list-stages` — read stage history for a work item
 
-- Always respond in the user's interface language. The user's locale lives in
-  `application_state` under key `locale` (value `{ "locale": "zh-CN" }` or
-  `{ "locale": "en" }`).
-- If the locale isn't already visible in your context, read it (e.g. `db-query`:
-  `SELECT value FROM application_state WHERE key = 'locale'`, or the
-  `view-screen` / app-state tool).
-- `zh-CN` → reply in 简体中文; `en` → reply in English. Default to English if
-  unset.
-- Match the user's UI language for all natural-language prose (explanations,
-  summaries, confirmations). Keep code, identifiers, file paths, API/SQL
-  keywords, and proper nouns (brand/model names) unchanged. Mirror the language
-  the user writes in if it differs from the stored locale.
+**Comments & Links:**
+- `add-comment`, `list-comments` — discussion threads per work item
+- `add-link`, `list-links` — typed relationships (blocks/blocked-by/duplicate-of/relates-to)
+
+**Artifacts:**
+- `create-artifact`, `list-artifacts` — attach files/designs/playbooks to items
+
+**Sprints:**
+- `create-sprint`, `update-sprint`, `get-sprint`, `list-sprints` — sprint management
+
+**Orchestrator Dispatch:**
+- `dispatch-to-orchestrator` — send a work item to orchestrator brain for AI execution
+- `bulk-dispatch-to-orchestrator` — dispatch multiple items
+- `list-tracker-activities` — poll orchestrator activity tagged to an item
+- `enqueue-work-item`, `dequeue-work-item`, `list-queue` — manage execution queue
 
 ## Application State
 
-- `navigation` exposes home chat, builder, published form, responses,
-  response-insights, selected field, and builder tab context
-  (`activeTab`: `edit`, `responses`, `settings`, or `integrations`).
-- `navigate` moves the UI between home, forms, builder, responses,
-  response-insights, preview, and team/settings-style views. For builder
-  sub-tabs, call `navigate` with `view=form`, the form ID, and
-  `tab=edit|responses|settings|integrations`.
+- `navigation` describes current view: `board`, `item` (with `id`), `new-item`,
+  `projects`, `sprints`, `sprint` (with `id`), `queue`, `team`
+- `navigate` moves the UI. `view-screen` reports what the user sees.
 
-## Chat-First Workflow
+## Stage Pipeline Rules
 
-- The `/` route is the primary chat surface. Use it to ask clarifying questions,
-  create or edit forms, explain setup, and surface response insights.
-- When the user needs a focused workspace, call `navigate` to open `/forms`,
-  `/forms/:id?tab=edit`, `/forms/:id?tab=responses`,
-  `/forms/:id?tab=settings`, `/forms/:id?tab=integrations`,
-  `/forms/:id/responses`, or `/response-insights`.
-- When the user asks to see, open, or view all responses for a form, navigate to
-  the responses view instead of rendering response rows in chat. Use the current
-  form from `view-screen` or an @-tagged form ID.
-- For setup questions, inspect the current state first. Use `db-status` and
-  `db-connect` for database/cloud setup, and form actions for publishing,
-  fields, sharing, and response review.
-- When the user @-tags a form, use the referenced form ID directly with
-  `preview-form`, `response-insights`, `list-responses`, or `navigate`.
-- For tables or charts in chat, use typed action results. `response-insights`
-  is the first-party path for native response tables and submission charts, but
-  do not include both unless the user asked for both; iframe/MCP App rendering
-  is only a fallback for external hosts.
+When working on a task, move it through the 7 stages:
+1. `trigger-stage` to start each stage (creates a stage run record)
+2. `complete-stage` to finish a stage and advance `currentStageName`
+3. Dispatch to orchestrator for AI execution after 分析/设计
+4. Use `rollback-stage` if a stage needs to be redone
+
+## Key Conventions
+
+- Work items are created with `priority` (1=P0 to 4=P3) and `risk` (low/medium/high)
+- `itemKey` is auto-assigned (e.g. `PRJ-001`) — never set manually
+- Sprint status: 规划 → 进行中 → 已完成 → 已发布
+- Tags are free-form strings on work items
+- Work item `type`: `需求` (requirement), `缺陷` (bug), `任务` (task), `事故` (incident)
+- For AI execution: dispatch to orchestrator; orchestrator brain handles the run
+- The board groups by `currentStageName` — this is the primary visual
+
+## Response Language
+
+- Always respond in the user's language. If context has zh-CN → reply in 简体中文.
+- Keep code, identifiers, and file paths in their original language.
 
 ## Skills
 
 Read the relevant skill before deeper work:
 
-- `form-building` for schema/field creation and edits.
-- `form-publishing` for public forms, submission behavior, and sharing.
-- `form-responses` for response review and analysis.
-- `storing-data`, `real-time-sync`, `security`, `actions`, `frontend-design`,
-  and `shadcn-ui` for framework work.
+- `actions` for defining and calling actions
+- `storing-data`, `real-time-sync`, `security` for data work
+- `frontend-design`, `shadcn-ui` for UI changes
+- `self-modifying-code` for source edits
+- `delegate-to-agent` for AI delegation patterns

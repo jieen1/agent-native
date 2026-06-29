@@ -1,11 +1,32 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router";
-import { useActivity, useDispatch, useStages, useWorkItem } from "@/hooks/use-tracker";
+import { useParams, Link, useNavigate } from "react-router";
+import {
+  useActivity,
+  useComments,
+  useAddComment,
+  useLinks,
+  useAddLink,
+  useTrackerActivities,
+  useUpdateWorkItem,
+  useDeleteWorkItem,
+  useDispatch,
+  useStages,
+  useWorkItem,
+  useSprints,
+} from "@/hooks/use-tracker";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Tooltip,
   TooltipContent,
@@ -18,17 +39,23 @@ import {
   IconBrandGithub,
   IconCheck,
   IconClock,
+  IconEdit,
   IconExternalLink,
   IconFlag,
   IconGitBranch,
   IconHash,
   IconLayoutKanban,
+  IconLink,
   IconListCheck,
   IconLoader2,
   IconMessageCircle,
+  IconPlus,
   IconRocket,
   IconStack2,
   IconTag,
+  IconTimeline,
+  IconUser,
+  IconTrash,
   IconX,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
@@ -45,7 +72,15 @@ import {
 
 // ── Stage stepper ────────────────────────────────────────────────────────────
 
-const STAGE_NODES = ["待办", "分析", "设计", "实施", "测试", "验收", "交付"] as const;
+const STAGE_NODES = [
+  "待办",
+  "分析",
+  "设计",
+  "实施",
+  "测试",
+  "验收",
+  "交付",
+] as const;
 
 function StageNode({ status, name }: { status: string; name: string }) {
   if (status === "已完成") {
@@ -54,7 +89,9 @@ function StageNode({ status, name }: { status: string; name: string }) {
         <div className="size-5 rounded-full bg-emerald-500 flex items-center justify-center">
           <IconCheck className="size-3 text-white" strokeWidth={3} />
         </div>
-        <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">{name}</span>
+        <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+          {name}
+        </span>
       </div>
     );
   }
@@ -64,7 +101,9 @@ function StageNode({ status, name }: { status: string; name: string }) {
         <div className="size-5 rounded-full bg-blue-500 flex items-center justify-center ring-4 ring-blue-500/20">
           <span className="size-2 rounded-full bg-white animate-pulse" />
         </div>
-        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{name}</span>
+        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
+          {name}
+        </span>
       </div>
     );
   }
@@ -84,7 +123,9 @@ function StageNode({ status, name }: { status: string; name: string }) {
         <div className="size-5 rounded-full border-2 border-dashed border-slate-400 flex items-center justify-center">
           <span className="text-[10px] text-slate-400">—</span>
         </div>
-        <span className="text-[10px] font-medium text-slate-400 line-through">{name}</span>
+        <span className="text-[10px] font-medium text-slate-400 line-through">
+          {name}
+        </span>
       </div>
     );
   }
@@ -92,18 +133,28 @@ function StageNode({ status, name }: { status: string; name: string }) {
   return (
     <div className="flex flex-col items-center gap-1.5 relative z-10">
       <div className="size-5 rounded-full border-2 border-slate-300 dark:border-slate-600" />
-      <span className="text-[10px] font-medium text-muted-foreground">{name}</span>
+      <span className="text-[10px] font-medium text-muted-foreground">
+        {name}
+      </span>
     </div>
   );
 }
 
 function StageLine({ prevDone }: { prevDone: boolean }) {
-  return prevDone
-    ? <div className="flex-1 h-px bg-emerald-500 my-2.5" />
-    : <div className="flex-1 h-px border border-dashed border-slate-300 dark:border-slate-600 my-2.5" />;
+  return prevDone ? (
+    <div className="flex-1 h-px bg-emerald-500 my-2.5" />
+  ) : (
+    <div className="flex-1 h-px border border-dashed border-slate-300 dark:border-slate-600 my-2.5" />
+  );
 }
 
-function StageProgressCard({ workItemId, currentStageName }: { workItemId: string; currentStageName: string }) {
+function StageProgressCard({
+  workItemId,
+  currentStageName,
+}: {
+  workItemId: string;
+  currentStageName: string;
+}) {
   const { data, isLoading } = useStages(workItemId);
   const stages: any[] = Array.isArray(data) ? data : [];
   const stageMap: Record<string, string> = {};
@@ -121,19 +172,22 @@ function StageProgressCard({ workItemId, currentStageName }: { workItemId: strin
     交付: stageMap["交付"] ?? "待执行",
   };
 
-  const currentLabel = nodeStatuses[currentStageName] === "执行中"
-    ? `${currentStageName} · 执行中`
-    : currentStageName === "交付" && nodeStatuses["交付"] === "已完成"
-      ? "交付 · 已完成"
-      : `${currentStageName}`;
+  const currentLabel =
+    nodeStatuses[currentStageName] === "执行中"
+      ? `${currentStageName} · 执行中`
+      : currentStageName === "交付" && nodeStatuses["交付"] === "已完成"
+        ? "交付 · 已完成"
+        : `${currentStageName}`;
 
-  const currentBadgeClass = nodeStatuses[currentStageName] === "已完成" || currentStageName === "交付"
-    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-500/30"
-    : "bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-1 ring-inset ring-blue-500/30";
+  const currentBadgeClass =
+    nodeStatuses[currentStageName] === "已完成" || currentStageName === "交付"
+      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-500/30"
+      : "bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-1 ring-inset ring-blue-500/30";
 
-  const currentDot = nodeStatuses[currentStageName] === "已完成"
-    ? "bg-emerald-500"
-    : "bg-blue-500 animate-pulse";
+  const currentDot =
+    nodeStatuses[currentStageName] === "已完成"
+      ? "bg-emerald-500"
+      : "bg-blue-500 animate-pulse";
 
   if (isLoading) {
     return (
@@ -152,7 +206,8 @@ function StageProgressCard({ workItemId, currentStageName }: { workItemId: strin
       <div className="flex items-start">
         {STAGE_NODES.map((name, i) => {
           const st = nodeStatuses[name];
-          const prevDone = i === 0 ? false : nodeStatuses[STAGE_NODES[i - 1]] === "已完成";
+          const prevDone =
+            i === 0 ? false : nodeStatuses[STAGE_NODES[i - 1]] === "已完成";
           return (
             <>
               {i > 0 && <StageLine key={`line-${i}`} prevDone={prevDone} />}
@@ -165,7 +220,12 @@ function StageProgressCard({ workItemId, currentStageName }: { workItemId: strin
       {/* Current stage badge */}
       <div className="mt-4 flex items-center gap-2">
         <span className="text-xs text-muted-foreground">当前:</span>
-        <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium", currentBadgeClass)}>
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
+            currentBadgeClass,
+          )}
+        >
           <span className={cn("size-1.5 rounded-full", currentDot)} />
           {currentLabel}
         </span>
@@ -197,6 +257,246 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
+// ── Comments panel ────────────────────────────────────────────────────────────
+
+function CommentsPanel({ workItemId }: { workItemId: string }) {
+  const { data, isLoading } = useComments(workItemId);
+  const addComment = useAddComment();
+  const [text, setText] = useState("");
+
+  const comments: any[] = Array.isArray(data) ? data : [];
+
+  function submit() {
+    const body = text.trim();
+    if (!body) return;
+    addComment.mutate(
+      { workItemId, body },
+      {
+        onSuccess: () => {
+          setText("");
+          toast.success("评论已添加");
+        },
+      },
+    );
+  }
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2">
+        <IconMessageCircle className="size-3.5 text-muted-foreground" />
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          评论{comments.length > 0 ? ` (${comments.length})` : ""}
+        </h2>
+      </div>
+      <div className="space-y-3">
+        {isLoading ? (
+          <div className="h-12 animate-pulse rounded-lg bg-muted/40" />
+        ) : comments.length === 0 ? (
+          <p className="text-xs text-muted-foreground/60 py-2">暂无评论。</p>
+        ) : (
+          comments.map((c: any) => (
+            <div
+              key={c.id}
+              className="rounded-lg border border-border bg-card/40 p-3"
+            >
+              <div className="mb-1.5 flex items-center gap-2">
+                <IconUser className="size-3 shrink-0 text-muted-foreground" />
+                <span className="text-xs font-medium">{c.authorName}</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">
+                  {fmtDateTime(c.createdAt)}
+                </span>
+              </div>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                {c.body}
+              </p>
+            </div>
+          ))
+        )}
+        <div className="flex flex-col gap-2">
+          <Textarea
+            placeholder="写下评论… (Ctrl+Enter 发送)"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={2}
+            className="resize-none text-sm"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit();
+            }}
+          />
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              onClick={submit}
+              disabled={!text.trim() || addComment.isPending}
+              className="gap-1.5"
+            >
+              {addComment.isPending ? (
+                <IconLoader2 className="size-3.5 animate-spin" />
+              ) : (
+                <IconPlus className="size-3.5" />
+              )}
+              发表评论
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Links panel ───────────────────────────────────────────────────────────────
+
+const LINK_TYPE_LABELS: Record<string, string> = {
+  blocks: "阻塞",
+  "blocked-by": "被阻塞",
+  "duplicate-of": "重复",
+  "relates-to": "关联",
+  "depends-on": "依赖",
+};
+
+function LinksPanel({ workItemId }: { workItemId: string }) {
+  const { data, isLoading } = useLinks(workItemId);
+  const addLink = useAddLink();
+  const [toItemId, setToItemId] = useState("");
+  const [linkType, setLinkType] = useState("relates-to");
+
+  const links: any[] = Array.isArray(data) ? data : [];
+
+  function submit() {
+    const target = toItemId.trim();
+    if (!target) return;
+    addLink.mutate(
+      { fromItemId: workItemId, toItemId: target, linkType },
+      {
+        onSuccess: () => {
+          setToItemId("");
+          toast.success("关联已添加");
+        },
+      },
+    );
+  }
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2">
+        <IconLink className="size-3.5 text-muted-foreground" />
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          关联{links.length > 0 ? ` (${links.length})` : ""}
+        </h2>
+      </div>
+      <div className="space-y-2">
+        {isLoading ? (
+          <div className="h-10 animate-pulse rounded-lg bg-muted/40" />
+        ) : links.length === 0 ? (
+          <p className="text-xs text-muted-foreground/60 py-1">
+            暂无关联工作项。
+          </p>
+        ) : (
+          links.map((l: any) => (
+            <div
+              key={l.id}
+              className="flex items-center gap-2 rounded-lg border border-border bg-card/40 px-3 py-2"
+            >
+              <span className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {LINK_TYPE_LABELS[l.linkType] ?? l.linkType}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {l.direction === "from" ? "→" : "←"}
+              </span>
+              <span className="text-xs font-medium truncate">
+                {l.otherItemTitle || l.otherItemId}
+              </span>
+            </div>
+          ))
+        )}
+        <div className="flex gap-2">
+          <Input
+            placeholder="目标工作项 ID"
+            value={toItemId}
+            onChange={(e) => setToItemId(e.target.value)}
+            className="h-8 text-xs flex-1"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+            }}
+          />
+          <Select value={linkType} onValueChange={setLinkType}>
+            <SelectTrigger className="h-8 w-[110px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(LINK_TYPE_LABELS).map(([v, l]) => (
+                <SelectItem key={v} value={v} className="text-xs">
+                  {l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={submit}
+            disabled={!toItemId.trim() || addLink.isPending}
+            className="h-8 px-2"
+          >
+            {addLink.isPending ? (
+              <IconLoader2 className="size-3.5 animate-spin" />
+            ) : (
+              <IconPlus className="size-3.5" />
+            )}
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Tracker activities panel ──────────────────────────────────────────────────
+
+function ActivitiesPanel({ workItemId }: { workItemId: string }) {
+  const { data, isLoading } = useTrackerActivities(workItemId, true);
+  const activities: any[] = Array.isArray(data) ? data : [];
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2">
+        <IconTimeline className="size-3.5 text-muted-foreground" />
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          操作历史
+        </h2>
+      </div>
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-8 animate-pulse rounded bg-muted/40" />
+          ))}
+        </div>
+      ) : activities.length === 0 ? (
+        <p className="text-xs text-muted-foreground/60 py-2">暂无操作记录。</p>
+      ) : (
+        <div className="relative border-l border-border pl-4">
+          {activities.map((a: any) => (
+            <div key={a.id} className="relative pb-3">
+              <span className="absolute -left-[1.1rem] top-1.5 size-2 rounded-full border-2 border-border bg-muted" />
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs font-medium">{a.eventType}</span>
+                  <span className="mx-1 text-xs text-muted-foreground">·</span>
+                  <span className="text-xs text-muted-foreground">
+                    {a.actorName}
+                  </span>
+                </div>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {fmtDateTime(a.createdAt)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── Metadata row (definition list) ───────────────────────────────────────────
 
 function MetaRow({
@@ -219,16 +519,295 @@ function MetaRow({
   );
 }
 
+// ── Editable priority ──────────────────────────────────────────────────────────
+
+const PRIORITY_LABELS: Record<number, string> = {
+  1: "P0",
+  2: "P1",
+  3: "P2",
+  4: "P3",
+};
+
+function EditablePriority({ id, priority }: { id: string; priority: number }) {
+  const update = useUpdateWorkItem();
+  const [editing, setEditing] = useState(false);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="group flex items-center gap-1.5 text-sm"
+        onClick={() => setEditing(true)}
+        title="点击编辑"
+      >
+        {PRIORITY_LABELS[priority] ?? `P${priority}`}
+        <IconEdit className="size-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+      </button>
+    );
+  }
+
+  return (
+    <Select
+      value={String(priority)}
+      onValueChange={(v) => {
+        update.mutate(
+          { id, priority: Number(v) },
+          {
+            onSuccess: () => {
+              setEditing(false);
+              toast.success("优先级已更新");
+            },
+          },
+        );
+      }}
+      open
+      onOpenChange={(o) => {
+        if (!o) setEditing(false);
+      }}
+    >
+      <SelectTrigger className="h-7 w-[80px] text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {[1, 2, 3, 4].map((p) => (
+          <SelectItem key={p} value={String(p)} className="text-xs">
+            {PRIORITY_LABELS[p]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// ── Editable risk ──────────────────────────────────────────────────────────────
+
+const RISK_MAP: Record<string, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
+};
+const RISK_COLORS: Record<string, string> = {
+  high: "border-red-300 bg-red-50 text-red-600 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400",
+  medium:
+    "border-amber-300 bg-amber-50 text-amber-600 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400",
+  low: "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400",
+};
+
+function EditableRisk({ id, risk }: { id: string; risk: string }) {
+  const update = useUpdateWorkItem();
+  const [editing, setEditing] = useState(false);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="group flex items-center gap-1.5"
+        onClick={() => setEditing(true)}
+        title="点击编辑"
+      >
+        <span
+          className={cn(
+            "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
+            RISK_COLORS[risk] ?? RISK_COLORS.low,
+          )}
+        >
+          {RISK_MAP[risk] ?? risk}
+        </span>
+        <IconEdit className="size-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+      </button>
+    );
+  }
+
+  return (
+    <Select
+      value={risk}
+      onValueChange={(v) => {
+        update.mutate(
+          { id, risk: v },
+          {
+            onSuccess: () => {
+              setEditing(false);
+              toast.success("风险已更新");
+            },
+          },
+        );
+      }}
+      open
+      onOpenChange={(o) => {
+        if (!o) setEditing(false);
+      }}
+    >
+      <SelectTrigger className="h-7 w-[80px] text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {Object.entries(RISK_MAP).map(([v, l]) => (
+          <SelectItem key={v} value={v} className="text-xs">
+            {l}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// ── Editable tags ──────────────────────────────────────────────────────────────
+
+function EditableTags({ id, tags }: { id: string; tags: string[] }) {
+  const update = useUpdateWorkItem();
+  const [addingTag, setAddingTag] = useState(false);
+  const [newTag, setNewTag] = useState("");
+
+  function removeTag(tag: string) {
+    update.mutate(
+      { id, tags: tags.filter((t) => t !== tag) },
+      { onSuccess: () => toast.success("标签已更新") },
+    );
+  }
+
+  function addTag() {
+    const t = newTag.trim();
+    setNewTag("");
+    setAddingTag(false);
+    if (!t || tags.includes(t)) return;
+    update.mutate(
+      { id, tags: [...tags, t] },
+      { onSuccess: () => toast.success("标签已添加") },
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {tags.map((tag) => (
+        <span
+          key={tag}
+          className="group inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+        >
+          {tag}
+          <button
+            type="button"
+            onClick={() => removeTag(tag)}
+            className="opacity-0 group-hover:opacity-70 transition-opacity hover:text-destructive"
+          >
+            <IconX className="size-2.5" />
+          </button>
+        </span>
+      ))}
+      {addingTag ? (
+        <Input
+          value={newTag}
+          onChange={(e) => setNewTag(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") addTag();
+            if (e.key === "Escape") {
+              setAddingTag(false);
+              setNewTag("");
+            }
+          }}
+          onBlur={addTag}
+          autoFocus
+          className="h-5 w-20 rounded px-1 text-[10px]"
+          placeholder="新标签"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAddingTag(true)}
+          className="inline-flex items-center rounded bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <IconPlus className="size-2.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Editable sprint ────────────────────────────────────────────────────────────
+
+function EditableSprint({
+  id,
+  sprint,
+}: {
+  id: string;
+  sprint: { id: string; name: string; status: string } | null;
+}) {
+  const update = useUpdateWorkItem();
+  const { data: sprintsRaw } = useSprints();
+  const sprints: any[] = Array.isArray(sprintsRaw) ? sprintsRaw : [];
+  const [editing, setEditing] = useState(false);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="group flex items-center gap-1.5 text-sm"
+        onClick={() => setEditing(true)}
+        title="点击编辑"
+      >
+        {sprint ? (
+          <>
+            <span className="font-medium">{sprint.name}</span>
+            <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+              {sprint.status}
+            </Badge>
+          </>
+        ) : (
+          <span className="text-muted-foreground text-xs">未分配</span>
+        )}
+        <IconEdit className="size-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+      </button>
+    );
+  }
+
+  return (
+    <Select
+      value={sprint?.id ?? "none"}
+      onValueChange={(v) => {
+        update.mutate(
+          { id, sprintId: v === "none" ? null : v },
+          {
+            onSuccess: () => {
+              setEditing(false);
+              toast.success("Sprint 已更新");
+            },
+          },
+        );
+      }}
+      open
+      onOpenChange={(o) => {
+        if (!o) setEditing(false);
+      }}
+    >
+      <SelectTrigger className="h-7 w-[160px] text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none" className="text-xs">
+          未分配
+        </SelectItem>
+        {sprints.map((s: any) => (
+          <SelectItem key={s.id} value={s.id} className="text-xs">
+            {s.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
 export function WorkItemDetailPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const { data: item, isLoading } = useWorkItem(id);
   const dispatch = useDispatch();
+  const deleteItem = useDeleteWorkItem();
   const dispatched = !!item?.orchestratorThreadId;
   const activity = useActivity(id, dispatched);
 
-  // Monitor interval (sec) for the orchestrator brain's periodic drift-check
-  // wake. Blank → server default (120); 0 → event-only (no timer wakes).
   const [monitorInterval, setMonitorInterval] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   function onDispatch() {
     const trimmed = monitorInterval.trim();
@@ -243,9 +822,7 @@ export function WorkItemDetailPage() {
         : { workItemId: id },
       {
         onSuccess: (res: { threadId: string }) => {
-          toast.success(
-            `已派发 — 大脑线程 ${res.threadId.slice(0, 12)}…`,
-          );
+          toast.success(`已派发 — 大脑线程 ${res.threadId.slice(0, 12)}…`);
         },
       },
     );
@@ -285,15 +862,14 @@ export function WorkItemDetailPage() {
   const ghHref = repoHref(remote);
   const ghLabel = repoLabel(remote);
 
-  const RISK_MAP: Record<string, string> = { low: "低", medium: "中", high: "高" };
-  const PRIORITY_MAP: Record<number, string> = { 1: "P0", 2: "P1", 3: "P2", 4: "P3" };
   const riskVal = (item as { risk?: string }).risk ?? "medium";
-  const riskLabel = RISK_MAP[riskVal] ?? riskVal;
-  const priorityLabel = PRIORITY_MAP[item.priority] ?? `P${item.priority}`;
   const tags = (item as { tags?: string[] }).tags ?? [];
-  const sprint = (item as { sprint?: { id: string; name: string; status: string } | null }).sprint;
+  const sprint =
+    (item as { sprint?: { id: string; name: string; status: string } | null })
+      .sprint ?? null;
   const itemKey = (item as { itemKey?: string }).itemKey;
-  const currentStageName = (item as { currentStageName?: string }).currentStageName ?? "待办";
+  const currentStageName =
+    (item as { currentStageName?: string }).currentStageName ?? "待办";
 
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-6">
@@ -314,7 +890,10 @@ export function WorkItemDetailPage() {
           ) : null}
           <Badge
             variant="outline"
-            className={cn("h-5 px-1.5 text-[11px] capitalize", typeChip(item.type))}
+            className={cn(
+              "h-5 px-1.5 text-[11px] capitalize",
+              typeChip(item.type),
+            )}
           >
             {item.type}
           </Badge>
@@ -395,15 +974,72 @@ export function WorkItemDetailPage() {
               </a>
             </Button>
           ) : null}
+
+          {/* Delete button */}
+          {confirmDelete ? (
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-destructive">确认删除？</span>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-7 gap-1"
+                disabled={deleteItem.isPending}
+                onClick={() => {
+                  deleteItem.mutate(
+                    { id },
+                    {
+                      onSuccess: () => {
+                        toast.success("工作项已删除");
+                        navigate(
+                          `/board?project=${encodeURIComponent(item.projectId)}`,
+                        );
+                      },
+                    },
+                  );
+                }}
+              >
+                {deleteItem.isPending ? (
+                  <IconLoader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <IconTrash className="size-3.5" />
+                )}
+                删除
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7"
+                onClick={() => setConfirmDelete(false)}
+              >
+                取消
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              className={cn(
+                "h-8 gap-1.5 text-muted-foreground hover:text-destructive",
+                dispatched ? "" : "ml-auto",
+              )}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <IconTrash className="size-3.5" />
+              删除
+            </Button>
+          )}
         </div>
       </header>
 
-      {/* ── Body: requirement + activity (left) · context (right) ── */}
+      {/* ── Body ── */}
       <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
         {/* Left column */}
         <div className="order-2 min-w-0 space-y-6 lg:order-1">
           {/* Stage progress card */}
-          <StageProgressCard workItemId={id} currentStageName={currentStageName} />
+          <StageProgressCard
+            workItemId={id}
+            currentStageName={currentStageName}
+          />
 
           {/* Requirement */}
           <section>
@@ -423,13 +1059,22 @@ export function WorkItemDetailPage() {
             </div>
           </section>
 
-          {/* Activity — the centerpiece */}
-          <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                动态
-              </h2>
-              {dispatched ? (
+          {/* Comments */}
+          <CommentsPanel workItemId={id} />
+
+          {/* Links */}
+          <LinksPanel workItemId={id} />
+
+          {/* Tracker Activities */}
+          <ActivitiesPanel workItemId={id} />
+
+          {/* Orchestrator Activity Feed */}
+          {dispatched ? (
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  编排器动态
+                </h2>
                 <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <span
                     className={cn(
@@ -443,14 +1088,14 @@ export function WorkItemDetailPage() {
                     ? `大脑 ${activity.data.thread.status}`
                     : "实时"}
                 </span>
-              ) : null}
-            </div>
-            <ActivityFeed
-              dispatched={dispatched}
-              activity={activity.data}
-              isLoading={activity.isLoading}
-            />
-          </section>
+              </div>
+              <ActivityFeed
+                dispatched={dispatched}
+                activity={activity.data}
+                isLoading={activity.isLoading}
+              />
+            </section>
+          ) : null}
         </div>
 
         {/* Right column: context */}
@@ -462,47 +1107,25 @@ export function WorkItemDetailPage() {
               </MetaRow>
             ) : null}
 
-            {sprint ? (
-              <MetaRow icon={IconStack2} label="Sprint">
-                <span className="text-sm font-medium">{sprint.name}</span>
-                <Badge variant="secondary" className="ml-2 h-4 px-1.5 text-[10px]">
-                  {sprint.status}
-                </Badge>
-              </MetaRow>
-            ) : null}
+            <MetaRow icon={IconStack2} label="Sprint">
+              <EditableSprint id={id} sprint={sprint} />
+            </MetaRow>
 
             <MetaRow icon={IconListCheck} label="当前阶段">
               <span className="text-sm">{currentStageName}</span>
             </MetaRow>
 
             <MetaRow icon={IconFlag} label="优先级">
-              <span className="text-sm">{priorityLabel}</span>
+              <EditablePriority id={id} priority={item.priority} />
             </MetaRow>
 
             <MetaRow icon={IconAlertTriangle} label="风险">
-              <span className={cn(
-                "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
-                riskVal === "high"
-                  ? "border-red-300 bg-red-50 text-red-600 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400"
-                  : riskVal === "medium"
-                  ? "border-amber-300 bg-amber-50 text-amber-600 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
-                  : "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-              )}>
-                {riskLabel}
-              </span>
+              <EditableRisk id={id} risk={riskVal} />
             </MetaRow>
 
-            {tags.length > 0 ? (
-              <MetaRow icon={IconTag} label="标签">
-                <div className="flex flex-wrap gap-1">
-                  {tags.map((tag: string) => (
-                    <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </MetaRow>
-            ) : null}
+            <MetaRow icon={IconTag} label="标签">
+              <EditableTags id={id} tags={tags} />
+            </MetaRow>
 
             <MetaRow icon={IconLayoutKanban} label="项目">
               <Link

@@ -18,11 +18,9 @@ export function useProjects() {
 export function useWorkItems(projectId?: string) {
   // Poll on the board's ~4s cadence so status transitions driven by the
   // orchestrator slot gate (queued → running → done) surface without a reload.
-  return useActionQuery(
-    "list-work-items",
-    projectId ? { projectId } : {},
-    { refetchInterval: 4000 },
-  ) as { data?: WorkItem[]; isLoading: boolean };
+  return useActionQuery("list-work-items", projectId ? { projectId } : {}, {
+    refetchInterval: 4000,
+  }) as { data?: WorkItem[]; isLoading: boolean };
 }
 
 export function useWorkItem(id: string) {
@@ -128,11 +126,17 @@ function messageOf(err: unknown, action: string, fallback: string): string {
 
 // Sprint hooks.
 export function useSprints() {
-  return useActionQuery("list-sprints", {}) as { data?: any; isLoading: boolean };
+  return useActionQuery("list-sprints", {}) as {
+    data?: any;
+    isLoading: boolean;
+  };
 }
 
 export function useSprint(id: string) {
-  return useActionQuery("get-sprint", { id }, { enabled: !!id }) as { data?: any; isLoading: boolean };
+  return useActionQuery("get-sprint", { id }, { enabled: !!id }) as {
+    data?: any;
+    isLoading: boolean;
+  };
 }
 
 export function useCreateSprint() {
@@ -162,7 +166,11 @@ export function useUpdateSprint() {
 
 // Stage hooks.
 export function useStages(workItemId: string) {
-  return useActionQuery("list-stages", { workItemId }, { enabled: !!workItemId }) as { data?: any; isLoading: boolean };
+  return useActionQuery(
+    "list-stages",
+    { workItemId },
+    { enabled: !!workItemId },
+  ) as { data?: any; isLoading: boolean };
 }
 
 export function useTriggerStage() {
@@ -193,7 +201,11 @@ export function useRollbackStage() {
 
 // Artifact hooks.
 export function useArtifacts(workItemId: string) {
-  return useActionQuery("list-artifacts", { workItemId }, { enabled: !!workItemId }) as { data?: any; isLoading: boolean };
+  return useActionQuery(
+    "list-artifacts",
+    { workItemId },
+    { enabled: !!workItemId },
+  ) as { data?: any; isLoading: boolean };
 }
 
 export function useCreateArtifact() {
@@ -203,7 +215,9 @@ export function useCreateArtifact() {
       qc.invalidateQueries({ queryKey: ["action", "list-artifacts"] });
     },
     onError: (err: unknown) => {
-      toast.error(messageOf(err, "create-artifact", "Failed to create artifact"));
+      toast.error(
+        messageOf(err, "create-artifact", "Failed to create artifact"),
+      );
     },
   });
 }
@@ -231,12 +245,19 @@ export function useAddComment() {
 }
 
 export function useComments(workItemId: string) {
-  return useActionQuery("list-comments", { workItemId }, { enabled: !!workItemId }) as { data?: any; isLoading: boolean };
+  return useActionQuery(
+    "list-comments",
+    { workItemId },
+    { enabled: !!workItemId },
+  ) as { data?: any; isLoading: boolean };
 }
 
 // Queue hooks.
 export function useQueue() {
-  return useActionQuery("list-queue", {}, { refetchInterval: 3000 }) as { data?: any; isLoading: boolean };
+  return useActionQuery("list-queue", {}, { refetchInterval: 3000 }) as {
+    data?: any;
+    isLoading: boolean;
+  };
 }
 
 export function useEnqueueWorkItem() {
@@ -247,7 +268,9 @@ export function useEnqueueWorkItem() {
       qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
     },
     onError: (err: unknown) => {
-      toast.error(messageOf(err, "enqueue-work-item", "Failed to enqueue work item"));
+      toast.error(
+        messageOf(err, "enqueue-work-item", "Failed to enqueue work item"),
+      );
     },
   });
 }
@@ -259,14 +282,20 @@ export function useDequeueWorkItem() {
       qc.invalidateQueries({ queryKey: ["action", "list-queue"] });
     },
     onError: (err: unknown) => {
-      toast.error(messageOf(err, "dequeue-work-item", "Failed to dequeue work item"));
+      toast.error(
+        messageOf(err, "dequeue-work-item", "Failed to dequeue work item"),
+      );
     },
   });
 }
 
 // Link hooks.
 export function useLinks(workItemId: string) {
-  return useActionQuery("list-links", { workItemId }, { enabled: !!workItemId }) as { data?: any; isLoading: boolean };
+  return useActionQuery(
+    "list-links",
+    { workItemId },
+    { enabled: !!workItemId },
+  ) as { data?: any; isLoading: boolean };
 }
 
 export function useAddLink() {
@@ -290,7 +319,37 @@ export function useUpdateWorkItem() {
       qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
     },
     onError: (err: unknown) => {
-      toast.error(messageOf(err, "update-work-item", "Failed to update work item"));
+      toast.error(
+        messageOf(err, "update-work-item", "Failed to update work item"),
+      );
+    },
+  });
+}
+
+// Delete work item hook.
+export function useDeleteWorkItem() {
+  const qc = useQueryClient();
+  return useActionMutation("delete-work-item", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(
+        messageOf(err, "delete-work-item", "Failed to delete work item"),
+      );
+    },
+  });
+}
+
+// Update project hook.
+export function useUpdateProject() {
+  const qc = useQueryClient();
+  return useActionMutation("update-project", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-projects"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "update-project", "Failed to update project"));
     },
   });
 }

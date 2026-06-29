@@ -10,6 +10,7 @@ import {
   IconGitBranch,
   IconLoader2,
   IconPlus,
+  IconSettings,
 } from "@tabler/icons-react";
 import { NewProjectDialog } from "@/components/NewProjectDialog";
 import { cn } from "@/lib/utils";
@@ -120,9 +121,8 @@ export function ProjectsPage() {
             const counts = countFor(countsByProject.get(p.id) ?? []);
             const repoText = repoLabel(p.gitRemote);
             return (
-              <Link
+              <div
                 key={p.id}
-                to={`/board?project=${encodeURIComponent(p.id)}`}
                 className="group flex h-full flex-col rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:border-foreground/20 hover:shadow"
               >
                 {/* Title */}
@@ -130,63 +130,78 @@ export function ProjectsPage() {
                   <span className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 font-mono text-[11px] font-semibold text-muted-foreground">
                     {p.key}
                   </span>
-                  <h3 className="min-w-0 flex-1 truncate text-base font-semibold leading-6 text-foreground">
+                  <Link
+                    to={`/board?project=${encodeURIComponent(p.id)}`}
+                    className="min-w-0 flex-1 truncate text-base font-semibold leading-6 text-foreground hover:underline"
+                  >
                     {p.name}
-                  </h3>
-                  <IconArrowRight className="mt-1 size-4 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
+                  </Link>
+                  <Link
+                    to={`/projects/${p.id}`}
+                    className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground/0 transition-colors hover:bg-muted hover:text-muted-foreground group-hover:text-muted-foreground/60"
+                    title="项目设置"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <IconSettings className="size-4" />
+                  </Link>
                 </div>
 
-                {p.description ? (
-                  <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">
-                    {p.description}
-                  </p>
-                ) : (
-                  <div className="mb-3" />
-                )}
-
-                {/* Repo / branch */}
-                <div className="mb-3 space-y-1">
-                  <p className="flex items-center gap-1.5 break-all font-mono text-xs text-muted-foreground">
-                    <IconBrandGithub className="size-3.5 shrink-0" />
-                    {repoText ?? "未配置代码仓库"}
-                  </p>
-                  <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-                    <IconGitBranch className="size-3.5 shrink-0" />
-                    {p.defaultBranch}
-                  </p>
-                </div>
-
-                {/* Counts */}
-                <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">
-                  {counts.total === 0 ? (
-                    <span className="text-xs text-muted-foreground/70">
-                      暂无工作项
-                    </span>
+                <Link
+                  to={`/board?project=${encodeURIComponent(p.id)}`}
+                  className="flex flex-1 flex-col"
+                >
+                  {p.description ? (
+                    <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">
+                      {p.description}
+                    </p>
                   ) : (
-                    <>
-                      <CountPill
-                        value={counts.open}
-                        label="待处理"
-                        dot="bg-zinc-400"
-                      />
-                      <CountPill
-                        value={counts.inFlight}
-                        label="进行中"
-                        dot="bg-blue-500"
-                        spin
-                      />
-                      <CountPill
-                        value={counts.done}
-                        label="已完成"
-                        dot="bg-emerald-500"
-                      />
-                      <span className="ml-auto font-mono text-xs text-muted-foreground/70">
-                        共 {counts.total} 项
-                      </span>
-                    </>
+                    <div className="mb-3" />
                   )}
-                </div>
-              </Link>
+
+                  {/* Repo / branch */}
+                  <div className="mb-3 space-y-1">
+                    <p className="flex items-center gap-1.5 break-all font-mono text-xs text-muted-foreground">
+                      <IconBrandGithub className="size-3.5 shrink-0" />
+                      {repoText ?? "未配置代码仓库"}
+                    </p>
+                    <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+                      <IconGitBranch className="size-3.5 shrink-0" />
+                      {p.defaultBranch}
+                    </p>
+                  </div>
+
+                  {/* Counts */}
+                  <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">
+                    {counts.total === 0 ? (
+                      <span className="text-xs text-muted-foreground/70">
+                        暂无工作项
+                      </span>
+                    ) : (
+                      <>
+                        <CountPill
+                          value={counts.open}
+                          label="待处理"
+                          dot="bg-zinc-400"
+                        />
+                        <CountPill
+                          value={counts.inFlight}
+                          label="进行中"
+                          dot="bg-blue-500"
+                          spin
+                        />
+                        <CountPill
+                          value={counts.done}
+                          label="已完成"
+                          dot="bg-emerald-500"
+                        />
+                        <span className="ml-auto font-mono text-xs text-muted-foreground/70">
+                          共 {counts.total} 项
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </Link>
+              </div>
             );
           })}
         </div>
