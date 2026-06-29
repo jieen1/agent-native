@@ -12,6 +12,8 @@ import {
   getBrainModel,
   ACCEPTED_BRAIN_MODELS,
   isAcceptedBrainModel,
+  getBrainModelTier,
+  isModelAllowedInTier,
 } from "../server/brain/brain-model.js";
 import { putSetting } from "@agent-native/core/settings";
 import { BRAIN_MODEL_KEY } from "../server/brain/brain-model.js";
@@ -41,6 +43,14 @@ export default defineAction({
     if (!isAcceptedBrainModel(trimmed)) {
       throw new Error(
         `Unsupported brain model '${trimmed}'. Accepted: ${ACCEPTED_BRAIN_MODELS.join(", ")}`,
+      );
+    }
+    const tier = await getBrainModelTier();
+    if (!isModelAllowedInTier(trimmed, tier)) {
+      throw new Error(
+        `Model '${trimmed}' is blocked by the current subscription tier (${tier}). ` +
+          "Opus models are not permitted when the tier is 'sonnet'. " +
+          "Update the brain model tier in Settings → Claude Code to allow Opus.",
       );
     }
     const stored = await setBrainModel(trimmed);

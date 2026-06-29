@@ -342,11 +342,24 @@ export interface RefreshResult {
 }
 
 /**
+ * Single-flight guard for the managed-token refresh. Concurrent callers that all
+ * observe a near-expiry token would otherwise EACH POST /v1/oauth/token — a
+ * refresh STORM that rotates the single-use refresh token N times and can
+ * invalidate the credential outright. Instead they share ONE in-flight refresh
+ * promise; the second+ caller awaits the first's result.
+ */
+let refreshInFlight: Promise<RefreshResult> | null = null;
+
+/**
  * Refresh the managed token when it is near expiry, rotating the single-use
- * refresh token and rewriting `.credentials.json` in place. Call this before
- * spawning a worker, or on a timer.
+ * refresh token and rewriting `.credentials.json` in place. Call this ONLY when
+ * you are about to USE the token (e.g. immediately before a server-side oauth
+ * call, or before spawning a worker) — never on every read.
  *
- * - `force` refreshes even if the token isn't near expiry yet.
+ * - Contacts the token endpoint ONLY when the token is actually within the
+ *   5-minute expiry skew. `force` overrides this.
+ * - Single-flight: concurrent callers reuse one in-flight refresh instead of
+ *   each firing a request against the single-use refresh token.
  * - Returns `{ refreshed: false }` (never throws) when there's nothing to do or
  *   the request fails, so callers safely keep the existing credential.
  */
@@ -360,8 +373,25 @@ export async function refreshManagedTokenIfNeeded(
     return { refreshed: false, reason: "no-refresh-token" };
   const needsRefresh =
     options.force || now + OAUTH_EXPIRY_BUFFER_MS >= blob.expiresAt;
+  // The token isn't near expiry — do NOT contact the endpoint at all.
   if (!needsRefresh) return { refreshed: false, reason: "not-expiring" };
 
+  // Single-flight: join an in-progress refresh instead of starting a second.
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = performManagedTokenRefresh(blob, now).finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+/**
+ * The actual refresh round-trip, extracted so {@link refreshManagedTokenIfNeeded}
+ * can single-flight it. Rotates + persists the credential in place.
+ */
+async function performManagedTokenRefresh(
+  blob: ClaudeAiOauth,
+  now: number,
+): Promise<RefreshResult> {
   try {
     const tokens = await postToken({
       grant_type: "refresh_token",

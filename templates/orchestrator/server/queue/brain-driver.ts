@@ -13,6 +13,8 @@
 
 import { admitBrainTasks } from "./brain-admit.js";
 import { reapBrainTasksOnce, BRAIN_REAP_TICK_MS } from "./brain-reap.js";
+import { reconcileBrainThreadsOnce } from "./brain-thread-reconcile.js";
+import { reconcileV3SpawnsOnce } from "./v3-spawn-reconcile.js";
 import { pruneOrphanedWorktrees } from "../v3-workspace-local.js";
 
 /** Liveness + activity the brain driver tick exposes (read by brain-queue-status). */
@@ -21,6 +23,8 @@ export interface BrainDriverHealth {
   lastTickAt: string | null;
   reapsFired: number;
   tasksPromoted: number;
+  threadsReconciled: number;
+  spawnsReconciled: number;
   lastError: string | null;
 }
 
@@ -29,6 +33,8 @@ const health: BrainDriverHealth = {
   lastTickAt: null,
   reapsFired: 0,
   tasksPromoted: 0,
+  threadsReconciled: 0,
+  spawnsReconciled: 0,
   lastError: null,
 };
 
@@ -45,9 +51,28 @@ export function getBrainDriverHealth(): BrainDriverHealth {
 export async function driveBrainOnce(): Promise<{
   reaped: number;
   promoted: number;
+  threadsReconciled: number;
+  spawnsReconciled: number;
 }> {
   const reaped = await reapBrainTasksOnce();
   health.reapsFired += reaped.length;
+
+  // Reset 'running' threads stranded by a process restart / child death so the
+  // Brain page never shows a false "运行中" (the THREAD-status counterpart to the
+  // brain-task reaper above). Best-effort — never block admission.
+  const reconciled = await reconcileBrainThreadsOnce().catch(
+    () => [] as Awaited<ReturnType<typeof reconcileBrainThreadsOnce>>,
+  );
+  health.threadsReconciled += reconciled.length;
+
+  // Reset stranded v3 spawns (running spawn whose parent node/run is terminal or
+  // which has no live microVM, plus orphaned pending spawns) so the Resource Pool
+  // page never shows a phantom "busy VM" / stale queue. The SPAWN-level
+  // counterpart to the brain-thread reconcile above. Best-effort.
+  const spawnsReconciled = await reconcileV3SpawnsOnce().catch(
+    () => [] as Awaited<ReturnType<typeof reconcileV3SpawnsOnce>>,
+  );
+  health.spawnsReconciled += spawnsReconciled.length;
 
   const promoted = await admitBrainTasks();
   health.tasksPromoted += promoted.length;
@@ -57,7 +82,12 @@ export async function driveBrainOnce(): Promise<{
 
   health.lastTickAt = new Date().toISOString();
   health.lastError = null;
-  return { reaped: reaped.length, promoted: promoted.length };
+  return {
+    reaped: reaped.length,
+    promoted: promoted.length,
+    threadsReconciled: reconciled.length,
+    spawnsReconciled: spawnsReconciled.length,
+  };
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -89,6 +119,12 @@ export function startBrainDriver(opts: { tickMs?: number } = {}): void {
     `[brain-driver] brain-task admission/reap driver started (tick=${tickMs}ms, ` +
       `reap window=${BRAIN_REAP_TICK_MS}ms)`,
   );
+  // Run one tick immediately on startup so a thread/task stranded 'running' by the
+  // restart that just happened is reconciled at once (not only after the first
+  // interval). Best-effort; the interval is the steady-state path.
+  void driveBrainOnce().catch((err: unknown) => {
+    health.lastError = err instanceof Error ? err.message : String(err);
+  });
 }
 
 /** Stop the brain driver tick (test cleanup / shutdown). */

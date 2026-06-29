@@ -5,6 +5,7 @@ import {
   IconCheck,
   IconCircleCheck,
   IconKey,
+  IconLock,
   IconPhoto,
   IconPlayerPlay,
   IconPlus,
@@ -34,6 +35,14 @@ import {
 } from "@/hooks/use-orchestrator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useActionMutation, useActionQuery } from "@agent-native/core/client";
 import { ClaudeCodeCard } from "@/components/ClaudeCodeCard";
 
 export function meta() {
@@ -68,7 +77,10 @@ export default function SettingsRoute() {
         </TabsList>
 
         <TabsContent value="claude">
-          <ClaudeCodeCard />
+          <div className="space-y-6">
+            <ClaudeCodeCard />
+            <BrainModelTierCard />
+          </div>
         </TabsContent>
         <TabsContent value="models">
           <ModelsTab />
@@ -95,6 +107,64 @@ function SectionHeading({
       <span className="text-muted-foreground">{icon}</span>
       <h2 className="text-sm font-semibold">{title}</h2>
     </div>
+  );
+}
+
+// ── Brain model tier (CC subscription restriction) ────────────────────────────
+
+type BrainModelTierValue = "sonnet" | "all";
+
+function BrainModelTierCard() {
+  const { t } = useTranslation();
+  const { data, refetch } = useActionQuery("get-brain-model-tier" as any, {});
+  const setTier = useActionMutation("set-brain-model-tier" as any, {});
+
+  const currentTier: BrainModelTierValue =
+    (data as any)?.tier === "all" ? "all" : "sonnet";
+
+  function handleChange(value: string) {
+    setTier.mutate(
+      { tier: value as BrainModelTierValue },
+      {
+        onSuccess: () => {
+          toast.success(t("settings.ccTierSaved"));
+          refetch();
+        },
+        onError: (e: unknown) =>
+          toast.error(e instanceof Error ? e.message : t("common.actionFailed")),
+      },
+    );
+  }
+
+  return (
+    <section>
+      <SectionHeading
+        icon={<IconLock className="size-5" />}
+        title={t("settings.ccTierTitle")}
+      />
+      <div className="rounded-lg border bg-card p-4 space-y-3">
+        <p className="text-xs text-muted-foreground">
+          {t("settings.ccTierDesc")}
+        </p>
+        <Select
+          value={currentTier}
+          onValueChange={handleChange}
+          disabled={setTier.isPending}
+        >
+          <SelectTrigger className="w-full max-w-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="sonnet">
+              {t("settings.ccTierSonnet")}
+            </SelectItem>
+            <SelectItem value="all">
+              {t("settings.ccTierAll")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </section>
   );
 }
 

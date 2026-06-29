@@ -99,7 +99,11 @@ export interface ReapedBrainTask {
  *      (e.g. a run-based task whose wake was dropped on redeploy); release as
  *      `done` (or `failed` when the thread errored), and
  *  (b) any running task whose claimed_at is older than the hard reap threshold —
- *      a crashed isolate; release as `failed`.
+ *      the crashed-isolate backstop. Reads the bound brain thread's status: if the
+ *      thread is already `done` the brain finished, so release as `done` (NOT
+ *      `failed`); only a task whose thread is genuinely NOT done is failed. Every
+ *      reaper release records `reap_reason` so a timeout-release is never mistaken
+ *      for a real brain failure (the s20ai7jxt5 false-failure fix).
  *
  * Returns the released tasks. Best-effort: never throws into the tick. After a
  * release, admission is re-run so the freed slot is filled.
@@ -147,13 +151,14 @@ export async function reapBrainTasksOnce(
     const threadId = String(row.thread_id);
     const threadStatus = String(row.thread_status);
     const terminal = threadStatus === "error" ? "failed" : "done";
+    const reason = `reaped: no-run thread ${threadStatus}`;
     const upd = await v3DbExec(
-      `UPDATE brain_tasks SET status = $2, updated_at = now()
+      `UPDATE brain_tasks SET status = $2, reap_reason = $3, updated_at = now()
          WHERE id = $1 AND status = 'running' AND run_id IS NULL RETURNING id`,
-      [id, terminal],
+      [id, terminal, reason],
     );
     if ((upd.rows?.length ?? 0) > 0) {
-      reaped.push({ id, threadId, reason: `no-run thread ${threadStatus}` });
+      reaped.push({ id, threadId, reason });
     }
   }
 
@@ -177,35 +182,65 @@ export async function reapBrainTasksOnce(
     const threadId = String(row.thread_id);
     const threadStatus = String(row.thread_status);
     const terminal = threadStatus === "error" ? "failed" : "done";
+    const reason = `reaped: thread ${threadStatus}`;
     const upd = await v3DbExec(
-      `UPDATE brain_tasks SET status = $2, updated_at = now()
+      `UPDATE brain_tasks SET status = $2, reap_reason = $3, updated_at = now()
          WHERE id = $1 AND status = 'running' RETURNING id`,
-      [id, terminal],
+      [id, terminal, reason],
     );
     if ((upd.rows?.length ?? 0) > 0) {
-      reaped.push({ id, threadId, reason: `thread ${threadStatus}` });
+      reaped.push({ id, threadId, reason });
     }
   }
 
   // (b) Hard age cutoff: any running task whose claimed_at is older than the
-  // threshold, regardless of thread status — a crashed isolate that left a wedge.
+  // threshold — the crashed-isolate backstop. It used to fail EVERY such task
+  // unconditionally, which mismarked a brain that finished its work (thread →
+  // `done`, committed) but happened to run past the threshold as `failed` (the
+  // s20ai7jxt5 false-failure that hit the localization batch). Fix: read the bound
+  // brain thread's status here too. A task whose thread is already `done` is
+  // released as `done` (the brain finished — same terminal disposition a normal
+  // run-terminal release would give), NOT `failed`. Only a task whose thread is
+  // genuinely NOT done (truly stuck / crashed isolate) is failed by this backstop.
+  // We LEFT JOIN so a task with a missing thread row still falls through to the
+  // stuck branch (failed). Behavior for genuinely-stuck tasks is unchanged.
   const staleRes = await v3DbExec(
-    `SELECT id, thread_id FROM brain_tasks
-      WHERE status = 'running'
-        AND (claimed_at IS NULL OR claimed_at < $1)`,
+    `SELECT bt.id AS id, bt.thread_id AS thread_id, btr.status AS thread_status
+       FROM brain_tasks bt
+       LEFT JOIN brain_threads btr ON btr.id = bt.thread_id
+      WHERE bt.status = 'running'
+        AND (bt.claimed_at IS NULL OR bt.claimed_at < $1)`,
     [cutoffIso],
   );
   for (const row of staleRes.rows as Array<Record<string, unknown>>) {
     const id = String(row.id);
     const threadId = String(row.thread_id);
     if (reaped.some((r) => r.id === id)) continue;
+    const threadStatus =
+      row.thread_status == null ? null : String(row.thread_status);
+    // Thread already done → the brain finished; release as `done`, not `failed`.
+    const threadDone = threadStatus === "done";
+    const terminal = threadDone ? "done" : "failed";
+    const reason = threadDone
+      ? "reaped: thread already done"
+      : `reaped: stale > threshold, thread not done${
+          threadStatus ? ` (${threadStatus})` : " (no thread)"
+        }`;
+    if (!threadDone) {
+      // Don't let a timeout be silently read as a brain failure: log loudly.
+      console.warn(
+        `[brain-reap] hard backstop failing stale task ${id} (thread ${
+          threadStatus ?? "missing"
+        }): ${reason}`,
+      );
+    }
     const upd = await v3DbExec(
-      `UPDATE brain_tasks SET status = 'failed', updated_at = now()
+      `UPDATE brain_tasks SET status = $2, reap_reason = $3, updated_at = now()
          WHERE id = $1 AND status = 'running' RETURNING id`,
-      [id],
+      [id, terminal, reason],
     );
     if ((upd.rows?.length ?? 0) > 0) {
-      reaped.push({ id, threadId, reason: "stale (>threshold)" });
+      reaped.push({ id, threadId, reason });
     }
   }
 

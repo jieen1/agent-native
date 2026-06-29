@@ -5,6 +5,7 @@
 // only). There is no third backend (DESIGN §7.0).
 
 import { MicrosandboxRuntime } from "./microsandbox-runtime.js";
+import { MsbRuntime } from "./msb-runtime.js";
 import { NoneRuntime } from "./none-runtime.js";
 import type { NodeRuntime } from "./node-runtime.js";
 import type { NodeRuntimeSpec } from "../../shared/types.js";
@@ -20,6 +21,7 @@ export type {
   VmHandle,
 } from "./node-runtime.js";
 export { MicrosandboxRuntime, toWslPath } from "./microsandbox-runtime.js";
+export { MsbRuntime, msbBridgeAvailable } from "./msb-runtime.js";
 export { NoneRuntime } from "./none-runtime.js";
 export { wslMsb, wslMsbStream, msbAvailable, shArg } from "./wsl-msb.js";
 
@@ -100,11 +102,26 @@ export {
 
 // Process-wide singletons: the backends are stateless drivers (all state lives
 // on the per-node VmHandle), so one instance each is enough and avoids
-// re-allocating the CLI bridge per node.
+// re-allocating the transport per node.
 const microsandbox = new MicrosandboxRuntime();
+const msb = new MsbRuntime();
 const none = new NoneRuntime();
+
+/**
+ * True when the host SDK bridge is configured (ORCH_MSB_BRIDGE_URL set). In that
+ * deployment (the `an-orchestrator` Docker container, which has no /dev/kvm and
+ * cannot load the native SDK), a microvm node is driven through the host bridge
+ * (`MsbRuntime`). When unset (host-native deployments), microvm nodes use
+ * `MicrosandboxRuntime` (the legacy WSL/`msb` CLI transport) — so this change is
+ * fully gated and host-native still works unchanged.
+ */
+function useSdkBridge(): boolean {
+  const u = process.env.ORCH_MSB_BRIDGE_URL;
+  return typeof u === "string" && u.trim() !== "";
+}
 
 /** Pick the runtime backend for a node's runtime spec (DESIGN §7.4.2). */
 export function runtimeForSpec(spec: NodeRuntimeSpec): NodeRuntime {
-  return spec.kind === "none" ? none : microsandbox;
+  if (spec.kind === "none") return none;
+  return useSdkBridge() ? msb : microsandbox;
 }

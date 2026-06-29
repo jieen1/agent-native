@@ -306,7 +306,14 @@ export async function insertRun(
  * states get the wider window via a LIKE-prefix match.
  */
 function backgroundAwareStaleCutoffSql(): string {
-  return `(? - CASE WHEN dispatch_mode LIKE 'background%' THEN ${BACKGROUND_RUN_STALE_MS} ELSE ${RUN_STALE_MS} END)`;
+  // The bound `now`/`completedAt` is always a millisecond epoch (Date.now()),
+  // which exceeds int32. Postgres infers an untyped parameter's type from its
+  // context, and `? - <integer literal>` would infer the param as `integer`,
+  // overflowing on any real timestamp ("value … is out of range for type
+  // integer"). Cast the parameter to BIGINT so the subtraction stays 64-bit.
+  // `CAST(? AS BIGINT)` is portable: SQLite gives BIGINT INTEGER affinity (its
+  // ints are already 64-bit), so this is a no-op there.
+  return `(CAST(? AS BIGINT) - CASE WHEN dispatch_mode LIKE 'background%' THEN ${BACKGROUND_RUN_STALE_MS} ELSE ${RUN_STALE_MS} END)`;
 }
 
 /**

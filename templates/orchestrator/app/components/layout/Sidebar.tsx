@@ -30,6 +30,7 @@ import {
 } from "@agent-native/core/client";
 import { ExtensionsSidebarSection } from "@agent-native/core/client/extensions";
 import { CapacityChip } from "./CapacityChip";
+import { AccountUsageChip } from "./AccountUsageChip";
 import { OrgSwitcher } from "@agent-native/core/client/org";
 import { cn } from "@/lib/utils";
 import { APP_TITLE } from "@/lib/app-config";
@@ -50,50 +51,56 @@ const navItems = [
   {
     icon: IconBrain,
     labelKey: "nav.brain",
-    label: "Brain",
+    label: "大脑",
     href: "/brain",
     view: "brain",
   },
-  { icon: IconPlayerPlay, labelKey: "nav.runs", label: "Runs", href: "/runs", view: "runs" },
+  {
+    icon: IconPlayerPlay,
+    labelKey: "nav.runs",
+    label: "运行",
+    href: "/runs",
+    view: "runs",
+  },
   {
     icon: IconSitemap,
     labelKey: "nav.workflows",
-    label: "Workflows",
+    label: "工作流",
     href: "/workflows",
     view: "workflows",
   },
   {
     icon: IconListCheck,
     labelKey: "nav.agents",
-    label: "Agents",
+    label: "智能体",
     href: "/agents",
     view: "agents",
   },
   {
     icon: IconFolders,
     labelKey: "nav.workspaces",
-    label: "Workspaces",
+    label: "工作区",
     href: "/workspaces",
     view: "workspaces",
   },
   {
     icon: IconActivity,
     labelKey: "nav.spawns",
-    label: "Spawns",
+    label: "派生任务",
     href: "/spawns",
     view: "spawns",
   },
   {
     icon: IconDatabase,
     labelKey: "nav.pool",
-    label: "Pool",
+    label: "资源池",
     href: "/pool",
     view: "pool",
   },
   {
     icon: IconSettings,
     labelKey: "nav.settings",
-    label: "Settings",
+    label: "设置",
     href: "/settings",
     view: "settings",
   },
@@ -111,20 +118,20 @@ interface SidebarProps {
 function formatThreadAge(updatedAt: number) {
   const diffMs = Math.max(0, Date.now() - updatedAt);
   const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return "now";
+  if (minutes < 1) return "刚刚";
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d`;
-  return new Date(updatedAt).toLocaleDateString([], {
+  return new Date(updatedAt).toLocaleDateString("zh-CN", {
     month: "short",
     day: "numeric",
   });
 }
 
 function threadTitle(thread: ChatThreadSummary) {
-  return thread.title || thread.preview || "Untitled chat";
+  return thread.title || thread.preview || "未命名对话";
 }
 
 function threadUpdatedAt(thread: ChatThreadSummary) {
@@ -228,7 +235,7 @@ function ChatThreadsSection() {
       threadId === activeThreadId || threadId === persistedActiveThreadId();
     const archived = await archiveThread(threadId);
     if (!archived) {
-      toast.error("Could not archive chat.");
+      toast.error("无法归档对话。");
       return;
     }
     if (wasActive) {
@@ -258,7 +265,7 @@ function ChatThreadsSection() {
     setRenameDraft("");
     if (title) {
       const renamed = await renameThread(threadId, title);
-      if (!renamed) toast.error("Could not rename chat.");
+      if (!renamed) toast.error("无法重命名对话。");
     }
     committingRenameRef.current = false;
   }
@@ -272,7 +279,7 @@ function ChatThreadsSection() {
     <div className="mt-2 border-l border-sidebar-border/70 pl-3">
       <div className="mb-1 flex h-7 items-center gap-2 pr-1">
         <div className="min-w-0 flex-1 text-xs font-medium text-sidebar-foreground/70">
-          Chats
+          对话
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -280,12 +287,12 @@ function ChatThreadsSection() {
               type="button"
               onClick={handleNewChat}
               className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              aria-label="New chat"
+              aria-label="新建对话"
             >
               <IconPlus className="size-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>New chat</TooltipContent>
+          <TooltipContent>新建对话</TooltipContent>
         </Tooltip>
       </div>
       <div className="grid gap-0.5">
@@ -319,7 +326,7 @@ function ChatThreadsSection() {
                       }
                     }}
                     maxLength={160}
-                    aria-label={`Rename ${threadTitle(thread)}`}
+                    aria-label={`重命名 ${threadTitle(thread)}`}
                     className="h-6 min-w-0 rounded-sm border-sidebar-border bg-background px-1.5 text-xs"
                   />
                 </form>
@@ -342,7 +349,7 @@ function ChatThreadsSection() {
                       <DropdownMenuTrigger asChild>
                         <button
                           type="button"
-                          aria-label={`Chat options for ${threadTitle(thread)}`}
+                          aria-label={`${threadTitle(thread)} 的对话操作`}
                           className="absolute right-1 flex size-6 items-center justify-center rounded-md text-sidebar-foreground/65 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100"
                         >
                           <IconDots className="size-4" />
@@ -357,7 +364,7 @@ function ChatThreadsSection() {
                           onSelect={() => startRenameThread(thread)}
                         >
                           <IconEdit className="size-4" />
-                          Rename chat
+                          重命名对话
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onSelect={() =>
@@ -365,14 +372,14 @@ function ChatThreadsSection() {
                           }
                         >
                           <IconPin className="size-4" />
-                          {thread.pinnedAt ? "Unpin chat" : "Pin chat"}
+                          {thread.pinnedAt ? "取消置顶" : "置顶对话"}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
                           onSelect={() => void handleArchiveThread(thread.id)}
                         >
                           <IconArchive className="size-4" />
-                          Archive chat
+                          归档对话
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -421,13 +428,13 @@ export function Sidebar({
             "flex shrink-0 items-center justify-center rounded-md text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             collapsed ? "size-8" : "size-7",
           )}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
         >
           <ToggleIcon className="size-4" />
         </button>
       </TooltipTrigger>
       <TooltipContent side="right">
-        {collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        {collapsed ? "展开侧边栏" : "收起侧边栏"}
       </TooltipContent>
     </Tooltip>
   ) : null;
@@ -526,6 +533,9 @@ export function Sidebar({
         )}
       >
         {!collapsed ? <CapacityChip /> : null}
+        {/* Single GLOBAL account-usage indicator (account-level, shown once —
+            NOT per brain session). On-demand + ~12-min background + SQL-cached. */}
+        {!collapsed ? <AccountUsageChip /> : null}
         {!collapsed ? (
           <div className="border-t border-sidebar-border px-2 py-1">
             <ExtensionsSidebarSection />

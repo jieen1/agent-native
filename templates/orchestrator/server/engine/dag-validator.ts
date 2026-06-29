@@ -210,6 +210,17 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
       if (agent.engine_override != null && typeof agent.engine_override !== "string") {
         errors.push(`Node '${id}': engine_override must be a string`);
       }
+      if (
+        typeof agent.engine_override === "string" &&
+        (agent.engine_override.trim() === "claude-code" ||
+          agent.engine_override.trim().toLowerCase().startsWith("acp:claude"))
+      ) {
+        errors.push(
+          `Node '${id}': engine_override 'claude-code' is not allowed on DAG worker nodes — ` +
+            "CC subscription is reserved for the brain only. " +
+            "Use ai-sdk:anthropic, ai-sdk:openai, or a vllm/remote-api runtime_config instead.",
+        );
+      }
       if (agent.retry != null) {
         if (typeof agent.retry !== "object" || Array.isArray(agent.retry)) {
           errors.push(`Node '${id}': retry must be an object`);

@@ -5,13 +5,23 @@ export type Lang = "en" | "zh";
 export const LANGS: Lang[] = ["en", "zh"];
 const STORAGE_KEY = "orchestrator.lang";
 
+// This deployment ships a Chinese-first UI: the default locale is zh-CN, and the
+// stored preference only switches AWAY to English when the user explicitly picks
+// it. (A prior "default locale to zh-CN" change was authored but never reached
+// the deployed branch, which is why the t()-driven chrome — the sidebar nav, the
+// settings page, the command palette and topbar — was rendering English on the
+// live site even though every page body had been translated.)
+const DEFAULT_LANG: Lang = "zh";
+
 export function readStoredLang(): Lang {
-  if (typeof window === "undefined") return "en";
+  if (typeof window === "undefined") return DEFAULT_LANG;
   try {
     const v = window.localStorage.getItem(STORAGE_KEY);
-    return v === "zh" ? "zh" : "en";
+    if (v === "zh") return "zh";
+    if (v === "en") return "en";
+    return DEFAULT_LANG;
   } catch {
-    return "en";
+    return DEFAULT_LANG;
   }
 }
 
@@ -35,6 +45,13 @@ const en = {
     settings: "Settings",
     observability: "Observability",
     database: "Database",
+    // Sidebar destinations (the shared left nav). These were missing from the
+    // nav namespace, so the Sidebar fell back to its hardcoded English labels.
+    brain: "Brain",
+    agents: "Agents",
+    workspaces: "Workspaces",
+    spawns: "Spawns",
+    pool: "Pool",
   },
   settings: {
     title: "Settings",
@@ -88,6 +105,14 @@ const en = {
     tabRuntime: "Runtime",
     tabImages: "Images",
     tabCredentials: "Credentials",
+    // CC subscription model tier restriction.
+    ccTierTitle: "Subscription model restriction",
+    ccTierDesc:
+      "Limit which models the CC subscription brain can select. " +
+      "Blocking Opus prevents accidental high-cost usage on a Pro/Max plan.",
+    ccTierSonnet: "Sonnet / Haiku only (block Opus)",
+    ccTierAll: "All models (allow Opus)",
+    ccTierSaved: "Model tier updated.",
     // vLLM Test button (DESIGN §8.3 item2 — parity with the Claude Code test).
     vllmTest: "Test",
     vllmTesting: "Testing…",
@@ -178,6 +203,20 @@ const en = {
     toggleTheme: "Toggle theme",
     toggleLanguage: "Toggle language",
     commandSearch: "Search…",
+  },
+  // Global account-usage indicator (single sidebar chip; account-level).
+  usage: {
+    account: "Account usage",
+    notConnected: "Not connected",
+    unavailable: "Unavailable",
+    loading: "Loading…",
+    fiveHour: "5-hour",
+    weekly: "Weekly",
+    resetsIn: "until reset",
+    resetsAt: "reset",
+    asOf: "as of",
+    stale: "stale",
+    refresh: "Refresh",
   },
   // ⌘K command palette (FRONTEND §0 / C5).
   palette: {
@@ -712,6 +751,12 @@ const zh: typeof en = {
     settings: "设置",
     observability: "可观测性",
     database: "数据库",
+    // 共享左侧导航的目的地 —— 与首页卡片标签保持一致的术语。
+    brain: "大脑",
+    agents: "智能体",
+    workspaces: "工作区",
+    spawns: "派生任务",
+    pool: "资源池",
   },
   settings: {
     title: "设置",
@@ -802,6 +847,13 @@ const zh: typeof en = {
     credsRegistered: "已注册",
     credsMissing: "未设置",
     credsMountedBy: "挂载方",
+    // CC 订阅模型档次限制。
+    ccTierTitle: "订阅模型限制",
+    ccTierDesc:
+      "限制 CC 订阅 Brain 可选的模型。屏蔽 Opus 可防止在 Pro/Max 订阅上意外消耗高额配额。",
+    ccTierSonnet: "仅 Sonnet / Haiku（屏蔽 Opus）",
+    ccTierAll: "全部模型（允许 Opus）",
+    ccTierSaved: "模型档次已更新。",
   },
   common: {
     create: "创建",
@@ -854,6 +906,19 @@ const zh: typeof en = {
     toggleTheme: "切换主题",
     toggleLanguage: "切换语言",
     commandSearch: "搜索…",
+  },
+  usage: {
+    account: "账户用量",
+    notConnected: "未连接",
+    unavailable: "暂不可用",
+    loading: "加载中…",
+    fiveHour: "5 小时",
+    weekly: "每周",
+    resetsIn: "后重置",
+    resetsAt: "重置",
+    asOf: "截至",
+    stale: "已过期",
+    refresh: "刷新",
   },
   palette: {
     placeholder: "搜索或运行命令…",

@@ -52,6 +52,7 @@ export default defineAction({
       lastTickAt: health.lastTickAt,
       reapsFired: health.reapsFired,
       tasksPromoted: health.tasksPromoted,
+      threadsReconciled: health.threadsReconciled,
       lastError: health.lastError,
     };
   },

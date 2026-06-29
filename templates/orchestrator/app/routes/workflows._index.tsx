@@ -147,7 +147,7 @@ export default function V3TemplatesRoute() {
               action={
                 <Button size="sm" onClick={() => setCreateOpen(true)}>
                   <IconPlus className="mr-1 size-4" />
-                  New Template
+                  新建模板
                 </Button>
               }
             />

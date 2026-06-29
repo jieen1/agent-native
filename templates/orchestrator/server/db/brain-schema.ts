@@ -92,6 +92,14 @@ const STATEMENTS = [
      created_at   timestamptz DEFAULT now(),
      updated_at   timestamptz DEFAULT now()
    )`,
+  // Additive: the reaper's release reason, so a timeout-driven release is
+  // distinguishable from a real brain failure. Set whenever the reaper releases a
+  // task (e.g. `reaped: thread already done` vs
+  // `reaped: stale > threshold, thread not done`). Nullable / additive — a NULL
+  // value means the task reached terminal through the normal run-terminal release,
+  // not the reaper. Without this, a timeout-release reads as an indistinguishable
+  // `failed` and is mistaken for a brain failure (the s20ai7jxt5 false-failure).
+  `ALTER TABLE brain_tasks ADD COLUMN IF NOT EXISTS reap_reason text`,
   `CREATE INDEX IF NOT EXISTS idx_brain_tasks_status ON brain_tasks (status)`,
   `CREATE INDEX IF NOT EXISTS idx_brain_tasks_thread ON brain_tasks (thread_id)`,
   `CREATE INDEX IF NOT EXISTS idx_brain_tasks_owner ON brain_tasks (owner_email)`,
