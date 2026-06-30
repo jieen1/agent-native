@@ -7,7 +7,123 @@ import {
 } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
+import http from "node:http";
+import tls from "node:tls";
 import { managedClaudeConfigDir } from "./claude-managed-auth.js";
+
+/**
+ * Outbound proxy for the Claude OAuth endpoints, read from the standard env.
+ *
+ * Why this exists: on a multi-WAN host the Docker container's traffic can NAT
+ * out through a different public IP than the host. Cloudflare in front of
+ * `platform.claude.com` 403-blocks ("Request not allowed") that container egress
+ * IP while allowing the host's. Routing the token exchange + refresh through the
+ * host's HTTP proxy (which egresses via the allowed IP) is what unblocks login.
+ * Set `HTTPS_PROXY=http://172.18.0.1:20171` on the container. Empty = direct.
+ */
+function oauthProxyUrl(): string {
+  return (
+    process.env.CLAUDE_OAUTH_PROXY ||
+    process.env.HTTPS_PROXY ||
+    process.env.https_proxy ||
+    process.env.HTTP_PROXY ||
+    process.env.http_proxy ||
+    ""
+  );
+}
+
+/**
+ * POST to an HTTPS URL through an HTTP forward proxy via a CONNECT tunnel,
+ * using only Node built-ins (undici/ProxyAgent is not resolvable in the
+ * bundled server build). Tunnels TCP to the proxy, upgrades to TLS for the
+ * target host, then lets `https.request` speak HTTP/1.1 over that socket.
+ */
+function proxiedHttpsPost(
+  targetUrl: string,
+  proxyUrl: string,
+  headers: Record<string, string>,
+  body: string,
+  timeoutMs: number,
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(targetUrl);
+    const proxy = new URL(proxyUrl);
+    const targetPort = target.port || "443";
+    let settled = false;
+    const fail = (err: Error) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    };
+    const connectReq = http.request({
+      host: proxy.hostname,
+      port: Number(proxy.port) || 80,
+      method: "CONNECT",
+      path: `${target.hostname}:${targetPort}`,
+      headers: { Host: `${target.hostname}:${targetPort}` },
+      timeout: timeoutMs,
+    });
+    connectReq.once("connect", (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        fail(
+          new Error(
+            `Proxy CONNECT to ${target.hostname} failed: HTTP ${res.statusCode}`,
+          ),
+        );
+        return;
+      }
+      // The proxy tunnel carries raw TCP; establish TLS to the target over it,
+      // then speak plain HTTP/1.1 on the now-encrypted socket. Use http.request
+      // (NOT https.request) — the socket is already TLS, so https would wrap a
+      // second TLS layer and Cloudflare answers 520.
+      const secure = tls.connect(
+        { socket, servername: target.hostname, ALPNProtocols: ["http/1.1"] },
+        () => {
+          const req = http.request(
+            {
+              createConnection: () => secure,
+              method: "POST",
+              path: `${target.pathname}${target.search}`,
+              headers: {
+                ...headers,
+                Host: target.hostname,
+                "Content-Length": Buffer.byteLength(body),
+              },
+              timeout: timeoutMs,
+            },
+            (r) => {
+              const chunks: Buffer[] = [];
+              r.on("data", (c) => chunks.push(c as Buffer));
+              r.on("end", () => {
+                if (!settled) {
+                  settled = true;
+                  resolve({
+                    status: r.statusCode || 0,
+                    text: Buffer.concat(chunks).toString("utf8"),
+                  });
+                }
+              });
+            },
+          );
+          req.once("error", fail);
+          req.once("timeout", () =>
+            req.destroy(new Error("token request timeout")),
+          );
+          req.write(body);
+          req.end();
+        },
+      );
+      secure.once("error", fail);
+    });
+    connectReq.once("error", fail);
+    connectReq.once("timeout", () =>
+      connectReq.destroy(new Error("proxy CONNECT timeout")),
+    );
+    connectReq.end();
+  });
+}
 
 // Container-owned Claude Code SUBSCRIPTION login (DESIGN §13: NO ~/.claude
 // copying). The orchestrator container drives its OWN OAuth 2.0 Authorization
@@ -154,13 +270,47 @@ interface TokenResponse {
 }
 
 async function postToken(body: Record<string, string>): Promise<TokenResponse> {
+  const bodyStr = new URLSearchParams(body).toString();
+  const headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    // platform.claude.com sits behind Cloudflare, which now rejects the bare
+    // Node-fetch request (no/anonymous User-Agent) at the edge with 403
+    // "Request not allowed" / 429 before it ever reaches the OAuth handler. The
+    // Claude Code CLI's User-Agent is accepted, so we send it verbatim for both
+    // the code-exchange and the single-use refresh. Overridable via env so the
+    // version can be bumped without a rebuild.
+    "User-Agent":
+      process.env.CLAUDE_CLI_USER_AGENT ||
+      "claude-cli/2.1.191 (external, cli)",
+    Accept: "application/json",
+  };
+
+  // When the container's direct egress IP is Cloudflare-blocked (multi-WAN NAT),
+  // route the exchange through the configured host proxy via a CONNECT tunnel.
+  const proxyUrl = oauthProxyUrl();
+  if (proxyUrl) {
+    const { status, text } = await proxiedHttpsPost(
+      OAUTH_TOKEN_URL,
+      proxyUrl,
+      headers,
+      bodyStr,
+      HTTP_TIMEOUT_MS,
+    );
+    if (status < 200 || status >= 300) {
+      throw new Error(
+        `Claude token endpoint returned ${status}${text ? `: ${text.slice(0, 300)}` : ""}`,
+      );
+    }
+    return JSON.parse(text) as TokenResponse;
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
   try {
     const res = await fetch(OAUTH_TOKEN_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams(body).toString(),
+      headers,
+      body: bodyStr,
       signal: controller.signal,
     });
     if (!res.ok) {

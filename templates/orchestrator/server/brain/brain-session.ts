@@ -30,6 +30,7 @@ import { ensureBrainSchema } from "../db/brain-schema.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import { getBrainModel } from "./brain-model.js";
 import { deriveContextWindow } from "../../actions/brain-usage.js";
+import { runSdkBrainTurn } from "./sdk-brain-session.js";
 
 /**
  * The brain's system prompt. Appended via --append-system-prompt on every turn.
@@ -98,16 +99,10 @@ export async function startBrainTurn(
   await ensureBrainSchema();
   const db = getV3Db();
 
-  // Fail loud early if managed Claude Code login is missing — otherwise the
-  // child would spawn and immediately die with an opaque error.
+  // Check Claude Code login status. If CC is unavailable, fall through to the
+  // SDK brain (vLLM). Only throw if BOTH CC and the SDK path fail.
   const login = getManagedClaudeStatus();
-  if (!login.loggedIn) {
-    throw new Error(
-      login.expired
-        ? "Claude Code login expired — reconnect in Settings → Claude Code."
-        : "Claude Code is not connected — connect it in Settings → Claude Code.",
-    );
-  }
+  const useSdkBrain = !login.loggedIn;
 
   // 1) Resolve / create the thread.
   //
@@ -228,15 +223,38 @@ export async function startBrainTurn(
     .set(runningUpdate)
     .where(eq(v3Schema.brainThreads.id, threadId));
 
-  // 4) Spawn the CC child in the background (do not await).
-  void runBrainChild({
-    threadId,
-    ownerEmail: args.ownerEmail,
-    orgId: args.orgId ?? null,
-    message: args.message,
-    cwd,
-    resumeSessionId: sessionId,
-  }).catch(async (err) => {
+  // 4) Run the brain in the background (do not await).
+  // Use the SDK brain (vLLM) when CC is not logged in; otherwise CC path.
+  const bgTask = useSdkBrain
+    ? runSdkBrainTurn({
+        threadId: threadId!,
+        ownerEmail: args.ownerEmail,
+        orgId: args.orgId ?? null,
+        message: args.message,
+      }).then(async (outcome) => {
+        const db2 = getV3Db();
+        if (!outcome.ok) {
+          await db2
+            .update(v3Schema.brainThreads)
+            .set({ status: "error", error: outcome.error ?? "SDK brain failed", updatedAt: new Date() })
+            .where(eq(v3Schema.brainThreads.id, threadId!));
+        } else {
+          await db2
+            .update(v3Schema.brainThreads)
+            .set({ status: "done", updatedAt: new Date() })
+            .where(eq(v3Schema.brainThreads.id, threadId!));
+        }
+      })
+    : runBrainChild({
+        threadId: threadId!,
+        ownerEmail: args.ownerEmail,
+        orgId: args.orgId ?? null,
+        message: args.message,
+        cwd,
+        resumeSessionId: sessionId,
+      });
+
+  void bgTask.catch(async (err) => {
     const msg = err instanceof Error ? err.message : String(err);
     try {
       await appendEvent(threadId!, args.ownerEmail, args.orgId ?? null, {

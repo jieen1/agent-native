@@ -143,9 +143,6 @@ export function ClaudeCodeCard() {
             <DialogTitle>{t("settings.claudeConnectTitle")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-              {t("settings.claudeSessionWarning")}
-            </div>
             <Button
               variant="outline"
               asChild={!!authUrl}
