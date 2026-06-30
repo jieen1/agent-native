@@ -65,8 +65,10 @@ export function resolveNodeExecutorChoice(
   node: { engine?: string | null },
   ctx: ExecutorChoiceContext,
 ): ExecutorChoice {
+  // "claude-code" is intentionally absent from the accepted set: DAG worker
+  // nodes are not permitted to use the CC subscription engine. The explicit
+  // check below produces a clear error instead of a generic "unknown choice".
   const accepted = new Set<string>([
-    "claude-code",
     ...(ctx.builtinEngines ?? BUILTIN_ENGINES),
     ...ctx.runtimeConfigKeys,
   ]);
@@ -76,11 +78,23 @@ export function resolveNodeExecutorChoice(
     nonEmpty(ctx.markerRuntime) ??
     nonEmpty(ctx.systemDefault);
 
+  // Check CC first so callers get the specific error, not the generic one.
+  // CC subscription is reserved for the brain only — DAG worker nodes must use
+  // an API-key runtime. Isolated microVM nodes have no ~/.claude access and
+  // headless CC subscription use violates Anthropic's terms.
+  if (choice === "claude-code") {
+    throw new ConfigError(
+      "claude-code cannot be used as a DAG worker node engine. " +
+        "CC subscription is reserved for the brain only. " +
+        "Use an API-key runtime instead: ai-sdk:anthropic, ai-sdk:openai, " +
+        "or a saved vllm / remote-api runtime_config.",
+    );
+  }
+
   if (choice === undefined || !accepted.has(choice)) {
     throw new ConfigError(`unknown/empty executor choice: ${String(choice)}`);
   }
 
-  if (choice === "claude-code") return { kind: "claude-code" };
   return { kind: "engine", engine: choice };
 }
 
@@ -118,9 +132,8 @@ export async function resolveNodeExecutorChoiceFromEnv(
 }
 
 // STARTUP VALIDATION: a configured SYSTEM_DEFAULT must be a real runtime key
-// (claude-code | built-in engine | a saved runtime_configs id). A null/empty
-// default is allowed (no system default configured); a dangling magic string
-// is a config error.
+// (a built-in engine or a saved runtime_configs id). "claude-code" is NOT a
+// valid system default — it is reserved for the brain only.
 export async function assertSystemDefaultValid(
   systemDefault: string | null | undefined,
   runtimeConfigKeys: readonly string[],
@@ -128,8 +141,14 @@ export async function assertSystemDefaultValid(
   const value = nonEmpty(systemDefault);
   if (value === undefined) return;
 
+  if (value === "claude-code") {
+    throw new ConfigError(
+      "SYSTEM_DEFAULT cannot be 'claude-code': CC subscription is reserved " +
+        "for the brain only and may not be used as the default DAG worker engine.",
+    );
+  }
+
   const accepted = new Set<string>([
-    "claude-code",
     ...BUILTIN_ENGINES,
     ...runtimeConfigKeys,
   ]);

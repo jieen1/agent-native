@@ -100,6 +100,11 @@ function shouldShowDirectEngine(
   if (engine.name === currentEngineName) return true;
   if (engine.name === "builder") return false;
   if (engine.name === "ai-sdk:anthropic") return false;
+  // CORE-PATCHES.md #1: surface a template-registered local engine ("vllm" → a
+  // local OpenAI-compatible vLLM, key baked from env) even though it declares no
+  // requiredEnvVars. Without this the picker hides it and falls back to built-ins
+  // that are unusable in our bundled/workspace deploy (pkg-filtered or key-gated).
+  if (engine.name === "vllm") return true;
   if (engine.requiredEnvVars?.length === 0) return false;
   return true;
 }

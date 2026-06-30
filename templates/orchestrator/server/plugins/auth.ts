@@ -1,17 +1,17 @@
 import { createAuthPlugin } from "@agent-native/core/server";
 
 const rawAppTitle = "{{APP_TITLE}}";
-const appTitle = rawAppTitle === "{" + "{APP_TITLE}}" ? "Chat" : rawAppTitle;
+const appTitle = rawAppTitle === "{" + "{APP_TITLE}}" ? "Orchestrator" : rawAppTitle;
 
 export default createAuthPlugin({
   marketing: {
     appName: appTitle,
     tagline:
-      "Start from a chat-first agent-native app and add actions, screens, and workflows as you grow.",
+      "Multi-model workflow execution engine — author DAGs, run them across models in isolated workspaces, and observe every run, spawn, and patch.",
     features: [
-      "Full-page chat with durable threads and tool call history",
-      "Add actions once and use them from chat, UI, HTTP, MCP, A2A, and CLI",
-      "Plug in your own agent runtime or build on the included app-agent loop",
+      "Author and run workflow DAGs across multiple models",
+      "Live-patch the not-yet-executed part of a running run",
+      "Isolated microVM / ACP workspaces with full observability",
     ],
   },
 });

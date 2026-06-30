@@ -1,0 +1,4 @@
+# The bridge runs on the WSL2 HOST (needs /dev/kvm) and installs its own deps
+# there: `cd msb-bridge && npm install`. Never commit the host install artifacts.
+node_modules/
+package-lock.json

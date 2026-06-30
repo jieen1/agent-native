@@ -1,3 +1,8 @@
+/**
+ * @deprecated V1 task lifecycle — superseded by v2 run management
+ * (`run-start`, `run-cancel` etc. in actions/). This file is retained for
+ * backward compatibility only.
+ */
 import { defineAction } from "@agent-native/core";
 import { resolveAccess } from "@agent-native/core/sharing";
 import { and, eq, inArray } from "drizzle-orm";

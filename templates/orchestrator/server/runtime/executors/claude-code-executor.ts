@@ -118,6 +118,7 @@ export class ClaudeCodeExecutor implements RuntimeExecutor {
       tokensSpent: parsed.tokensSpent,
       toolCallCount: parsed.toolCallCount,
       model: parsed.model ?? ctx.node.model ?? "claude",
+      steps: parsed.steps,
       detail: {
         finalText: parsed.finalText,
         totalCostUsd: parsed.totalCostUsd,

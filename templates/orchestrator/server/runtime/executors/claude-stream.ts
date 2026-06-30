@@ -17,6 +17,29 @@
 // `result` event's `usage` is CUMULATIVE, so we prefer it; if no `result`
 // event arrived (stream cut off), we fall back to summing per-assistant usage.
 
+/**
+ * One ordered intermediate step extracted from the stream (DESIGN §8.5 — the
+ * Node Inspector "执行过程 / Execution" timeline). A spawn's full transcript is a
+ * `seq`-ordered list of these, mirroring the brain's `brain_events` shape so the
+ * run-detail timeline can render the same reasoning + tool-call cards.
+ */
+export interface ClaudeStreamStep {
+  /** Monotonic order within this spawn (0-based). */
+  seq: number;
+  /** The step kind. */
+  type: "text" | "tool_use" | "tool_result";
+  /** Tool name for a `tool_use` step. */
+  name?: string;
+  /** The model-side tool-call id (links a tool_use to its tool_result). */
+  toolUseId?: string;
+  /** The tool input object for a `tool_use` step. */
+  input?: unknown;
+  /** The tool result content for a `tool_result` step. */
+  result?: unknown;
+  /** Assistant reasoning/answer text for a `text` step. */
+  text?: string;
+}
+
 /** Aggregated outcome of parsing a claude stream-json transcript. */
 export interface ClaudeStreamParseResult {
   /** Total tokens (input + output + cache read + cache write). */
@@ -33,6 +56,13 @@ export interface ClaudeStreamParseResult {
   resultSubtype: string | null;
   /** `total_cost_usd` from the result event, when present. */
   totalCostUsd: number | null;
+  /**
+   * The ordered intermediate transcript: every assistant `text` / `tool_use`
+   * block and every `user` `tool_result`, in stream order. Persisted as
+   * `spawn_events` so the Node Inspector can replay the node's real reasoning +
+   * tool calls (not just a count). Empty when the stream had no acting steps.
+   */
+  steps: ClaudeStreamStep[];
 }
 
 interface UsageLike {
@@ -59,6 +89,63 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /**
+ * Extract the ordered intermediate steps from ONE parsed stream-json event
+ * (an `assistant` turn's content blocks, or a `user` turn's tool_result blocks).
+ * Shared by the batch {@link parseClaudeStreamJson} and the LIVE line-by-line
+ * worker so both produce identical step shapes — the worker assigns `seq` itself
+ * (a running counter) since it sees events one at a time (DESIGN §8.5).
+ *
+ * Returns steps WITHOUT a `seq` (the caller assigns it). Empty for any other
+ * event type (system/result/etc.).
+ */
+export function stepsFromEvent(
+  event: Record<string, unknown>,
+): Array<Omit<ClaudeStreamStep, "seq">> {
+  const out: Array<Omit<ClaudeStreamStep, "seq">> = [];
+  const type = event.type;
+  if (type === "assistant") {
+    const message = asRecord(event.message);
+    const content = message?.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        const b = asRecord(block);
+        if (!b) continue;
+        if (b.type === "tool_use") {
+          out.push({
+            type: "tool_use",
+            name: typeof b.name === "string" ? b.name : undefined,
+            toolUseId: typeof b.id === "string" ? b.id : undefined,
+            input: b.input ?? null,
+          });
+        } else if (
+          b.type === "text" &&
+          typeof b.text === "string" &&
+          b.text.trim()
+        ) {
+          out.push({ type: "text", text: b.text });
+        }
+      }
+    }
+  } else if (type === "user") {
+    const message = asRecord(event.message);
+    const content = message?.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        const b = asRecord(block);
+        if (!b || b.type !== "tool_result") continue;
+        out.push({
+          type: "tool_result",
+          toolUseId:
+            typeof b.tool_use_id === "string" ? b.tool_use_id : undefined,
+          result: b.content ?? null,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Parse a full claude stream-json transcript (the concatenated stdout). Lenient:
  * blank lines and non-JSON lines are skipped (the CLI may interleave the odd
  * non-JSON warning), so a partial/garbled stream still yields best-effort totals
@@ -73,6 +160,7 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
   let totalCostUsd: number | null = null;
   let resultUsage = 0;
   let summedAssistantUsage = 0;
+  const steps: ClaudeStreamStep[] = [];
 
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -86,10 +174,11 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
     if (!event) continue;
     const type = event.type;
 
-    if (type === "assistant") {
+    if (type === "assistant" || type === "user") {
       const message = asRecord(event.message);
-      if (message) {
+      if (type === "assistant" && message) {
         if (typeof message.model === "string") model = message.model;
+        // Last non-empty assistant text wins as the finalText.
         const content = message.content;
         if (Array.isArray(content)) {
           for (const block of content) {
@@ -97,11 +186,15 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
             if (!b) continue;
             if (b.type === "tool_use") toolCallCount += 1;
             else if (b.type === "text" && typeof b.text === "string") {
-              finalText = b.text; // last assistant text wins
+              finalText = b.text;
             }
           }
         }
         summedAssistantUsage += usageTotal(message.usage as UsageLike);
+      }
+      // Append this event's steps with running seq (shared extractor).
+      for (const s of stepsFromEvent(event)) {
+        steps.push({ seq: steps.length, ...s });
       }
     } else if (type === "result") {
       sawResult = true;
@@ -129,5 +222,6 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
     sawResult,
     resultSubtype,
     totalCostUsd,
+    steps,
   };
 }

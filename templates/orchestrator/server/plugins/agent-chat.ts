@@ -5,10 +5,16 @@ import {
 import { getOrgContext } from "@agent-native/core/org";
 import actionsRegistry from "../../.generated/actions-registry.js";
 import { registerOrchestratorRuntime } from "../register-runtime.js";
+import { registerVllmEngine, getVllmEngine } from "../vllm-engine.js";
 
 // Register the vLLM engine + Claude Code harness in the server process so the
 // agent chat, engine-status route, and model picker all see them.
 registerOrchestratorRuntime();
+registerVllmEngine();
+
+// Concrete vLLM engine instance pinned for the sidebar chat run (highest
+// resolveEngine priority) so it never falls through to the pkg-gated built-in.
+const vllmEngine = getVllmEngine();
 
 const INITIAL_TOOL_NAMES = [
   "view-screen",
@@ -22,6 +28,9 @@ export default createAgentChatPlugin({
   appId: "orchestrator",
   actions: loadActionsFromStaticRegistry(actionsRegistry),
   initialToolNames: INITIAL_TOOL_NAMES,
+  // Pin local vLLM as the sidebar chat engine when configured (composer usable,
+  // runs always hit vLLM). Falls back to the framework default when unset.
+  engine: vllmEngine,
   resolveOrgId: async (event) => (await getOrgContext(event)).orgId,
   systemPrompt: `You are the Orchestrator agent.
 

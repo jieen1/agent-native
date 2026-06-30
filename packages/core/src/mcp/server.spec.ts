@@ -2753,6 +2753,49 @@ describe("handleMcpRequest — web-standard runtime fallback (no Node req/res)",
     expect(out.result.content[0].text).not.toContain("should-be-hidden");
   });
 
+  it("surfaces the FULL result of a readOnly object action via structuredContent (untruncated)", async () => {
+    // Regression: cross-app / machine MCP callers reading a readOnly action need
+    // the full payload, not the ~2000-char concise text. The concise text is
+    // still emitted for the LLM, but structuredContent now carries the whole
+    // object so a structured consumer can parse it back intact.
+    const bigText = "x".repeat(5000); // far exceeds the 2000-char text cap
+    const readConfig = {
+      ...config,
+      actions: {
+        "read-big-transcript": {
+          tool: { description: "A read-only data read with a large payload" },
+          readOnly: true,
+          run: async () => ({
+            thread: { id: "t1", status: "done" },
+            events: [{ seq: 0, text: bigText }],
+          }),
+        },
+      },
+    };
+
+    const out = await callWeb(
+      {
+        jsonrpc: "2.0",
+        id: 162,
+        method: "tools/call",
+        params: { name: "read-big-transcript", arguments: {} },
+      },
+      {
+        headers: { "x-agent-native-mcp-full-catalog": "1" },
+        config: readConfig,
+      },
+    );
+
+    expect(out.error).toBeUndefined();
+    // The concise text is still capped.
+    expect(out.result.content[0].text.length).toBeLessThanOrEqual(2001);
+    // structuredContent carries the FULL object intact.
+    expect(out.result.structuredContent).toMatchObject({
+      thread: { id: "t1", status: "done" },
+    });
+    expect(out.result.structuredContent.events[0].text).toBe(bigText);
+  });
+
   it("strips embedTargetPath, embedExpiresAt, and ticket fields from structuredContent", async () => {
     // Regression: internal embed-routing fields are carried in
     // `_meta["agent-native/embedStart"]` for the embed runtime. They must NOT

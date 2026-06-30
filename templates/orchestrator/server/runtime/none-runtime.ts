@@ -11,7 +11,15 @@
 // edits a repo, or runs an agent uses MicrosandboxRuntime (DESIGN §7.0).
 
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile, rm, cp } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  writeFile,
+  rm,
+  cp,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -52,19 +60,51 @@ function scopedPath(root: string, p: string): string {
 export class NoneRuntime implements NodeRuntime {
   readonly kind = "none";
 
-  /** STAGE 1 — PROVISION. No VM: just a disposable scoped temp dir. */
+  /**
+   * STAGE 1 — PROVISION. No VM: just a disposable scoped temp dir.
+   *
+   * When `spec.hostDir` is set, the node operates DIRECTLY in that shared host
+   * checkout (no copy): we symlink the scoped `/work` worktree at it so any tool
+   * path under `/work` resolves, via the symlink, into the real workspace and
+   * edits persist for downstream nodes (e.g. a later CC review/commit node). The
+   * symlink lives inside the disposable temp root, so teardown's `rm -rf` of the
+   * root removes the LINK — never the shared directory it points at. The handle
+   * is flagged `meta.externalWork` so MOUNT skips the empty-`/work` worktree.
+   */
   async provision(spec: NodeRuntimeSpec): Promise<VmHandle> {
     const root = await mkdtemp(join(tmpdir(), "an-none-"));
-    return { name: `none-${root}`, spec, meta: { root } };
+    const externalWork = typeof spec.hostDir === "string" && spec.hostDir !== "";
+    if (externalWork) {
+      // `${root}/work` is exactly `scopedPath(root, "/work")` (DEFAULT_WORKDIR),
+      // so every `/work`-rooted tool path follows this symlink into spec.hostDir.
+      await symlink(resolve(spec.hostDir!), join(root, "work"), "dir");
+    }
+    return { name: `none-${root}`, spec, meta: { root, externalWork } };
   }
 
   /** STAGE 2 — MOUNT. Copy any folders/repo into the scoped root (host cp). */
   async mount(vm: VmHandle, mounts: MountSpec): Promise<void> {
     const root = this.rootOf(vm);
+    // When `provision` symlinked `/work` at a shared host checkout, that worktree
+    // ALREADY exists (it is the real workspace). The empty-host `/work` mount the
+    // node-runner passes ("create an empty workdir") must be SKIPPED so we never
+    // mkdir/cp over the symlink — doing so would shadow or clobber the workspace.
+    const externalWork = vm.meta?.externalWork === true;
+    const workLink = join(root, "work");
     for (const folder of mounts.folders ?? []) {
       const dest = scopedPath(root, folder.path);
+      if (externalWork && !folder.host && resolve(dest) === workLink) {
+        // The symlinked `/work` worktree — leave it pointing at the shared dir.
+        continue;
+      }
       await mkdir(dirname(dest), { recursive: true });
-      await cp(folder.host, dest, { recursive: true });
+      if (folder.host) {
+        await cp(folder.host, dest, { recursive: true });
+      } else {
+        // Empty-host mount (node-runner passes host:"" for the /work worktree
+        // = "create an empty workdir"). cp("") would ENOENT; just make the dir.
+        await mkdir(dest, { recursive: true });
+      }
     }
     // repo/creds/env are not meaningful for a pure-reasoning node; ignored.
     void mounts.repo;
@@ -216,7 +256,15 @@ export class NoneRuntime implements NodeRuntime {
     throw new Error("snapshot is not supported by NoneRuntime (no VM)");
   }
 
-  /** STAGE 7 — TEARDOWN. Remove the scoped temp dir unless "keep". */
+  /**
+   * STAGE 7 — TEARDOWN. Remove the scoped temp dir unless "keep".
+   *
+   * Safe for a shared workspace: when `spec.hostDir` was set, `/work` is a
+   * SYMLINK inside the temp root. `rm` removes the symlink itself, never the
+   * directory it targets (rm does not traverse INTO a symlinked dir to delete
+   * its contents), so the shared host checkout and the downstream nodes' view of
+   * it survive. We only ever pass the temp `root` here — never `spec.hostDir`.
+   */
   async teardown(vm: VmHandle, policy: TeardownPolicy): Promise<void> {
     if (policy === "keep") return;
     const root = this.rootOf(vm);

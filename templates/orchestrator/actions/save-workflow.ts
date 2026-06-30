@@ -1,3 +1,7 @@
+/**
+ * @deprecated Use `v3-workflow` action `workflow.save` instead.
+ * This V1 action is retained for backward compatibility only.
+ */
 import { defineAction } from "@agent-native/core";
 import {
   getRequestUserEmail,

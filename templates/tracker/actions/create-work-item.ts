@@ -1,0 +1,106 @@
+import { defineAction } from "@agent-native/core";
+import {
+  getRequestUserEmail,
+  getRequestOrgId,
+} from "@agent-native/core/server/request-context";
+import { and, eq, sql } from "drizzle-orm";
+import { customAlphabet } from "nanoid";
+import { z } from "zod";
+import { getDb, schema } from "../server/db/index.js";
+import { ownerScope } from "../server/lib/access.js";
+
+const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
+
+export default defineAction({
+  description:
+    "Create a work item under a project. Holds the requirement/intent only — " +
+    "repo and branch come from the project (configured once), NOT the item.",
+  schema: z.object({
+    projectId: z.string().min(1).describe("Owning project id"),
+    title: z.string().min(1).describe("Short work item title"),
+    description: z
+      .string()
+      .optional()
+      .describe("The requirement / intent handed to the orchestrator brain"),
+    type: z
+      .enum(["需求", "任务", "缺陷", "测试", "生产问题", "requirement", "task", "defect", "incident", "story"])
+      .optional()
+      .describe("Work item type: 需求/任务/缺陷/测试/生产问题 (or legacy English names)"),
+    priority: z.coerce.number().int().optional().describe("Priority: 0=P0 (Critical), 1=P1, 2=P2, 3=P3 (Low)"),
+    risk: z.enum(["low", "medium", "high"]).optional().describe("Risk level"),
+    tags: z.array(z.string()).optional().describe("Feature/label tags"),
+    nature: z.array(z.string()).optional().describe("Nature tags (性质): 前端 | 后端 | API | 数据"),
+    owner: z.string().nullable().optional().describe("Owner email or 'agent'. Null = unassigned."),
+    sprintId: z.string().optional().describe("Sprint to assign this item to"),
+    executionMode: z
+      .enum(["auto", "manual"])
+      .optional()
+      .describe("auto = enter queue on create; manual = stay in 待办"),
+  }),
+  http: { method: "POST" },
+  run: async (args) => {
+    const ownerEmail = getRequestUserEmail();
+    if (!ownerEmail) throw new Error("Not authenticated");
+    const orgId = getRequestOrgId() ?? null;
+
+    const db = getDb();
+    // Confirm the project exists and is visible to the caller.
+    const project = (
+      await db
+        .select({ id: schema.projects.id, key: schema.projects.key })
+        .from(schema.projects)
+        .where(and(eq(schema.projects.id, args.projectId), ownerScope(schema.projects)))
+        .limit(1)
+    )[0];
+    if (!project) throw new Error("Project not found or not accessible");
+
+    // Generate monotonic itemKey: count existing items for this project.
+    const countResult = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.workItems)
+      .where(eq(schema.workItems.projectId, args.projectId));
+    const seq = (Number(countResult[0]?.count) || 0) + 1;
+    const itemKey = `${project.key}-${String(seq).padStart(3, "0")}`;
+
+    const id = nanoid();
+    const now = new Date().toISOString();
+    await db.insert(schema.workItems).values({
+      id,
+      projectId: args.projectId,
+      type: args.type ?? "需求",
+      title: args.title.trim(),
+      description: args.description?.trim() ?? "",
+      status: "open",
+      priority: args.priority ?? 2,
+      risk: args.risk ?? "medium",
+      tags: JSON.stringify(args.tags ?? []),
+      nature: JSON.stringify(args.nature ?? []),
+      owner: args.owner ?? null,
+      sprintId: args.sprintId ?? null,
+      executionMode: args.executionMode ?? "manual",
+      itemKey,
+      createdAt: now,
+      updatedAt: now,
+      ownerEmail,
+      orgId,
+      visibility: "private",
+    });
+
+    return {
+      id,
+      projectId: args.projectId,
+      itemKey,
+      type: args.type ?? "requirement",
+      title: args.title.trim(),
+      description: args.description?.trim() ?? "",
+      status: "open",
+      priority: args.priority ?? 0,
+      risk: args.risk ?? "medium",
+      tags: args.tags ?? [],
+      sprintId: args.sprintId ?? null,
+      executionMode: args.executionMode ?? "manual",
+      createdAt: now,
+      updatedAt: now,
+    };
+  },
+});

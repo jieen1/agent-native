@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "mode": "database",
+  "apps": {
+    "tracker": {
+      "mode": "database"
+    }
+  },
+  "a2a": {
+    "name": "Tracker",
+    "description": "Project + work-item tracker. Holds projects (repo/branch configured once) and work items (requirements), and dispatches work items to the Orchestrator's Claude Code brain for autonomous execution.",
+    "agentCardPath": "/.well-known/agent-card.json",
+    "endpoint": "/_agent-native/a2a",
+    "auth": {
+      "scheme": "jwtBearer",
+      "secretEnv": "A2A_SECRET",
+      "subjectClaim": "sub"
+    },
+    "connections": {
+      "orchestrator": {
+        "name": "Orchestrator",
+        "description": "Multi-model workflow execution engine and persistent CC brain. The tracker dispatches work items to it and reads activity back by tag.",
+        "baseUrlEnv": "ORCHESTRATOR_BASE_URL",
+        "defaultBaseUrl": "http://an-orchestrator:3002",
+        "mcpEndpoint": "/orchestrator/_agent-native/mcp",
+        "auth": {
+          "scheme": "jwtBearer",
+          "secretEnv": "A2A_SECRET",
+          "subjectClaim": "sub",
+          "catalogScope": "full"
+        },
+        "dispatch": {
+          "tool": "brain-send",
+          "args": {
+            "message": "<requirement + execution instructions>",
+            "repo": "<project.git_remote>",
+            "baseBranch": "<project.default_branch>",
+            "tags": { "source": "tracker", "item_id": "<workItemId>" }
+          },
+          "returns": { "threadId": "<bt_...>", "workspaceId": "<ws_...>" }
+        },
+        "readback": {
+          "tools": ["brain-thread", "runsList", "spawnList"],
+          "tagMatch": { "source": "tracker", "item_id": "<workItemId>" }
+        },
+        "note": "Dispatch is a deterministic MCP tools/call (NOT the A2A NL loop). See server/lib/orchestrator-client.ts."
+      }
+    }
+  }
+}

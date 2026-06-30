@@ -185,6 +185,54 @@ export function useStartClaudeCode() {
   return useActionMutation("start-claude-code", {});
 }
 
+// ── Claude Code connection (subscription login via in-app OAuth) ─────────────
+
+export interface ClaudeStatus {
+  loggedIn: boolean;
+  expired: boolean;
+  subscriptionType: string | null;
+  expiresAt: string | null;
+  connected: boolean;
+}
+
+export function useClaudeStatus() {
+  return useActionQuery("claudeStatus", {}) as {
+    data?: ClaudeStatus;
+    isLoading: boolean;
+    isFetching: boolean;
+    refetch: () => void;
+  };
+}
+
+export function useClaudeConnect() {
+  return useActionMutation("claudeConnect", {}) as {
+    mutateAsync: (vars: Record<string, never>) => Promise<{
+      sessionId: string;
+      authUrl: string;
+    }>;
+    isPending: boolean;
+  };
+}
+
+export function useClaudeConnectComplete() {
+  return useActionMutation("claudeConnectComplete", {}) as {
+    mutateAsync: (vars: { sessionId: string; code: string }) => Promise<{
+      loggedIn: boolean;
+      error?: string;
+    }>;
+    isPending: boolean;
+  };
+}
+
+export function useClaudeDisconnect() {
+  // useActionMutation already invalidates all ["action"] queries on success,
+  // so claudeStatus refetches automatically.
+  return useActionMutation("claudeDisconnect", {}) as {
+    mutateAsync: (vars: Record<string, never>) => Promise<{ ok: boolean }>;
+    isPending: boolean;
+  };
+}
+
 export function useTestRuntimeConfig() {
   return useActionMutation("test-runtime-config", {});
 }

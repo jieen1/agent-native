@@ -1,3 +1,7 @@
+/**
+ * @deprecated Use `get-work-item` (actions/get-work-item.ts) instead.
+ * This V1 action is retained for backward compatibility only.
+ */
 import { defineAction } from "@agent-native/core";
 import { resolveAccess } from "@agent-native/core/sharing";
 import { and, asc, eq } from "drizzle-orm";

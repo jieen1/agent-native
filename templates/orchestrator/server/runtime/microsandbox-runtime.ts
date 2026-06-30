@@ -187,18 +187,12 @@ export class MicrosandboxRuntime implements NodeRuntime {
       }
     }
 
-    const wantClaude =
-      (mounts.creds ?? []).includes("~/.claude") ||
-      mounts.env?.ORCHESTRATOR_WANT_CLAUDE === "1" ||
-      vm.spec.env?.ORCHESTRATOR_WANT_CLAUDE === "1";
-
     // 1) Egress: fix DNS + decide direct-vs-proxy. Keep the host vLLM direct.
     const vllmHosts = noProxyHostsFor(vm.spec, mounts.env);
     const egress = await resolveEgress(this, vm, { noProxyHosts: vllmHosts });
 
-    // 2) Credentials: ~/.claude RO mount (claude nodes) + GITHUB_TOKEN env.
-    const creds = await mountVmCredentials(this, vm, {
-      wantClaude,
+    // 2) Credentials: GITHUB_TOKEN env (§13 forbids ~/.claude copy — use ACP).
+    const creds = await mountVmCredentials(vm, {
       home: VM_HOME,
       nodeRunId: (vm.meta?.nodeRunId as string | undefined) ?? null,
     });

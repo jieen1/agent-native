@@ -74,6 +74,71 @@ This mirrors Claude Code Subagents exactly:
 
 The DAG-as-data equivalent: **the DAG holds intermediate state; spawn contexts only see what the author explicitly interpolated.**
 
+### Why DAG-as-data, not workflow code
+
+Every other durable workflow engine worth studying — Temporal, Restate, Inngest,
+Prefect, LangGraph — and agent frameworks like Flue define workflows as **code** (a
+function in a real language). That is the right choice when the workflow's author
+is a **human writing it once, ahead of time**: developer ergonomics and expressive
+control flow win, and the engine only has to durably run what was written.
+
+Our author is different. The author is **Claude Code, re-planning a live run
+mid-flight.** The headline requirement (§8.6) is: an hour into a run, with several
+nodes already done, CC inspects progress and rewrites the *not-yet-executed* part —
+effective immediately, without re-running what completed. That demands the
+unexecuted plan be **inspectable, addressable, mutable state, stored separately
+from the execution that already happened.**
+
+- In a **code** model, "the rest of the workflow" is the continuation of the
+  program — the remaining statements, the closure, the call stack. There is no
+  first-class object named "node 7" to point at and rewrite; the future is implicit
+  in control flow. This is exactly why every code engine can only "deploy new code
+  → new runs only" (Temporal `patched()`, Step Functions, Restate deployment
+  pinning) or "recompile the whole graph and resume the thread" (LangGraph). None
+  lets you address and edit one future step of a live run, because that step is not
+  a thing — it is a not-yet-reached point in code.
+- In **DAG-as-data**, "node 7" is a row with a stable id and `status = pending`.
+  Editing it is an ordinary data mutation; the reconciler reads the new data on its
+  next pass. Live re-planning is not a workaround — it is the natural consequence of
+  representing the plan as data.
+
+So the data model is **not** a concession versus code; for this system's defining
+capability it is the correct and essentially the only clean representation. The
+cost of data — weaker expressiveness than a real language — is paid down by the
+layering: **complex logic lives in CC (the brain) and in agent prompts, never in
+the DAG.** Engines without a brain (Temporal, Camunda, Argo) are *forced* to grow a
+DSL plus a code escape hatch (`rawscript`, Code node, script task) because nothing
+above them can hold the logic. **CC is that escape hatch here — the structural
+advantage this design must protect.** The rule that protects it: when a
+`guard`/`until` expression (§5.2) wants arithmetic, string munging, or nested
+conditionals, that logic belongs in CC or in an agent's prompt — never grow the
+expression language into a programming language.
+
+### The Execution Frontier (what is mutable)
+
+Picture a run as a moving line — the **execution frontier** — separating what has
+happened from what is planned. The frontier is the **dispatch boundary**: a node is
+*ahead* of it until a worker has been handed its rendered prompt.
+
+- **Ahead of the frontier** (`pending`, or `ready` but not yet dispatched): the
+  **mutable plan.** Editable in place via `workflow.patch` (§8.6).
+- **At / behind the frontier** (`running`/`done` + their artifacts): the
+  **immutable journal.** Frozen (I5); outputs referenced by id.
+
+This single line answers every "what can I change in a live run?" question:
+
+| Want to change… | Node status | Mechanism |
+|---|---|---|
+| A future node not yet dispatched — its prompt, model, guard, deps, or the forward node set | `pending` / `ready` | **`workflow.patch`** — in place, live (§8.6) |
+| A node already dispatched, or its produced output | `running` / `done` | **`run.fork`** — branch a new run, done artifacts reused as cache (§8.4) |
+
+**Litmus test: is it ahead of the frontier? Yes → patch. At/behind → you cannot
+edit it in place; fork instead.** "Patch the future, fork the past" is the whole
+mutation story. Under concurrency the frontier is a **set, not a point** — with
+`parallel_over` fan-out and implicit parallelism many nodes sit at the frontier at
+once and it advances as each completes; §9 (Patch application & the moving
+frontier) defines exactly which nodes are patchable as the set moves.
+
 ### Invariants (never broken)
 
 | ID | Invariant |
@@ -86,6 +151,7 @@ The DAG-as-data equivalent: **the DAG holds intermediate state; spawn contexts o
 | I6 | Backend never inferences about tasks. No task state machine, no "task done" signal, no auto-summary at run boundary. |
 | I7 | **No implicit cross-node data injection.** Author writes every `{{deps.X.output.Y}}` reference. Backend never auto-stuffs upstream output into downstream context. |
 | I8 | Orchestrator is callable from any app (via MCP or A2A). No special knowledge of any dispatching app. |
+| I9 | **Patch the future, fork the past.** Only nodes not yet dispatched to a worker (`pending`/`ready`) are mutable in place via `workflow.patch`. Nodes `running`/`done` and their artifacts are an immutable journal — change them only by `run.fork`. |
 
 ---
 
@@ -377,6 +443,11 @@ events (
 - **Output**: array of body outputs in item order. Type:
   - If body has no `output_schema`: `string[]`
   - If body has `output_schema`: `T[]`
+- **Patchability (mid-run):** `items_from` is evaluated once when deps complete and
+  the item set is then frozen. A `modify_node` on `body` reaches item instances not
+  yet dispatched; already-dispatched instances and the item set itself are behind
+  the frontier — to change the set, `run.fork`. See §9 (Patch application & the
+  moving frontier).
 
 ### 4.3 `loop` — iteration
 
@@ -397,6 +468,10 @@ events (
 - Previous iteration's body node outputs available as `deps.NODE.previous_iteration.output`.
 - **Output**: same type as the **last body node's output** at the iteration that satisfied `until` (or last attempted if max_iterations hit).
 - Additional accessible from outside: `deps.LOOP.iterations` (count), `deps.LOOP.history[i].NODE.output` (per-iter per-node).
+- **Patchability (mid-run):** the iteration currently executing is behind the
+  frontier (immutable); body-node edits and `modify_loop` (`until`,
+  `max_iterations`) take effect at the next iteration boundary. See §9 (Patch
+  application & the moving frontier).
 
 ### 4.4 `human_gate` — pause for approval (optional)
 
@@ -766,17 +841,26 @@ node.skip(runId, nodeId)
 node.resolve_gate(runId, nodeId, choice, note?)
 ```
 
-### 8.6 Patch (mutation)
+### 8.6 Patch (mutation) — live re-planning of the unexecuted future
+
+**The headline capability.** While a run is in flight, CC rewrites the part of the
+DAG **ahead of the execution frontier** (§0) — a future node's prompt, model,
+guard, or deps; add or remove future nodes; adjust loop bounds; or replace the
+whole forward plan — and it takes effect on the reconciler's next pass (see §9,
+Patch application & the moving frontier), **without cancelling or re-running** what
+already completed. Nodes at or behind the frontier are immutable (I5/I9); to change
+those, `run.fork` (§8.4).
 
 ```
 workflow.patch(runId, expected_dag_version, ops[])
   → { new_dag_version }
   | { error: "version_conflict", current_dag_version: N }
+  | { error: "node_not_patchable", node_id: "...", status: "running" | "done" }
 ```
 
 ```json
 [
-  { "op": "modify_node", "node_id": "review", "set": { "prompt": "...", "model_override": "..." } },
+  { "op": "modify_node", "node_id": "review", "set": { "prompt": "...", "guard": "...", "deps": ["..."], "model_override": "..." } },
   { "op": "add_node", "node": { ...node json... } },
   { "op": "remove_node", "node_id": "extra_lint" },
   { "op": "modify_loop", "node_id": "fix_loop", "set": { "max_iterations": 5, "until": "..." } },
@@ -784,12 +868,32 @@ workflow.patch(runId, expected_dag_version, ops[])
 ]
 ```
 
+**Patchability is decided by the frontier — whether a node has been dispatched to a
+worker:**
+
+| Node status | Patchable? | Behavior on patch |
+|---|---|---|
+| `pending` (deps not all done) | YES | edited in place |
+| `ready` (deps done, queued, **not yet dispatched**) | YES | atomically demoted to `pending`, edited, re-evaluated next pass |
+| `running` (worker dispatched) | NO | rejected `node_not_patchable`; use `run.fork` |
+| `done` / `failed` / `skipped` | NO | rejected; immutable journal (I5) |
+
 Rules:
-1. CAS via `expected_dag_version`.
-2. `modify_node` / `remove_node` only on `status = pending` nodes.
-3. `add_node` deps reference existing nodes; no cycle.
-4. `replace_dag`: every `running` / `done` node must remain with SAME `node_id_in_dag` + `type`.
-5. Success: `dag_version += 1`, patch row inserted, `patch_applied` event.
+1. **CAS** via `expected_dag_version`. On mismatch → `version_conflict` with the
+   current version; CC re-reads (`run.state`) and rebuilds the patch — patches are
+   optimistic (retry contract in §9).
+2. `modify_node` / `remove_node` apply only to nodes not yet dispatched (`pending`,
+   or `ready` which is demoted first). `running` / `done` → `node_not_patchable`.
+3. `add_node`: `deps` must reference existing nodes; no cycle. A new node whose deps
+   are already `done` becomes `ready` on the next pass.
+4. `replace_dag`: every `running` / `done` node MUST appear in `new_dag` with the
+   SAME `node_id_in_dag` + `type` (their artifacts are referenced by id, I5); the
+   forward portion may be restructured freely.
+5. Loop / `parallel_over` mid-run scoping is defined in §9 (Patch application & the
+   moving frontier).
+6. Success: validate (DAG schema + expression syntax, §5) in one transaction;
+   `dag_version += 1`; insert `patches` row; emit `patch_applied`; enqueue a
+   reconcile event.
 
 ### 8.7 Pool / Dispatch Inspection
 
@@ -883,6 +987,96 @@ On startup: scan `runs.status in (pending, running, paused)`.
 - Load full state.
 - For each in-flight spawn: check VM/ACP session liveness. If dead, mark spawn `cancelled`, re-evaluate node retry.
 - Resume.
+
+### Patch application & the moving frontier
+
+`patch_applied` is a reconcile trigger. On that pass the reconciler re-reads the DAG
+at its new `dag_version`, recomputes the ready set against the **edited** node
+definitions, and renders prompts from the new `prompt`/`deps`. Nodes already
+dispatched are untouched. So **"real-time" means effective on the next reconcile
+tick** — bounded by the per-run single-writer loop, typically milliseconds. Only
+nodes ahead of the frontier are affected; the executed journal is never replayed or
+recomputed.
+
+**The frontier is a set, not a point.** With `parallel_over` fan-out and implicit
+parallelism, many nodes run at once and the frontier advances as each finishes. A
+patch is applied atomically against `expected_dag_version`, and each target node's
+*current* status is re-checked inside that transaction (§8.6 rule 2): a node that
+slipped `pending`→`running` between CC's read and the patch is rejected
+(`node_not_patchable`), never silently raced.
+
+**Loop mid-run.** A `loop` re-instantiates its body ids each iteration (distinct
+`iteration` index). The iteration currently executing is behind the frontier —
+immutable. Edits take effect at the **next iteration boundary**:
+
+- `modify_node` on a body node → applies when that node is next instantiated; the
+  in-flight iteration finishes on the old definition.
+- `modify_loop` (`until`, `max_iterations`) → evaluated at the next `until` check.
+  Lowering `max_iterations` below the current `iteration` ends the loop after the
+  current iteration completes; it never aborts the running iteration.
+
+**`parallel_over` mid-run.** `items_from` is evaluated once when deps complete; the
+item set is then **frozen** (part of the journal).
+
+- Item instances already dispatched (`running`/`done`) are behind the frontier —
+  immutable.
+- Item instances not yet dispatched follow the node's `body` template; a
+  `modify_node` on the body applies to them, in item order.
+- To change the item **set** after expansion has begun you cannot patch it — use
+  `run.fork` with a modified `items_from`, or model the item list as its own
+  upstream node you patch *before* it expands.
+
+**`guard` mid-run.** A guard is evaluated when its node becomes ready. Editing a
+pending node's `guard` takes effect at that node's ready-time; if its deps are
+already `done`, on the next pass.
+
+**CC's optimistic-concurrency contract.** Patching is read-modify-write under CAS,
+against a live, advancing run:
+
+1. `run.state(runId)` → note `dag_version` + node statuses.
+2. Build ops targeting only nodes still ahead of the frontier.
+3. `workflow.patch(runId, dag_version, ops)`.
+4. On `version_conflict` (run advanced) or `node_not_patchable` (a target was
+   dispatched meanwhile) → return to step 1 and rebuild. CC must not hold a patch
+   open as if it were a long transaction.
+
+### Worked example — re-planning a run that is already an hour in
+
+A `code-change-with-review` run at `dag_version: 3`, started 1h ago: `design` ✅,
+`impl` ✅, `test` ✅ done; `review` 🟢 running; ahead and `pending`: `commit`
+(guard `verdict == 'pass'`), `fix` (guard `verdict != 'pass'`), `deploy`. CC learns
+the release target changed and a security scan must precede commit — and patches
+**only the future**:
+
+```
+run.state("run_abc")
+// → dag_version 3 · review: running · commit/fix/deploy: pending
+
+workflow.patch("run_abc", 3, [
+  { "op": "modify_node", "node_id": "commit",
+    "set": { "prompt": "Commit to release/v2 (NOT main):\n{{deps.impl.output}}" } },
+
+  { "op": "add_node", "node": {
+      "id": "sec_scan", "type": "agent", "agent": "security-reviewer",
+      "deps": ["impl"], "guard": "deps.review.output.verdict == 'pass'",
+      "prompt": "Scan this diff for secrets/SQLi:\n{{deps.impl.output}}",
+      "output_schema": { "type": "object",
+        "properties": { "safe": { "type": "boolean" } }, "required": ["safe"] } } },
+
+  { "op": "modify_node", "node_id": "commit",
+    "set": { "deps": ["review", "sec_scan"],
+             "guard": "deps.review.output.verdict == 'pass' && deps.sec_scan.output.safe == true" } }
+])
+// → { new_dag_version: 4 }
+```
+
+`review` was running, so it is untouched and runs to completion on the old plan.
+When it finishes, the reconciler reads `dag_version 4`: `sec_scan` (its dep `impl`
+already done) becomes ready and runs; `commit` now waits on both `review` and
+`sec_scan` and fires only if review passed AND the scan is safe. The hour of
+completed work was never re-run. Had CC instead needed to change `impl` (already
+`done`, behind the frontier), the patch is rejected — that is `run.fork` territory:
+branch a new run with a modified `impl`, reusing `design`'s artifact as cache.
 
 ---
 
@@ -1222,6 +1416,9 @@ Two complementary surfaces:
 | Reconciler doesn't double-dispatch | `nodes.status` transition `ready → running` via atomic UPDATE (single-process assumption) |
 | Spawn context isolation | Worker dispatcher provides ONLY system_prompt + rendered_prompt + tools + workspace to worker shim; nothing else (I2, I7) |
 | Rendered prompts reproducible | `spawns.rendered_prompt` stores exact string sent |
+| Patch the future, fork the past | Patch targets only nodes not yet dispatched (`pending`/`ready`); `running`/`done` rejected `node_not_patchable`; behind-frontier change → `run.fork` (I9) |
+| Patch race is closed | Each target node's status re-checked inside the patch transaction at `expected_dag_version`; a node dispatched between CC's read and the patch is rejected, not raced |
+| Loop/parallel patches are next-boundary | Loop body/`until` edits apply at the next iteration; `parallel_over` body edits apply to not-yet-dispatched items; a frozen item set needs `run.fork` |
 
 ---
 
@@ -1233,6 +1430,7 @@ Two complementary surfaces:
 | Backend pushes notifications to CC | CC pulls. No server-initiated MCP push |
 | Backend auto-summarizes runs at completion | On-demand only via `run.summary` |
 | Backend decides what to do next after a run | Always CC's job |
+| In-place edit of a node at/behind the execution frontier | `running`/`done` nodes are immutable (I5/I9). Change the executed past via `run.fork`, not patch |
 | **Auto-injection of deps into prompts** | I7. Author writes every `{{deps.X.output.Y}}`. Backend never auto-dumps |
 | **Mandatory output_schema on every agent node** | CC default is text-only. Schema is opt-in for structured |
 | **Schema enforcement at LLM-tool layer** | CC's Agent tool has no schema parameter. Schema lives in workflow runtime layer. We match: schema enforced by worker shim |

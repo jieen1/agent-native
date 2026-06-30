@@ -1,3 +1,7 @@
+/**
+ * @deprecated V1 step listing — superseded by v2 `node-get` (actions/node-get.ts).
+ * This file is retained for backward compatibility only.
+ */
 import { defineAction } from "@agent-native/core";
 import { resolveAccess } from "@agent-native/core/sharing";
 import { asc, eq } from "drizzle-orm";
