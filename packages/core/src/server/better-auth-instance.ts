@@ -708,7 +708,20 @@ async function ensureBetterAuthTables(): Promise<void> {
         `CREATE TABLE IF NOT EXISTS jwks (id TEXT PRIMARY KEY, public_key TEXT NOT NULL, private_key TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER)`,
       ];
 
-  for (const sql of statements) await db.execute(sql);
+  for (const stmt of statements) {
+    try {
+      await db.execute(stmt);
+    } catch (err: any) {
+      // Multiple apps share the same Postgres instance. When app A creates the
+      // `invitation` table, Postgres auto-creates a composite row type with the
+      // same name. If app B then tries `CREATE TABLE IF NOT EXISTS "invitation"`
+      // and the row type already exists (but the TABLE check passed the IF NOT
+      // EXISTS guard), Postgres raises 23505 on pg_type_typname_nsp_index.
+      // Treat this as "table already exists" and continue.
+      if (err?.code === "23505" && err?.constraint === "pg_type_typname_nsp_index") continue;
+      throw err;
+    }
+  }
 }
 
 /**

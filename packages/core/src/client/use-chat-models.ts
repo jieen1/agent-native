@@ -225,10 +225,17 @@ export function useChatModels({
               : []),
           ];
         } else {
+          // NOTE (template integration / CORE-PATCHES.md): the model picker
+          // allow-lists engines by name. A self-hosted template can register a
+          // custom local engine (e.g. "vllm" → a local OpenAI-compatible vLLM)
+          // via core's public registerAgentEngine; without it here the picker
+          // would hide that engine and fall back to the built-ins, which can be
+          // unusable in a bundled/workspace deploy (pkg-filtered or key-gated).
           const allowedEngines = new Set([
             "anthropic",
             "ai-sdk:openai",
             "ai-sdk:google",
+            "vllm",
           ]);
           groups = enginesData.engines
             .filter(
