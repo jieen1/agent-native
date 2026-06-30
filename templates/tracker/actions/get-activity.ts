@@ -259,7 +259,7 @@ export default defineAction({
             // node fetch is best-effort
           }
         }
-        return { ...run, nodes };
+        return { id: typeof run.id === "string" ? run.id : null, ...run, nodes };
       }),
     );
 

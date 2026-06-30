@@ -64,11 +64,7 @@ export default defineAction({
         .where(eq(schema.stages.id, existingStage.id));
     } else {
       // Create a new stage row
-      const stageId = existingStage?.id || "";
-      const newStageId =
-        existingStage && existingStage.id
-          ? existingStage.id
-          : `stage_${args.workItemId.slice(0, 4)}_${args.stageName}_${now.replace(/\D/g, "").slice(0, 14)}`;
+      const newStageId = `stage_${args.workItemId.slice(0, 4)}_${args.stageName}_${now.replace(/\D/g, "").slice(0, 14)}`;
 
       await db.insert(schema.stages).values({
         id: newStageId,

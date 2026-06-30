@@ -17,7 +17,7 @@ export default defineAction({
     workItemId: z.string().min(1).describe("Work item whose stage to complete"),
     stageName: z.string().min(1).describe("Stage name (e.g. 分析, 设计, 实施, 测试, 验收, 交付)"),
     verdict: z
-      .record(z.unknown())
+      .record(z.string(), z.unknown())
       .optional()
       .describe("Optional verdict object (e.g. { passed: true, notes: '...' })"),
     deliveryItems: z

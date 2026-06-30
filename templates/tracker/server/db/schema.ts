@@ -61,6 +61,11 @@ export const workItems = table("tracker_work_items", {
   plannedStages: text("planned_stages").notNull().default("[]"),
   currentStageName: text("current_stage_name").notNull().default("待办"),
   branch: text("branch").default(null),
+  // --- Additive v2: owner (负责人) and nature tags (性质: 前端/后端/API/数据).
+  // owner = email or "agent" (显示: 智能体). null = unassigned.
+  owner: text("owner").default(null),
+  // nature = JSON array of tags from set: 前端 | 后端 | API | 数据
+  nature: text("nature").notNull().default("[]"),
 });
 
 // ---------------------------------------------------------------------------

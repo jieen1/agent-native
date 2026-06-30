@@ -344,7 +344,7 @@ export function QueuePage() {
   );
 
   function handleRemove(id: string) {
-    void dequeue.mutateAsync({ queueItemId: id });
+    void dequeue.mutateAsync({ workItemId: id });
     setOrder((prev) => prev.filter((oid) => oid !== id));
     toast.success("已从队列移除");
   }

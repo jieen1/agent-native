@@ -74,7 +74,6 @@ export default defineAction({
         createdAt: now,
         ownerEmail,
         orgId,
-        updatedAt: now,
       })
       .returning();
 
@@ -93,7 +92,6 @@ export default defineAction({
       createdAt: now,
       ownerEmail,
       orgId,
-      updatedAt: now,
     });
 
     return link[0];

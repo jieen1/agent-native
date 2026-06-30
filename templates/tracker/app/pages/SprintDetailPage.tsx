@@ -1,7 +1,7 @@
 import { useParams } from "react-router";
 import { Link } from "react-router";
 import { useSprint } from "@/hooks/use-tracker";
-import type { SprintDetail, TrackerWorkItem, Stage } from "@/shared/types";
+import type { SprintDetail, TrackerWorkItem, Stage } from "@shared/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -296,7 +296,7 @@ function SprintItemsCard({
 
               {/* Assignee avatar (small) */}
               <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-                {item.assigneeName ? item.assigneeName[0] : "?"}
+                {(item as { assigneeName?: string }).assigneeName ? (item as { assigneeName?: string }).assigneeName![0] : "?"}
               </div>
             </div>
           );

@@ -212,6 +212,12 @@ ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS priority INTEGER NOT NUL
 ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS current_stage TEXT NOT NULL DEFAULT '';
 ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS started_at TEXT`,
     },
+    {
+      // v2 design: owner (负责人) and nature (性质) columns on work_items.
+      version: 12,
+      sql: `ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS owner TEXT;
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS nature TEXT NOT NULL DEFAULT '[]'`,
+    },
   ],
   { table: "tracker_migrations" },
 );

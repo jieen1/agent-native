@@ -52,8 +52,6 @@ export default defineAction({
         startedAt: null,
         ownerEmail,
         orgId,
-        createdAt: now,
-        updatedAt: now,
       })
       .onConflictDoUpdate({
         target: schema.execQueue.workItemId,
@@ -63,7 +61,6 @@ export default defineAction({
           currentStage: workItem.currentStageName ?? "",
           enqueuedAt: now,
           startedAt: null,
-          updatedAt: now,
         },
       });
 
@@ -88,7 +85,6 @@ export default defineAction({
       createdAt: now,
       ownerEmail,
       orgId,
-      updatedAt: now,
     });
 
     // Return the queue row.

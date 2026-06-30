@@ -21,7 +21,7 @@ Status moves only by explicit human or agent action. No automatic inference.
 
 **Comments & Links:**
 - `add-comment`, `list-comments` — discussion threads per work item
-- `add-link`, `list-links` — typed relationships (blocks/blocked-by/duplicate-of/relates-to)
+- `add-link`, `list-links` — typed relationships (blocks/blocked-by/duplicate-of/relates-to/bug-of/test-of)
 
 **Artifacts:**
 - `create-artifact`, `list-artifacts` — attach files/designs/playbooks to items

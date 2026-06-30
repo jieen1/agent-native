@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useSprints, useCreateSprint, useProjects } from "@/hooks/use-tracker";
-import type { Sprint } from "@/shared/types";
+import type { Sprint } from "@shared/types";
 import {
   Dialog,
   DialogContent,

@@ -13,6 +13,8 @@ import {
   useStages,
   useWorkItem,
   useSprints,
+  useTriggerStage,
+  useRollbackStage,
 } from "@/hooks/use-tracker";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -347,11 +349,23 @@ function CommentsPanel({ workItemId }: { workItemId: string }) {
 // ── Links panel ───────────────────────────────────────────────────────────────
 
 const LINK_TYPE_LABELS: Record<string, string> = {
+  "bug-of": "缺陷归属",
+  "test-of": "测试归属",
   blocks: "阻塞",
   "blocked-by": "被阻塞",
   "duplicate-of": "重复",
   "relates-to": "关联",
   "depends-on": "依赖",
+};
+
+const LINK_TYPE_COLORS: Record<string, string> = {
+  "bug-of": "bg-red-500/15 text-red-600 dark:text-red-400 ring-red-500/30",
+  "test-of": "bg-teal-500/15 text-teal-600 dark:text-teal-400 ring-teal-500/30",
+  blocks: "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/30",
+  "blocked-by": "bg-orange-500/15 text-orange-600 dark:text-orange-400 ring-orange-500/30",
+  "duplicate-of": "bg-slate-500/15 text-slate-600 dark:text-slate-400 ring-slate-500/30",
+  "relates-to": "bg-secondary text-secondary-foreground ring-border",
+  "depends-on": "bg-violet-500/15 text-violet-600 dark:text-violet-400 ring-violet-500/30",
 };
 
 function LinksPanel({ workItemId }: { workItemId: string }) {
@@ -397,10 +411,13 @@ function LinksPanel({ workItemId }: { workItemId: string }) {
               key={l.id}
               className="flex items-center gap-2 rounded-lg border border-border bg-card/40 px-3 py-2"
             >
-              <span className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <span className={cn(
+                "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                LINK_TYPE_COLORS[l.linkType] ?? "bg-secondary text-secondary-foreground ring-border",
+              )}>
                 {LINK_TYPE_LABELS[l.linkType] ?? l.linkType}
               </span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-[10px] text-muted-foreground">
                 {l.direction === "from" ? "→" : "←"}
               </span>
               <span className="text-xs font-medium truncate">
@@ -795,6 +812,99 @@ function EditableSprint({
   );
 }
 
+// ── Editable nature (性质 tags) ────────────────────────────────────────────────
+
+const NATURE_OPTIONS = ["前端", "后端", "API", "数据"] as const;
+
+function EditableNature({ id, nature }: { id: string; nature: string[] }) {
+  const update = useUpdateWorkItem();
+
+  function toggle(tag: string) {
+    const next = nature.includes(tag)
+      ? nature.filter((t) => t !== tag)
+      : [...nature, tag];
+    update.mutate({ id, nature: next }, {
+      onSuccess: () => toast.success("性质已更新"),
+    });
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {NATURE_OPTIONS.map((tag) => (
+        <button
+          key={tag}
+          type="button"
+          onClick={() => toggle(tag)}
+          className={cn(
+            "rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors",
+            nature.includes(tag)
+              ? "bg-violet-500/15 text-violet-600 dark:text-violet-400 ring-violet-500/30"
+              : "bg-secondary text-secondary-foreground ring-border hover:bg-muted",
+          )}
+        >
+          {tag}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Editable owner (负责人) ────────────────────────────────────────────────────
+
+function EditableOwner({ id, owner }: { id: string; owner: string | null }) {
+  const update = useUpdateWorkItem();
+  const [editing, setEditing] = useState(false);
+
+  const displayLabel =
+    owner === "agent" || owner === "智能体"
+      ? "智能体"
+      : owner
+        ? owner.length > 20
+          ? owner.slice(0, 20) + "…"
+          : owner
+        : "未分配";
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="group flex items-center gap-1 text-xs text-foreground hover:underline"
+        onClick={() => setEditing(true)}
+      >
+        <IconUser className="size-3 text-muted-foreground" />
+        {owner ? (
+          <span>{displayLabel}</span>
+        ) : (
+          <span className="text-muted-foreground">未分配</span>
+        )}
+        <IconEdit className="size-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+      </button>
+    );
+  }
+
+  return (
+    <Select
+      value={owner ?? "none"}
+      onValueChange={(v) => {
+        update.mutate(
+          { id, owner: v === "none" ? null : v },
+          { onSuccess: () => { setEditing(false); toast.success("负责人已更新"); } },
+        );
+      }}
+      open
+      onOpenChange={(o) => { if (!o) setEditing(false); }}
+    >
+      <SelectTrigger className="h-7 w-[140px] text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none" className="text-xs">未分配</SelectItem>
+        <SelectItem value="agent" className="text-xs">智能体</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function WorkItemDetailPage() {
@@ -805,9 +915,12 @@ export function WorkItemDetailPage() {
   const deleteItem = useDeleteWorkItem();
   const dispatched = !!item?.orchestratorThreadId;
   const activity = useActivity(id, dispatched);
+  const triggerStage = useTriggerStage();
+  const rollbackStage = useRollbackStage();
 
   const [monitorInterval, setMonitorInterval] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [activityTab, setActivityTab] = useState<"activity" | "comments">("activity");
 
   function onDispatch() {
     const trimmed = monitorInterval.trim();
@@ -870,6 +983,15 @@ export function WorkItemDetailPage() {
   const itemKey = (item as { itemKey?: string }).itemKey;
   const currentStageName =
     (item as { currentStageName?: string }).currentStageName ?? "待办";
+  const owner = (item as { owner?: string | null }).owner ?? null;
+  const nature: string[] = (() => {
+    try {
+      const raw = (item as { nature?: string }).nature ?? "[]";
+      return Array.isArray(raw) ? raw : JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  })();
 
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-6">
@@ -1059,14 +1181,46 @@ export function WorkItemDetailPage() {
             </div>
           </section>
 
-          {/* Comments */}
-          <CommentsPanel workItemId={id} />
-
           {/* Links */}
           <LinksPanel workItemId={id} />
 
-          {/* Tracker Activities */}
-          <ActivitiesPanel workItemId={id} />
+          {/* Unified activity + comments tab panel */}
+          <section className="rounded-xl border border-border bg-card/40">
+            {/* Tab header */}
+            <div className="flex items-center gap-1 border-b border-border px-4 pt-3 pb-0">
+              <button
+                type="button"
+                onClick={() => setActivityTab("activity")}
+                className={cn(
+                  "pb-2 px-2 text-xs font-medium border-b-2 -mb-px transition-colors",
+                  activityTab === "activity"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                活动
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivityTab("comments")}
+                className={cn(
+                  "pb-2 px-2 text-xs font-medium border-b-2 -mb-px transition-colors",
+                  activityTab === "comments"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                评论
+              </button>
+            </div>
+            <div className="p-4">
+              {activityTab === "activity" ? (
+                <ActivitiesPanel workItemId={id} />
+              ) : (
+                <CommentsPanel workItemId={id} />
+              )}
+            </div>
+          </section>
 
           {/* Orchestrator Activity Feed */}
           {dispatched ? (
@@ -1100,12 +1254,61 @@ export function WorkItemDetailPage() {
 
         {/* Right column: context */}
         <aside className="order-1 lg:order-2">
-          <div className="divide-y divide-border rounded-xl border border-border bg-card lg:sticky lg:top-4">
+          <div className="space-y-3 lg:sticky lg:top-4">
+            {/* Actions card */}
+            {(() => {
+              const STAGE_ORDER = ['待办','分析','设计','实施','测试','验收','交付'] as const;
+              const idx = STAGE_ORDER.indexOf(currentStageName as typeof STAGE_ORDER[number]);
+              const nextStage = idx >= 0 && idx < STAGE_ORDER.length - 1 ? STAGE_ORDER[idx + 1] : null;
+              const prevStage = idx > 0 ? STAGE_ORDER[idx - 1] : null;
+              return (
+                <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+                  <Button
+                    className="w-full gap-1.5"
+                    size="sm"
+                    disabled={triggerStage.isPending || !nextStage}
+                    onClick={() => nextStage && triggerStage.mutate(
+                      { workItemId: id, stageName: nextStage },
+                      { onSuccess: () => toast.success(`已触发阶段 ${nextStage}`) },
+                    )}
+                  >
+                    {triggerStage.isPending ? (
+                      <IconLoader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <IconRocket className="size-3.5" />
+                    )}
+                    触发{nextStage ? `「${nextStage}」` : "下一"}阶段
+                  </Button>
+                  <Button
+                    className="w-full gap-1.5"
+                    size="sm"
+                    variant="outline"
+                    disabled={rollbackStage.isPending || !prevStage}
+                    onClick={() => prevStage && rollbackStage.mutate(
+                      { workItemId: id, targetStage: prevStage },
+                      { onSuccess: () => toast.success(`已回退至 ${prevStage}`) },
+                    )}
+                  >
+                    {rollbackStage.isPending ? (
+                      <IconLoader2 className="size-3.5 animate-spin" />
+                    ) : null}
+                    回退至{prevStage ? `「${prevStage}」` : "上一阶段"}
+                  </Button>
+                </div>
+              );
+            })()}
+
+          {/* Attributes card */}
+          <div className="divide-y divide-border rounded-xl border border-border bg-card">
             {itemKey ? (
               <MetaRow icon={IconHash} label="编号">
                 <span className="font-mono text-xs">{itemKey}</span>
               </MetaRow>
             ) : null}
+
+            <MetaRow icon={IconUser} label="负责人">
+              <EditableOwner id={id} owner={owner} />
+            </MetaRow>
 
             <MetaRow icon={IconStack2} label="Sprint">
               <EditableSprint id={id} sprint={sprint} />
@@ -1121,6 +1324,10 @@ export function WorkItemDetailPage() {
 
             <MetaRow icon={IconAlertTriangle} label="风险">
               <EditableRisk id={id} risk={riskVal} />
+            </MetaRow>
+
+            <MetaRow icon={IconTag} label="性质">
+              <EditableNature id={id} nature={nature} />
             </MetaRow>
 
             <MetaRow icon={IconTag} label="标签">
@@ -1189,6 +1396,7 @@ export function WorkItemDetailPage() {
                 {fmtDateTime(item.createdAt)}
               </span>
             </MetaRow>
+          </div>
           </div>
         </aside>
       </div>

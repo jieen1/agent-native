@@ -5,6 +5,7 @@ import {
   useCreateWorkItem,
   useEnqueueWorkItem,
   useSprints,
+  useProjects,
 } from "@/hooks/use-tracker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -192,6 +193,9 @@ export function NewWorkItemPage() {
   // Nature tags (multi)
   const [natureTags, setNatureTags] = useState<string[]>([]);
 
+  // Project
+  const [projectId, setProjectId] = useState("");
+
   // Sprint
   const [sprintId, setSprintId] = useState("");
 
@@ -199,6 +203,8 @@ export function NewWorkItemPage() {
   const [executionMode, setExecutionMode] = useState("auto");
 
   // Hook states
+  const { data: projectsData } = useProjects();
+  const projects = useMemo(() => (Array.isArray(projectsData) ? projectsData : []), [projectsData]);
   const { data: sprintsData, isLoading: sprintsLoading } = useSprints();
   const sprints: Sprint[] = useMemo(
     () => (Array.isArray(sprintsData) ? sprintsData : []),
@@ -221,15 +227,21 @@ export function NewWorkItemPage() {
       return;
     }
 
+    if (!projectId) {
+      toast.error("请先选择项目");
+      return;
+    }
+
     const payload = {
+      projectId,
       title: title.trim(),
       description: description.trim(),
-      type,
+      type: type as "需求" | "任务" | "缺陷" | "测试" | "生产问题",
       priority: priorityMap(priorityLabel),
       risk,
       tags: natureTags,
       sprintId: sprintId || undefined,
-      executionMode: autoMode ? "auto" : "manual",
+      executionMode: (autoMode ? "auto" : "manual") as "auto" | "manual",
     };
 
     try {
@@ -276,6 +288,20 @@ export function NewWorkItemPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <Field label="项目" required>
+                <Select value={projectId} onValueChange={setProjectId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择项目" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects.map((p: { id: string; name: string }) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
               <Field label="标题" required>
                 <Input
                   value={title}

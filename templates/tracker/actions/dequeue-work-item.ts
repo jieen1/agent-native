@@ -65,7 +65,6 @@ export default defineAction({
       createdAt: now,
       ownerEmail,
       orgId,
-      updatedAt: now,
     });
 
     return {

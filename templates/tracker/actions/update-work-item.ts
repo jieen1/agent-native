@@ -20,6 +20,8 @@ export default defineAction({
     plannedStages: z.array(z.string()).optional(),
     currentStageName: z.string().optional(),
     branch: z.string().nullable().optional(),
+    owner: z.string().nullable().optional(),
+    nature: z.array(z.string()).optional(),
   }),
   http: { method: "POST" },
   run: async (args) => {
@@ -50,6 +52,8 @@ export default defineAction({
     if (args.plannedStages !== undefined) patch.plannedStages = JSON.stringify(args.plannedStages);
     if (args.currentStageName !== undefined) patch.currentStageName = args.currentStageName;
     if (args.branch !== undefined) patch.branch = args.branch;
+    if (args.owner !== undefined) patch.owner = args.owner;
+    if (args.nature !== undefined) patch.nature = JSON.stringify(args.nature);
 
     await db
       .update(schema.workItems)
