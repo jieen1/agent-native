@@ -28,8 +28,8 @@ use screencapturekit::stream::{
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const QUICKTIME_RECORDING_MIME_TYPE: &str = "video/quicktime";
-const MP4_RECORDING_MIME_TYPE: &str = "video/mp4";
+pub(crate) const QUICKTIME_RECORDING_MIME_TYPE: &str = "video/quicktime";
+pub(crate) const MP4_RECORDING_MIME_TYPE: &str = "video/mp4";
 // Keep native chunks comfortably under serverless request/event limits.
 const UPLOAD_CHUNK_BYTES: usize = 3 * 1024 * 1024;
 // Master switch for native transcoding/compression.
@@ -85,7 +85,7 @@ const THUMBNAIL_MAX_BYTES: u64 = 2 * 1024 * 1024;
 const THUMBNAIL_WIDTH: &str = "1280";
 const SIPS_PATH: &str = "/usr/bin/sips";
 // Minimum free space required to start recording; below this we hard-block.
-const DISK_SPACE_BLOCK_BYTES: u64 = 500 * 1024 * 1024;
+pub(crate) const DISK_SPACE_BLOCK_BYTES: u64 = 500 * 1024 * 1024;
 // Free space below this at start time is logged as a warning but not blocked.
 const DISK_SPACE_WARN_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 // Mid-recording warning threshold (emits clips:disk-space-warning).
@@ -168,7 +168,7 @@ struct RestartInfo {
     capture_region: Option<NativeCaptureRegion>,
 }
 
-enum NativeFullscreenBackend {
+pub(crate) enum NativeFullscreenBackend {
     Screencapture {
         child: Child,
     },
@@ -195,7 +195,7 @@ enum NativeFullscreenBackend {
 /// stop path block on that callback (bounded by a timeout) before the file
 /// is moved.
 #[cfg(target_os = "macos")]
-struct RecordingFinish {
+pub(crate) struct RecordingFinish {
     /// `None` while recording; `Some(Ok)` finished; `Some(Err)` failed.
     state: Mutex<Option<Result<(), String>>>,
     cv: Condvar,
@@ -261,13 +261,13 @@ struct PreparedRecordingFile {
     temporary: bool,
 }
 
-fn format_mb(bytes: u64) -> String {
+pub(crate) fn format_mb(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
 }
 
 /// Returns free bytes on the volume containing `path`, or `None` on error.
 #[cfg(target_os = "macos")]
-fn free_disk_bytes(path: &Path) -> Option<u64> {
+pub(crate) fn free_disk_bytes(path: &Path) -> Option<u64> {
     use std::ffi::CString;
     let c_path = CString::new(path.to_str()?).ok()?;
     let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
@@ -756,13 +756,25 @@ pub async fn native_fullscreen_recording_stop_and_upload(
     has_camera: bool,
 ) -> Result<NativeFullscreenUploadResult, String> {
     emit_native_upload_progress(&app, "finalizing", "Optimizing clip", None, None);
+    // The recorder's ScreenCaptureKit stream is now fully stopped and its moov
+    // atom is written (or has definitively failed). Signal the UI so it can tear
+    // down the separate live-transcription SCStream (system_audio.rs) now,
+    // without racing the recorder finalize: tearing that stream down while the
+    // recorder is still writing its moov interrupts ScreenCaptureKit
+    // (RPRecordingErrorDomain -5814) and corrupts the clip. We emit from inside
+    // the finalize helper — after the moov write but BEFORE segment
+    // consolidation — so a paused multi-segment recording stops transcription
+    // promptly instead of letting it run through the merge window and push the
+    // saved transcript past the clip's real end. See recorder.ts `handle.stop()`.
     let StoppedSession {
         session,
         duration_ms,
         stop_outcome,
         consolidate_outcome,
         multi_segment,
-    } = take_and_finalize_active_session(&state)?;
+    } = take_and_finalize_active_session(&state, |_session| {
+        let _ = app.emit("clips:native-recording-finalized", &recording_id);
+    })?;
 
     // The camera bubble is the ONE overlay we deliberately leave
     // capture-included (see `show_bubble`), so it has to stay on-screen
@@ -896,7 +908,7 @@ pub async fn native_fullscreen_recording_stop_and_save(
         stop_outcome,
         consolidate_outcome,
         multi_segment,
-    } = take_and_finalize_active_session(&state)?;
+    } = take_and_finalize_active_session(&state, |_session| {})?;
     // Capture is finalized — drop the camera bubble now so the face
     // doesn't linger while the clip saves (mirrors the upload path).
     let _ = crate::clips::close_bubble(app.clone()).await;
@@ -1197,8 +1209,17 @@ struct StoppedSession {
 /// Take the active session out of state, finalize its backend, and merge
 /// any pause/resume segments into the canonical output path. Shared by
 /// the upload and save-locally stop commands.
+///
+/// `on_capture_finalized` runs in the narrow window after the capture
+/// backend is fully stopped (moov atom written) but before segment
+/// consolidation begins. The upload path uses it to tell the UI to stop
+/// live transcription: doing it here keeps the saved transcript anchored
+/// to the clip's real end instead of running through the (multi-segment)
+/// merge, while still avoiding the -5814 corruption from tearing the
+/// transcription SCStream down before the recorder's moov is written.
 fn take_and_finalize_active_session(
     state: &State<'_, NativeFullscreenRecordingState>,
+    on_capture_finalized: impl FnOnce(&NativeFullscreenSession),
 ) -> Result<StoppedSession, String> {
     let mut session = {
         let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
@@ -1223,6 +1244,13 @@ fn take_and_finalize_active_session(
         stop_outcome.is_ok(),
         describe_recording_path(&session.path)
     );
+    // The capture backend is fully stopped and its moov atom is written.
+    // Signal callers now — before the (potentially slow) segment merge — so
+    // live transcription can stop while the clip duration is still anchored
+    // to the real Stop click. Tearing it down here is safe from the -5814
+    // corruption because the recorder's SCStream is already finalized; the
+    // remaining work is plain on-disk file merging.
+    on_capture_finalized(&session);
     // With one segment this is a cheap rename. With multiple segments a
     // failure would silently lose everything after the first pause, so
     // callers check `multi_segment` and surface the merge error.
@@ -1417,7 +1445,7 @@ fn start_segment_backend(
 /// Configure and start a fresh ScreenCaptureKit capture writing into
 /// `output_path`. Shared by the initial start and the resume path.
 #[cfg(target_os = "macos")]
-fn start_screencapturekit_backend_at(
+pub(crate) fn start_screencapturekit_backend_at(
     output_path: &Path,
     include_audio: bool,
     capture_system_audio: bool,
@@ -1548,7 +1576,7 @@ fn start_screencapturekit_backend_at(
 /// Spawn the macOS `screencapture` fallback writing into `output_path`.
 /// Shared by the initial start and the resume path.
 #[cfg(target_os = "macos")]
-fn start_screencapture_backend_at(
+pub(crate) fn start_screencapture_backend_at(
     app: &AppHandle,
     output_path: &Path,
     include_audio: bool,
@@ -2225,7 +2253,7 @@ fn persist_saved_recording_error(app: &AppHandle, saved: &mut SavedNativeRecordi
 /// Returns `None` when the tray anchor hasn't been set yet or any lookup
 /// fails — callers fall back to the first available display.
 #[cfg(target_os = "macos")]
-fn tray_display_id(app: &AppHandle) -> Option<u32> {
+pub(crate) fn tray_display_id(app: &AppHandle) -> Option<u32> {
     let tray_rect = app
         .try_state::<crate::state::TrayAnchor>()
         .and_then(|a| a.0.lock().ok().and_then(|g| *g))?;
@@ -2430,7 +2458,7 @@ fn new_fullscreen_session(
     }
 }
 
-fn primary_monitor_size(app: &AppHandle) -> (Option<u32>, Option<u32>) {
+pub(crate) fn primary_monitor_size(app: &AppHandle) -> (Option<u32>, Option<u32>) {
     let monitor_size = app
         .primary_monitor()
         .ok()
@@ -2516,7 +2544,7 @@ const SCK_FINALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 /// signals the recording finished, so the caller never moves a half-written
 /// MP4. Cancel passes `false` (the file is discarded immediately, so there's
 /// nothing to wait for and no reason to delay teardown).
-fn stop_native_recording(
+pub(crate) fn stop_native_recording(
     backend: &mut NativeFullscreenBackend,
     wait_for_finalize: bool,
 ) -> Result<(), String> {
@@ -3046,7 +3074,7 @@ fn is_moov_corrupt_error(err: &str) -> bool {
 /// finding one (file is unplayable), or `None` when the file could not be
 /// read (transient I/O error — callers must not treat this as permanent
 /// corruption).
-fn mp4_has_moov(path: &Path) -> Option<bool> {
+pub(crate) fn mp4_has_moov(path: &Path) -> Option<bool> {
     use std::io::{ErrorKind, Read, Seek, SeekFrom};
     let mut f = match std::fs::File::open(path) {
         Ok(f) => f,

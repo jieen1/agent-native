@@ -13,12 +13,71 @@ Skills 位于 `.agents/skills/<name>/SKILL.md`，包含针对代理的详细指�
 
 每个技能的 frontmatter `name` 和 `description` 总是被注入到系统提示符的 skills 块中，以便代理知道 skills 存在什么。当代理确定技能与任务相关时，会按需加载完整的技能主体（也通过 `docs-search` 显示）。这就是为什么保持描述简短且特定于触发器很重要：描述是代理在决定是否加载其余部分之前读取的唯一内容。
 
-```an-diagram title="渐进式披露" summary="只有每个技能的名称+描述始终处于上下文中。当任务匹配时，全身会按需加载。"
-{
-  "html": "<div class=\"sk-flow\"><div class=\"diagram-card\"><span class=\"diagram-pill accent\">始终在系统提示中</span><div class=\"sk-list\"><span class=\"diagram-pill\">storing-data &mdash; <small class=\"diagram-muted\">add data models&hellip;</small></span><span class=\"diagram-pill\">real-time-sync &mdash; <small class=\"diagram-muted\">wire polling&hellip;</small></span><span class=\"diagram-pill\">create-skill &mdash; <small class=\"diagram-muted\">add a skill&hellip;</small></span></div><small class=\"diagram-muted\">just name + description (cheap)</small></div><div class=\"diagram-arrow diagram-muted\" aria-hidden=\"true\">&rarr;</div><div class=\"diagram-panel center\"><small class=\"diagram-muted\">task matches a description</small><span class=\"diagram-pill accent\">load on demand</span></div><div class=\"diagram-arrow diagram-muted\" aria-hidden=\"true\">&rarr;</div><div class=\"diagram-box\">Full <code>SKILL.md</code> body<br><small class=\"diagram-muted\">规则、代码、应该做和不要做</small></div></div>",
-  "css": ".sk-flow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.sk-flow .diagram-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px;min-width:240px}.sk-flow .sk-list{display:flex;flex-direction:column;gap:6px}.sk-flow .center{display:flex;flex-direction:column;align-items:center;gap:6px}.sk-flow .diagram-arrow{font-size:22px}"
+<Diagram id="doc-block-htncku" title={"渐进式披露"} summary={"只有每个技能的名称+描述始终处于上下文中。当任务匹配时，全身会按需加载。"}>
+
+```html
+<div class="sk-flow">
+  <div class="diagram-card">
+    <span class="diagram-pill accent">始终在系统提示中</span>
+    <div class="sk-list">
+      <span class="diagram-pill"
+        >storing-data &mdash;
+        <small class="diagram-muted">add data models&hellip;</small></span
+      ><span class="diagram-pill"
+        >real-time-sync &mdash;
+        <small class="diagram-muted">wire polling&hellip;</small></span
+      ><span class="diagram-pill"
+        >create-skill &mdash;
+        <small class="diagram-muted">add a skill&hellip;</small></span
+      >
+    </div>
+    <small class="diagram-muted">just name + description (cheap)</small>
+  </div>
+  <div class="diagram-arrow diagram-muted" aria-hidden="true">&rarr;</div>
+  <div class="diagram-panel center">
+    <small class="diagram-muted">task matches a description</small
+    ><span class="diagram-pill accent">load on demand</span>
+  </div>
+  <div class="diagram-arrow diagram-muted" aria-hidden="true">&rarr;</div>
+  <div class="diagram-box">
+    Full <code>SKILL.md</code> body<br /><small class="diagram-muted"
+      >规则、代码、应该做和不要做</small
+    >
+  </div>
+</div>
+```
+
+```css
+.sk-flow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.sk-flow .diagram-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  min-width: 240px;
+}
+.sk-flow .sk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sk-flow .center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.sk-flow .diagram-arrow {
+  font-size: 22px;
 }
 ```
+
+</Diagram>
 
 ## 框架skills {#framework-skills}
 
@@ -58,6 +117,10 @@ Skills 位于 `.agents/skills/<name>/SKILL.md`，包含针对代理的详细指�
 域 skills 遵循与框架 skills 相同的格式。它们对代理需要遵循的特定模板的模式进行编码。
 
 ## 应用程序支持的 skills {#app-backed-skills}
+
+当前应用支持的 skills 包括 Plan 的 `visual-plan` 和 `visual-recap`、Design
+的 `visual-edit`、Assets 的 `assets`，以及用于仓库内 docs/blog/MDX 编辑的
+`content`。
 
 应用程序支持的 skills 将代理本机应用程序打包为技能市场工件。该捆绑包可以包含代理指令、导出的 skills、MCP 连接器元数据、托管/本地启动指令和 UI 表面（例如 MCP 应用程序）。
 
@@ -148,13 +211,63 @@ scope: dev
 
 这取代了依赖 Claude 代码仅读取 `.claude/skills` 的旧技巧 - `scope: dev` 使开发与运行时分割成为一流的显式选择。
 
-```an-diagram title="哪个代理加载哪个技能" summary="范围决定应用程序内运行时代理是否看到技能。开发技能仅对您的编码代理可见。"
-{
-"html": "<div class=\"sc-grid\"><div class=\"diagram-card\"><span class=\"diagram-pill\">.agents/skills/</span><div class=\"sc-row\"><span class=\"diagram-pill ok\">scope: both</span><small class=\"diagram-muted\">default</small></div><div class=\"sc-row\"><span class=\"diagram-pill ok\">scope: runtime</span></div><div class=\"sc-row\"><span class=\"diagram-pill warn\">scope: dev</span></div></div><div class=\"sc-targets\"><div class=\"diagram-box\">Runtime agent<br><small class=\"diagram-muted\">reads <code>both</code> + <code>runtime</code></small></div><div class=\"diagram-box\">编码 Agent<br><small class=\"diagram-muted\">Claude Code reads <code>.claude/skills/</code> + <code>dev</code></small></div></div></div>",
-"css": ".sc-grid{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}.sc-grid .diagram-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px}.sc-grid .sc-row{display:flex;align-items:center;gap:8px}.sc-grid .sc-targets{display:flex;flex-direction:column;gap:10px}"
-}
+<Diagram id="doc-block-ua3x18" title={"哪个代理加载哪个技能"} summary={"范围决定应用程序内运行时代理是否看到技能。开发技能仅对您的编码代理可见。"}>
 
+```html
+<div class="sc-grid">
+  <div class="diagram-card">
+    <span class="diagram-pill">.agents/skills/</span>
+    <div class="sc-row">
+      <span class="diagram-pill ok">scope: both</span
+      ><small class="diagram-muted">default</small>
+    </div>
+    <div class="sc-row">
+      <span class="diagram-pill ok">scope: runtime</span>
+    </div>
+    <div class="sc-row"><span class="diagram-pill warn">scope: dev</span></div>
+  </div>
+  <div class="sc-targets">
+    <div class="diagram-box">
+      Runtime agent<br /><small class="diagram-muted"
+        >reads <code>both</code> + <code>runtime</code></small
+      >
+    </div>
+    <div class="diagram-box">
+      编码 Agent<br /><small class="diagram-muted"
+        >Claude Code reads <code>.claude/skills/</code> +
+        <code>dev</code></small
+      >
+    </div>
+  </div>
+</div>
 ```
+
+```css
+.sc-grid {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.sc-grid .diagram-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+}
+.sc-grid .sc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sc-grid .sc-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+```
+
+</Diagram>
 
 > **另请参阅：** [Writing Agent Instructions](/docs/writing-agent-instructions) 了解如何措辞技能描述、应用渐进式披露以及保持 `AGENTS.md` 精简。
 
@@ -219,6 +332,7 @@ Hosted 是默认安装路径。本地启动是明确的定制，
 ```bash
 # 愉快的路径：导出的指令加上托管的 MCP 连接器。
 npx @agent-native/core@latest skills add visual-plan
+npx @agent-native/core@latest skills add visual-edit
 npx @agent-native/core@latest skills add assets
 
 # 回购优先内容 docs/blog/MDX 编辑。

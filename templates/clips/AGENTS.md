@@ -18,6 +18,11 @@ Detailed media, meeting, dictation, editing, and sharing rules live in
 - Recording start/stop/pause are UI gestures because browser media capture needs
   user activation; navigate the user to the recording view instead of trying a
   server action.
+- Screen Memory is a local-only desktop buffer, not a hosted Clips recording.
+  Users enable/pause/export/clear it from the desktop tray settings. External
+  local agents can read recent app/window context through
+  `agent-native mcp screen-memory`; do not upload raw Screen Memory segments or
+  treat them as shareable Clips unless the user explicitly exports/imports them.
 - Use `import-loom-recording` for Loom share/embed URLs. It downloads Loom's
   public MP4, reuploads it to Clips storage, creates a ready playable
   Clips-hosted recording, and imports Loom's public transcript when the share
@@ -25,6 +30,10 @@ Detailed media, meeting, dictation, editing, and sharing rules live in
   download the original from Loom and use "Upload video".
 - Native transcript first. Cleanup and title generation can run in the
   background; do not hide a usable native transcript behind a failed cleanup.
+- Dictation cleanup, Clip title/cleanup, and meeting summaries should pass
+  bounded `voiceContext` to the shared cleanup/transcription path when active
+  app context, learned vocabulary, user notes, or AGENTS.md preferences are
+  available.
 - Cloud transcription is fallback-only for Clips recordings and should use the
   configured Builder/Gemini or Groq paths, not OpenAI.
 - AI setup must be visible and paid-account-backed: lead with Builder.io Connect
@@ -60,6 +69,10 @@ Detailed media, meeting, dictation, editing, and sharing rules live in
   tell the user that clearly and point them to Builder.io credits/upgrade or a
   Groq key for backup speech-to-text. Generic OpenAI or Anthropic chat keys do
   not transcribe Clips recordings.
+- Use `get-builder-credit-status` when the user asks whether Builder.io credit
+  limits are pausing backup transcription, transcript cleanup, summaries, or AI
+  title generation. Treat an exhausted status as an FYI/upgrade path, not an app
+  error.
 - Slack unfurls use `/api/slack/unfurl` for `link_shared` events and only
   return playable `chat.unfurl` video blocks for ready public clips with no
   password, no expiry hit, and no archive/trash marker. Private, org-only,
@@ -98,6 +111,14 @@ Detailed media, meeting, dictation, editing, and sharing rules live in
   links, then renders the existing `/embed/:id` player in an extension-owned
   preview iframe so the video is playable without leaving GitHub. Keep this
   scoped to GitHub unless there is a deliberate permission review.
+- Screen Memory is a disabled-by-default, local-only desktop capability for
+  recent screen/app/window context. Use `get-screen-memory-status` before
+  relying on it, then `query-screen-memory-context` for bounded recent snippets
+  when local context files are present. If the local Screen Memory MCP built-in
+  is connected, the agent may also use `screen_memory_status`,
+  `screen_memory_recent_context`, and `screen_memory_recent_segments`; only
+  inspect or export segment file paths when the user explicitly asks. Never
+  describe Screen Memory as hosted, shared, exhaustive, or enabled by default.
 - After mutations, rely on the app refresh/polling path; do not invent a second
   sync mechanism.
 

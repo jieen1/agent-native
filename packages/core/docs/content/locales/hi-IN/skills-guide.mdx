@@ -13,12 +13,71 @@ Skills, `.agents/skills/<name>/SKILL.md` पर लाइव है और इ�
 
 प्रत्येक कौशल के फ्रंटमैटर `name` और `description` को हमेशा सिस्टम प्रॉम्प्ट के skills ब्लॉक में इंजेक्ट किया जाता है ताकि एजेंट को पता चले कि skills क्या मौजूद है। जब एजेंट निर्णय लेता है कि कौशल कार्य के लिए प्रासंगिक है, तो पूर्ण कौशल निकाय को मांग पर लोड किया जाता है (यह `docs-search` के माध्यम से भी सामने आता है)। यही कारण है कि विवरणों को छोटा रखना और ट्रिगर-विशिष्ट मायने रखता है: विवरण ही एकमात्र ऐसी चीज है जिसे एजेंट यह तय करने से पहले पढ़ता है कि बाकी को लोड करना है या नहीं।
 
-```an-diagram title="प्रगतिशील खुलासा" summary="प्रत्येक कौशल का केवल नाम + विवरण हमेशा संदर्भ में होता है। जब कार्य मेल खाता है तो पूरा शरीर मांग पर लोड होता है।"
-{
-  "html": "<div class=\"sk-flow\"><div class=\"diagram-card\"><span class=\"diagram-pill accent\">हमेशा system prompt में</span><div class=\"sk-list\"><span class=\"diagram-pill\">storing-data &mdash; <small class=\"diagram-muted\">add data models&hellip;</small></span><span class=\"diagram-pill\">real-time-sync &mdash; <small class=\"diagram-muted\">wire polling&hellip;</small></span><span class=\"diagram-pill\">create-skill &mdash; <small class=\"diagram-muted\">add a skill&hellip;</small></span></div><small class=\"diagram-muted\">just name + description (cheap)</small></div><div class=\"diagram-arrow diagram-muted\" aria-hidden=\"true\">&rarr;</div><div class=\"diagram-panel center\"><small class=\"diagram-muted\">task matches a description</small><span class=\"diagram-pill accent\">load on demand</span></div><div class=\"diagram-arrow diagram-muted\" aria-hidden=\"true\">&rarr;</div><div class=\"diagram-box\">Full <code>SKILL.md</code> body<br><small class=\"diagram-muted\">नियम, कोड, क्या करें/न करें</small></div></div>",
-  "css": ".sk-flow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.sk-flow .diagram-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px;min-width:240px}.sk-flow .sk-list{display:flex;flex-direction:column;gap:6px}.sk-flow .center{display:flex;flex-direction:column;align-items:center;gap:6px}.sk-flow .diagram-arrow{font-size:22px}"
+<Diagram id="doc-block-eiboxf" title={"प्रगतिशील खुलासा"} summary={"प्रत्येक कौशल का केवल नाम + विवरण हमेशा संदर्भ में होता है। जब कार्य मेल खाता है तो पूरा शरीर मांग पर लोड होता है।"}>
+
+```html
+<div class="sk-flow">
+  <div class="diagram-card">
+    <span class="diagram-pill accent">हमेशा system prompt में</span>
+    <div class="sk-list">
+      <span class="diagram-pill"
+        >storing-data &mdash;
+        <small class="diagram-muted">add data models&hellip;</small></span
+      ><span class="diagram-pill"
+        >real-time-sync &mdash;
+        <small class="diagram-muted">wire polling&hellip;</small></span
+      ><span class="diagram-pill"
+        >create-skill &mdash;
+        <small class="diagram-muted">add a skill&hellip;</small></span
+      >
+    </div>
+    <small class="diagram-muted">just name + description (cheap)</small>
+  </div>
+  <div class="diagram-arrow diagram-muted" aria-hidden="true">&rarr;</div>
+  <div class="diagram-panel center">
+    <small class="diagram-muted">task matches a description</small
+    ><span class="diagram-pill accent">load on demand</span>
+  </div>
+  <div class="diagram-arrow diagram-muted" aria-hidden="true">&rarr;</div>
+  <div class="diagram-box">
+    Full <code>SKILL.md</code> body<br /><small class="diagram-muted"
+      >नियम, कोड, क्या करें/न करें</small
+    >
+  </div>
+</div>
+```
+
+```css
+.sk-flow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.sk-flow .diagram-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  min-width: 240px;
+}
+.sk-flow .sk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sk-flow .center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.sk-flow .diagram-arrow {
+  font-size: 22px;
 }
 ```
+
+</Diagram>
 
 ## फ्रेमवर्क skills {#framework-skills}
 
@@ -58,6 +117,10 @@ Skills, `.agents/skills/<name>/SKILL.md` पर लाइव है और इ�
 डोमेन skills फ्रेमवर्क skills के समान प्रारूप का पालन करता है। वे उस टेम्पलेट के लिए विशिष्ट पैटर्न को एन्कोड करते हैं जिसका एजेंट को अनुसरण करने की आवश्यकता होती है।
 
 ## ऐप-समर्थित skills {#app-backed-skills}
+
+मौजूदा app-backed skills में Plan के `visual-plan` और `visual-recap`, Design का
+`visual-edit`, Assets का `assets`, और repo-backed docs/blog/MDX editing के लिए
+`content` शामिल हैं.
 
 ऐप-समर्थित skills एक कौशल बाज़ार आर्टिफैक्ट के रूप में एक एजेंट-मूल ऐप को पैकेज करता है। बंडल में एजेंट निर्देश, निर्यातित skills, MCP कनेक्टर मेटाडेटा, होस्टेड/स्थानीय लॉन्च निर्देश और UI सतह जैसे MCP ऐप्स शामिल हो सकते हैं।
 
@@ -148,13 +211,63 @@ scope: dev
 
 यह केवल `.claude/skills` को पढ़ने के लिए Claude कोड पर भरोसा करने की पुरानी हैक को प्रतिस्थापित करता है - `scope: dev` देव-बनाम-रनटाइम विभाजन को प्रथम श्रेणी, स्पष्ट विकल्प बनाता है।
 
-```an-diagram title="कौन सा एजेंट कौन सा कौशल लोड करता है" summary="स्कोप यह तय करता है कि इन-ऐप रनटाइम एजेंट किसी कौशल को देखता है या नहीं। देव कौशल केवल आपके कोडिंग एजेंट को दिखाई देते हैं।"
-{
-"html": "<div class=\"sc-grid\"><div class=\"diagram-card\"><span class=\"diagram-pill\">.agents/skills/</span><div class=\"sc-row\"><span class=\"diagram-pill ok\">scope: both</span><small class=\"diagram-muted\">default</small></div><div class=\"sc-row\"><span class=\"diagram-pill ok\">scope: runtime</span></div><div class=\"sc-row\"><span class=\"diagram-pill warn\">scope: dev</span></div></div><div class=\"sc-targets\"><div class=\"diagram-box\">Runtime agent<br><small class=\"diagram-muted\">reads <code>both</code> + <code>runtime</code></small></div><div class=\"diagram-box\">कोडिंग एजेंट<br><small class=\"diagram-muted\">Claude Code reads <code>.claude/skills/</code> + <code>dev</code></small></div></div></div>",
-"css": ".sc-grid{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}.sc-grid .diagram-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px}.sc-grid .sc-row{display:flex;align-items:center;gap:8px}.sc-grid .sc-targets{display:flex;flex-direction:column;gap:10px}"
-}
+<Diagram id="doc-block-kt8x06" title={"कौन सा एजेंट कौन सा कौशल लोड करता है"} summary={"स्कोप यह तय करता है कि इन-ऐप रनटाइम एजेंट किसी कौशल को देखता है या नहीं। देव कौशल केवल आपके कोडिंग एजेंट को दिखाई देते हैं।"}>
 
+```html
+<div class="sc-grid">
+  <div class="diagram-card">
+    <span class="diagram-pill">.agents/skills/</span>
+    <div class="sc-row">
+      <span class="diagram-pill ok">scope: both</span
+      ><small class="diagram-muted">default</small>
+    </div>
+    <div class="sc-row">
+      <span class="diagram-pill ok">scope: runtime</span>
+    </div>
+    <div class="sc-row"><span class="diagram-pill warn">scope: dev</span></div>
+  </div>
+  <div class="sc-targets">
+    <div class="diagram-box">
+      Runtime agent<br /><small class="diagram-muted"
+        >reads <code>both</code> + <code>runtime</code></small
+      >
+    </div>
+    <div class="diagram-box">
+      कोडिंग एजेंट<br /><small class="diagram-muted"
+        >Claude Code reads <code>.claude/skills/</code> +
+        <code>dev</code></small
+      >
+    </div>
+  </div>
+</div>
 ```
+
+```css
+.sc-grid {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.sc-grid .diagram-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+}
+.sc-grid .sc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sc-grid .sc-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+```
+
+</Diagram>
 
 > **यह भी देखें:** [Writing Agent Instructions](/docs/writing-agent-instructions) कौशल विवरण को कैसे शब्दों में कहें, प्रगतिशील प्रकटीकरण कैसे लागू करें, और `AGENTS.md` को दुबला कैसे रखें।
 
@@ -219,6 +332,7 @@ scope: dev
 ```bash
 # शुभ पथ: निर्यात किए गए निर्देश और होस्ट किए गए MCP कनेक्टर।
 npx @agent-native/core@latest skills add visual-plan
+npx @agent-native/core@latest skills add visual-edit
 npx @agent-native/core@latest skills add assets
 
 # रेपो-प्रथम Content docs/blog/MDX संपादन।

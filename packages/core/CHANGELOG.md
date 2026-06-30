@@ -1,5 +1,192 @@
 # @agent-native/core
 
+## 0.80.10
+
+### Patch Changes
+
+- d26a679: Design connect: document the per-element provenance contract (`data-source-file` / `data-source-line` / `data-source-column` / `data-component-name`, plus `data-loc` shorthand) used to map a selected element back to its source location, and surface it in `design connect --help`. The `resolveNodeToFile` bridge capability now carries a reason string describing this contract.
+- d26a679: Harden the app-backed skill installer for visual-plan feedback: built-in skill folders now stage writes before replacing existing installs, include first-time install command metadata, and make `skills update` point first-time users to `skills add` for setup and MCP registration.
+
+## 0.80.9
+
+### Patch Changes
+
+- 82c138c: Expose app main surfaces as named CSS query containers so templates can reflow against the available app pane instead of the viewport.
+- 82c138c: ShareButton can render optional custom tabs beside the default share-link panel.
+- 82c138c: Improve the exported Design skills with a clearer generation quality bar, updated variant-screen flow guidance, and more grounded visual-edit review instructions.
+- 82c138c: Remove the extension viewer notification bell and place the vertical more menu before Share.
+- 82c138c: Allow guided question options to submit immediately when selected, with optional per-question submit and skip message copy.
+- 82c138c: Add a local Clips Screen Memory MCP stdio server for querying recent on-device screen context.
+- 82c138c: Avoid CORS preflights for cross-origin session replay uploads so hosted apps can send recordings to the first-party analytics collector.
+
+## 0.80.8
+
+### Patch Changes
+
+- 24deb20: Reduce noisy browser Sentry captures by filtering public-site source-less errors that only report their page URL as a Sentry tag, delaying reconnect aborts until active runs are truly stuck on the server clock, and recovering assistant-ui duplicate message-id append races before they escape.
+
+## 0.80.7
+
+### Patch Changes
+
+- 72ef787: Add `onReady` and `onUnavailable` callbacks to `EmbeddedExtension`. `onReady` fires once when the embedded iframe first signals content readiness (its first height report, or iframe load as a fallback) — hosts that gate on content paint, such as dashboard report screenshots, can use it to avoid capturing a blank extension. `onUnavailable` fires when the extension can't be loaded for the current viewer (e.g. 403/404 because it isn't shared with them or no longer exists), so hosts can render an explanatory fallback instead of a silently blank panel.
+
+## 0.80.6
+
+### Patch Changes
+
+- f52eeb1: Pin the scaffolded workspace Nitro tracer dependency so fresh installs keep building reliably.
+- f52eeb1: Ignore shareable resource registrations that originate from test modules during app runtime.
+
+## 0.80.5
+
+### Patch Changes
+
+- 8a43376: Allow app-level opt-in to durable background agent chat runs, let direct loop callers use that timeout regime, and expose per-action tool timeouts from `defineAction`.
+- 8a43376: Route Figma/code design-system indexing through Builder and keep the legacy fig subpath as a compatibility shim.
+- 8a43376: Expose the Design visual-edit skill in repo-local skill sync and generated app plugin bundles.
+- 8a43376: Defer agent chat context subscriber updates so embedded chat rendering does not trigger render-phase updates in host apps.
+- 8a43376: Make MCP install/connect idempotent for Codex `config.toml`. The writer now
+  recognizes a server's sub-tables (`[mcp_servers.<name>.http_headers]`,
+  `[mcp_servers.<name>.env]`, …) as part of its footprint, so re-installing or
+  reconnecting a server clears stale sub-tables instead of leaving one behind as a
+  duplicate TOML key. Same-URL alias cleanup removes the whole footprint too, and
+  the AGENTS.md / CLAUDE.md managed-instruction writers collapse any pre-existing
+  duplicate blocks into a single block.
+- 8a43376: Show a clear loading state while authorizing MCP device codes.
+- 8a43376: Render label share buttons without a leading visibility icon.
+- 8a43376: Show the Connect AI setup card and block submits from standalone prompt composers when no LLM is connected.
+
+## 0.80.4
+
+### Patch Changes
+
+- fa56720: Fix video playback failing in workspace dev mode. When a browser requested video bytes (range/streaming requests), the dev server was stripping the app base path prefix before Nitro's media handler could run, causing Vite to return an error page instead of the video.
+
+## 0.80.3
+
+### Patch Changes
+
+- 995dd3b: Add an opt-in `maxBodyBytes` option to `defineAction`. When set, the action
+  HTTP route rejects oversize requests with 413 based on the declared
+  `Content-Length` BEFORE buffering or parsing the body.
+
+  This closes a gap for public, no-auth POST actions: previously the router parsed
+  the full JSON body before any in-`run()` size check, so a large anonymous
+  request could force parse work on an unauthenticated route. The check is
+  runtime-agnostic (header only), so it works on both the web-`Request.json()` and
+  Node `readBody` paths, and is unset by default so existing actions are
+  unaffected. The Plan template's public `validate-local-plan-source` action opts
+  in.
+
+- 995dd3b: Make `plan local verify` validate plan content against the real renderer
+  schema, and stop `plan local check` from reporting false greens.
+
+  Previously both headless commands could pass a plan the renderer later rejects:
+  `check` ran a hand-rolled regex lint (a subset of the schema that never
+  inspected blocks authored as JSON inside a container's `tabs={[…]}` /
+  `columns={[…]}` array), and `verify` only checked bridge/CORS transport, never
+  the content. The plan then got stuck on "Loading plan" when rendered.
+
+  Now:
+  - `verify` POSTs the MDX folder to the Plan app's new, public, no-DB
+    `validate-local-plan-source` action, which runs the renderer's own
+    `parsePlanMdxFolder` + `planContentSchema`. Its verdict gates `verify`'s
+    `ok`, and rejected plans surface the renderer's exact schema-path issue
+    (e.g. `blocks[1].data.tabs[0].blocks[0].data.items[0].id`). When the endpoint
+    is unavailable (older/unreachable Plan app), `verify` degrades to the
+    transport checks and warns that content was not validated, rather than
+    hard-failing.
+  - `check` now recurses into nested `tabs` block arrays so the common
+    nested-checklist / question-form / missing-`id` case is caught offline, and
+    it no longer reports `validation: "passed"`. It reports a clearly-scoped
+    `lint-passed` with a note pointing to `verify` for authoritative validation.
+
+## 0.80.2
+
+### Patch Changes
+
+- 7b44f20: Fix MCP App embeds never becoming visible in ChatGPT/Codex (stuck on "Loading
+  app", then the fallback panel). Two shell bugs in the inline-embed render path:
+  1. `launchEmbed` called `setMessage("Loading app")` before the dedupe check, so
+     the constant `openai:set_globals`-driven relaunches wiped the just-mounted
+     iframe out of the stage on every cycle — the app rendered and was instantly
+     blanked, never reaching its ready handshake. The loading message now only
+     shows when no frame is mounted.
+  2. The `openai:set_globals` handler re-synced unconditionally, and the sync
+     itself called `notifyHostHeight()`/`sendHostContext()`, which the host
+     reflected back as another `set_globals` — an infinite feedback storm that
+     starved the host into its sad-face placeholder. `syncOpenAiBridge` now
+     short-circuits when the relevant globals (tool input, open URLs, display
+     mode, theme, locale) are unchanged.
+
+  Bumps the embed shell version so hosts refetch the fixed shell.
+
+## 0.80.1
+
+### Patch Changes
+
+- 1d77419: Route design-system indexing through Builder-managed design-system APIs while preserving the public Figma parser export.
+- 1d77419: Fix avatar lookup routes so profile photos load for users signed in through legacy Google OAuth sessions.
+- 1d77419: Keep shared app shell outlines visible around the top corners when app content fills the main surface.
+
+## 0.80.0
+
+### Minor Changes
+
+- aa345cc: Add `agent-native design connect` foundations for localhost Design bridge manifests.
+
+### Patch Changes
+
+- aa345cc: App shells use an outline-style raised surface ring and Dispatch left navigation can collapse to an animated icon rail.
+- aa345cc: Live cursors now use compact pointer markers with adjacent participant labels.
+- aa345cc: Surface missing LLM provider connections before agent chat starts a run, including Builder and AI SDK engines.
+- aa345cc: Fix Chrome visual glitchiness (blank/stale regions on scroll, pan, and zoom) in
+  plan documents and canvases by removing `backdrop-filter` (`backdrop-blur`) from
+  always-rendered per-block controls. A long plan rendered 40+ per-block edit
+  triggers, each forcing its own composited backdrop layer; Chrome re-samples every
+  backdrop snapshot on each scroll frame and its backdrop-filter invalidation drops
+  tiles, leaving regions blank until the next repaint. The tiny hover-trigger chips
+  now use an opaque background, which is visually identical but eliminates the
+  composited backdrop layers. Affects the block edit trigger, diagram/mermaid
+  expand/style triggers, and wireframe style trigger.
+- aa345cc: Allow embedded MCP App controls to target their own local agent sidebar instead of relaying every submitted prompt to the host chat.
+- aa345cc: Respect silent chat context staging across app/frame boundaries so selection context can update without opening the agent sidebar.
+- aa345cc: Polish the shared chat thinking status with capitalized text and a subtle shine animation.
+- aa345cc: Add the Design `/visual-edit` skill and route it through the built-in skill installers so agents can open localhost routes as URL-backed Design screens.
+- aa345cc: Improve voice transcription and cleanup with bounded voice context packs for active composer context, learned vocabulary, and transcript cleanup prompts.
+
+## 0.79.27
+
+### Patch Changes
+
+- 087be08: Show Gemini and other installed API-key-backed providers in the chat model picker.
+- 087be08: Add a `agent-native content local-files` launcher for local Content editing, propagate local file profiles through manifests, and support standard MDX child code fences for Diagram block authoring.
+- 087be08: Allow the framework Settings email panel to save Resend and SendGrid provider keys for transactional email and dashboard reports.
+- 087be08: Move Portuguese and Chinese locale options directly under German in locale pickers.
+- 087be08: Add a shared MCP integrations catalog dialog to the composer and Workspace create menus, with configurable default remote server presets plus custom server setup.
+- 087be08: Simplify the chat thinking indicator to plain text without the logo or animated dots.
+- 087be08: Reduce noisy browser Sentry reports from public docs visitors and harden organization member search SQL.
+- 087be08: Keep shared wireframe blocks readable in dark mode by stripping host theme utility classes and avoiding overlapping rough outlines around broad helper containers.
+
+## 0.79.26
+
+### Patch Changes
+
+- 27f630c: Fix Windows desktop (Tauri) email/password sign-in. The login endpoint now
+  returns the session token to the Windows WebView2 origin
+  (`http://tauri.localhost` / `https://tauri.localhost`), which was missing from
+  the desktop token allowlist, so sign-in no longer silently bounces back to the
+  form. Also stop reporting wrong-password failures as "Enter a valid email
+  address" — credential errors now surface as "Invalid email or password" while
+  genuine malformed-email input still gets the friendly format message.
+
+## 0.79.25
+
+### Patch Changes
+
+- 8bac54f: Expose the optional image model menu through AgentSidebar so app sidebars can show secondary generation model controls.
+
 ## 0.79.24
 
 ### Patch Changes
@@ -2831,7 +3018,7 @@ visual-plan` / `visual-recap` likewise install only the named skill, while the
   - Exponential backoff with jitter (cap ~15 s) on consecutive network errors.
   - SSE fast-path: wire collab events via the existing `/_agent-native/poll-events` EventSource stream; relax poll to ~12 s while SSE is healthy, fall back to 2 s when SSE drops.
 
-- 66f8e32: Add Presence Kit: Liveblocks/Figma-grade live-cursor and selection primitives.
+- 66f8e32: Add Presence Kit: Liveblocks/collaboration-grade live-cursor and selection primitives.
   - **Fast awareness**: `useCollaborativeDoc` now POSTs awareness state changes within ~150ms (throttled trailing edge) instead of waiting for the 2s poll cycle. The `postAwareness` server handler emits an `AWARENESS_CHANGE_EVENT` that is forwarded through the `/_agent-native/poll-events` SSE stream to connected peers push-style. Polling-only deployments degrade gracefully to poll cadence.
   - **`usePresence(awareness, localClientId)`**: reactive hook that derives `OtherPresence[]` from awareness state. The agent (AGENT_CLIENT_ID) appears as a first-class participant with `isAgent: true`. Returns `setPresence(partial)` to publish arbitrary presence fields (cursor, selection, viewport).
   - **`LiveCursorOverlay`**: absolutely-positioned overlay that renders remote users' cursors from normalized 0–1 coordinates. The agent cursor uses a sparkle icon. Cursors fade out after 10s of inactivity with 120ms CSS transitions.

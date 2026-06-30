@@ -1,17 +1,49 @@
 export interface ElementInfo {
   tagName: string;
   id?: string;
+  sourceId?: string;
   selector?: string;
   classes: string[];
   computedStyles: Record<string, string>;
   boundingRect: { x: number; y: number; width: number; height: number };
   textContent?: string;
+  htmlContent?: string;
   isFlexChild: boolean;
   isFlexContainer: boolean;
   parentDisplay?: string;
+  parentLayout?: {
+    display?: string;
+    flexDirection?: string;
+    alignItems?: string;
+    justifyContent?: string;
+    gap?: string;
+    gridTemplateColumns?: string;
+    gridTemplateRows?: string;
+    position?: string;
+  };
+  editCapabilities?: Array<{
+    kind:
+      | "deterministic-style-edit"
+      | "deterministic-class-edit"
+      | "agent-structural-edit"
+      | "unsupported";
+    label: string;
+    confidence: number;
+    reason?: string;
+  }>;
+  confidence?: number;
 }
 
 export type DeviceFrameType = "none" | "desktop" | "tablet" | "mobile";
+
+export const DEVICE_FRAME_VIEWPORTS = {
+  desktop: { width: 1280, height: 800 },
+  tablet: { width: 768, height: 1024 },
+  mobile: { width: 390, height: 844 },
+} as const satisfies Record<
+  Exclude<DeviceFrameType, "none">,
+  { width: number; height: number }
+>;
 
 export interface ViewportTab {
   id: string;

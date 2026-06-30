@@ -1881,6 +1881,40 @@ async function startNativeFullscreenRecording(
 
         let uploadResult: NativeFullscreenUploadResult | null = null;
         const viewUrl = `/r/${id}`;
+
+        // A native recording runs two ScreenCaptureKit streams: the screen
+        // recorder and the whisper system-audio recognizer (system_audio.rs
+        // opens its own SCStream with captures_audio). Tearing the transcription
+        // stream down while the recorder is flushing its final `moov` atom
+        // interrupts ScreenCaptureKit (RPRecordingErrorDomain -5814,
+        // "Application connection interrupted"), so the recorder's
+        // SCRecordingOutput aborts before the moov is written and the MP4 is left
+        // permanently corrupt. The teardowns must be sequenced: recorder first,
+        // transcription second.
+        //
+        // We also must not delay the recorder stop, or the clip keeps capturing
+        // past the Stop click (Rust measures duration when the stop command
+        // runs, and transcriptionCapture.stop() blocks on a ~1.5s settle).
+        //
+        // So: start the native finalize+upload now, which stops the recorder
+        // capture immediately; wait for Rust to emit that the recorder has
+        // finalized (moov written); only then tear the transcription stream
+        // down. A timeout longer than the Rust finalize ceiling
+        // (SCK_FINALIZE_TIMEOUT) guards against a lost event so Stop can never
+        // hang.
+        let signalRecorderFinalized: () => void = () => {};
+        const recorderFinalized = new Promise<void>((resolve) => {
+          signalRecorderFinalized = resolve;
+        });
+        const unlistenFinalized = await listen<string>(
+          "clips:native-recording-finalized",
+          (event) => {
+            if (!event.payload || event.payload === id) {
+              signalRecorderFinalized();
+            }
+          },
+        );
+
         const uploadPromise = invoke<NativeFullscreenUploadResult>(
           "native_fullscreen_recording_stop_and_upload",
           {
@@ -1894,6 +1928,12 @@ async function startNativeFullscreenRecording(
         );
         uploadPromise.catch(() => {});
         try {
+          await Promise.race([
+            recorderFinalized,
+            new Promise<void>((resolve) => window.setTimeout(resolve, 15000)),
+          ]);
+          unlistenFinalized();
+
           const capturedTranscript = await transcriptionCapture
             ?.stop()
             .catch((err) => {
@@ -2029,6 +2069,8 @@ async function startNativeFullscreenRecording(
         .then(() => {
           pausedAt = at;
           emitState();
+          console.log("[clips-recorder] native pause: pausing transcription");
+          void transcriptionCapture?.pause().catch(() => {});
         })
         .catch((err) => {
           console.warn("[clips-recorder] native pause failed:", err);
@@ -2036,6 +2078,8 @@ async function startNativeFullscreenRecording(
     }),
     listen("clips:recorder-resume", () => {
       if (pausedAt == null) return;
+      // Only resume transcription once the recorder actually resumed, so a
+      // rejected IPC can't leave transcription running over a paused recording.
       invoke("native_fullscreen_recording_resume")
         .then(() => {
           if (pausedAt != null) {
@@ -2043,6 +2087,8 @@ async function startNativeFullscreenRecording(
             pausedAt = null;
           }
           emitState();
+          console.log("[clips-recorder] native resume: resuming transcription");
+          void transcriptionCapture?.resume().catch(() => {});
         })
         .catch((err) => {
           console.warn("[clips-recorder] native resume failed:", err);
@@ -2085,6 +2131,12 @@ async function startNativeFullscreenRecording(
     if (stopped && transcriptionCapture) {
       void transcriptionCapture.cancel().catch(() => {});
       transcriptionCapture = null;
+    } else if (pausedAt != null && transcriptionCapture) {
+      // The user paused while the engine was still starting; honor it now.
+      console.log(
+        "[clips-recorder] native: paused during startup, pausing transcription",
+      );
+      void transcriptionCapture.pause().catch(() => {});
     } else if (
       wantsAudio &&
       !transcriptionCapture &&
@@ -2845,6 +2897,8 @@ async function startRecordingInner(
           recorder.pause();
           pausedAt = Date.now();
           emitState(true);
+          console.log("[clips-recorder] recorder pause: pausing transcription");
+          void transcriptionCapture?.pause().catch(() => {});
         } catch {
           // ignore
         }
@@ -2857,6 +2911,10 @@ async function startRecordingInner(
           if (pausedAt) accumulatedPauseMs += Date.now() - pausedAt;
           pausedAt = null;
           emitState(false);
+          console.log(
+            "[clips-recorder] recorder resume: resuming transcription",
+          );
+          void transcriptionCapture?.resume().catch(() => {});
         } catch {
           // ignore
         }
@@ -2911,6 +2969,12 @@ async function startRecordingInner(
   if (stopped && transcriptionCapture) {
     void transcriptionCapture.cancel().catch(() => {});
     transcriptionCapture = null;
+  } else if (pausedAt != null && transcriptionCapture) {
+    // The user paused while the engine was still starting; honor it now.
+    console.log(
+      "[clips-recorder] recorder: paused during startup, pausing transcription",
+    );
+    void transcriptionCapture.pause().catch(() => {});
   } else if (
     wantsAudio &&
     !transcriptionCapture &&

@@ -24,13 +24,18 @@ export type TweakSelections = Record<string, string | number | boolean>;
  * assignments. Rules (must match the editor's historical inline behavior):
  *
  *  - booleans  -> "1" / "0"
- *  - numbers   -> `${value}` plus "px" when the CSS var name contains "radius",
- *                 otherwise unitless
+ *  - numbers   -> `${value}` plus `t.unit` when provided, falling back to "px"
+ *                 when the CSS var name contains "radius", otherwise unitless
  *  - strings   -> the string as-is
  *
  * Tweaks without a `cssVar` are skipped (they don't map to a property).
  * A missing selection falls back to the tweak's `defaultValue`.
+ * Selection keys that are themselves safe CSS custom properties are also
+ * emitted directly, which lets token edits persist vars that were not part of
+ * the generated tweak definition list.
  */
+const CSS_CUSTOM_PROPERTY_NAME = /^--[-_a-zA-Z0-9]+$/;
+
 export function resolveTweaksToCssVars(
   tweaks: TweakDefinition[],
   selections: TweakSelections,
@@ -39,16 +44,35 @@ export function resolveTweaksToCssVars(
   for (const t of tweaks) {
     if (!t.cssVar) continue;
     const v = selections[t.id] ?? t.defaultValue;
-    if (typeof v === "boolean") {
-      out[t.cssVar] = v ? "1" : "0";
-    } else if (typeof v === "number") {
-      const unit = t.cssVar.toLowerCase().includes("radius") ? "px" : "";
-      out[t.cssVar] = `${v}${unit}`;
-    } else {
-      out[t.cssVar] = String(v);
-    }
+    out[t.cssVar] = stringifyCssVarValue(t.cssVar, v, t.unit);
   }
+
+  for (const [key, value] of Object.entries(selections)) {
+    if (!isDirectCssVarSelectionKey(key)) continue;
+    out[key] = stringifyCssVarValue(key, value);
+  }
+
   return out;
+}
+
+export function isDirectCssVarSelectionKey(key: string): boolean {
+  return CSS_CUSTOM_PROPERTY_NAME.test(key);
+}
+
+function stringifyCssVarValue(
+  cssVar: string,
+  value: string | number | boolean,
+  unit?: string,
+): string {
+  if (typeof value === "boolean") {
+    return value ? "1" : "0";
+  }
+  if (typeof value === "number") {
+    const resolvedUnit =
+      unit ?? (cssVar.toLowerCase().includes("radius") ? "px" : "");
+    return `${value}${resolvedUnit}`;
+  }
+  return String(value);
 }
 
 /**

@@ -167,6 +167,39 @@ export const FRAMEWORK_ROUTE_PREFIX = "/_agent-native";
 export const FRAMEWORK_EVENTS_ROUTE = `${FRAMEWORK_ROUTE_PREFIX}/events`;
 export const LEGACY_FRAMEWORK_EVENTS_ROUTE = `${FRAMEWORK_ROUTE_PREFIX}/poll-events`;
 
+export function getFrameworkEnvKeys(): EnvKeyConfig[] {
+  return [
+    { key: "ENABLE_BUILDER", label: "Enable Builder.io features" },
+    {
+      key: "AGENT_ENGINE_PREFER_BYO_KEY",
+      label:
+        "Prefer BYO LLM key over Builder gateway (default: false — gateway wins)",
+    },
+    {
+      key: "RESEND_API_KEY",
+      label: "Resend API key",
+      helpText:
+        "Enables transactional email, including password resets, invitations, share notifications, and dashboard reports.",
+    },
+    {
+      key: "SENDGRID_API_KEY",
+      label: "SendGrid API key",
+      helpText:
+        "Enables transactional email, including password resets, invitations, share notifications, and dashboard reports.",
+    },
+    {
+      key: "EMAIL_FROM",
+      label: "Email from address",
+      helpText:
+        "Sender address for transactional email. Required when using SendGrid.",
+    },
+    ...Object.values(PROVIDER_ENV_META).map(({ envVar, label }) => ({
+      key: envVar,
+      label,
+    })),
+  ];
+}
+
 /** Result of the `/_agent-native/health` liveness + DB-warmup probe. */
 export interface DbHealthProbeResult {
   /** The serverless function is live and served the request. */
@@ -349,6 +382,31 @@ function parseBuilderCallbackBoolean(
 // attributes that execute when the browser renders them as an <img> src or
 // inlines them in the DOM. Mirrors SAFE_DATA_IMAGE in sanitize-html.ts.
 export const AVATAR_RASTER_MIME = /^data:image\/(png|jpe?g|gif|webp);/i;
+
+export function resolveAvatarEmailParam(
+  pathname: string,
+  appBasePath = "",
+): string {
+  const base = appBasePath.replace(/\/+$/, "");
+  const avatarPaths = Array.from(
+    new Set([`${base}/_agent-native/avatar/`, "/_agent-native/avatar/"]),
+  );
+
+  for (const avatarPath of avatarPaths) {
+    const avatarIndex = pathname.indexOf(avatarPath);
+    if (avatarIndex >= 0) {
+      return pathname
+        .slice(avatarIndex + avatarPath.length)
+        .replace(/^\/+/, "")
+        .split("/")[0];
+    }
+  }
+
+  const firstSegment = pathname.replace(/^\/+/, "").split("/")[0] ?? "";
+  if (!firstSegment || firstSegment === "_agent-native") return "";
+  if (base && firstSegment === base.replace(/^\/+/, "")) return "";
+  return firstSegment;
+}
 
 async function detectUsageEngineName(
   event: H3Event,
@@ -2199,18 +2257,7 @@ export function createCoreRoutesPlugin(
       );
 
       // Env key management — framework keys are always included
-      const frameworkEnvKeys: EnvKeyConfig[] = [
-        { key: "ENABLE_BUILDER", label: "Enable Builder.io features" },
-        {
-          key: "AGENT_ENGINE_PREFER_BYO_KEY",
-          label:
-            "Prefer BYO LLM key over Builder gateway (default: false — gateway wins)",
-        },
-        ...Object.values(PROVIDER_ENV_META).map(({ envVar, label }) => ({
-          key: envVar,
-          label,
-        })),
-      ];
+      const frameworkEnvKeys = getFrameworkEnvKeys();
       {
         const envKeys = [...frameworkEnvKeys, ...(options.envKeys ?? [])];
         const allowedEnvKeyNames = envKeys.map(({ key }) => key);
@@ -2988,9 +3035,10 @@ export function createCoreRoutesPlugin(
         `${P}/avatar`,
         defineEventHandler(async (event: H3Event) => {
           const method = getMethod(event);
-          const emailParam = (event.url?.pathname || "")
-            .replace(/^\/+/, "")
-            .split("/")[0];
+          const emailParam = resolveAvatarEmailParam(
+            event.url?.pathname || "",
+            getConfiguredAppBasePath(),
+          );
 
           if (method === "GET") {
             if (!emailParam) {

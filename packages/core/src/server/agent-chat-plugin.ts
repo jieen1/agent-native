@@ -36,6 +36,7 @@ import { DEFAULT_ANTHROPIC_MODEL } from "../agent/default-model.js";
 import {
   AGENT_CHAT_PROCESS_RUN_PATH,
   extractProcessRunId,
+  isInBackgroundFunctionRuntime,
   prepareProcessRunRequest,
 } from "../agent/durable-background.js";
 import {
@@ -2567,6 +2568,12 @@ export interface AgentChatPluginOptions {
    * timeout. When reached, long runs continue through the hidden continuation
    * path instead of surfacing a timeout warning. */
   runSoftTimeoutMs?: number;
+  /**
+   * Opt this app into Netlify durable background-function agent-chat runs. This
+   * gives hosted agent turns the 15-minute async-function budget when the app's
+   * Netlify build also emits the background function.
+   */
+  durableBackgroundRuns?: boolean;
   /** Anthropic API key. Falls back to ANTHROPIC_API_KEY env var */
   apiKey?: string;
   /**
@@ -4837,6 +4844,11 @@ export function createAgentChatPlugin(
               signal: controller.signal,
             },
             options?.runSoftTimeoutMs,
+            {
+              backgroundFunction:
+                options?.durableBackgroundRuns === true &&
+                isInBackgroundFunctionRuntime(),
+            },
           );
 
           const { responseText, finalText } = assembleA2AFinalResponse(
@@ -5035,6 +5047,11 @@ export function createAgentChatPlugin(
                 signal: controller.signal,
               },
               options?.runSoftTimeoutMs,
+              {
+                backgroundFunction:
+                  options?.durableBackgroundRuns === true &&
+                  isInBackgroundFunctionRuntime(),
+              },
             );
 
             return accumulatedText || "(no response)";
@@ -5712,6 +5729,7 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
         appId: options?.appId,
         apiKey: options?.apiKey,
         runSoftTimeoutMs: options?.runSoftTimeoutMs,
+        durableBackgroundRuns: options?.durableBackgroundRuns,
         finalResponseGuard: options?.finalResponseGuard,
         prepareRequest: async (details) => {
           // Stash the threadId on runCtx so systemPrompt can check isNewThread().
@@ -5802,6 +5820,7 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
               appId: options?.appId,
               apiKey: options?.apiKey,
               runSoftTimeoutMs: options?.runSoftTimeoutMs,
+              durableBackgroundRuns: options?.durableBackgroundRuns,
               finalResponseGuard: options?.finalResponseGuard,
               prepareRequest: options?.prepareRequest,
               skipFilesContext: true,
@@ -5932,6 +5951,7 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
           appId: options?.appId,
           apiKey: options?.apiKey,
           runSoftTimeoutMs: options?.runSoftTimeoutMs,
+          durableBackgroundRuns: options?.durableBackgroundRuns,
           finalResponseGuard: options?.finalResponseGuard,
           prepareRequest: options?.prepareRequest,
           skipFilesContext,
@@ -6470,6 +6490,31 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
             source: "codebase" | "resource";
           }> = [];
           const seenNames = new Set<string>();
+
+          // Bundled template skills are available in production via the
+          // virtual agents bundle, not the runtime filesystem. Surface them in
+          // the slash/skill picker so production users can explicitly invoke
+          // the same skills that are present in the prompt and docs-search.
+          try {
+            const { loadAgentsBundle, getRuntimeSkills } =
+              await import("./agents-bundle.js");
+            const bundle = await loadAgentsBundle();
+            for (const skill of getRuntimeSkills(bundle)) {
+              const fm = parseSkillFrontmatter(skill.content);
+              if (fm.userInvocable === false) continue;
+              const skillName = skill.meta.name || fm.name;
+              if (!skillName || seenNames.has(skillName)) continue;
+              seenNames.add(skillName);
+              skills.push({
+                name: skillName,
+                description: skill.meta.description || fm.description,
+                path: `${skill.dir}/SKILL.md`,
+                source: "codebase",
+              });
+            }
+          } catch {
+            // Bundle unavailable — fall back to dev filesystem/resources below.
+          }
 
           // In dev mode, scan .agents/skills/ plus legacy .agent/skills/.
           if (currentDevMode) {

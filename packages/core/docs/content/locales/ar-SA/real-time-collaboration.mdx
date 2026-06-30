@@ -14,7 +14,7 @@ description: "تحرير تعاوني متعدد المستخدمين حيث ي�
 
 ## الرؤية {#vision}
 
-يبدو التحرير جنبًا إلى جنب مع الوكيل وكأنه يعمل في Google Docs أو Figma مع
+يبدو التحرير جنبًا إلى جنب مع الوكيل وكأنه يعمل في محرر تعاوني مع
 زميل عمل فوري ولا يكل:
 
 إذا كنت تحتاج فقط إلى تحديث UI عندما يكتب الوكيل أو مستخدم آخر إلى SQL، فلن تحتاج إلى أي من هذا — استخدم [`useDbSync`](/docs/client). هذه الصفحة مخصصة للتحرير المشترك على مستوى الأحرف لمستند نص منسق واحد (المؤشرات المشتركة، والدمج الخالي من الصراع). كلاهما يركبان نفس قناة `/_agent-native/poll`.
@@ -36,12 +36,52 @@ description: "تحرير تعاوني متعدد المستخدمين حيث ي�
 
 يحتوي نظام التعاون على خمس طبقات متشابكة.
 
-```an-diagram title="خمس طبقات متشابكة" summary="بدءًا من CRDT في الذاكرة وحتى وسيلة النقل التي تحمل التحديثات بين النظراء — تحتوي كل طبقة على وظيفة واحدة."
-{
-  "html": "<div class=\"diagram-stack\"><div class=\"diagram-card layer\"><span class=\"diagram-pill accent\">1 &middot; Yjs Y.Doc</span><small class=\"diagram-muted\">CRDT &mdash; دمج بلا تعارض، بلا منسق</small></div><div class=\"diagram-card layer\"><span class=\"diagram-pill\">2 &middot; المحتوى القانوني في SQL</span><small class=\"diagram-muted\">_collab_docs &mdash; durable source of truth, versioned</small></div><div class=\"diagram-card layer\"><span class=\"diagram-pill\">3 &middot; تسوية محكومة بـ updatedAt</span><small class=\"diagram-muted\">تنتشر تعديلات الوكيل عبر تحديث SQL</small></div><div class=\"diagram-card layer\"><span class=\"diagram-pill\">4 &middot; انتخاب العميل القائد</span><small class=\"diagram-muted\">علامة تبويب واحدة فقط تطبق اللقطة</small></div><div class=\"diagram-card layer\"><span class=\"diagram-pill ok\">5 &middot; مسار SSE السريع + الاستطلاع</span><small class=\"diagram-muted\">نحو عشرات المللي ثانية، ويتراجع إلى استطلاع كل ثانيتين في أي مكان</small></div></div>",
-  "css": ".diagram-stack{display:flex;flex-direction:column;gap:8px}.diagram-stack .layer{display:flex;flex-direction:column;gap:4px;padding:12px 14px}"
+<Diagram id="doc-block-1l6ef14" title={"خمس طبقات متشابكة"} summary={"بدءًا من CRDT في الذاكرة وحتى وسيلة النقل التي تحمل التحديثات بين النظراء — تحتوي كل طبقة على وظيفة واحدة."}>
+
+```html
+<div class="diagram-stack">
+  <div class="diagram-card layer">
+    <span class="diagram-pill accent">1 &middot; Yjs Y.Doc</span
+    ><small class="diagram-muted">CRDT &mdash; دمج بلا تعارض، بلا منسق</small>
+  </div>
+  <div class="diagram-card layer">
+    <span class="diagram-pill">2 &middot; المحتوى القانوني في SQL</span
+    ><small class="diagram-muted"
+      >_collab_docs &mdash; durable source of truth, versioned</small
+    >
+  </div>
+  <div class="diagram-card layer">
+    <span class="diagram-pill">3 &middot; تسوية محكومة بـ updatedAt</span
+    ><small class="diagram-muted">تنتشر تعديلات الوكيل عبر تحديث SQL</small>
+  </div>
+  <div class="diagram-card layer">
+    <span class="diagram-pill">4 &middot; انتخاب العميل القائد</span
+    ><small class="diagram-muted">علامة تبويب واحدة فقط تطبق اللقطة</small>
+  </div>
+  <div class="diagram-card layer">
+    <span class="diagram-pill ok">5 &middot; مسار SSE السريع + الاستطلاع</span
+    ><small class="diagram-muted"
+      >نحو عشرات المللي ثانية، ويتراجع إلى استطلاع كل ثانيتين في أي مكان</small
+    >
+  </div>
+</div>
+```
+
+```css
+.diagram-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.diagram-stack .layer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
 }
 ```
+
+</Diagram>
 
 ### 1. Yjs Y.Doc (طبقة CRDT)
 
@@ -100,12 +140,66 @@ description: "تحرير تعاوني متعدد المستخدمين حيث ي�
 
 تستخدم أخطاء الشبكة التراجع الأسي مع عدم الاستقرار، بحد أقصى 15 ثانية تقريبًا.
 
-```an-diagram title="مساران للتحرير، أحدهما مدمج" summary="تدفق ضغطات المفاتيح البشرية Y.Doc → الخادم → SSE. تمر تعديلات الوكيل عبر SQL: يتم تحديث مطبات الإجراء عند تسوية العميل الرئيسي، ثم يُدخل التغيير مرة أخرى إلى Yjs."
-{
-  "html": "<div class=\"diagram-collab\"><div class=\"lane\"><span class=\"diagram-pill\">تعديل بشري</span><div class=\"diagram-node\">Y.Doc update<br><small class=\"diagram-muted\">تأخير debounce ~80 مللي ثانية</small></div><span class=\"diagram-arrow diagram-muted\" aria-hidden=\"true\">&rarr;</span><div class=\"diagram-box\" data-rough>POST /update<br><small class=\"diagram-muted\">apply + persist</small></div><span class=\"diagram-arrow diagram-accent\" aria-hidden=\"true\">&rarr;</span><div class=\"diagram-box diagram-accent\">SSE push<br><small class=\"diagram-muted\">to all peers</small></div></div><div class=\"lane\"><span class=\"diagram-pill warn\">تعديل الوكيل</span><div class=\"diagram-node\">الإجراء يكتب SQL<br><small class=\"diagram-muted\">يحدث updatedAt</small></div><span class=\"diagram-arrow diagram-muted\" aria-hidden=\"true\">&rarr;</span><div class=\"diagram-box\" data-rough>العميل القائد<br><small class=\"diagram-muted\">setContent إلى Y.Doc</small></div><span class=\"diagram-arrow diagram-accent\" aria-hidden=\"true\">&rarr;</span><div class=\"diagram-box diagram-accent\">POST /update<br><small class=\"diagram-muted\">re-enters Yjs &middot; SSE push</small></div></div></div>",
-  "css": ".diagram-collab{display:flex;flex-direction:column;gap:14px}.diagram-collab .lane{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.diagram-collab .diagram-arrow{font-size:22px;line-height:1}"
+<Diagram id="doc-block-1c1vbo3" title={"مساران للتحرير، أحدهما مدمج"} summary={"تدفق ضغطات المفاتيح البشرية Y.Doc → الخادم → SSE. تمر تعديلات الوكيل عبر SQL: يتم تحديث مطبات الإجراء عند تسوية العميل الرئيسي، ثم يُدخل التغيير مرة أخرى إلى Yjs."}>
+
+```html
+<div class="diagram-collab">
+  <div class="lane">
+    <span class="diagram-pill">تعديل بشري</span>
+    <div class="diagram-node">
+      Y.Doc update<br /><small class="diagram-muted"
+        >تأخير debounce ~80 مللي ثانية</small
+      >
+    </div>
+    <span class="diagram-arrow diagram-muted" aria-hidden="true">&rarr;</span>
+    <div class="diagram-box" data-rough>
+      POST /update<br /><small class="diagram-muted">apply + persist</small>
+    </div>
+    <span class="diagram-arrow diagram-accent" aria-hidden="true">&rarr;</span>
+    <div class="diagram-box diagram-accent">
+      SSE push<br /><small class="diagram-muted">to all peers</small>
+    </div>
+  </div>
+  <div class="lane">
+    <span class="diagram-pill warn">تعديل الوكيل</span>
+    <div class="diagram-node">
+      الإجراء يكتب SQL<br /><small class="diagram-muted">يحدث updatedAt</small>
+    </div>
+    <span class="diagram-arrow diagram-muted" aria-hidden="true">&rarr;</span>
+    <div class="diagram-box" data-rough>
+      العميل القائد<br /><small class="diagram-muted"
+        >setContent إلى Y.Doc</small
+      >
+    </div>
+    <span class="diagram-arrow diagram-accent" aria-hidden="true">&rarr;</span>
+    <div class="diagram-box diagram-accent">
+      POST /update<br /><small class="diagram-muted"
+        >re-enters Yjs &middot; SSE push</small
+      >
+    </div>
+  </div>
+</div>
+```
+
+```css
+.diagram-collab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.diagram-collab .lane {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.diagram-collab .diagram-arrow {
+  font-size: 22px;
+  line-height: 1;
 }
 ```
+
+</Diagram>
 
 ## البدء السريع {#quickstart}
 
@@ -262,7 +356,7 @@ pnpm action edit-document --id doc123 --find "delete me" --replace ""
 
 ## مجموعة أدوات الحضور {#presence-kit}
 
-توفر مجموعة أدوات الحضور Liveblocks/مؤشر مباشر على مستوى Figma وأساسيات التحديد أعلى طبقة الوعي الحالية.
+توفر مجموعة أدوات الحضور مؤشرات مباشرة وأساسيات تحديد على مستوى التعاون أعلى طبقة الوعي الحالية.
 
 استيراد التواجد من جانب العميل والمحرر UI من المسار الفرعي للمتصفح الذي يتم التركيز عليه:
 

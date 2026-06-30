@@ -1318,7 +1318,7 @@ function AgentPanelInner({
             data-agent-page-new-chat=""
             aria-label={t("agentPanel.newChat")}
             onClick={() => {
-              void addTab();
+              addTab();
             }}
             className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background/95 px-2.5 text-xs font-medium text-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -2340,6 +2340,8 @@ export interface AgentSidebarProps {
   dynamicSuggestions?: AssistantChatProps["dynamicSuggestions"];
   /** Optional controls rendered in the chat composer toolbar. */
   composerToolbarSlot?: AssistantChatProps["composerToolbarSlot"];
+  /** Optional secondary model menu shown inside the chat composer model picker. */
+  imageModelMenu?: AssistantChatProps["imageModelMenu"];
   /** Optional content rendered at the bottom of the chat thread. */
   threadFooterSlot?: AssistantChatProps["threadFooterSlot"];
   /** Initial sidebar width in pixels. Mount-only; user resize and a saved
@@ -2389,6 +2391,7 @@ export function AgentSidebar({
   suggestions,
   dynamicSuggestions,
   composerToolbarSlot,
+  imageModelMenu,
   threadFooterSlot,
   defaultSidebarWidth,
   sidebarWidth,
@@ -2924,6 +2927,7 @@ export function AgentSidebar({
             suggestions={suggestions}
             dynamicSuggestions={dynamicSuggestions}
             composerToolbarSlot={composerToolbarSlot}
+            imageModelMenu={imageModelMenu}
             threadFooterSlot={threadFooterSlot}
             missingApiKeySetupLayout="sidebar"
             onCollapse={() => setOpenPersisted(false)}

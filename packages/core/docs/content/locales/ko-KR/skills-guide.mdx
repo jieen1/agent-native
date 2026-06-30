@@ -13,12 +13,71 @@ Skills는 `.agents/skills/<name>/SKILL.md`에 거주하며 상담원을 위한 �
 
 모든 스킬의 앞부분 `name` 및 `description`는 항상 시스템 프롬프트의 skills 블록에 삽입되므로 에이전트는 skills가 무엇인지 알 수 있습니다. 전체 기술 본문은 에이전트가 기술이 작업과 관련이 있다고 결정할 때 요청 시 로드됩니다(`docs-search`를 통해서도 표시됨). 이것이 설명을 짧게 유지하고 트리거별로 중요한 이유입니다. 설명은 에이전트가 나머지 로드 여부를 결정하기 전에 읽는 유일한 내용입니다.
 
-```an-diagram title="점진적 공개" summary="모든 기술의 이름 + 설명만 항상 맥락에 있습니다. 작업이 일치할 때 요청 시 전체 본문이 로드됩니다."
-{
-  "html": "<div class=\"sk-flow\"><div class=\"diagram-card\"><span class=\"diagram-pill accent\">항상 시스템 프롬프트에 포함</span><div class=\"sk-list\"><span class=\"diagram-pill\">storing-data &mdash; <small class=\"diagram-muted\">add data models&hellip;</small></span><span class=\"diagram-pill\">real-time-sync &mdash; <small class=\"diagram-muted\">wire polling&hellip;</small></span><span class=\"diagram-pill\">create-skill &mdash; <small class=\"diagram-muted\">add a skill&hellip;</small></span></div><small class=\"diagram-muted\">just name + description (cheap)</small></div><div class=\"diagram-arrow diagram-muted\" aria-hidden=\"true\">&rarr;</div><div class=\"diagram-panel center\"><small class=\"diagram-muted\">task matches a description</small><span class=\"diagram-pill accent\">load on demand</span></div><div class=\"diagram-arrow diagram-muted\" aria-hidden=\"true\">&rarr;</div><div class=\"diagram-box\">Full <code>SKILL.md</code> body<br><small class=\"diagram-muted\">규칙, 코드, 해야 할 일과 피할 일</small></div></div>",
-  "css": ".sk-flow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.sk-flow .diagram-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px;min-width:240px}.sk-flow .sk-list{display:flex;flex-direction:column;gap:6px}.sk-flow .center{display:flex;flex-direction:column;align-items:center;gap:6px}.sk-flow .diagram-arrow{font-size:22px}"
+<Diagram id="doc-block-199ekw5" title={"점진적 공개"} summary={"모든 기술의 이름 + 설명만 항상 맥락에 있습니다. 작업이 일치할 때 요청 시 전체 본문이 로드됩니다."}>
+
+```html
+<div class="sk-flow">
+  <div class="diagram-card">
+    <span class="diagram-pill accent">항상 시스템 프롬프트에 포함</span>
+    <div class="sk-list">
+      <span class="diagram-pill"
+        >storing-data &mdash;
+        <small class="diagram-muted">add data models&hellip;</small></span
+      ><span class="diagram-pill"
+        >real-time-sync &mdash;
+        <small class="diagram-muted">wire polling&hellip;</small></span
+      ><span class="diagram-pill"
+        >create-skill &mdash;
+        <small class="diagram-muted">add a skill&hellip;</small></span
+      >
+    </div>
+    <small class="diagram-muted">just name + description (cheap)</small>
+  </div>
+  <div class="diagram-arrow diagram-muted" aria-hidden="true">&rarr;</div>
+  <div class="diagram-panel center">
+    <small class="diagram-muted">task matches a description</small
+    ><span class="diagram-pill accent">load on demand</span>
+  </div>
+  <div class="diagram-arrow diagram-muted" aria-hidden="true">&rarr;</div>
+  <div class="diagram-box">
+    Full <code>SKILL.md</code> body<br /><small class="diagram-muted"
+      >규칙, 코드, 해야 할 일과 피할 일</small
+    >
+  </div>
+</div>
+```
+
+```css
+.sk-flow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.sk-flow .diagram-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  min-width: 240px;
+}
+.sk-flow .sk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sk-flow .center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.sk-flow .diagram-arrow {
+  font-size: 22px;
 }
 ```
+
+</Diagram>
 
 ## 프레임워크 skills {#framework-skills}
 
@@ -58,6 +117,10 @@ Skills는 `.agents/skills/<name>/SKILL.md`에 거주하며 상담원을 위한 �
 도메인 skills는 프레임워크 skills와 동일한 형식을 따릅니다. 에이전트가 따라야 하는 템플릿과 관련된 패턴을 인코딩합니다.
 
 ## 앱 지원 skills {#app-backed-skills}
+
+현재 app-backed skills에는 Plan의 `visual-plan`과 `visual-recap`, Design의
+`visual-edit`, Assets의 `assets`, repo-backed docs/blog/MDX editing을 위한
+`content`가 포함됩니다.
 
 앱 지원 skills는 에이전트 기반 앱을 스킬 마켓플레이스 아티팩트로 패키지합니다. 번들에는 에이전트 지침, 내보낸 skills, MCP 커넥터 메타데이터, 호스팅/로컬 실행 지침 및 MCP 앱과 같은 UI 표면이 포함될 수 있습니다.
 
@@ -148,13 +211,63 @@ scope: dev
 
 이것은 `.claude/skills`만 읽는 Claude 코드에 의존하는 오래된 해킹을 대체합니다. — `scope: dev`는 개발 대 런타임 분할을 일류의 명시적인 선택으로 만듭니다.
 
-```an-diagram title="어떤 에이전트가 어떤 스킬을 로드하는지" summary="범위는 인앱 런타임 에이전트가 기술을 볼지 여부를 결정합니다. 개발 기술은 코딩 에이전트에만 표시됩니다."
-{
-"html": "<div class=\"sc-grid\"><div class=\"diagram-card\"><span class=\"diagram-pill\">.agents/skills/</span><div class=\"sc-row\"><span class=\"diagram-pill ok\">scope: both</span><small class=\"diagram-muted\">default</small></div><div class=\"sc-row\"><span class=\"diagram-pill ok\">scope: runtime</span></div><div class=\"sc-row\"><span class=\"diagram-pill warn\">scope: dev</span></div></div><div class=\"sc-targets\"><div class=\"diagram-box\">Runtime agent<br><small class=\"diagram-muted\">reads <code>both</code> + <code>runtime</code></small></div><div class=\"diagram-box\">코딩 에이전트<br><small class=\"diagram-muted\">Claude Code reads <code>.claude/skills/</code> + <code>dev</code></small></div></div></div>",
-"css": ".sc-grid{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}.sc-grid .diagram-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px}.sc-grid .sc-row{display:flex;align-items:center;gap:8px}.sc-grid .sc-targets{display:flex;flex-direction:column;gap:10px}"
-}
+<Diagram id="doc-block-i06ksi" title={"어떤 에이전트가 어떤 스킬을 로드하는지"} summary={"범위는 인앱 런타임 에이전트가 기술을 볼지 여부를 결정합니다. 개발 기술은 코딩 에이전트에만 표시됩니다."}>
 
+```html
+<div class="sc-grid">
+  <div class="diagram-card">
+    <span class="diagram-pill">.agents/skills/</span>
+    <div class="sc-row">
+      <span class="diagram-pill ok">scope: both</span
+      ><small class="diagram-muted">default</small>
+    </div>
+    <div class="sc-row">
+      <span class="diagram-pill ok">scope: runtime</span>
+    </div>
+    <div class="sc-row"><span class="diagram-pill warn">scope: dev</span></div>
+  </div>
+  <div class="sc-targets">
+    <div class="diagram-box">
+      Runtime agent<br /><small class="diagram-muted"
+        >reads <code>both</code> + <code>runtime</code></small
+      >
+    </div>
+    <div class="diagram-box">
+      코딩 에이전트<br /><small class="diagram-muted"
+        >Claude Code reads <code>.claude/skills/</code> +
+        <code>dev</code></small
+      >
+    </div>
+  </div>
+</div>
 ```
+
+```css
+.sc-grid {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.sc-grid .diagram-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+}
+.sc-grid .sc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sc-grid .sc-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+```
+
+</Diagram>
 
 > **또한 참조:** 기술 설명을 단어로 표현하고, 점진적인 공개를 적용하고, `AGENTS.md`를 간결하게 유지하는 방법은 [Writing Agent Instructions](/docs/writing-agent-instructions)를 참조하세요.
 
@@ -219,6 +332,7 @@ scope: dev
 ```bash
 # 해피 경로: 내보낸 지침과 호스팅된 MCP 커넥터.
 npx @agent-native/core@latest skills add visual-plan
+npx @agent-native/core@latest skills add visual-edit
 npx @agent-native/core@latest skills add assets
 
 # Repo-first 콘텐츠 docs/blog/MDX 편집.

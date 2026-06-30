@@ -724,6 +724,32 @@ switch (command) {
     break;
   }
 
+  case "content": {
+    import("./content-local.js")
+      .then(async (m) => {
+        const code = await m.runContentLocal(args);
+        process.exit(code);
+      })
+      .catch((err) => {
+        console.error(err?.message ?? err);
+        process.exit(1);
+      });
+    break;
+  }
+
+  case "design": {
+    import("./design-connect.js")
+      .then(async (m) => {
+        const code = await m.runDesign(args);
+        process.exit(code);
+      })
+      .catch((err) => {
+        console.error(err?.message ?? err);
+        process.exit(1);
+      });
+    break;
+  }
+
   case "recap": {
     // PR visual recap helpers used by the GitHub Action. Promoted to the CLI
     // so an installed repo's workflow can call `agent-native recap …` instead
@@ -901,13 +927,20 @@ Usage:
                                 reinstalling app skills/connectors.
   agent-native app-skill <cmd>  Install, launch, or package app-backed skills.
                                 cmds: ensure | launch | pack
-  agent-native skills add assets|content|design-exploration|visual-plan|visual-recap|context-xray
+  agent-native skills add assets|content|design-exploration|visual-edit|visual-plan|visual-recap|context-xray
                                 Install the skill instructions, register the MCP
                                 connector, AND authenticate it in one step.
                                 --no-connect skips auth (run 'connect' later);
                                 non-interactive shells print the connect command.
                                 --with-github-action also writes the PR Visual
                                 Recap workflow into .github/workflows/.
+  agent-native content local-files <file-or-folder>
+                                Launch Content in local-file mode for a local
+                                docs/content folder. Use --no-open, --port N,
+                                or --profile docs/no-bookkeeping as needed.
+  agent-native design connect  Start a localhost Design bridge for a running
+                                dev server. Use --url, --port, --root, or
+                                --json to print the route/source manifest.
   agent-native recap <cmd>      PR visual recap setup and GitHub Action helpers.
                                 Run 'agent-native recap help' for subcommands.
   agent-native plan <cmd>       Plan helpers for block catalogs and local files.

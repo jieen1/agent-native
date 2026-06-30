@@ -34,6 +34,7 @@ import React, {
   useImperativeHandle,
 } from "react";
 
+import { LLM_MISSING_CREDENTIALS_MESSAGE } from "../agent/engine/credential-errors.js";
 import type { ReasoningEffort } from "../shared/reasoning-effort.js";
 import {
   getActiveRun,
@@ -48,9 +49,11 @@ import {
 import {
   appendAgentChatContextToMessage,
   formatAgentChatContextItemsForPrompt,
+  getAgentChatContextState,
   normalizeAgentChatContextItem,
   publishAgentChatContextItems,
   refreshAgentChatContext,
+  subscribeAgentChatContext,
   type AgentChatContextItem,
 } from "./agent-chat.js";
 import { captureError } from "./analytics.js";
@@ -147,7 +150,10 @@ import {
   readSSEStreamRaw,
   settleInterruptedToolCalls,
 } from "./sse-event-processor.js";
-import { useAgentEngineConfigured } from "./use-agent-engine-configured.js";
+import {
+  fetchAgentEngineConfiguredState,
+  useAgentEngineConfigured,
+} from "./use-agent-engine-configured.js";
 import type {
   ChatThreadScope,
   ChatThreadSnapshot,
@@ -222,7 +228,9 @@ function createUserMessageRunConfig(
 
 const PENDING_SELECTION_KEY = "pending-selection-context";
 const ACTIVE_RUN_CLEAR_TIMEOUT_MS = 5_000;
+const ACTIVE_RUN_STUCK_THRESHOLD_MS = 90_000;
 const ACTIVE_RUN_POLL_INTERVAL_MS = 150;
+const SUBMIT_ENGINE_STATUS_TIMEOUT_MS = 1000;
 
 type ActiveRunLookup = {
   active?: boolean;
@@ -230,15 +238,27 @@ type ActiveRunLookup = {
   threadId?: string;
   status?: string;
   heartbeatAt?: number | null;
+  lastProgressAt?: number | null;
+  serverNow?: number;
 };
 
 function activeRunLooksStale(runInfo: ActiveRunLookup): boolean {
-  const heartbeatAt =
-    typeof runInfo.heartbeatAt === "number" ? runInfo.heartbeatAt : null;
+  const lastProgressAt =
+    typeof runInfo.lastProgressAt === "number" ? runInfo.lastProgressAt : null;
+  const nowMs =
+    typeof runInfo.serverNow === "number" ? runInfo.serverNow : Date.now();
   return (
     runInfo.status === "running" &&
-    heartbeatAt != null &&
-    Date.now() - heartbeatAt > 5000
+    lastProgressAt != null &&
+    nowMs - lastProgressAt > ACTIVE_RUN_STUCK_THRESHOLD_MS
+  );
+}
+
+function isAssistantUiDuplicateMessageIdError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    message.includes("MessageRepository") &&
+    message.includes("same id already exists")
   );
 }
 
@@ -288,14 +308,13 @@ async function waitForThreadRunToClear(apiUrl: string, threadId?: string) {
         `${apiUrl}/runs/active?threadId=${encodeURIComponent(threadId)}`,
       );
       if (res.ok) {
-        const info = await res.json();
-        const heartbeatAt =
-          typeof info?.heartbeatAt === "number" ? info.heartbeatAt : null;
-        const stale =
-          info?.status === "running" &&
-          heartbeatAt != null &&
-          Date.now() - heartbeatAt > 5000;
-        if (!info?.active || info?.status !== "running" || stale) return;
+        const info = (await res.json()) as ActiveRunLookup;
+        if (
+          !info?.active ||
+          info?.status !== "running" ||
+          activeRunLooksStale(info)
+        )
+          return;
       }
     } catch {
       // Transient poll failure — try again until the short grace period ends.
@@ -1131,15 +1150,32 @@ const AssistantChatInner = forwardRef<
       }
     };
   }, [threadRuntime]);
-  const missingApiKey = useAgentEngineConfigured(
+  const agentEngineConfigured = useAgentEngineConfigured(
     providerStatusChecksEnabled,
-  ).missing;
+  );
+  const missingApiKey = agentEngineConfigured.missing;
   const isComposerDisabled = missingApiKey || composerDisabled;
   const missingApiKeySetupAboveComposer =
     missingApiKeySetupLayout === "sidebar";
   // Increments each time the user tries to chat while no LLM is connected.
   // `BuilderSetupCard` watches this to replay a one-shot bounce.
   const [missingKeyBouncePulse, setMissingKeyBouncePulse] = useState(0);
+  const ensureAgentEngineReadyForSubmit = useCallback(async () => {
+    const state =
+      agentEngineConfigured.state === "missing"
+        ? "missing"
+        : await fetchAgentEngineConfiguredState(providerStatusChecksEnabled, {
+            timeoutMs: SUBMIT_ENGINE_STATUS_TIMEOUT_MS,
+          });
+    if (state !== "missing") return true;
+
+    setComposerError(LLM_MISSING_CREDENTIALS_MESSAGE);
+    setMissingKeyBouncePulse((p) => p + 1);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("agent-chat:missing-api-key"));
+    }
+    return false;
+  }, [agentEngineConfigured.state, providerStatusChecksEnabled]);
   const [authError, setAuthError] = useState<{
     sessionExpired?: boolean;
   } | null>(null);
@@ -1167,8 +1203,18 @@ const AssistantChatInner = forwardRef<
       setComposerContextItems((previous) => {
         const next = updater(previous);
         composerContextItemsRef.current = next;
-        publishComposerContextItems(next);
         return next;
+      });
+      // Publish outside the setState updater. `publishComposerContextItems`
+      // mutates the module-level context store and synchronously dispatches a
+      // window event, which would re-enter React (notifying
+      // `useSyncExternalStore` subscribers like `useAgentChatContext`) while the
+      // updater runs during the render phase. React 19 then throws "Cannot
+      // update a component while rendering a different component". Queueing a
+      // microtask runs the publish after the commit; it reads the freshly
+      // updated `composerContextItemsRef`, not React state.
+      queueMicrotask(() => {
+        publishComposerContextItems(composerContextItemsRef.current);
       });
     },
     [publishComposerContextItems],
@@ -1231,8 +1277,15 @@ const AssistantChatInner = forwardRef<
       composerContextItemsRef.current = state.items;
       setComposerContextItems(state.items);
     });
+    const unsubscribe = subscribeAgentChatContext(() => {
+      if (cancelled || !isActiveComposerRef.current) return;
+      const state = getAgentChatContextState();
+      composerContextItemsRef.current = state.items;
+      setComposerContextItems(state.items);
+    });
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [isActiveComposer]);
   // Tracks the JSON of the last queue we successfully persisted so the
@@ -1426,9 +1479,40 @@ const AssistantChatInner = forwardRef<
     }
   }, [apiUrl, importThreadData, loadHistoryRepository, threadId]);
 
+  const exportCleanThreadRepo = useCallback(
+    () =>
+      ensureMessageMetadata(normalizeThreadRepository(threadRuntime.export())),
+    [threadRuntime],
+  );
+
+  const appendThreadMessage = useCallback(
+    (message: Parameters<typeof threadRuntime.append>[0]) => {
+      try {
+        threadRuntime.append(message);
+        return;
+      } catch (error) {
+        if (!isAssistantUiDuplicateMessageIdError(error)) throw error;
+      }
+
+      try {
+        threadRuntime.import(exportCleanThreadRepo());
+      } catch {
+        // Best effort cleanup; retry below handles the still-duplicated case.
+      }
+
+      try {
+        threadRuntime.append(message);
+      } catch (retryError) {
+        if (isAssistantUiDuplicateMessageIdError(retryError)) return;
+        throw retryError;
+      }
+    },
+    [exportCleanThreadRepo, threadRuntime],
+  );
+
   const cacheCurrentThreadSnapshot = useCallback(() => {
     if (!threadId || messages.length === 0) return;
-    const repo = threadRuntime.export();
+    const repo = exportCleanThreadRepo();
     const threadData = JSON.stringify(stripBase64FromRepo(repo));
     const { title, preview } = extractThreadMeta(repo);
     writeCachedThreadSnapshot(apiUrl, threadId, {
@@ -1437,7 +1521,7 @@ const AssistantChatInner = forwardRef<
       preview,
       messageCount: messages.length,
     });
-  }, [apiUrl, messages.length, threadId, threadRuntime]);
+  }, [apiUrl, exportCleanThreadRepo, messages.length, threadId]);
 
   useBrowserLayoutEffect(() => {
     if (hasImportedInitialCachedSnapshotRef.current) return;
@@ -1934,7 +2018,7 @@ const AssistantChatInner = forwardRef<
     const timeSinceLastSave = now - lastSaveTimeRef.current;
     if (timeSinceLastSave < 5000) return;
 
-    const repo = threadRuntime.export();
+    const repo = exportCleanThreadRepo();
     const { title, preview } = extractThreadMeta(repo);
     const threadData = JSON.stringify(stripBase64FromRepo(repo));
     const snapshot = {
@@ -1948,7 +2032,7 @@ const AssistantChatInner = forwardRef<
     savedTitleRef.current = title;
     writeCachedThreadSnapshot(apiUrl, threadId, snapshot);
     onSaveThreadRef.current(threadId, snapshot);
-  }, [apiUrl, messages, isRunning, threadId, threadRuntime]);
+  }, [apiUrl, exportCleanThreadRepo, messages, isRunning, threadId]);
 
   // Persist full thread data after each completed response
   useEffect(() => {
@@ -1956,7 +2040,7 @@ const AssistantChatInner = forwardRef<
     if (isRunning) return;
     if (messages.length === 0) return;
 
-    const repo = threadRuntime.export();
+    const repo = exportCleanThreadRepo();
 
     if (threadId && onSaveThreadRef.current) {
       // Save to server via the hook callback
@@ -1978,7 +2062,7 @@ const AssistantChatInner = forwardRef<
         sessionStorage.setItem(storageKey, JSON.stringify(repo));
       } catch {}
     }
-  }, [apiUrl, messages, isRunning, threadId, tabId, threadRuntime]);
+  }, [apiUrl, exportCleanThreadRepo, messages, isRunning, threadId, tabId]);
 
   useEffect(() => {
     onMessageCountChange?.(messages.length);
@@ -2239,7 +2323,7 @@ const AssistantChatInner = forwardRef<
             next.attachments && next.attachments.length > 0
               ? next.attachments
               : (imageAttachments ?? []);
-          threadRuntime.append({
+          appendThreadMessage({
             role: "user",
             content: [{ type: "text", text: next.text }],
             ...(messageAttachments.length > 0
@@ -2293,12 +2377,12 @@ const AssistantChatInner = forwardRef<
     };
   }, [
     apiUrl,
+    appendThreadMessage,
     applyLocalQueuedMessages,
     isRestoring,
     isRunning,
     queuedMessages,
     threadId,
-    threadRuntime,
   ]);
 
   // Clear frozen reconnect content + forceStopped only on the false→true
@@ -2454,6 +2538,9 @@ const AssistantChatInner = forwardRef<
       includeComposerContext = false,
       trackInRunsTray = false,
     ) => {
+      if (!(await ensureAgentEngineReadyForSubmit())) {
+        return;
+      }
       materializeFrozenReconnectContent();
       setShowContinue(false);
       setLoopLimitInfo(null);
@@ -2639,7 +2726,7 @@ const AssistantChatInner = forwardRef<
           },
         ]);
       } else {
-        threadRuntime.append({
+        appendThreadMessage({
           role: "user",
           content: [{ type: "text", text: submittedText }],
           ...(messageAttachments.length > 0
@@ -2660,10 +2747,11 @@ const AssistantChatInner = forwardRef<
     [
       applyLocalQueuedMessages,
       buildComposerContextSubmission,
+      ensureAgentEngineReadyForSubmit,
       execMode,
       isRunning,
       materializeFrozenReconnectContent,
-      threadRuntime,
+      appendThreadMessage,
       updateComposerContextItems,
     ],
   );
@@ -2729,7 +2817,7 @@ const AssistantChatInner = forwardRef<
       },
       exportThreadSnapshot() {
         if (messages.length === 0) return null;
-        const repo = threadRuntime.export();
+        const repo = exportCleanThreadRepo();
         const { title, preview } = extractThreadMeta(repo);
         return {
           threadData: JSON.stringify(repo),
@@ -2741,10 +2829,10 @@ const AssistantChatInner = forwardRef<
     }),
     [
       addToQueue,
+      exportCleanThreadRepo,
       messages.length,
       stageComposerContextItem,
       thread.isRunning,
-      threadRuntime,
     ],
   );
 
@@ -2941,7 +3029,7 @@ const AssistantChatInner = forwardRef<
   const approvalCtx = useMemo<ApprovalContextValue>(
     () => ({
       onApprove: (approvalKey: string) => {
-        threadRuntime.append({
+        appendThreadMessage({
           role: "user",
           content: [
             {
@@ -2963,7 +3051,7 @@ const AssistantChatInner = forwardRef<
         } as Parameters<typeof threadRuntime.append>[0]);
       },
     }),
-    [threadRuntime, execMode],
+    [appendThreadMessage, execMode],
   );
 
   return (
@@ -3156,7 +3244,7 @@ const AssistantChatInner = forwardRef<
                                   setMissingKeyBouncePulse((p) => p + 1);
                                   return;
                                 }
-                                threadRuntime.append({
+                                appendThreadMessage({
                                   role: "user",
                                   content: [{ type: "text", text: suggestion }],
                                 });
@@ -3439,6 +3527,7 @@ const AssistantChatInner = forwardRef<
                         : undefined
                     }
                     onSlashCommand={onSlashCommand}
+                    onBeforeSubmit={ensureAgentEngineReadyForSubmit}
                     execMode={execMode}
                     onExecModeChange={onExecModeChange}
                     planModeDisabled={planModeDisabled}

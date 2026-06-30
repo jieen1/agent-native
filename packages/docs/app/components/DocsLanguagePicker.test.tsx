@@ -24,6 +24,8 @@ import DocsLanguageSuggestion, {
 const ORIGINAL_NAVIGATOR_LANGUAGES = navigator.languages;
 const ORIGINAL_NAVIGATOR_LANGUAGE = navigator.language;
 
+installTestLocalStorage();
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
@@ -32,6 +34,38 @@ afterEach(() => {
     ORIGINAL_NAVIGATOR_LANGUAGE,
   );
 });
+
+function installTestLocalStorage() {
+  const values = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return values.size;
+    },
+    clear() {
+      values.clear();
+    },
+    getItem(key) {
+      return values.get(key) ?? null;
+    },
+    key(index) {
+      return [...values.keys()][index] ?? null;
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    },
+  };
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: storage,
+  });
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: storage,
+  });
+}
 
 function setBrowserLanguages(
   languages: readonly string[],
@@ -103,6 +137,31 @@ describe("DocsLanguagePicker", () => {
       "/zh-CN/docs/internationalization?tab=api#overview",
     );
     expect(zhLink.getAttribute("data-an-prefetch")).toBe("render");
+  });
+
+  it("renders locale options in product order", () => {
+    renderPicker();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Language:/ }));
+
+    const optionLabels = screen
+      .getAllByRole("link")
+      .map((link) => link.textContent?.trim());
+
+    expect(optionLabels).toEqual([
+      "System",
+      "English (en-US)",
+      "Español (es-ES)",
+      "Français (fr-FR)",
+      "Deutsch (de-DE)",
+      "Português (Brasil) (pt-BR)",
+      "简体中文 (zh-CN)",
+      "繁體中文 (zh-TW)",
+      "日本語 (ja-JP)",
+      "한국어 (ko-KR)",
+      "हिन्दी (hi-IN)",
+      "العربية (ar-SA)",
+    ]);
   });
 
   it("stores the selected preference while routing client-side", async () => {

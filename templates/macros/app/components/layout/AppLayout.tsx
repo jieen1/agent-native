@@ -163,7 +163,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {/* Page content */}
           <div className="agent-layout-main-surface flex min-w-0 flex-1 flex-col overflow-hidden">
             <Header onOpenSidebar={() => setSidebarOpen(true)} />
-            <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+            <main className="agent-native-app-main min-w-0 flex-1 overflow-y-auto">
+              {children}
+            </main>
           </div>
           <SyncIndicator sidebarCollapsed={desktopSidebarCollapsed} />
         </div>
@@ -279,11 +281,11 @@ function SidebarContent({
 
       {!collapsed && (
         <>
-          <div className="border-t border-border px-2 py-2">
+          <div className="px-2 py-2">
             <ExtensionsSidebarSection />
           </div>
 
-          <div className="space-y-2 border-t border-border px-3 py-2">
+          <div className="space-y-2 px-3 py-2">
             <DevDatabaseLink />
             <FeedbackButton />
             <OrgSwitcher />
