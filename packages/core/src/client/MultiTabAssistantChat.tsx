@@ -151,13 +151,19 @@ function resolveModelSelection(
           : "auto",
     };
   }
+  // Only a `configured` group counts as a valid landing spot — several
+  // engines can share a model *name* (e.g. "claude-sonnet-4-6" is in both
+  // the keyless "anthropic" builtin and a local "vllm" engine's list), so
+  // matching on model name alone can land on an unconfigured engine and get
+  // stuck there forever (CORE-PATCHES.md #2).
   const preferredGroup = groups.find(
     (group) =>
+      group.configured &&
       group.engine === selection.engine &&
       group.models.includes(selection.model),
   );
-  const fallbackGroup = groups.find((group) =>
-    group.models.includes(selection.model),
+  const fallbackGroup = groups.find(
+    (group) => group.configured && group.models.includes(selection.model),
   );
   if (groups.length > 0 && !preferredGroup && !fallbackGroup) {
     return undefined;
@@ -1107,11 +1113,19 @@ export function MultiTabAssistantChat({
               : []),
           ];
         } else {
-          // No Builder connection — show SDK engines this app can run.
+          // No Builder connection — show SDK engines this app can run. A
+          // template can register a custom local engine (e.g. "vllm", a
+          // local OpenAI-compatible server) via core's public
+          // registerAgentEngine; allow-list it here too so it's selectable
+          // in the composer's own picker (see CORE-PATCHES.md #1 — this is
+          // the actual dropdown consumers use; `use-chat-models.ts` is a
+          // separate copy for other surfaces like the Dispatch hero
+          // composer and must be kept in sync).
           const allowedEngines = new Set([
             "anthropic",
             "ai-sdk:openai",
             "ai-sdk:google",
+            "vllm",
           ]);
           groups = enginesData.engines
             .filter(

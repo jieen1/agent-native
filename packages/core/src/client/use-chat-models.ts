@@ -268,11 +268,22 @@ export function useChatModels({
         setAvailableModels(groups);
         setDefaultModel(nextDefaultModel);
 
+        // A group is only a valid landing spot if it's actually configured.
+        // Several engines can share a model *name* (e.g. "claude-sonnet-4-6"
+        // is in both the keyless "anthropic" builtin and our local "vllm"
+        // engine's list) — matching on model name alone can land on an
+        // unconfigured engine and get stuck there (CORE-PATCHES.md #2).
+        const findDefaultGroup = () =>
+          groups.find(
+            (group) => group.configured && group.models.includes(nextDefaultModel),
+          ) ??
+          groups.find((group) => group.configured) ??
+          groups.find((group) => group.models.includes(nextDefaultModel)) ??
+          groups[0];
+
         const selection = selectionRef.current;
         if (!hasExplicitSelectionRef.current) {
-          const defaultGroup =
-            groups.find((group) => group.models.includes(nextDefaultModel)) ??
-            groups[0];
+          const defaultGroup = findDefaultGroup();
           const nextModel =
             defaultGroup?.models.find((model) => model === nextDefaultModel) ??
             defaultGroup?.models[0] ??
@@ -292,14 +303,13 @@ export function useChatModels({
 
         const selectedGroup = groups.find(
           (group) =>
+            group.configured &&
             group.models.includes(selection.selectedModel) &&
             (!selection.selectedEngine ||
               group.engine === selection.selectedEngine),
         );
         if (!selectedGroup) {
-          const defaultGroup =
-            groups.find((group) => group.models.includes(nextDefaultModel)) ??
-            groups[0];
+          const defaultGroup = findDefaultGroup();
           const nextModel =
             defaultGroup?.models.find((model) => model === nextDefaultModel) ??
             defaultGroup?.models[0] ??
