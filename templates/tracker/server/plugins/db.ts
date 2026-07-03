@@ -301,6 +301,12 @@ CREATE INDEX IF NOT EXISTS tracker_sprint_artifacts_owner_idx ON tracker_sprint_
 CREATE INDEX IF NOT EXISTS tracker_approvals_sprint_idx ON tracker_approvals (sprint_id, status);
 CREATE INDEX IF NOT EXISTS tracker_approvals_owner_org_idx ON tracker_approvals (owner_email, org_id)`,
     },
+    {
+      // M1-6: per-project gate criteria config for advance-stage, keyed by
+      // stage name. e.g. {"分析":{"requireArtifacts":["sprint-doc"],"requireApproval":"plan-signoff"}}
+      version: 17,
+      sql: `ALTER TABLE tracker_projects ADD COLUMN IF NOT EXISTS stage_gate_config TEXT NOT NULL DEFAULT '{}'`,
+    },
   ],
   { table: "tracker_migrations" },
 );

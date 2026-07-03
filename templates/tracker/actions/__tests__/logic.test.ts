@@ -97,6 +97,44 @@ function generateItemKey(prefix: string, n: number): string {
   return `${prefix}-${n}`;
 }
 
+/**
+ * Default plannedStages computation by type/tags (M1-6).
+ * Derived from create-work-item.ts's isNarrowScope logic: 缺陷/defect/
+ * from-audit type (or an explicit "from-audit" tag) get the narrow
+ * ["实施","测试"] subset; everything else gets the full seven stages.
+ */
+function computeDefaultPlannedStages(type: string | undefined, tags: string[]): string[] {
+  const isNarrowScope =
+    type === '缺陷' || type === 'defect' || type === 'from-audit' || tags.includes('from-audit');
+  return isNarrowScope
+    ? ['实施', '测试']
+    : ['待办', '分析', '设计', '实施', '测试', '验收', '交付'];
+}
+
+/**
+ * Sprint-scope cascade result classification (M1-6, advance-stage.ts).
+ * Mirrors the cascaded.push(...) branching in the sprint-scope loop:
+ *  - blocked            -> ok:false with a "blocked: ..." message
+ *  - noop/stage-mismatch -> skipped entirely (not a candidate item, not a failure)
+ *  - noop/other reason   -> ok:false with a "noop: ..." message
+ *  - otherwise (success) -> ok:true
+ */
+function classifyCascadeResult(
+  workItemId: string,
+  result: { blocked?: boolean; missing?: string[]; noop?: boolean; reason?: string },
+): { workItemId: string; ok: boolean; error?: string } | null {
+  if (result.blocked) {
+    return { workItemId, ok: false, error: `blocked: ${(result.missing ?? []).join('; ')}` };
+  }
+  if (result.noop && result.reason === 'stage-mismatch') {
+    return null;
+  }
+  if (result.noop) {
+    return { workItemId, ok: false, error: `noop: ${result.reason ?? 'unknown'}` };
+  }
+  return { workItemId, ok: true };
+}
+
 // ── 1. Stage ordering logic ────────────────────────────────────────────
 
 describe('Stage ordering logic', () => {
@@ -456,7 +494,126 @@ describe('TrackerWorkItem-shaped object validation', () => {
   });
 });
 
-// ── 11. Additional cross-cutting validations from the types module ─────
+// ── 11. Default plannedStages computation (M1-6) ────────────────────────
+
+describe('computeDefaultPlannedStages', () => {
+  it('缺陷 type gets the narrow ["实施","测试"] subset', () => {
+    expect(computeDefaultPlannedStages('缺陷', [])).toEqual(['实施', '测试']);
+  });
+
+  it('defect (legacy English) type gets the narrow subset', () => {
+    expect(computeDefaultPlannedStages('defect', [])).toEqual(['实施', '测试']);
+  });
+
+  it('from-audit type gets the narrow subset', () => {
+    expect(computeDefaultPlannedStages('from-audit', [])).toEqual(['实施', '测试']);
+  });
+
+  it('an explicit "from-audit" tag also narrows scope regardless of type', () => {
+    expect(computeDefaultPlannedStages('需求', ['from-audit'])).toEqual(['实施', '测试']);
+    expect(computeDefaultPlannedStages(undefined, ['from-audit'])).toEqual(['实施', '测试']);
+  });
+
+  it('需求 type gets the full seven-stage plan', () => {
+    expect(computeDefaultPlannedStages('需求', [])).toEqual([
+      '待办', '分析', '设计', '实施', '测试', '验收', '交付',
+    ]);
+  });
+
+  it('任务 type gets the full seven-stage plan', () => {
+    expect(computeDefaultPlannedStages('任务', [])).toEqual([
+      '待办', '分析', '设计', '实施', '测试', '验收', '交付',
+    ]);
+  });
+
+  it('undefined type with no tags gets the full seven-stage plan', () => {
+    expect(computeDefaultPlannedStages(undefined, [])).toEqual([
+      '待办', '分析', '设计', '实施', '测试', '验收', '交付',
+    ]);
+  });
+
+  it('unrelated tags do not trigger narrow scope', () => {
+    expect(computeDefaultPlannedStages('需求', ['auth', 'urgent'])).toEqual([
+      '待办', '分析', '设计', '实施', '测试', '验收', '交付',
+    ]);
+  });
+
+  it('first entry of the narrow subset is a valid stage name', () => {
+    const narrow = computeDefaultPlannedStages('缺陷', []);
+    expect(isValidStageName(narrow[0])).toBe(true);
+  });
+
+  it('the full plan matches STAGE_ORDER exactly', () => {
+    expect(computeDefaultPlannedStages('集合', [])).toEqual([...STAGE_ORDER]);
+  });
+});
+
+// ── 12. Sprint-scope cascade result classification (M1-6) ──────────────
+
+describe('classifyCascadeResult', () => {
+  it('a blocked result yields ok:false with a "blocked: ..." message joining missing reasons', () => {
+    const result = classifyCascadeResult('wi_1', {
+      blocked: true,
+      missing: ['产物缺失: sprint-doc', '审批未通过: plan-signoff'],
+    });
+    expect(result).toEqual({
+      workItemId: 'wi_1',
+      ok: false,
+      error: 'blocked: 产物缺失: sprint-doc; 审批未通过: plan-signoff',
+    });
+  });
+
+  it('a blocked result with no missing array still produces a message', () => {
+    const result = classifyCascadeResult('wi_2', { blocked: true });
+    expect(result).toEqual({ workItemId: 'wi_2', ok: false, error: 'blocked: ' });
+  });
+
+  it('a stage-mismatch noop is skipped entirely (returns null)', () => {
+    const result = classifyCascadeResult('wi_3', {
+      noop: true,
+      reason: 'stage-mismatch',
+    });
+    expect(result).toBeNull();
+  });
+
+  it('a run-id-mismatch noop yields ok:false with a "noop: ..." message', () => {
+    const result = classifyCascadeResult('wi_4', {
+      noop: true,
+      reason: 'run-id-mismatch',
+    });
+    expect(result).toEqual({ workItemId: 'wi_4', ok: false, error: 'noop: run-id-mismatch' });
+  });
+
+  it('a no-next-stage noop yields ok:false with a "noop: ..." message', () => {
+    const result = classifyCascadeResult('wi_5', {
+      noop: true,
+      reason: 'no-next-stage',
+    });
+    expect(result).toEqual({ workItemId: 'wi_5', ok: false, error: 'noop: no-next-stage' });
+  });
+
+  it('a noop with no reason falls back to "unknown"', () => {
+    const result = classifyCascadeResult('wi_6', { noop: true });
+    expect(result).toEqual({ workItemId: 'wi_6', ok: false, error: 'noop: unknown' });
+  });
+
+  it('a plain success result (no blocked, no noop) yields ok:true', () => {
+    const result = classifyCascadeResult('wi_7', {});
+    expect(result).toEqual({ workItemId: 'wi_7', ok: true });
+  });
+
+  it('blocked takes precedence over noop when both are somehow set', () => {
+    const result = classifyCascadeResult('wi_8', {
+      blocked: true,
+      missing: ['x'],
+      noop: true,
+      reason: 'stage-mismatch',
+    });
+    expect(result).toEqual({ workItemId: 'wi_8', ok: false, error: 'blocked: x' });
+  });
+});
+
+// ── 13. Additional cross-cutting validations from the types module ─────
 
 describe('Additional type constants from shared/types.ts', () => {
   it('ItemType has 5 values', () => {

@@ -199,6 +199,20 @@ export function useRollbackStage() {
   });
 }
 
+export function useAdvanceStage() {
+  const qc = useQueryClient();
+  return useActionMutation("advance-stage", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-stages"] });
+      qc.invalidateQueries({ queryKey: ["action", "get-work-item"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "advance-stage", "Failed to advance stage"));
+    },
+  });
+}
+
 // Artifact hooks.
 export function useArtifacts(workItemId: string) {
   return useActionQuery(
