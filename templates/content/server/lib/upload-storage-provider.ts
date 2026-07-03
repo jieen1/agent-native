@@ -40,7 +40,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, normalize, resolve, sep } from "node:path";
 
 import type { FileUploadProvider } from "@agent-native/core/file-upload";
-import { resolveHasBuilderPrivateKey } from "@agent-native/core/server";
+import {
+  getConfiguredAppBasePath,
+  resolveHasBuilderPrivateKey,
+} from "@agent-native/core/server";
 
 interface S3Config {
   region: string;
@@ -344,12 +347,17 @@ export const contentFileUploadProvider: FileUploadProvider = {
     const contentType = mimeType || "application/octet-stream";
     const objectKey = objectKeyFor(filename);
     const cfg = readS3Config();
+    // The app may be deployed under a non-root base path (e.g.
+    // APP_BASE_PATH=/content). Relative read-back URLs must include it so
+    // they resolve correctly as <img src> — getConfiguredAppBasePath()
+    // returns "" when the app is deployed at "/".
+    const basePath = getConfiguredAppBasePath();
 
     if (cfg) {
       await putObject(cfg, objectKey, bytes, contentType);
       const publicUrl = publicObjectUrl(cfg, objectKey);
       return {
-        url: publicUrl ?? `/api/uploads/s3/${objectKey}`,
+        url: publicUrl ?? `${basePath}/api/uploads/s3/${objectKey}`,
         id: `s3:${objectKey}`,
         provider: "content-storage",
       };
@@ -357,7 +365,7 @@ export const contentFileUploadProvider: FileUploadProvider = {
 
     await writeLocalObject(objectKey, bytes);
     return {
-      url: `/api/uploads/local/${objectKey}`,
+      url: `${basePath}/api/uploads/local/${objectKey}`,
       id: `local:${objectKey}`,
       provider: "content-storage",
     };
