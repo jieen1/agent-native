@@ -1,5 +1,3 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { useActionQuery, useActionMutation } from "@agent-native/core/client";
 import type {
   ActivityResponse,
@@ -7,6 +5,8 @@ import type {
   WorkItem,
   WorkItemDetail,
 } from "@shared/types";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 export function useProjects() {
   return useActionQuery("list-projects", {}) as {
@@ -374,15 +374,17 @@ export function useSprintArtifacts(sprintId: string) {
     "list-sprint-artifacts",
     { sprintId },
     { enabled: !!sprintId },
-  ) as { data?: import("@shared/types").SprintArtifactsByDocKey; isLoading: boolean };
+  ) as {
+    data?: import("@shared/types").SprintArtifactsByDocKey;
+    isLoading: boolean;
+  };
 }
 
 export function useSprintArtifact(id: string) {
-  return useActionQuery(
-    "get-sprint-artifact",
-    { id },
-    { enabled: !!id },
-  ) as { data?: import("@shared/types").SprintArtifact; isLoading: boolean };
+  return useActionQuery("get-sprint-artifact", { id }, { enabled: !!id }) as {
+    data?: import("@shared/types").SprintArtifact;
+    isLoading: boolean;
+  };
 }
 
 export function useCreateSprintArtifact() {
@@ -398,12 +400,12 @@ export function useCreateSprintArtifact() {
 }
 
 // Approval hooks (M1-3).
-export function useApprovals(params: { sprintId?: string; status?: string } = {}) {
-  return useActionQuery(
-    "list-approvals",
-    params,
-    { refetchInterval: 5000 },
-  ) as { data?: import("@shared/types").Approval[]; isLoading: boolean };
+export function useApprovals(
+  params: { sprintId?: string; status?: string } = {},
+) {
+  return useActionQuery("list-approvals", params, {
+    refetchInterval: 5000,
+  }) as { data?: import("@shared/types").Approval[]; isLoading: boolean };
 }
 
 export function useRequestApproval() {
@@ -440,6 +442,43 @@ export function useRejectGate() {
     },
     onError: (err: unknown) => {
       toast.error(messageOf(err, "reject-gate", "拒绝失败"));
+    },
+  });
+}
+
+// Document hooks (M1-7).
+export function useDocuments(workItemId: string) {
+  return useActionQuery(
+    "list-work-item-documents",
+    { workItemId },
+    { enabled: !!workItemId },
+  ) as { data?: any; isLoading: boolean };
+}
+
+export function useAddDocument() {
+  const qc = useQueryClient();
+  return useActionMutation("add-work-item-document", {
+    onSuccess: () => {
+      qc.invalidateQueries({
+        queryKey: ["action", "list-work-item-documents"],
+      });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "add-work-item-document", "添加文档失败"));
+    },
+  });
+}
+
+export function useDeleteDocument() {
+  const qc = useQueryClient();
+  return useActionMutation("delete-work-item-document", {
+    onSuccess: () => {
+      qc.invalidateQueries({
+        queryKey: ["action", "list-work-item-documents"],
+      });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "delete-work-item-document", "删除文档失败"));
     },
   });
 }

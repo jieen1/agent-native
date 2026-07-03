@@ -307,6 +307,24 @@ CREATE INDEX IF NOT EXISTS tracker_approvals_owner_org_idx ON tracker_approvals 
       version: 17,
       sql: `ALTER TABLE tracker_projects ADD COLUMN IF NOT EXISTS stage_gate_config TEXT NOT NULL DEFAULT '{}'`,
     },
+    {
+      // M1-7: work item documents — design / prototype / acceptance / spec /
+      // other type docs attached to a work item. Each row is one external
+      // document URL with a title and doc_type.
+      version: 18,
+      sql: `CREATE TABLE IF NOT EXISTS tracker_work_item_documents (
+  id TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL,
+  doc_type TEXT NOT NULL DEFAULT 'other',
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE INDEX IF NOT EXISTS tracker_work_item_documents_work_item_idx ON tracker_work_item_documents (work_item_id, doc_type)`,
+    },
   ],
   { table: "tracker_migrations" },
 );

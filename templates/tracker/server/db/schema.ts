@@ -1,4 +1,9 @@
-import { table, text, integer, ownableColumns } from "@agent-native/core/db/schema";
+import {
+  table,
+  text,
+  integer,
+  ownableColumns,
+} from "@agent-native/core/db/schema";
 
 // ---------------------------------------------------------------------------
 // Tracker schema (minimal viable slice of docs/v1-DESIGN.md §3).
@@ -279,6 +284,21 @@ export const sprintArtifacts = table("tracker_sprint_artifacts", {
   producedByKind: text("produced_by_kind").notNull().default("agent"),
   content: text("content").notNull().default(""),
   contentRef: text("content_ref").default(null),
+  createdAt: text("created_at").notNull(),
+  ...ownableColumns(),
+});
+
+// ---------------------------------------------------------------------------
+// Work item documents — external docs (design / prototype / acceptance /
+// spec / other) attached to a work item. Each row is one URL with a title
+// and doc_type label.
+// ---------------------------------------------------------------------------
+export const workItemDocuments = table("tracker_work_item_documents", {
+  id: text("id").primaryKey(),
+  workItemId: text("work_item_id").notNull(),
+  docType: text("doc_type").notNull().default("other"),
+  title: text("title").notNull(),
+  url: text("url").notNull(),
   createdAt: text("created_at").notNull(),
   ...ownableColumns(),
 });
