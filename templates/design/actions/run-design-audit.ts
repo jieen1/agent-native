@@ -108,6 +108,8 @@ function checkMissingLabels(html: string): A11yFinding[] {
   let idx = 0;
   for (const m of html.matchAll(inputPattern)) {
     const tag = m[0];
+    const inputStart = m.index ?? 0;
+    const inputEnd = inputStart + tag.length;
     const typeMatch = tag.match(/\btype\s*=\s*(?:"([^"]*?)"|'([^']*?)')/i);
     const type = (typeMatch?.[1] ?? typeMatch?.[2] ?? "text").toLowerCase();
     // Hidden and submit/button/image inputs don't need visible labels
@@ -123,8 +125,9 @@ function checkMissingLabels(html: string): A11yFinding[] {
     const hasExplicitLabel = inputId
       ? new RegExp(`for\\s*=\\s*(?:"${inputId}"|'${inputId}')`, "i").test(html)
       : false;
+    const hasImplicitLabel = isWrappedByLabel(html, inputStart, inputEnd);
 
-    if (!hasAriaLabel && !hasExplicitLabel) {
+    if (!hasAriaLabel && !hasExplicitLabel && !hasImplicitLabel) {
       findings.push({
         id: `missing-label:input-${idx}`,
         severity: "error" as A11ySeverity,
@@ -143,22 +146,75 @@ function checkMissingLabels(html: string): A11yFinding[] {
   return findings;
 }
 
-/** Check interactive elements that are likely too small for touch targets (< ~44px heuristic via Tailwind class). */
-function checkTapTargets(html: string): A11yFinding[] {
+function isWrappedByLabel(
+  html: string,
+  inputStart: number,
+  inputEnd: number,
+): boolean {
+  const labelOpen = html.lastIndexOf("<label", inputStart);
+  if (labelOpen === -1) return false;
+  const labelCloseBeforeInput = html.lastIndexOf("</label", inputStart);
+  if (labelCloseBeforeInput > labelOpen) return false;
+  const labelCloseAfterInput = html.indexOf("</label", inputEnd);
+  return labelCloseAfterInput !== -1;
+}
+
+/**
+ * Whether an interactive element already declares a minimum size that meets the
+ * 44px tap-target floor. This recognises exactly what the inline auto-fix adds
+ * (`min-h-[44px] min-w-[44px]`) plus equivalents — arbitrary `min-h`/`min-w`
+ * values in px/rem/em ≥ 44px, the Tailwind spacing scale (`min-h-11` = 44px on a
+ * 4px step), and full-bleed minimums (`min-h-full` / `min-h-screen`). Without
+ * this, a fixed element keeps its original tiny `h-4` class and the audit would
+ * re-flag it forever, so the audit↔fix loop would never converge.
+ */
+function hasAdequateMinTapSize(tag: string): boolean {
+  // Arbitrary values: min-h-[44px], min-w-[2.75rem], etc.
+  const arbitraryPattern = /\bmin-(?:h|w)-\[([\d.]+)(px|rem|em)\]/gi;
+  let m: RegExpExecArray | null;
+  while ((m = arbitraryPattern.exec(tag)) !== null) {
+    const value = Number.parseFloat(m[1] ?? "");
+    if (!Number.isFinite(value)) continue;
+    const px = m[2]?.toLowerCase() === "px" ? value : value * 16;
+    if (px >= 44) return true;
+  }
+  // Tailwind spacing scale: min-h-11 / min-w-11 = 2.75rem = 44px (4px per step).
+  const scalePattern = /\bmin-(?:h|w)-(\d+)\b/gi;
+  while ((m = scalePattern.exec(tag)) !== null) {
+    if (Number.parseInt(m[1] ?? "", 10) * 4 >= 44) return true;
+  }
+  // Full-bleed minimums always clear the tap floor.
+  return /\bmin-(?:h|w)-(?:full|screen)\b/.test(tag);
+}
+
+/**
+ * Check interactive elements that are likely too small for touch targets
+ * (< ~44px heuristic via Tailwind class). Exported for unit tests that assert
+ * the audit↔fix loop converges (a fixed element must stop being flagged).
+ */
+export function checkTapTargets(html: string): A11yFinding[] {
   const findings: A11yFinding[] = [];
   // Heuristic: buttons/links with explicit tiny size classes (h-4, h-5, w-4, w-5, size-4, size-5)
   // and no explicit larger override or sr-only are flagged.
-  const interactivePattern = /<(?:button|a)\b[^>]*>/gi;
+  const interactivePattern =
+    /<(button|a|input|select|textarea)\b[^>]*(?:\/>|>)/gi;
   const tinyPattern = /\b(?:h|w|size)-[345]\b/;
   const largePattern = /\b(?:h|w|size)-(?:[6-9]|[1-9]\d)/;
   const srOnlyPattern = /\bsr-only\b/;
   let idx = 0;
   for (const m of html.matchAll(interactivePattern)) {
     const tag = m[0];
+    const tagName = (m[1] ?? "button").toLowerCase();
+    const typeMatch = tag.match(/\btype\s*=\s*(?:"([^"]*?)"|'([^']*?)')/i);
+    if (tagName === "input") {
+      const type = (typeMatch?.[1] ?? typeMatch?.[2] ?? "text").toLowerCase();
+      if (type === "hidden") continue;
+    }
     if (
       tinyPattern.test(tag) &&
       !largePattern.test(tag) &&
-      !srOnlyPattern.test(tag)
+      !srOnlyPattern.test(tag) &&
+      !hasAdequateMinTapSize(tag)
     ) {
       findings.push({
         id: `tap-target:interactive-${idx}`,
@@ -168,7 +224,7 @@ function checkTapTargets(html: string): A11yFinding[] {
         detail:
           "Minimum recommended tap target size is 44×44 px (WCAG 2.5.5). Consider increasing padding or size.",
         nodeId: extractNodeId(tag),
-        selector: extractSelector(tag, "button"),
+        selector: extractSelector(tag, tagName),
         wcag: "2.5.5",
         fixAvailable: true,
       });

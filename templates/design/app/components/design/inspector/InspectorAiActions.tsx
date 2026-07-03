@@ -2,7 +2,7 @@ import { useT } from "@agent-native/core/client";
 import {
   IconClipboard,
   IconChevronDown,
-  IconSparkles,
+  IconMessageCircle,
 } from "@tabler/icons-react";
 import { useState } from "react";
 
@@ -25,6 +25,8 @@ export interface InspectorAiActionsProps {
   fileId?: string;
   /** Active file name (e.g. "index.html"). */
   filename?: string;
+  /** Localhost-backed source file, when the selected screen comes from a local app. */
+  routeSourceFile?: string;
   /** The design id. */
   designId?: string;
   /** When false, the controls are disabled. */
@@ -43,6 +45,7 @@ export function InspectorAiActions({
   sourceId,
   fileId,
   filename,
+  routeSourceFile,
   designId,
   canEdit,
 }: InspectorAiActionsProps) {
@@ -57,9 +60,11 @@ export function InspectorAiActions({
     sourceId,
     fileId,
     filename,
+    routeSourceFile,
     designId,
   };
-  const disabled = !canEdit || !request.trim();
+  const copyDisabled = !request.trim();
+  const askDisabled = !canEdit || copyDisabled;
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="w-full">
@@ -71,7 +76,7 @@ export function InspectorAiActions({
           )}
         >
           <span className="flex items-center gap-1.5">
-            <IconSparkles className="size-3.5 shrink-0" />
+            <IconMessageCircle className="size-3.5 shrink-0" />
             {t("designEditor.localSourceEdit.askAi")}
           </span>
           <IconChevronDown
@@ -93,9 +98,12 @@ export function InspectorAiActions({
                 : t("designEditor.localSourceEdit.describeChange")
             }
             className="min-h-[64px] resize-none text-xs"
-            disabled={!canEdit}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !disabled) {
+              if (
+                e.key === "Enter" &&
+                (e.metaKey || e.ctrlKey) &&
+                !askDisabled
+              ) {
                 e.preventDefault();
                 void sendEdit(args);
                 setRequest("");
@@ -108,21 +116,21 @@ export function InspectorAiActions({
               size="sm"
               variant="default"
               className="flex-1 gap-1.5 text-xs"
-              disabled={disabled}
+              disabled={askDisabled}
               onClick={() => {
                 void sendEdit(args);
                 setRequest("");
                 setOpen(false);
               }}
             >
-              <IconSparkles className="size-3.5 shrink-0" />
+              <IconMessageCircle className="size-3.5 shrink-0" />
               {t("designEditor.localSourceEdit.applyWithAi")}
             </Button>
             <Button
               size="sm"
               variant="outline"
               className="gap-1.5 text-xs"
-              disabled={disabled}
+              disabled={copyDisabled}
               onClick={() => {
                 void copyPrompt(args);
               }}

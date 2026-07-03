@@ -4,15 +4,15 @@
  *
  * Matches the motion artboard at
  * https://plan.agent-native.com/plans/plan-88dc4a09fb0c46bc:
- * - Full-width collapsible dock beneath the canvas.
+ * - Full-width dock beneath the canvas when opened from the Layers footer.
  * - Left sidebar: animated layer rows with property sub-rows.
  * - Center: time ruler + diamond keyframes on a track grid.
  * - Playhead: draggable; scrubbing sends a preview-only `motion-preview`
  *   postMessage to the canvas iframe — NEVER writes to DB.
- * - Top toolbar: play/pause, duration input, auto-keyframe toggle, Write to CSS.
+ * - Top toolbar: play/pause, duration input, auto-keyframe toggle, autosave.
  *
- * Write to CSS calls the parent's `onApply` prop, which should invoke
- * `apply-motion-edit` through `useActionMutation`.
+ * Track and duration edits notify the parent; the parent persists through
+ * `apply-motion-edit`. Scrubbing/playback stays preview-only.
  *
  * All times are normalised to [0, 1] internally; the ruler maps them to px.
  */
@@ -37,7 +37,6 @@ import {
   IconChevronRight,
   IconPlus,
   IconTrash,
-  IconCode,
   IconRefresh,
   IconBolt,
   IconLayersSubtract,
@@ -48,6 +47,7 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type TransitionEvent as ReactTransitionEvent,
 } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -104,22 +104,27 @@ export interface MotionDockProps {
   open?: boolean;
   /** Called when the user toggles the dock open/closed. */
   onOpenChange?: (open: boolean) => void;
+  /** Called after the close transform finishes. */
+  onExitComplete?: () => void;
   /** Called when a track is modified (add/move/delete keyframe or change value). */
   onTracksChange?: (tracks: MotionDockTrack[]) => void;
   /** Called when durationMs is edited. */
   onDurationChange?: (ms: number) => void;
   /**
-   * Called when "Write to CSS" is clicked. The parent should call
-   * `apply-motion-edit` via useActionMutation.
-   */
-  onApply?: (tracks: MotionDockTrack[], durationMs: number) => void;
-  /**
    * Reference to the canvas iframe element. Used to send preview postMessages.
    * If not provided, preview messages are skipped (no crash).
    */
   canvasIframeRef?: React.RefObject<HTMLIFrameElement | null>;
-  /** Whether the parent apply mutation is in flight. */
+  /** Whether the parent autosave mutation is in flight. */
   applying?: boolean;
+  /** Controlled auto-keyframe state. */
+  autoKeyframe?: boolean;
+  /** Called when the auto-keyframe toggle changes. */
+  onAutoKeyframeChange?: (enabled: boolean) => void;
+  /** Controlled playhead position, normalized to [0, 1]. */
+  playhead?: number;
+  /** Called whenever the playhead moves. */
+  onPlayheadChange?: (t: number) => void;
   /**
    * The currently-selected canvas element, if any. Required to create the FIRST
    * track for a layer: the picker animates this node's
@@ -137,11 +142,15 @@ export function MotionDock({
   defaultEase = "ease",
   open: openProp,
   onOpenChange,
+  onExitComplete,
   onTracksChange,
   onDurationChange,
-  onApply,
   canvasIframeRef,
   applying = false,
+  autoKeyframe: autoKeyframeProp,
+  onAutoKeyframeChange,
+  playhead: playheadProp,
+  onPlayheadChange,
   selectedTarget = null,
 }: MotionDockProps) {
   // Controlled / uncontrolled open state.
@@ -156,18 +165,51 @@ export function MotionDock({
   );
 
   // Playhead position: normalised [0, 1].
-  const [playhead, setPlayhead] = useState(0);
+  const [playhead, setPlayhead] = useState(playheadProp ?? 0);
   const [playing, setPlaying] = useState(false);
   const playRafRef = useRef<number | null>(null);
   const playStartRef = useRef<{ wallMs: number; startT: number } | null>(null);
+  useEffect(() => {
+    if (playheadProp === undefined) return;
+    setPlayhead(Math.max(0, Math.min(1, playheadProp)));
+  }, [playheadProp]);
 
-  // Auto-keyframe mode: clicking the canvas at a time scrubs without writing.
-  const [autoKeyframe, setAutoKeyframe] = useState(false);
+  // Auto-keyframe mode: inspector/style edits create keyframes at the playhead.
+  const [autoKeyframeInternal, setAutoKeyframeInternal] = useState(false);
+  const autoKeyframe = autoKeyframeProp ?? autoKeyframeInternal;
+  const setAutoKeyframe = useCallback(
+    (next: boolean | ((current: boolean) => boolean)) => {
+      const resolved =
+        typeof next === "function"
+          ? (next as (current: boolean) => boolean)(autoKeyframe)
+          : next;
+      setAutoKeyframeInternal(resolved);
+      onAutoKeyframeChange?.(resolved);
+    },
+    [autoKeyframe, onAutoKeyframeChange],
+  );
+  const setPlayheadValue = useCallback(
+    (next: number) => {
+      setPlayhead(next);
+      onPlayheadChange?.(next);
+    },
+    [onPlayheadChange],
+  );
 
   // Dock height (resizable via the top drag handle).
   const [dockHeight, setDockHeight] = useState(DEFAULT_DOCK_HEIGHT);
+  const [isResizingDock, setIsResizingDock] = useState(false);
   const resizingRef = useRef(false);
   const resizeStartRef = useRef<{ y: number; h: number } | null>(null);
+
+  const handleDockTransitionEnd = useCallback(
+    (event: ReactTransitionEvent<HTMLDivElement>) => {
+      if (event.currentTarget !== event.target) return;
+      if (event.propertyName !== "height") return;
+      if (!isOpen) onExitComplete?.();
+    },
+    [isOpen, onExitComplete],
+  );
 
   // Expanded layers in the sidebar.
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
@@ -228,7 +270,7 @@ export function MotionDock({
       if (!playStartRef.current) return;
       const elapsed = now - playStartRef.current.wallMs;
       const t = Math.min(1, playStartRef.current.startT + elapsed / durationMs);
-      setPlayhead(t);
+      setPlayheadValue(t);
       sendPreview(t);
       if (t < 1) {
         playRafRef.current = requestAnimationFrame(tick);
@@ -237,7 +279,7 @@ export function MotionDock({
       }
     };
     playRafRef.current = requestAnimationFrame(tick);
-  }, [durationMs, playhead, sendPreview, stopPlayback]);
+  }, [durationMs, playhead, sendPreview, setPlayheadValue, stopPlayback]);
 
   useEffect(() => {
     return () => {
@@ -256,10 +298,10 @@ export function MotionDock({
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
       const rect = trackAreaRef.current.getBoundingClientRect();
       const t = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      setPlayhead(t);
+      setPlayheadValue(t);
       sendPreview(t);
     },
-    [sendPreview, stopPlayback],
+    [sendPreview, setPlayheadValue, stopPlayback],
   );
 
   const handleRulerPointerMove = useCallback(
@@ -267,10 +309,10 @@ export function MotionDock({
       if (!isDraggingPlayhead.current || !trackAreaRef.current) return;
       const rect = trackAreaRef.current.getBoundingClientRect();
       const t = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      setPlayhead(t);
+      setPlayheadValue(t);
       sendPreview(t);
     },
-    [sendPreview],
+    [sendPreview, setPlayheadValue],
   );
 
   const handleRulerPointerUp = useCallback(() => {
@@ -281,6 +323,7 @@ export function MotionDock({
   const handleResizePointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       resizingRef.current = true;
+      setIsResizingDock(true);
       resizeStartRef.current = { y: e.clientY, h: dockHeight };
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     },
@@ -300,6 +343,7 @@ export function MotionDock({
 
   const handleResizePointerUp = useCallback(() => {
     resizingRef.current = false;
+    setIsResizingDock(false);
     resizeStartRef.current = null;
   }, []);
 
@@ -340,8 +384,8 @@ export function MotionDock({
   // ── Create a brand-new track (the "first track" path) ──────────────────────
   // This is the entry point that turns the dock from a dead end into a working
   // editor: with an element selected and no track yet, the user picks a property
-  // preset and we seed a two-keyframe track. Once at least one track exists,
-  // "Write to CSS" enables. Idempotent per (nodeId, property) — picking the same
+  // preset and we seed a two-keyframe track. The parent autosaves that valid
+  // track into managed CSS. Idempotent per (nodeId, property) — picking the same
   // property twice just re-expands the existing track instead of duplicating.
   const createTrack = useCallback(
     (preset: MotionPropertyPreset) => {
@@ -411,46 +455,45 @@ export function MotionDock({
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div
-      aria-label="Motion dock"
       className={cn(
-        "flex flex-col border-t border-border bg-background transition-all duration-150 select-none",
-        isOpen ? "" : "h-8",
+        "design-motion-dock-space relative shrink-0 overflow-visible",
+        isResizingDock && "design-motion-dock-resizing",
       )}
-      style={isOpen ? { height: dockHeight } : undefined}
+      onTransitionEnd={handleDockTransitionEnd}
+      style={{ height: isOpen ? dockHeight : 0 }}
     >
-      {/* Resize handle */}
-      {isOpen && (
+      <div
+        aria-label="Motion dock"
+        aria-hidden={!isOpen ? true : undefined}
+        className={cn(
+          "design-motion-dock absolute inset-x-0 bottom-0 z-40 flex min-h-0 transform-gpu flex-col overflow-hidden border-t bg-background select-none",
+          isOpen
+            ? "translate-y-0 border-border opacity-100"
+            : "translate-y-full border-transparent pointer-events-none",
+        )}
+        style={{ height: dockHeight }}
+      >
+        {/* Resize handle */}
         <div
           className="absolute -top-1 left-0 right-0 h-2 cursor-ns-resize z-10"
           onPointerDown={handleResizePointerDown}
           onPointerMove={handleResizePointerMove}
           onPointerUp={handleResizePointerUp}
+          onPointerCancel={handleResizePointerUp}
         />
-      )}
 
-      {/* Dock toolbar */}
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
-        {/* Collapse toggle */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-6 shrink-0"
-          onClick={() => setOpen(!isOpen)}
-          aria-label={isOpen ? "Collapse motion dock" : "Expand motion dock"}
-        >
-          {isOpen ? (
+        {/* Dock toolbar */}
+        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
+          {/* Collapse toggle. The rail owns the visible Motion label. */}
+          <button
+            type="button"
+            className="-ml-1 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-[var(--design-editor-accent-color)]"
+            onClick={() => setOpen(false)}
+            aria-label="Collapse motion dock"
+          >
             <IconChevronDown className="size-3.5" />
-          ) : (
-            <IconChevronRight className="size-3.5" />
-          )}
-        </Button>
+          </button>
 
-        <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase mr-1">
-          Motion
-        </span>
-
-        {isOpen && (
           <>
             {/* Play / Pause */}
             <Tooltip>
@@ -485,7 +528,7 @@ export function MotionDock({
                   className="size-6 shrink-0"
                   onClick={() => {
                     stopPlayback();
-                    setPlayhead(0);
+                    setPlayheadValue(0);
                     sendPreview(0);
                   }}
                   aria-label="Reset playhead"
@@ -515,7 +558,7 @@ export function MotionDock({
                     setDurationInput(String(durationMs));
                   }
                 }}
-                className="h-5 w-16 px-1 text-[11px]"
+                className="h-5 w-16 px-1 !text-[11px] md:!text-[11px]"
                 aria-label="Duration in ms"
               />
               <span className="text-[10px] text-muted-foreground">ms</span>
@@ -551,36 +594,25 @@ export function MotionDock({
                 <TooltipContent side="top">Auto-keyframe</TooltipContent>
               </Tooltip>
 
-              {/* Write to CSS */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-6 px-2.5 text-[11px] gap-1"
-                    disabled={applying || tracks.length === 0}
-                    onClick={() => onApply?.(tracks, durationMs)}
-                  >
-                    {applying ? (
+              {applying ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      role="status"
+                      aria-label="Saving motion"
+                      className="flex size-6 items-center justify-center rounded text-muted-foreground"
+                    >
                       <IconRefresh className="size-3 animate-spin" />
-                    ) : (
-                      <IconCode className="size-3" />
-                    )}
-                    Write to CSS
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  Compile timeline → managed &lt;style
-                  data-agent-native-motion&gt; block
-                </TooltipContent>
-              </Tooltip>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Saving motion</TooltipContent>
+                </Tooltip>
+              ) : null}
             </div>
           </>
-        )}
-      </div>
+        </div>
 
-      {/* Dock body */}
-      {isOpen && (
+        {/* Dock body */}
         <div className="flex flex-1 overflow-hidden">
           {/* Layer sidebar */}
           <div
@@ -598,7 +630,7 @@ export function MotionDock({
                 <IconLayersSubtract className="size-5 text-muted-foreground/40" />
                 {selectedTarget ? (
                   <>
-                    <p className="text-[11px] text-muted-foreground/70 leading-snug">
+                    <p className="!text-[11px] text-muted-foreground/70 leading-snug">
                       Animate{" "}
                       <span className="font-medium text-foreground/80">
                         {selectedTarget.label}
@@ -612,7 +644,7 @@ export function MotionDock({
                     />
                   </>
                 ) : (
-                  <p className="text-[11px] text-muted-foreground/70 leading-snug">
+                  <p className="!text-[11px] text-muted-foreground/70 leading-snug">
                     Select an element on the canvas, then add a track to animate
                     it.
                   </p>
@@ -703,7 +735,7 @@ export function MotionDock({
             </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -734,7 +766,7 @@ function AddTrackMenu({
         type="button"
         size="sm"
         variant="secondary"
-        className="h-7 gap-1 text-[11px]"
+        className="h-7 gap-1 !text-[11px]"
         disabled={disabled}
       >
         <IconPlus className="size-3.5" />
@@ -745,7 +777,7 @@ function AddTrackMenu({
         type="button"
         size="sm"
         variant="ghost"
-        className="h-6 gap-1 px-2 text-[11px]"
+        className="h-6 gap-1 px-2 !text-[11px]"
         disabled={disabled}
       >
         <IconPlus className="size-3.5" />
@@ -771,18 +803,17 @@ function AddTrackMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-52">
-        <DropdownMenuLabel className="truncate text-[10px] text-muted-foreground">
+      <DropdownMenuContent align="start" className="w-48 p-1">
+        <DropdownMenuLabel className="truncate px-2 py-1 text-[10px] font-medium leading-none text-muted-foreground">
           Animate “{selectedTarget.label}”
         </DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="my-1" />
         {MOTION_PROPERTY_PRESETS.map((preset) => (
           <DropdownMenuItem
             key={`${preset.property}-${preset.label}`}
-            className="text-[12px]"
+            className="h-7 px-2 text-[12px] leading-none"
             onSelect={() => onCreateTrack(preset)}
           >
-            <IconDiamond className="size-3 text-primary/70" />
             {preset.label}
           </DropdownMenuItem>
         ))}
@@ -853,7 +884,7 @@ function LayerGroup({
           )}
         </span>
         <span
-          className="flex-1 truncate text-[11px] font-medium"
+          className="flex-1 truncate !text-[11px] font-medium"
           title={layer.label}
         >
           {layer.label}

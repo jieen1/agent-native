@@ -299,6 +299,12 @@ export type CodeLayerTreeNodeType =
   | "group"
   | "component"
   | "shape"
+  | "ellipse"
+  | "vector"
+  | "line"
+  | "arrow"
+  | "polygon"
+  | "star"
   | "text"
   | "image"
   | "element";
@@ -1659,6 +1665,33 @@ function layerNameFor(
 }
 
 function treeTypeForNode(node: CodeLayerNode): CodeLayerTreeNodeType {
+  // Canvas primitives (drawn shapes / board objects) carry their kind via
+  // data-an-primitive so the layers panel shows a true shape/text/frame icon
+  // instead of the generic code glyph. The marker wins over tag heuristics:
+  // these primitives are <div>s, which would otherwise classify as "element".
+  const primitiveKind = node.dataAttributes["data-an-primitive"];
+  if (primitiveKind) {
+    if (primitiveKind === "text") return "text";
+    if (primitiveKind === "frame") return "frame";
+    if (primitiveKind === "image") return "image";
+    if (
+      primitiveKind === "ellipse" ||
+      primitiveKind === "circle" ||
+      primitiveKind === "oval"
+    ) {
+      return "ellipse";
+    }
+    // SVG-based vector primitives each get their own type so the layers panel
+    // renders a true pen/line/arrow/polygon/star icon instead of falling
+    // through to the rectangle ("shape") glyph.
+    if (primitiveKind === "path") return "vector";
+    if (primitiveKind === "line") return "line";
+    if (primitiveKind === "arrow") return "arrow";
+    if (primitiveKind === "polygon") return "polygon";
+    if (primitiveKind === "star") return "star";
+    // rectangle/rect and anything else still classify as a generic shape.
+    return "shape";
+  }
   if (TEXT_LAYER_TAGS.has(node.tag)) return "text";
   if (IMAGE_LAYER_TAGS.has(node.tag)) return "image";
   if (SHAPE_LAYER_TAGS.has(node.tag)) return "shape";
@@ -1705,11 +1738,12 @@ function compactCodeLayerTreeNodes(
       nextAncestors,
     );
     const compactedNode: CodeLayerTreeNode = { ...node, children };
-    const promotedNodes =
-      isCollapsibleDocumentShellNode(compactedNode, nodesById) &&
-      children.length > 0
-        ? children
-        : [compactedNode];
+    const promotedNodes = isCollapsibleDocumentShellNode(
+      compactedNode,
+      nodesById,
+    )
+      ? children
+      : [compactedNode];
 
     for (const promotedNode of promotedNodes) {
       if (siblingIds.has(promotedNode.id)) continue;
@@ -1783,6 +1817,25 @@ function capabilitiesFor(element: ParsedElement): EditCapability[] {
   return capabilities;
 }
 
+// Internal nodes of an <svg> (the <path>/<polygon>/<circle>/... geometry) are
+// rendering primitives, never selectable design layers. Projecting them adds a
+// meaningless expandable child to every pen vector / line / arrow / polygon /
+// star (and to any inline SVG icon). Treat the <svg> as a leaf: skip everything
+// that has an <svg> ancestor.
+function hasSvgAncestor(
+  element: ParsedElement,
+  elements: ParsedElement[],
+): boolean {
+  let parentIndex = element.parentIndex;
+  while (parentIndex !== undefined) {
+    const parent = elements[parentIndex];
+    if (!parent) break;
+    if (parent.tag === "svg") return true;
+    parentIndex = parent.parentIndex;
+  }
+  return false;
+}
+
 function buildProjection(
   html: string,
   source: CodeLayerSource,
@@ -1797,6 +1850,7 @@ function buildProjection(
 
   for (const element of elements) {
     if (NON_VISUAL_TAGS.has(element.tag)) continue;
+    if (hasSvgAncestor(element, elements)) continue;
     const nodeId = nodeIdFor(element, elements, source);
     nodeIdByElementIndex.set(element.index, nodeId);
   }
@@ -2027,9 +2081,10 @@ export function buildCodeLayerTree(
   const treeById = new Map<string, CodeLayerTreeNode>();
 
   for (const node of projection.nodes) {
+    const componentName = node.componentInstance?.name;
     treeById.set(node.id, {
       id: node.id,
-      name: node.layerName,
+      name: componentName ?? node.layerName,
       type: treeTypeForNode(node),
       tag: node.tag,
       selector: node.selector,
@@ -3369,6 +3424,47 @@ export function applyVisualEdit(
       after,
     ),
   };
+}
+
+/**
+ * Attributes injected by the editor at runtime that must NOT appear in
+ * on-disk source files. These are stripped before any write-back so that
+ * the saved file stays clean and matches what a developer would author.
+ *
+ * - `data-agent-native-node-id` — stable selection id stamped by the editor.
+ * - `data-agent-native-layer-name` is intentionally kept: it is a
+ *   developer-authored attribute (the canonical layer-name hint) and is
+ *   useful in committed source.  Only ephemeral runtime stamps are removed.
+ */
+const EDITOR_ONLY_ATTRIBUTES: readonly string[] = ["data-agent-native-node-id"];
+
+/**
+ * Strip editor-only runtime attributes from an HTML string, returning clean
+ * source suitable for writing back to disk.
+ *
+ * Currently removes `data-agent-native-node-id` (and any future attributes
+ * listed in EDITOR_ONLY_ATTRIBUTES). The function operates on the raw HTML
+ * string with a regex that handles both quoted forms and unquoted values, and
+ * is safe to apply to already-clean source (idempotent).
+ *
+ * @param html  The raw HTML string, potentially containing editor stamps.
+ * @returns     A new string with all editor-only attributes removed.
+ */
+export function stripEditorOnlyAttributes(html: string): string {
+  if (!html || typeof html !== "string") return html ?? "";
+  let result = html;
+  for (const attr of EDITOR_ONLY_ATTRIBUTES) {
+    // Match the attribute with optional surrounding whitespace. The value may
+    // be double-quoted, single-quoted, or unquoted (no spaces / > chars).
+    // A leading \s+ is required so we only strip the attribute name+value pair
+    // and leave surrounding markup intact.
+    const re = new RegExp(
+      `\\s+${attr.replace(/-/g, "\\-")}\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s"'=><\`]+)`,
+      "gi",
+    );
+    result = result.replace(re, "");
+  }
+  return result;
 }
 
 export interface MoveNodeBetweenDocumentsOptions {

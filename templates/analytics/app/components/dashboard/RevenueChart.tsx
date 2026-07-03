@@ -11,6 +11,11 @@ import {
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency as formatCurrencyLocale } from "locale-kit/format";
+import {
+  chartAxisStroke,
+  chartGridStroke,
+  chartTooltipContentStyle,
+} from "@/lib/chart-theme";
 
 const data = [
   { name: "Jan", total: 1200 },
@@ -50,13 +55,13 @@ export function RevenueChart() {
               </defs>
               <XAxis
                 dataKey="name"
-                stroke="#52525b"
+                stroke={chartAxisStroke}
                 fontSize={12}
                 tickLine={false}
                 axisLine={false}
               />
               <YAxis
-                stroke="#52525b"
+                stroke={chartAxisStroke}
                 fontSize={12}
                 tickLine={false}
                 axisLine={false}
@@ -68,17 +73,12 @@ export function RevenueChart() {
               />
               <CartesianGrid
                 strokeDasharray="3 3"
-                stroke="#27272a"
+                stroke={chartGridStroke}
                 vertical={false}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: "#09090b",
-                  border: "1px solid #27272a",
-                  borderRadius: "8px",
-                  color: "#fafafa",
-                }}
-                itemStyle={{ color: "#38bdf8" }}
+                contentStyle={chartTooltipContentStyle}
+                itemStyle={{ color: "var(--brand-blue)" }}
               />
               <Area
                 type="monotone"

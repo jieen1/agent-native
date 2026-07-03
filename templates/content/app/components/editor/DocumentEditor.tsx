@@ -6,7 +6,6 @@ import {
   emailToName,
   useSession,
   useT,
-  appApiPath,
   agentNativePath,
   type CollabUser,
 } from "@agent-native/core/client";
@@ -22,7 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ClipboardEvent } from "react";
+import type { ClipboardEvent, MutableRefObject } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 
@@ -34,13 +33,18 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useComments } from "@/hooks/use-comments";
+import { useProcessBuilderBodyHydration } from "@/hooks/use-content-database";
 import {
   useDocument,
   useDocuments,
   useUpdateDocument,
 } from "@/hooks/use-documents";
 import { useLocalStorage } from "@/hooks/use-local-storage";
-import { useDocumentSyncStatus } from "@/hooks/use-notion";
+import {
+  documentSyncStatusQueryKey,
+  useDocumentSyncStatus,
+  usePushDocumentToNotion,
+} from "@/hooks/use-notion";
 import {
   canWriteLinkedLocalSource,
   readDocumentFromLinkedLocalSource,
@@ -67,6 +71,54 @@ const TAB_ID = generateTabId();
 
 interface DocumentEditorProps {
   documentId: string;
+}
+
+type FieldSaveWatermark = { title: string; updatedAt: string | null };
+type ContentSaveWatermark = { content: string; updatedAt: string | null };
+
+function adoptConfirmedSaveWatermarks({
+  saved,
+  savedAt,
+  title,
+  content,
+  updates,
+  lastSavedTitleRef,
+  lastSavedContentRef,
+}: {
+  saved: Document | undefined;
+  savedAt: string;
+  title: string;
+  content: string;
+  updates: {
+    title?: string;
+    content?: string;
+    icon?: string | null;
+  };
+  lastSavedTitleRef: MutableRefObject<FieldSaveWatermark>;
+  lastSavedContentRef: MutableRefObject<ContentSaveWatermark>;
+}) {
+  if (updates.title !== undefined) {
+    lastSavedTitleRef.current = { title, updatedAt: savedAt };
+  } else if (
+    (updates.content !== undefined || updates.icon !== undefined) &&
+    saved?.title === lastSavedTitleRef.current.title
+  ) {
+    lastSavedTitleRef.current = {
+      ...lastSavedTitleRef.current,
+      updatedAt: savedAt,
+    };
+  }
+  if (updates.content !== undefined) {
+    lastSavedContentRef.current = { content, updatedAt: savedAt };
+  } else if (
+    (updates.title !== undefined || updates.icon !== undefined) &&
+    saved?.content === lastSavedContentRef.current.content
+  ) {
+    lastSavedContentRef.current = {
+      ...lastSavedContentRef.current,
+      updatedAt: savedAt,
+    };
+  }
 }
 
 function DocumentEditorSkeleton() {
@@ -282,6 +334,9 @@ function DocumentEditorBody({ documentId, document }: DocumentEditorBodyProps) {
   const t = useT();
   const updateDocument = useUpdateDocument();
   const queryClient = useQueryClient();
+  const processBuilderBodies = useProcessBuilderBodyHydration(
+    document.databaseMembership?.databaseDocumentId ?? documentId,
+  );
   const canEdit = document.canEdit ?? true;
   const canEditRef = useRef(canEdit);
   canEditRef.current = canEdit;
@@ -308,12 +363,14 @@ function DocumentEditorBody({ documentId, document }: DocumentEditorBodyProps) {
   useDocumentSyncStatus(canEdit && !isLocalFileDocument ? documentId : null, {
     autoSync,
   });
+  const pushDocumentToNotion = usePushDocumentToNotion(documentId);
   const [localTitle, setLocalTitle] = useState("");
   const [localContent, setLocalContent] = useState("");
   const [localContentUpdatedAt, setLocalContentUpdatedAt] = useState<
     string | null
   >(document.updatedAt ?? null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const promotedBuilderBodyRef = useRef<string | null>(null);
   const pendingDocumentSaveRef = useRef<PendingDocumentSave | null>(null);
   // Separate freshness watermarks for title and content so that a content save
   // never suppresses adopting a newer external title and vice versa.
@@ -344,6 +401,26 @@ function DocumentEditorBody({ documentId, document }: DocumentEditorBodyProps) {
     },
     [t],
   );
+
+  useEffect(() => {
+    const membership = document.databaseMembership;
+    const hydration = membership?.bodyHydration;
+    if (
+      !membership?.sourceId ||
+      !hydration ||
+      (hydration.status !== "pending" && hydration.status !== "error")
+    ) {
+      return;
+    }
+    const promotionKey = `${membership.sourceId}:${documentId}:${hydration.status}:${hydration.version ?? ""}`;
+    if (promotedBuilderBodyRef.current === promotionKey) return;
+    promotedBuilderBodyRef.current = promotionKey;
+    processBuilderBodies.mutate({
+      sourceId: membership.sourceId,
+      documentId,
+      limit: 1,
+    });
+  }, [document.databaseMembership, documentId, processBuilderBodies.mutate]);
   const titleFocusedRef = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLTextAreaElement>(null);
@@ -686,12 +763,15 @@ function DocumentEditorBody({ documentId, document }: DocumentEditorBodyProps) {
       const saved = await persistDocumentUpdates(updates, options);
       // Adopt the server updatedAt per saved field.
       const savedAt = saved?.updatedAt ?? new Date().toISOString();
-      if (updates.title !== undefined) {
-        lastSavedTitleRef.current = { title, updatedAt: savedAt };
-      }
-      if (updates.content !== undefined) {
-        lastSavedContentRef.current = { content, updatedAt: savedAt };
-      }
+      adoptConfirmedSaveWatermarks({
+        saved,
+        savedAt,
+        title,
+        content,
+        updates,
+        lastSavedTitleRef,
+        lastSavedContentRef,
+      });
 
       // Push-on-save: when auto-sync is on, trigger a Notion push
       // immediately after the save lands in SQL. This eliminates the
@@ -699,20 +779,18 @@ function DocumentEditorBody({ documentId, document }: DocumentEditorBodyProps) {
       // the debounce and the next save, reading the previous content.
       // Pulls remain driven by the polling refetch in useDocumentSyncStatus.
       if (autoSync) {
-        const status = queryClient.getQueryData<DocumentSyncStatus>([
-          "document-sync",
-          documentId,
-        ]);
+        const status = queryClient.getQueryData<DocumentSyncStatus>(
+          documentSyncStatusQueryKey(documentId, { autoSync }),
+        );
         if (status?.pageId && !status.hasConflict) {
           try {
-            const res = await fetch(
-              appApiPath(`/api/documents/${documentId}/notion/push`),
-              { method: "POST" },
+            const next = await pushDocumentToNotion.mutateAsync({
+              documentId,
+            });
+            queryClient.setQueryData(
+              documentSyncStatusQueryKey(documentId, { autoSync }),
+              next,
             );
-            if (res.ok) {
-              const next = (await res.json()) as DocumentSyncStatus;
-              queryClient.setQueryData(["document-sync", documentId], next);
-            }
           } catch {
             // Non-fatal — next polling refetch will surface any error.
           }
@@ -727,6 +805,7 @@ function DocumentEditorBody({ documentId, document }: DocumentEditorBodyProps) {
       autoSync,
       isLinkedLocalSourceDocument,
       persistDocumentUpdates,
+      pushDocumentToNotion,
       queryClient,
     ],
   );
@@ -818,15 +897,15 @@ function DocumentEditorBody({ documentId, document }: DocumentEditorBodyProps) {
               if (Object.keys(updates).length > 0) {
                 const saved = await persistDocumentUpdates(updates);
                 const savedAt = saved?.updatedAt ?? new Date().toISOString();
-                if (updates.title !== undefined) {
-                  lastSavedTitleRef.current = { title, updatedAt: savedAt };
-                }
-                if (updates.content !== undefined) {
-                  lastSavedContentRef.current = {
-                    content,
-                    updatedAt: savedAt,
-                  };
-                }
+                adoptConfirmedSaveWatermarks({
+                  saved,
+                  savedAt,
+                  title,
+                  content,
+                  updates,
+                  lastSavedTitleRef,
+                  lastSavedContentRef,
+                });
               }
             } finally {
               // Acknowledge the flush even if nothing changed — the SQL row is
@@ -1113,7 +1192,19 @@ function DocumentEditorBody({ documentId, document }: DocumentEditorBodyProps) {
                           }
                           onSelect={(emoji) => {
                             void (async () => {
-                              await persistDocumentUpdates({ icon: emoji });
+                              const saved = await persistDocumentUpdates({
+                                icon: emoji,
+                              });
+                              adoptConfirmedSaveWatermarks({
+                                saved,
+                                savedAt:
+                                  saved?.updatedAt ?? new Date().toISOString(),
+                                title: localTitleRef.current,
+                                content: localContentRef.current,
+                                updates: { icon: emoji },
+                                lastSavedTitleRef,
+                                lastSavedContentRef,
+                              });
                             })().catch(handleBackgroundSaveError);
                           }}
                         />

@@ -1,23 +1,20 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  createFixtureDesign,
   designFrame,
   enterDirectMode,
   gotoEditor,
   installBridge,
-  readSeedDesignId,
   selectByText,
   waitForBridge,
 } from "./helpers";
 
 let designId: string;
 
-test.beforeAll(async () => {
-  designId = await readSeedDesignId();
-});
-
 test.describe.serial("layers menu structure operations", () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    designId = await createFixtureDesign(page, `E2E Layers ${testInfo.title}`);
     await gotoEditor(page, designId);
     await openLayerSearch(page, "Button");
   });
@@ -35,7 +32,7 @@ test.describe.serial("layers menu structure operations", () => {
     await additiveSelectLayerRow(page, "Beta Button");
 
     await expect.poll(() => selectedRowCount(page)).toBe(2);
-    await expect(page.getByText("2 selected")).toBeVisible();
+    await expect(layerSelectionCountLabel(page)).toBeHidden();
     await expect(layerRow(page, "Alpha Button")).toHaveAttribute(
       "aria-selected",
       "true",
@@ -89,6 +86,7 @@ test.describe.serial("layers menu structure operations", () => {
     await openLayerSearch(page, "");
     const originalLevel = await rowLevel(page, "Alpha Button");
     await expandLayerRow(page, "Section");
+    const sectionLevel = await rowLevel(page, "Section");
     await expect(layerRow(page, "Fixture Card Title")).toBeVisible();
 
     try {
@@ -109,7 +107,7 @@ test.describe.serial("layers menu structure operations", () => {
         .toBe(true);
       await expect
         .poll(async () => rowLevel(page, "Alpha Button"))
-        .toBeGreaterThanOrEqual(originalLevel);
+        .toBe(sectionLevel + 1);
 
       await clickLayerRow(page, "Alpha Button");
       await expect(layerRow(page, "Alpha Button")).toHaveAttribute(
@@ -133,6 +131,55 @@ test.describe.serial("layers menu structure operations", () => {
         // If cleanup fails, the test body already surfaced the useful failure.
       }
     }
+  });
+
+  test("dragging onto an empty container reparents inside and persists after reload", async ({
+    page,
+  }) => {
+    await clickLayerRow(page, "Alpha Button");
+    await openLayerSearch(page, "");
+    const containerLevel = await rowLevel(page, "E2E Token Sample");
+
+    await layerRow(page, "Alpha Button").dragTo(
+      layerRow(page, "E2E Token Sample"),
+      {
+        targetPosition: { x: 96, y: 16 },
+      },
+    );
+
+    await expect(layerRow(page, "E2E Token Sample")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    await expect
+      .poll(async () => rowLevel(page, "Alpha Button"))
+      .toBe(containerLevel + 1);
+    await expect
+      .poll(async () => {
+        const names = await visibleLayerNames(page);
+        return (
+          names.indexOf("E2E Token Sample") < names.indexOf("Alpha Button")
+        );
+      })
+      .toBe(true);
+
+    await gotoEditor(page, designId);
+    await revealLayerRow(page, "E2E Token Sample");
+    const persistedContainerLevel = await rowLevel(page, "E2E Token Sample");
+    await expandLayerRow(page, "E2E Token Sample");
+    await expect(layerRow(page, "Alpha Button")).toBeVisible();
+    await expect
+      .poll(async () => {
+        const names = await visibleLayerNames(page);
+        return (
+          names.indexOf("E2E Token Sample") >= 0 &&
+          names.indexOf("E2E Token Sample") < names.indexOf("Alpha Button")
+        );
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => rowLevel(page, "Alpha Button"))
+      .toBe(persistedContainerLevel + 1);
   });
 
   test("locking a layer keeps panel selection but blocks canvas selection", async ({
@@ -229,6 +276,10 @@ async function selectedRowCount(page: Page): Promise<number> {
     .count();
 }
 
+function layerSelectionCountLabel(page: Page) {
+  return layerTree(page).getByText(/\b\d+\s+selected\b/);
+}
+
 async function visibleLayerNames(page: Page): Promise<string[]> {
   return await layerTree(page)
     .locator("[data-layer-row-button][data-layer-node-id]")
@@ -246,13 +297,31 @@ async function rowLevel(page: Page, name: string): Promise<number> {
 }
 
 async function clickLayerRow(page: Page, name: string): Promise<void> {
-  await layerRowButton(page, name).click();
+  const button = await waitForLayerRowButton(page, name);
+  await button.click({ force: true });
+}
+
+async function waitForLayerRowButton(page: Page, name: string) {
+  const button = layerRowButton(page, name);
+  await expect(button).toBeVisible();
+  return button;
 }
 
 async function expandLayerRow(page: Page, name: string): Promise<void> {
   const row = layerRow(page, name);
+  await expect(row).toBeVisible();
   if ((await row.getAttribute("aria-expanded")) === "true") return;
-  await row.getByRole("button", { name: "Expand layer" }).click();
+  const toggle = row.getByRole("button", { name: "Expand layer" });
+  await expect(toggle).toBeVisible();
+  await toggle.click({ force: true });
+  await expect(row).toHaveAttribute("aria-expanded", "true");
+}
+
+async function revealLayerRow(page: Page, name: string): Promise<void> {
+  await openLayerSearch(page, name);
+  await clickLayerRow(page, name);
+  await openLayerSearch(page, "");
+  await expect(layerRow(page, name)).toBeVisible();
 }
 
 async function additiveSelectLayerRow(page: Page, name: string): Promise<void> {
@@ -378,10 +447,42 @@ function cssString(value: string) {
 }
 
 async function openLayerSearch(page: Page, query: string): Promise<void> {
-  await page
-    .getByRole("button", { name: "Search layers...", exact: true })
-    .click();
-  await page.getByPlaceholder("Search layers...").fill(query);
+  const normalized = query.trim().toLowerCase();
+  const deadline = Date.now() + 30_000;
+  let lastNames: string[] = [];
+  do {
+    const input = page.getByPlaceholder("Search layers...");
+    if (!(await input.isVisible().catch(() => false))) {
+      await page
+        .getByRole("button", { name: "Search layers...", exact: true })
+        .click();
+      await expect(input).toBeVisible();
+    }
+    await input.fill(query);
+    await expect(input).toHaveValue(query);
+    const matched = await expect
+      .poll(
+        async () => {
+          lastNames = await visibleLayerNames(page);
+          return normalized
+            ? lastNames.some((name) => name.toLowerCase().includes(normalized))
+            : lastNames.length > 0;
+        },
+        { timeout: 3_000 },
+      )
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+    if (matched) return;
+    await page.waitForTimeout(250);
+  } while (Date.now() < deadline);
+
+  if (!normalized) {
+    throw new Error("Layer rows did not become searchable");
+  }
+  throw new Error(
+    `Layer search for ${query} did not match any rows; last rows: ${lastNames.join(", ")}`,
+  );
 }
 
 async function attemptCanvasSelect(

@@ -25,7 +25,6 @@ import {
   agentLeaveDocument,
   agentUpdateSelection,
   applyText,
-  getText,
   hasCollabState,
   seedFromText,
 } from "@agent-native/core/collab";
@@ -117,26 +116,11 @@ export function applyRootAttributeEdit(
   };
 }
 
-async function liveContent(
-  fileId: string,
-  storedContent: string,
-): Promise<string> {
-  try {
-    if (await hasCollabState(fileId)) {
-      const live = await getText(fileId, "content");
-      if (typeof live === "string") return live;
-    }
-  } catch {
-    // Collab reads are best-effort; SQL content is the fallback.
-  }
-  return storedContent;
-}
-
 async function persistEdit(file: {
   id: string;
   designId: string;
   content: string;
-}): Promise<void> {
+}): Promise<string> {
   await assertAccess("design", file.designId, "editor");
   const db = getDb();
   const now = new Date().toISOString();
@@ -161,6 +145,8 @@ async function persistEdit(file: {
   } finally {
     agentLeaveDocument(file.id);
   }
+
+  return now;
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -213,8 +199,24 @@ export default defineAction({
         }),
       ])
       .describe("The prop edit to apply"),
+    source: z
+      .object({
+        currentContent: z
+          .string()
+          .optional()
+          .describe(
+            "Latest editor HTML snapshot. Used to compose rapid sequential prop edits before collab persistence catches up.",
+          ),
+        revision: z
+          .string()
+          .optional()
+          .describe(
+            "design_files.updatedAt value the currentContent is based on.",
+          ),
+      })
+      .optional(),
   }),
-  run: async ({ designId, nodeId, fileId, edit }) => {
+  run: async ({ designId, nodeId, fileId, edit, source }) => {
     const db = getDb();
 
     // ── Access check ────────────────────────────────────────────────────────
@@ -274,6 +276,7 @@ export default defineAction({
         designId: schema.designFiles.designId,
         filename: schema.designFiles.filename,
         content: schema.designFiles.content,
+        updatedAt: schema.designFiles.updatedAt,
       })
       .from(schema.designFiles)
       .innerJoin(
@@ -285,7 +288,31 @@ export default defineAction({
 
     if (!file) throw new Error("Design HTML file not found.");
 
-    const html = await liveContent(file.id, file.content ?? "");
+    if (
+      source?.currentContent &&
+      source.revision &&
+      file.updatedAt &&
+      source.revision !== file.updatedAt
+    ) {
+      return {
+        designId,
+        nodeId,
+        persisted: false,
+        conflict: true,
+        fileId: file.id,
+        filename: file.filename,
+        error:
+          "This file changed since this component prop edit was prepared. Refresh the editor and try again.",
+      };
+    }
+
+    // Prefer explicit editor content after the caller's revision check, and use
+    // the saved SQL content as the fallback. Collab/Yjs reads can be stale
+    // across local dev worker processes and make prop controls lag behind.
+    const html =
+      typeof source?.currentContent === "string"
+        ? source.currentContent
+        : (file.content ?? "");
 
     // ── Resolve node ─────────────────────────────────────────────────────────
     const codeLayerSource: CodeLayerSource = {
@@ -406,7 +433,7 @@ export default defineAction({
     const shouldPersist = changed || patchedContent !== (file.content ?? "");
 
     if (shouldPersist) {
-      await persistEdit({
+      const updatedAt = await persistEdit({
         id: file.id,
         designId: file.designId,
         content: patchedContent,
@@ -418,6 +445,22 @@ export default defineAction({
         editingFile: file.filename,
         designId: file.designId,
       });
+      return {
+        designId,
+        nodeId,
+        componentName,
+        sourceType,
+        editKind: edit.kind,
+        persisted: shouldPersist,
+        ctaRequired: false,
+        fileId: file.id,
+        filename: file.filename,
+        updatedAt,
+        content: patchedContent,
+        bytesBefore: html.length,
+        bytesAfter: patchedContent.length,
+        note: "Edit applied and persisted via the deterministic HTML-patch path.",
+      };
     }
 
     return {

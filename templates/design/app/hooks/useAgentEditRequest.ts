@@ -1,6 +1,8 @@
-import { sendToAgentChat, useT } from "@agent-native/core/client";
+import { useT } from "@agent-native/core/client";
 import { useCallback } from "react";
 import { toast } from "sonner";
+
+import { sendToDesignAgentChat } from "@/lib/agent-chat";
 
 export interface AgentEditRequestArgs {
   /** Freeform user message describing the edit to make. */
@@ -24,7 +26,7 @@ export interface AgentEditRequestArgs {
  * same pattern used by the tweaks panel (DesignEditor.tsx ~5293) and the
  * extensions panel context builder (DesignExtensionsPanel.tsx ~120-131).
  */
-function buildEditContext(args: AgentEditRequestArgs): string {
+export function buildEditContext(args: AgentEditRequestArgs): string {
   const lines: string[] = [];
 
   if (args.designId) {
@@ -75,7 +77,7 @@ function buildEditContext(args: AgentEditRequestArgs): string {
  * Builds the full pasteable prompt string (visible message + context block)
  * for use in the "Copy prompt" flow.
  */
-function buildFullPrompt(args: AgentEditRequestArgs): string {
+export function buildFullPrompt(args: AgentEditRequestArgs): string {
   const context = buildEditContext(args);
   return `${args.message}\n\n---\n${context}`;
 }
@@ -95,8 +97,8 @@ export interface UseAgentEditRequestReturn {
 
 /**
  * Shared hook for routing AI edit requests from the inspector and the
- * local-source banner. Reuses sendToAgentChat from @agent-native/core/client
- * and the clipboard+toast pattern established in DesignEditor.tsx.
+ * local-source banner. Reuses the Design-local chat bridge and the
+ * clipboard+toast pattern established in DesignEditor.tsx.
  */
 export function useAgentEditRequest(): UseAgentEditRequestReturn {
   const t = useT();
@@ -104,7 +106,7 @@ export function useAgentEditRequest(): UseAgentEditRequestReturn {
   const sendEdit = useCallback(
     async (args: AgentEditRequestArgs): Promise<void> => {
       const context = buildEditContext(args);
-      sendToAgentChat({
+      sendToDesignAgentChat({
         message: args.message,
         context,
         submit: true,

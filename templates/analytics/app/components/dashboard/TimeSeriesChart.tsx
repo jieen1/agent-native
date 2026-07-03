@@ -12,6 +12,11 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate as formatDateLocale } from "locale-kit/format";
+import {
+  chartAxisStroke,
+  chartGridStroke,
+  chartTooltipContentStyle,
+} from "@/lib/chart-theme";
 
 interface TimeSeriesChartProps {
   title: string;
@@ -76,14 +81,14 @@ export function TimeSeriesChart({
                 </defs>
                 <XAxis
                   dataKey={xKey}
-                  stroke="#52525b"
+                  stroke={chartAxisStroke}
                   fontSize={12}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={formatXLabel}
                 />
                 <YAxis
-                  stroke="#52525b"
+                  stroke={chartAxisStroke}
                   fontSize={12}
                   tickLine={false}
                   axisLine={false}
@@ -91,16 +96,11 @@ export function TimeSeriesChart({
                 />
                 <CartesianGrid
                   strokeDasharray="3 3"
-                  stroke="#27272a"
+                  stroke={chartGridStroke}
                   vertical={false}
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#09090b",
-                    border: "1px solid #27272a",
-                    borderRadius: "8px",
-                    color: "#fafafa",
-                  }}
+                  contentStyle={chartTooltipContentStyle}
                   labelFormatter={formatXLabel}
                 />
                 <Area

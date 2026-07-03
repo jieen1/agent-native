@@ -139,6 +139,10 @@ export interface DesignColorPickerProps {
   onChange: (value: string) => void;
   onPaintValueChange?: (value: string) => void;
   onImageFillChange?: (value: ImageFillValue) => void;
+  backgroundImage?: string;
+  backgroundSize?: string;
+  backgroundRepeat?: string;
+  backgroundPosition?: string;
   label?: string;
   opacity?: number;
   onOpacityChange?: (opacity: number) => void;
@@ -684,6 +688,10 @@ export function DesignColorPicker({
   onChange,
   onPaintValueChange,
   onImageFillChange,
+  backgroundImage,
+  backgroundSize,
+  backgroundRepeat,
+  backgroundPosition,
   label: _label,
   opacity,
   onOpacityChange,
@@ -723,9 +731,31 @@ export function DesignColorPicker({
   )
     ? blendMode
     : "normal";
+  const parsedImageFill = useMemo(
+    () =>
+      backgroundImage !== undefined ||
+      backgroundSize !== undefined ||
+      backgroundRepeat !== undefined ||
+      backgroundPosition !== undefined
+        ? parseImageFillCss({
+            backgroundImage: backgroundImage ?? value,
+            backgroundSize,
+            backgroundRepeat,
+            backgroundPosition,
+          })
+        : parseImageFillCss(value),
+    [
+      backgroundImage,
+      backgroundPosition,
+      backgroundRepeat,
+      backgroundSize,
+      value,
+    ],
+  );
 
   const [mode, setMode] = useState<DesignColorMode>("hex");
   const [hexDraft, setHexDraft] = useState(() => toDisplayHex(color));
+  const hexDraftRef = useRef(hexDraft);
   const [open, setOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const skipNextHexBlurCommitRef = useRef(false);
@@ -748,10 +778,9 @@ export function DesignColorPicker({
     null,
   );
   const [selectedStopId, setSelectedStopId] = useState<string>("");
-  const [imageFill, setImageFill] = useState<ImageFillValue>({
-    url: "",
-    fit: "fill",
-  });
+  const [imageFill, setImageFill] = useState<ImageFillValue>(
+    () => parsedImageFill ?? { url: "", fit: "fill" },
+  );
   const [shaderDescriptor, setShaderDescriptor] =
     useState<ShaderDescriptor | null>(null);
 
@@ -786,7 +815,9 @@ export function DesignColorPicker({
     : null;
 
   useEffect(() => {
-    setHexDraft(toDisplayHex(color));
+    const nextHex = toDisplayHex(color);
+    hexDraftRef.current = nextHex;
+    setHexDraft(nextHex);
   }, [color.r, color.g, color.b]);
 
   // The local override (the user's explicit paint-type click) persists for the
@@ -796,16 +827,14 @@ export function DesignColorPicker({
 
   // Keep image-fill state synced when the incoming value is an image fill.
   useEffect(() => {
-    if (effectivePaintType !== "image") return;
-    const parsed = parseImageFillCss(value);
-    if (
-      parsed &&
-      (parsed.url !== imageFill.url || parsed.fit !== imageFill.fit)
-    ) {
-      setImageFill(parsed);
-    }
+    if (!parsedImageFill) return;
+    setImageFill((current) =>
+      current.url === parsedImageFill.url && current.fit === parsedImageFill.fit
+        ? current
+        : parsedImageFill,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, effectivePaintType]);
+  }, [parsedImageFill?.url, parsedImageFill?.fit]);
 
   // Ensure a selected stop id exists whenever a gradient is active.
   useEffect(() => {
@@ -837,17 +866,20 @@ export function DesignColorPicker({
   };
 
   const commitHex = () => {
-    const parsed = parseCssColor(`#${hexDraft.replace(/^#/, "")}`);
+    const currentDraft = hexDraftRef.current;
+    const parsed = parseCssColor(`#${currentDraft.replace(/^#/, "")}`);
     if (!parsed) {
-      setHexDraft(toDisplayHex(activeGradient ? fieldColor : color));
+      const reverted = toDisplayHex(activeGradient ? fieldColor : color);
+      hexDraftRef.current = reverted;
+      setHexDraft(reverted);
       return;
     }
     if (activeGradient) {
-      const hexIncludesAlpha = hasHexAlpha(hexDraft);
+      const hexIncludesAlpha = hasHexAlpha(currentDraft);
       emitStopColor(hexIncludesAlpha ? parsed : { ...parsed, a: fieldColor.a });
       return;
     }
-    const hexIncludesAlpha = hasHexAlpha(hexDraft);
+    const hexIncludesAlpha = hasHexAlpha(currentDraft);
     const nextOpacity = hexIncludesAlpha
       ? alphaToOpacity(parsed.a)
       : effectiveOpacity;
@@ -987,11 +1019,14 @@ export function DesignColorPicker({
       return;
     }
     if (nextType === "image") {
-      if (onImageFillChange && imageFill.url) {
-        onImageFillChange(imageFill);
+      const nextImageFill = parsedImageFill ?? imageFill;
+      if (onImageFillChange && nextImageFill.url) {
+        onImageFillChange(nextImageFill);
         return;
       }
-      emitPaintValue(imageFill.url ? imageFillToCss(imageFill) : "transparent");
+      emitPaintValue(
+        nextImageFill.url ? imageFillToCss(nextImageFill) : "transparent",
+      );
       return;
     }
     if (nextType === "video") {
@@ -1050,8 +1085,11 @@ export function DesignColorPicker({
           disabled={disabled}
           aria-label={copy.hex}
           spellCheck={false}
-          className="h-6 min-w-0 rounded-md border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] px-2 text-[11px] tabular-nums uppercase"
-          onChange={(e) => setHexDraft(e.target.value)}
+          className="h-6 min-w-0 rounded-md border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] px-2 !text-[11px] tabular-nums uppercase md:!text-[11px]"
+          onChange={(e) => {
+            hexDraftRef.current = e.target.value;
+            setHexDraft(e.target.value);
+          }}
           onFocus={(e) => e.target.select()}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -1061,7 +1099,9 @@ export function DesignColorPicker({
               e.currentTarget.blur();
             }
             if (e.key === "Escape") {
-              setHexDraft(toDisplayHex(color));
+              const reverted = toDisplayHex(color);
+              hexDraftRef.current = reverted;
+              setHexDraft(reverted);
               skipNextHexBlurCommitRef.current = true;
               e.currentTarget.blur();
             }
@@ -1166,7 +1206,7 @@ export function DesignColorPicker({
             disabled={disabled}
             aria-label={copy.trigger}
             className={cn(
-              "flex h-6 w-full items-center gap-1.5 rounded-md border border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] px-2 text-[11px] shadow-none",
+              "flex h-6 w-full items-center gap-1.5 rounded-md border border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] px-2 !text-[11px] shadow-none",
               "hover:bg-[var(--design-editor-panel-raised-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               disabled && "pointer-events-none opacity-50",
             )}
@@ -1176,10 +1216,10 @@ export function DesignColorPicker({
               className="size-4 shrink-0 rounded-[3px] border border-border/60"
               style={triggerSwatchStyle(value, color)}
             />
-            <span className="min-w-0 flex-1 truncate text-left tabular-nums uppercase text-[11px]">
+            <span className="min-w-0 flex-1 truncate text-left tabular-nums uppercase !text-[11px]">
               {triggerLabel(effectivePaintType, color)}
             </span>
-            <span className="tabular-nums text-muted-foreground text-[11px]">
+            <span className="tabular-nums text-muted-foreground !text-[11px]">
               {effectiveOpacity}%
             </span>
           </button>
@@ -1322,7 +1362,7 @@ export function DesignColorPicker({
                       placeholder={"Video URL (mp4, webm)" /* i18n-ignore */}
                       aria-label={"Video URL" /* i18n-ignore */}
                       spellCheck={false}
-                      className="h-6 w-full rounded-md border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] px-2 text-[11px]"
+                      className="h-6 w-full rounded-md border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] px-2 !text-[11px] md:!text-[11px]"
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
@@ -1525,7 +1565,7 @@ export function DesignColorPicker({
                               setOpacity(next);
                             }
                           }}
-                          className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent px-1 text-[11px] tabular-nums shadow-none focus-visible:ring-0"
+                          className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent px-1 !text-[11px] tabular-nums shadow-none focus-visible:ring-0"
                           compact
                         />
                         <span className="flex w-4 shrink-0 items-center justify-center border-l border-border/60 text-[10px] text-muted-foreground">
@@ -1539,7 +1579,7 @@ export function DesignColorPicker({
                 {showBlendMode && onBlendModeChange && (
                   <div className="border-t border-border/70 px-3 py-2.5">
                     <div className="flex items-center gap-1.5">
-                      <span className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+                      <span className="min-w-0 flex-1 !text-[11px] text-muted-foreground">
                         {copy.blendMode}
                       </span>
                       <Select
@@ -1549,7 +1589,7 @@ export function DesignColorPicker({
                       >
                         <SelectTrigger
                           aria-label={copy.blendMode}
-                          className="h-6 min-w-0 flex-1 rounded-md border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] px-1.5 text-[11px] shadow-none focus:ring-1 focus:ring-[var(--design-editor-accent-color)]"
+                          className="h-6 min-w-0 flex-1 rounded-md border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] px-1.5 !text-[11px] shadow-none focus:ring-1 focus:ring-[var(--design-editor-accent-color)]"
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -1558,7 +1598,7 @@ export function DesignColorPicker({
                             <SelectItem
                               key={option.value}
                               value={option.value}
-                              className="text-[11px]"
+                              className="!text-[11px]"
                             >
                               {option.label}
                             </SelectItem>
@@ -1576,7 +1616,7 @@ export function DesignColorPicker({
                     section is never empty. */}
                 <div className="border-t border-border/70 px-3 py-2.5">
                   {/* Source label — matches the design editor layout */}
-                  <div className="mb-2 flex h-6 w-full items-center justify-between px-0.5 text-[11px] text-muted-foreground">
+                  <div className="mb-2 flex h-6 w-full items-center justify-between px-0.5 !text-[11px] text-muted-foreground">
                     {"Document colors" /* i18n-ignore design picker source */}
                   </div>
 
@@ -1678,7 +1718,7 @@ function ColorModelPill({
         onClick={() => setMenuOpen((o) => !o)}
         className={cn(
           "flex h-6 w-[4.5rem] items-center gap-0.5 rounded px-1.5",
-          "text-[11px] font-semibold text-foreground",
+          "!text-[11px] font-semibold text-foreground",
           "bg-transparent border-0 shadow-none",
           "hover:bg-[var(--design-editor-control-bg)]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -1711,7 +1751,7 @@ function ColorModelPill({
                 setMenuOpen(false);
               }}
               className={cn(
-                "flex w-full items-center px-2 py-1 text-[11px]",
+                "flex w-full items-center px-2 py-1 !text-[11px]",
                 "hover:bg-accent hover:text-accent-foreground",
                 "focus-visible:outline-none focus-visible:bg-accent",
                 m.value === value
@@ -1949,16 +1989,21 @@ function ScrubbyNumberInput({
   compact?: boolean;
 }) {
   const [draft, setDraft] = useState<string>(() => String(value));
+  const draftRef = useRef(draft);
   const skipBlurRef = useRef(false);
 
   useEffect(() => {
-    setDraft(String(value));
+    const nextDraft = String(value);
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
   }, [value]);
 
   const commit = () => {
-    const parsed = Number(draft);
+    const parsed = Number(draftRef.current);
     if (!Number.isFinite(parsed)) {
-      setDraft(String(value));
+      const reverted = String(value);
+      draftRef.current = reverted;
+      setDraft(reverted);
       return;
     }
     onChange(clamp(parsed, min, max));
@@ -1973,12 +2018,15 @@ function ScrubbyNumberInput({
       max={max}
       disabled={disabled}
       className={cn(
-        "h-6 w-full rounded-md border border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] text-center text-[11px] tabular-nums",
+        "h-6 w-full rounded-md border border-[var(--design-editor-control-border)] bg-[var(--design-editor-control-bg)] text-center !text-[11px] tabular-nums",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         compact && "border-0 shadow-none focus-visible:ring-0",
         className,
       )}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => {
+        draftRef.current = e.target.value;
+        setDraft(e.target.value);
+      }}
       onFocus={(e) => e.target.select()}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
@@ -1988,21 +2036,23 @@ function ScrubbyNumberInput({
           e.currentTarget.blur();
         }
         if (e.key === "Escape") {
-          setDraft(String(value));
+          const reverted = String(value);
+          draftRef.current = reverted;
+          setDraft(reverted);
           skipBlurRef.current = true;
           e.currentTarget.blur();
         }
         if (e.key === "ArrowUp") {
           e.preventDefault();
           const step = e.shiftKey ? 10 : 1;
-          const parsed = Number(draft);
+          const parsed = Number(draftRef.current);
           const base = Number.isFinite(parsed) ? parsed : value;
           onChange(clamp(base + step, min, max));
         }
         if (e.key === "ArrowDown") {
           e.preventDefault();
           const step = e.shiftKey ? 10 : 1;
-          const parsed = Number(draft);
+          const parsed = Number(draftRef.current);
           const base = Number.isFinite(parsed) ? parsed : value;
           onChange(clamp(base - step, min, max));
         }

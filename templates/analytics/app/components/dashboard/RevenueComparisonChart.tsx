@@ -18,6 +18,7 @@ import {
   formatCurrency as formatCurrencyLocale,
   formatDate as formatDateLocale,
 } from "locale-kit/format";
+import { chartAxisStroke, chartGridStroke } from "@/lib/chart-theme";
 
 interface RevenueComparisonChartProps {
   title: string;
@@ -46,7 +47,7 @@ const formatDate = (value: string) => {
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border border-border bg-[#09090b] px-3 py-2 text-xs text-foreground shadow-lg">
+    <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
       <p className="mb-1 font-medium">{formatDate(label)}</p>
       {payload.map((entry: any) => (
         <p
@@ -98,19 +99,19 @@ export function RevenueComparisonChart({
               <ComposedChart data={chartData}>
                 <CartesianGrid
                   strokeDasharray="3 3"
-                  stroke="#27272a"
+                  stroke={chartGridStroke}
                   vertical={false}
                 />
                 <XAxis
                   dataKey="day"
-                  stroke="#52525b"
+                  stroke={chartAxisStroke}
                   fontSize={12}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={formatDate}
                 />
                 <YAxis
-                  stroke="#52525b"
+                  stroke={chartAxisStroke}
                   fontSize={12}
                   tickLine={false}
                   axisLine={false}
@@ -120,7 +121,7 @@ export function RevenueComparisonChart({
                     return `$${v}`;
                   }}
                 />
-                <ReferenceLine y={0} stroke="#52525b" strokeWidth={1} />
+                <ReferenceLine y={0} stroke={chartAxisStroke} strokeWidth={1} />
                 <Tooltip content={<CustomTooltip />} />
                 <Legend
                   wrapperStyle={{ fontSize: "12px", paddingTop: "8px" }}

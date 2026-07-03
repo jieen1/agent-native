@@ -191,6 +191,10 @@
   overflow: visible;
 }
 
+.analytics-chat-panel .agent-composer-area--hero {
+  padding-inline: 1rem;
+}
+
 .analytics-chat-panel [data-agent-empty-state="centered"] .agent-composer-area {
   width: 100%;
   max-width: min(760px, 90%);
@@ -464,6 +468,10 @@
   container: analytics-session-detail / inline-size;
 }
 
+.analytics-session-detail-timeline {
+  display: none;
+}
+
 @container analytics-session-detail (min-width: 760px) {
   .analytics-session-detail-header {
     flex-direction: row;
@@ -475,6 +483,10 @@
 @container analytics-session-detail (min-width: 1040px) {
   .analytics-session-detail-workbench {
     grid-template-columns: minmax(0, 1fr) 330px;
+  }
+
+  .analytics-session-detail-timeline {
+    display: flex;
   }
 }
 

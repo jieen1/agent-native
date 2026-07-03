@@ -322,19 +322,25 @@ iteration, or a human-in-the-loop choice among design directions.
 
 - Use \`create-design\` first to create a project shell. Do not report the
   design as ready until it has renderable HTML.
-- For open-ended UX exploration, generate distinct, complete HTML directions
-  (2-5, three by default) and call \`present-design-variants\`. Design saves
-  every option as a normal screen on the overview board and renders an inline
-  chat choice with one button per screen name. After the user picks, delete the
-  unchosen variant screens and continue from the kept screen.
+- For open-ended UX exploration, generate distinct, compact, complete HTML
+  directions (2-5, three by default) and call \`present-design-variants\`. Each
+  direction should be one representative screen or directional snapshot, not a
+  full app per variant. Design saves every option as a normal screen on the
+  overview board and renders an inline chat choice with one button per screen
+  name. After the user picks, delete the unchosen variant screens and continue
+  from the kept screen by first calling \`get-design-snapshot\` with that
+  screen's \`fileId\`, then calling \`edit-design\` on that same \`fileId\` in a
+  bounded single-file pass. Use \`mode: "replace-file"\` when expanding the
+  representative placeholder into the full chosen direction. Do not call
+  \`generate-design\` after a variant pick.
 - If the chat choice buttons are not available in the host, ask the user to
   tell you the screen name they prefer. The variants are already real screens
   on the board, so do not ask them to paste HTML or copy a generated handoff
   summary.
 - For direct refinements to an already chosen direction, call
   \`get-design-snapshot\`, edit from the current tuned HTML, and use
-  \`edit-design\` for surgical changes. Use \`generate-design\` for new files
-  or larger structural rewrites.
+  \`edit-design\` for surgical changes or \`mode: "replace-file"\` for a bounded
+  selected-file replacement. Use \`generate-design\` for new files only.
 - Use \`export-coding-handoff\` when the user wants to implement the chosen
   design in a codebase.
 
@@ -343,25 +349,42 @@ iteration, or a human-in-the-loop choice among design directions.
 1. Default to three variants unless the user asks for a different count
    (\`present-design-variants\` accepts 2-5; three is the sweet spot).
 2. Make variants structurally and stylistically distinct, not just color swaps.
-3. Each variant must be a complete standalone HTML document that renders
-   without a build step.
+3. Each variant must be a compact, complete standalone HTML document that
+   renders without a build step.
 4. For product UI redesigns, prefer cleaner hierarchy, progressive disclosure,
    and realistic controls over decorative mockups.
 5. After \`present-design-variants\`, wait for the user's pick before
    generating the next version. Keep the chosen screen, delete the other
-   variant screens, then refine that direction with \`generate-design\` or
-   \`edit-design\`.
+   variant screens, call \`get-design-snapshot\` with \`fileId\` for the kept
+   screen, then call \`edit-design\` on that same \`fileId\` in a bounded pass.
+   Use \`mode: "replace-file"\` when expanding the representative placeholder
+   into the full chosen direction. Do not call \`generate-design\` after a
+   variant pick. Stop after the first successful \`edit-design\` save.
 
 ## Design Quality Bar
+
+Generic "AI slop" comes from letting one prompt set taste, explore, and emit code
+at once — so the model returns the training-average (Inter, an indigo/violet
+gradient, a centered hero, three rounded cards). The variant flow above exists to
+separate those jobs; use it, and hold this bar:
 
 - Before generating, name the concrete audience, the screen's primary job, and
   the visual thesis. If the brief is vague, make a reasonable choice and state
   it instead of producing a generic dashboard/landing-page default.
-- For existing products, inspect the current screen, design system, tokens,
-  component language, or codebase context before inventing a new direction.
+- Refuse the defaults, and pair every "don't" with a "do" (banning Inter alone
+  just makes you reach for Roboto). Avoid Inter/Roboto/system fonts, the
+  indigo/violet slop palette (\`#6366F1\`/\`#8B5CF6\`/\`#A855F7\`) and purple-on-white
+  gradients, and centered-hero + three-icon-card layouts; instead pick a
+  distinctive font pairing, one non-default palette family with a single decisive
+  accent, and an asymmetric layout with a clear focal point.
 - Make each direction distinct in structure and behavior, not just palette.
   Give every variant one memorable signature choice, then keep the surrounding
-  chrome disciplined.
+  chrome disciplined. Even your creative picks converge (Space Grotesk
+  everywhere) — vary deliberately so two directions never share a fingerprint.
+- For existing products, inspect the current screen, design system, tokens, and
+  component language before inventing a new direction. Treat any drift back to a
+  default as a missing token to pin, and vary layout per screen so on-brand does
+  not become same-in-your-colors.
 - Treat copy, data, and imagery as design material. Use realistic domain
   content and first-party/generated assets when images matter; avoid lorem
   ipsum, vague SaaS filler, and decorative placeholder boxes.
@@ -449,6 +472,10 @@ iframe-backed screens on the infinite canvas.
 - The \`/visual-edit\` entry route can open before the viewer signs in. Public
   \`/design/:id\` editor links can also render read-only public designs without a
   session.
+- Prefer links returned by Design actions or \`/_agent-native/open\` deep links.
+  Do not surface URLs with \`_session=\` tokens. Query sessions are only a
+  fallback after normal cookie resolution, so an existing browser session can
+  still open the design as a different user and show "Design not found".
 - Do not attempt anonymous write actions. Bridge registration, design creation,
   screen placement, generation, saving, and sharing are account-backed. If a
   signed-out visitor wants to save or share, send them through the framework
@@ -460,41 +487,53 @@ iframe-backed screens on the infinite canvas.
 From the target app repo, make sure its dev server is running, then run:
 
 \`\`\`bash
-npx @agent-native/core@latest design connect --url http://localhost:5173 --root .
+npx @agent-native/core@latest design connect --url http://localhost:5173 --root . --daemon
 \`\`\`
 
-Use the app's real port. The command starts a local bridge on
-\`http://127.0.0.1:7331\` by default and exposes \`/manifest.json\`,
-\`/routes.json\`, and \`/health\`.
+Use the app's real port. The command starts a detached local bridge on
+\`http://127.0.0.1:7331\` by default, waits for \`/health\`, prints the
+manifest JSON, and keeps the bridge alive after the agent command exits.
 
-For one-shot agent setup, ask for JSON and keep the long-running bridge open in
-a second terminal if the user needs live updates:
+For a manual health/manifest check:
 
 \`\`\`bash
-npx @agent-native/core@latest design connect --url http://localhost:5173 --root . --json
+curl http://127.0.0.1:7331/manifest.json
 \`\`\`
+
+Do not use \`--json\` for an editable session. \`--json\`, \`--once\`, and
+\`--dry-run\` print the manifest and exit, so Design will fall back to a
+non-editable live iframe as soon as it tries to refresh the snapshot.
 
 ## Action Flow
 
-1. Register or refresh the bridge with \`connect-localhost\`, passing the
-   \`/manifest.json\` result as \`routeManifest\` and \`capabilities\`.
-2. Create or reuse a Design project with \`create-design\`.
-3. Place URL-backed screens with \`add-localhost-screens\`:
+Prefer the single authenticated \`open-visual-edit\` action. It registers or
+refreshes the localhost bridge, creates or reuses a Design project, places
+URL-backed screens, stores the active visual-edit context, and navigates to
+overview mode in one call. This avoids creating a private design under a
+synthetic CLI user and then handing the browser a tokenized URL that may be
+shadowed by an existing session.
 
 \`\`\`bash
-pnpm action add-localhost-screens '{
-  "designId": "<design-id>",
-  "connectionId": "<connection-id>",
+pnpm action open-visual-edit '{
+  "title": "Docs homepage visual edit",
+  "devServerUrl": "http://localhost:5173",
+  "bridgeUrl": "http://127.0.0.1:7331",
+  "rootPath": "/absolute/path/to/app",
+  "routeManifest": { "...": "from /manifest.json" },
   "paths": ["/", "/pricing", "/checkout?step=payment"]
 }'
 \`\`\`
 
+The action returns \`designId\`, \`connectionId\`, \`screens\`, \`urlPath\`, and
+\`openUrl\`. Keep those IDs in the chat context for follow-ups.
+
 For a numbered flow the user describes in chat, keep the labels and order:
 
 \`\`\`bash
-pnpm action add-localhost-screens '{
-  "designId": "<design-id>",
-  "connectionId": "<connection-id>",
+pnpm action open-visual-edit '{
+  "designId": "<existing-design-id>",
+  "connectionId": "<existing-connection-id>",
+  "devServerUrl": "http://localhost:1234",
   "routes": [
     { "url": "localhost:1234/onboarding/1", "title": "Screen 1" },
     { "url": "localhost:1234/onboarding/2", "title": "Screen 2" },
@@ -503,14 +542,32 @@ pnpm action add-localhost-screens '{
 }'
 \`\`\`
 
-If no \`routes\` or \`paths\` are supplied, \`add-localhost-screens\` uses every
-route from the latest localhost manifest.
-
-4. Navigate to overview mode:
+For responsive follow-ups, call \`open-visual-edit\` again with the same
+\`designId\` and \`connectionId\`, plus explicit viewport dimensions:
 
 \`\`\`bash
-pnpm action navigate --view editor --designId "<design-id>" --editorView overview
+pnpm action open-visual-edit '{
+  "designId": "<existing-design-id>",
+  "connectionId": "<existing-connection-id>",
+  "devServerUrl": "http://localhost:5173",
+  "paths": ["/"],
+  "defaultWidth": 390,
+  "defaultHeight": 844,
+  "startX": 1600,
+  "startY": 0
+}'
 \`\`\`
+
+If no \`routes\` or \`paths\` are supplied, \`open-visual-edit\` uses every route
+from the localhost manifest.
+
+Fallback, only when \`open-visual-edit\` is unavailable:
+
+1. Register or refresh the bridge with \`connect-localhost\`, passing the
+   \`/manifest.json\` result as \`routeManifest\` and \`capabilities\`.
+2. Create or reuse a Design project with \`create-design\`.
+3. Place URL-backed screens with \`add-localhost-screens\`.
+4. Navigate to overview mode with \`navigate\`.
 
 ## Open The Design Surface
 
@@ -518,6 +575,8 @@ pnpm action navigate --view editor --designId "<design-id>" --editorView overvie
   the user sees the canvas. In Codex Desktop or VS Code, prefer opening that
   Design URL in the available preview/webview panel; otherwise surface the
   "Open design" link.
+- Return or open the \`openUrl\` / action link, not a hand-built
+  \`/design/:id?_session=...\` URL.
 - If the user is working in VS Code, the Agent Native extension can open the
   same URL via
   \`vscode://builder.agent-native/open?url=<encoded-design-url>\`. Its
@@ -703,15 +762,13 @@ background, text, border, ring, fill, stroke, gradient, placeholder, decoration,
 or shadow color, rewrite it to renderer tokens or remove it. Layout-only classes
 are still discouraged; inline flex/grid styles are safer and easier to review.
 
-**Keep Rough.js sparse.** \`.wf-card\` and \`.wf-box\` already render with
-theme-safe filled backgrounds (\`--wf-card\`) and soft tokenized borders that work
-in both light and dark mode. Do not add \`data-rough\` to broad root wrappers,
-dialog shells, page panels, grid cells, or nested containers unless that single
-container is the visual point. The renderer sketches the outer frame and
-standard controls by default; use \`data-rough\` only for a deliberate one-off
-shape. If a mockup starts looking like stacked/overlapping sketch lines, remove
-rough targets from parent containers and let backgrounds plus spacing separate
-the surfaces.
+**Keep Rough.js sparse.** The renderer sketches the outer frame, standard
+\`.wf-*\` primitives, controls, and inline border dividers by default. Do not add
+\`data-rough\` to broad root wrappers, dialog shells, page panels, grid cells, or
+nested containers unless that single container is the visual point. Use
+\`data-rough\` only for a deliberate one-off shape. If a mockup starts looking
+like stacked/overlapping sketch lines, remove rough targets from parent
+containers and let backgrounds plus spacing separate the surfaces.
 
 **Use literal CSS lengths for spacing.** The \`--wf-*\` tokens are for colors and
 renderer-owned visual styling, not layout spacing. Do not use guessed spacing

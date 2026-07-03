@@ -7,6 +7,7 @@ import {
   ensureCodeLayerNodeIdsInHtml,
   moveNodeBetweenDocuments,
   removeCodeLayerNodeFromHtml,
+  stripEditorOnlyAttributes,
   type EditIntent,
 } from "./code-layer";
 
@@ -164,14 +165,12 @@ describe("code-layer projection", () => {
     const tree = buildCodeLayerTree(buildCodeLayerProjection(html));
     const mainNode = tree[0];
     expect(mainNode).toBeTruthy();
-    const navBar = mainNode?.children.find(
-      (child) => child.name === "Frame" || child.type === "component",
-    );
-    // The NavBar-annotated div must be classified as "component".
+    // The NavBar-annotated div must use the component name and classification.
     const componentChild = mainNode?.children.find(
       (child) => child.type === "component",
     );
     expect(componentChild).toBeTruthy();
+    expect(componentChild?.name).toBe("NavBar");
   });
 
   it("builds a design-editor DOM layer tree from projection parentage", () => {
@@ -205,6 +204,81 @@ describe("code-layer projection", () => {
         type: "text",
       }),
     );
+  });
+
+  it("classifies canvas primitives by their data-an-primitive kind marker", () => {
+    // Canvas primitives (drawn shapes / board objects) are <div>s, which would
+    // otherwise classify as "element" (code glyph). The kind marker makes a
+    // rectangle render with a rectangle icon, text with a text icon, etc.
+    const html = `
+      <div data-agent-native-node-id="r1" data-an-primitive="rectangle" style="position:absolute;width:80px;height:40px;background:#2563eb"></div>
+      <div data-agent-native-node-id="t1" data-an-primitive="text" style="position:absolute">Label</div>
+      <div data-agent-native-node-id="f1" data-an-primitive="frame" style="position:absolute;width:120px;height:80px"></div>
+      <div data-agent-native-node-id="e1" data-an-primitive="ellipse" style="position:absolute;width:60px;height:60px;border-radius:50%;background:#2563eb"></div>
+    `;
+    const tree = buildCodeLayerTree(buildCodeLayerProjection(html));
+    expect(tree.map((node) => node.type)).toEqual([
+      "shape",
+      "text",
+      "frame",
+      "ellipse",
+    ]);
+  });
+
+  it("classifies SVG-based vector primitives by their data-an-primitive kind marker", () => {
+    // Pen-tool vectors, lines, arrows, polygons, and stars are <svg>s. Without
+    // a distinct type they would fall through to "shape" and show a rectangle
+    // glyph. The kind marker gives each its own vector/line/arrow/polygon/star
+    // classification.
+    const html = `
+      <svg data-agent-native-node-id="p1" data-an-primitive="path" style="position:absolute"><path d="M 0 0 L 10 10"/></svg>
+      <svg data-agent-native-node-id="l1" data-an-primitive="line" style="position:absolute"><path d="M 0 5 L 100 5"/></svg>
+      <svg data-agent-native-node-id="a1" data-an-primitive="arrow" style="position:absolute"><path d="M 0 5 L 100 5" marker-end="url(#a)"/></svg>
+      <svg data-agent-native-node-id="g1" data-an-primitive="polygon" style="position:absolute"><polygon points="0,0 10,0 5,10"/></svg>
+      <svg data-agent-native-node-id="s1" data-an-primitive="star" style="position:absolute"><polygon points="0,0 2,2 4,0"/></svg>
+    `;
+    const tree = buildCodeLayerTree(buildCodeLayerProjection(html));
+    expect(tree.map((node) => node.type)).toEqual([
+      "vector",
+      "line",
+      "arrow",
+      "polygon",
+      "star",
+    ]);
+    // Each SVG primitive is a single leaf layer: its internal geometry
+    // (<path>/<polygon>) must not be projected as a child layer.
+    expect(tree.map((node) => node.children.length)).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it("does not project inline-SVG internals as child layers", () => {
+    const html = `
+      <div data-agent-native-node-id="logo" style="position:absolute">
+        <svg viewBox="0 0 24 24"><g><path d="M0 0h24v24H0z"/><circle cx="12" cy="12" r="6"/></g></svg>
+      </div>
+    `;
+    const tree = buildCodeLayerTree(buildCodeLayerProjection(html));
+    const container = tree[0];
+    const svg = container?.children.find((child) => child.tag === "svg");
+    expect(svg).toBeTruthy();
+    expect(svg?.children).toEqual([]);
+  });
+
+  it("classifies rectangle/rect data-an-primitive as a generic shape", () => {
+    const html = `
+      <div data-agent-native-node-id="r1" data-an-primitive="rectangle" style="position:absolute;width:80px;height:40px;background:#2563eb"></div>
+      <div data-agent-native-node-id="r2" data-an-primitive="rect" style="position:absolute;width:80px;height:40px;background:#2563eb"></div>
+    `;
+    const tree = buildCodeLayerTree(buildCodeLayerProjection(html));
+    expect(tree.map((node) => node.type)).toEqual(["shape", "shape"]);
+  });
+
+  it("classifies circle and oval data-an-primitive variants as ellipse", () => {
+    const html = `
+      <div data-agent-native-node-id="c1" data-an-primitive="circle" style="position:absolute;width:40px;height:40px;border-radius:50%"></div>
+      <div data-agent-native-node-id="o1" data-an-primitive="oval" style="position:absolute;width:80px;height:50px;border-radius:50%"></div>
+    `;
+    const tree = buildCodeLayerTree(buildCodeLayerProjection(html));
+    expect(tree.map((node) => node.type)).toEqual(["ellipse", "ellipse"]);
   });
 
   it("deduplicates malformed duplicate root ids in the layer tree", () => {
@@ -255,6 +329,13 @@ describe("code-layer projection", () => {
     ]);
     expect(JSON.stringify(tree)).not.toContain('"tag":"html"');
     expect(JSON.stringify(tree)).not.toContain('"tag":"body"');
+  });
+
+  it("omits empty unnamed document shell rows from the layer tree", () => {
+    const html = `<!doctype html><html><head></head><body></body></html>`;
+    const tree = buildCodeLayerTree(buildCodeLayerProjection(html));
+
+    expect(tree).toEqual([]);
   });
 
   it("keeps explicitly named document shell rows in the layer tree", () => {
@@ -1219,5 +1300,56 @@ describe("autoLayout (regression)", () => {
     // Child absolute positioning is also stripped
     expect(patch.content).not.toContain("position: absolute");
     expect(patch.content).not.toContain("left: 5px");
+  });
+});
+
+describe("stripEditorOnlyAttributes", () => {
+  it("removes data-agent-native-node-id from simple elements", () => {
+    const html = `<div data-agent-native-node-id="an-abc123" class="foo">hello</div>`;
+    const result = stripEditorOnlyAttributes(html);
+    expect(result).not.toContain("data-agent-native-node-id");
+    expect(result).toContain('class="foo"');
+    expect(result).toContain("hello");
+  });
+
+  it("removes data-agent-native-node-id with single-quoted value", () => {
+    const html = `<span data-agent-native-node-id='an-xyz' style="color:red">text</span>`;
+    const result = stripEditorOnlyAttributes(html);
+    expect(result).not.toContain("data-agent-native-node-id");
+    expect(result).toContain('style="color:red"');
+  });
+
+  it("strips the attribute from multiple elements", () => {
+    const html = [
+      `<div data-agent-native-node-id="an-1" id="a">`,
+      `  <p data-agent-native-node-id="an-2" class="text-sm">content</p>`,
+      `</div>`,
+    ].join("\n");
+    const result = stripEditorOnlyAttributes(html);
+    expect(result).not.toContain("data-agent-native-node-id");
+    expect(result).toContain('id="a"');
+    expect(result).toContain('class="text-sm"');
+  });
+
+  it("preserves data-agent-native-layer-name (developer-authored, not editor-only)", () => {
+    const html = `<div data-agent-native-node-id="an-abc" data-agent-native-layer-name="Card">body</div>`;
+    const result = stripEditorOnlyAttributes(html);
+    expect(result).not.toContain("data-agent-native-node-id");
+    expect(result).toContain('data-agent-native-layer-name="Card"');
+  });
+
+  it("is idempotent on already-clean source", () => {
+    const html = `<section class="p-4"><h1>Title</h1></section>`;
+    expect(stripEditorOnlyAttributes(html)).toBe(html);
+  });
+
+  it("handles empty string input", () => {
+    expect(stripEditorOnlyAttributes("")).toBe("");
+  });
+
+  it("does not corrupt adjacent attributes when removing the stamp", () => {
+    const html = `<button data-agent-native-node-id="an-z" type="button" class="btn">Click</button>`;
+    const result = stripEditorOnlyAttributes(html);
+    expect(result).toBe(`<button type="button" class="btn">Click</button>`);
   });
 });

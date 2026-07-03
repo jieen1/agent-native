@@ -6,31 +6,22 @@
  * 2. Persist the `motion_timeline` row (insert or update).
  * 3. Compile the tracks into deterministic CSS.
  * 4. Inject/replace the managed `<style data-agent-native-motion>` block inside
- *    the design's HTML content, using the same persist path as apply-visual-edit
- *    (Yjs/collab + SQL, via agentEnterDocument / applyText / seedFromText).
+ *    the design's durable HTML content.
  * 5. Update `compiledHash` on the row to guard against drift.
  * 6. Return a diff summary (bytes before/after, track count, hash).
  *
  * Never writes unless all steps succeed. Scrubbing/preview is handled by the
  * separate `motion-preview` postMessage path on the frontend — this action is
- * the deliberate "Write to CSS" commit step.
+ * the durable autosave/persist path for edited timelines.
  */
 
 import { defineAction } from "@agent-native/core";
 import {
-  agentEnterDocument,
-  agentLeaveDocument,
-  applyText,
-  getText,
-  hasCollabState,
-  seedFromText,
-} from "@agent-native/core/collab";
-import {
   getRequestOrgId,
   getRequestUserEmail,
 } from "@agent-native/core/server/request-context";
-import { accessFilter, assertAccess } from "@agent-native/core/sharing";
-import { and, eq } from "drizzle-orm";
+import { assertAccess } from "@agent-native/core/sharing";
+import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
@@ -40,6 +31,7 @@ import {
   assertSafeMotionCssProperty,
   assertSafeMotionCssToken,
   compile,
+  injectManagedMotionCss,
 } from "../shared/motion-compiler.js";
 import type { MotionTrack } from "../shared/motion-timeline.js";
 
@@ -78,62 +70,31 @@ const trackSchema = z.object({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const MOTION_STYLE_OPEN = "<style data-agent-native-motion>";
-const MOTION_STYLE_CLOSE = "</style>";
-
-/**
- * Bounded, case-insensitive matcher for any HTML `</style>` end tag
- * (`</style >`, `</STYLE>`, …). Used to locate the close of the managed block
- * without a naive `indexOf("</style>")` that would miss case/whitespace
- * variants — and to detect any `</style` sequence smuggled into compiled CSS.
- */
-const STYLE_CLOSE_RE = /<\s*\/\s*style\b[^>]*>/i;
-
-/**
- * Inject or replace the managed `<style data-agent-native-motion>` block in
- * the HTML content.  Inserts before `</head>` when not already present.
- */
-function injectMotionStyle(html: string, css: string): string {
-  const open = MOTION_STYLE_OPEN;
-  const close = MOTION_STYLE_CLOSE;
-  const openIdx = html.indexOf(open);
-
-  if (openIdx !== -1) {
-    // Find the matching closing tag after the open tag using a bounded regex
-    // (tolerates `</style >`, `</STYLE>`, etc.) instead of a literal indexOf.
-    const after = html.slice(openIdx + open.length);
-    const closeMatch = STYLE_CLOSE_RE.exec(after);
-    if (closeMatch) {
-      const closeIdx = openIdx + open.length + closeMatch.index;
-      // Replace the existing block.
-      return (
-        html.slice(0, openIdx) + open + "\n" + css + "\n" + html.slice(closeIdx)
-      );
-    }
-  }
-
-  // Not found — insert before </head> or, if there is no <head>, at the top.
-  const headClose = html.lastIndexOf("</head>");
-  const block = `${open}\n${css}\n${close}`;
-  if (headClose !== -1) {
-    return html.slice(0, headClose) + block + "\n" + html.slice(headClose);
-  }
-  return block + "\n" + html;
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
-async function liveFileContent(
-  fileId: string,
-  storedContent: string,
-): Promise<string> {
-  try {
-    if (await hasCollabState(fileId)) {
-      const live = await getText(fileId, "content");
-      if (typeof live === "string") return live;
-    }
-  } catch {
-    // Best-effort; SQL is the fallback.
-  }
-  return storedContent;
+export function resolveMotionTimelineInsertOwnership(args: {
+  requestUserEmail?: string | null;
+  requestOrgId?: string | null;
+  designOwnerEmail?: unknown;
+  designOrgId?: unknown;
+}): { ownerEmail: string; orgId: string | null } {
+  const ownerEmail =
+    nonEmptyString(args.requestUserEmail) ??
+    nonEmptyString(args.designOwnerEmail);
+
+  if (!ownerEmail) throw new Error("no authenticated user");
+
+  return {
+    ownerEmail,
+    orgId:
+      nonEmptyString(args.requestOrgId) ?? nonEmptyString(args.designOrgId),
+  };
+}
+
+export function canPatchManagedMotionCss(content: string): boolean {
+  return /<\s*(?:!doctype|[a-z][a-z0-9:-]*(?:\s|>|\/>))/i.test(content);
 }
 
 async function persistFileContent(
@@ -141,31 +102,25 @@ async function persistFileContent(
   designId: string,
   content: string,
   now: string,
-): Promise<void> {
+): Promise<string> {
   const db = getDb();
-  agentEnterDocument(fileId);
-  try {
-    await db
-      .update(schema.designFiles)
-      .set({ content, updatedAt: now })
-      .where(eq(schema.designFiles.id, fileId));
+  await db
+    .update(schema.designFiles)
+    .set({ content, updatedAt: now })
+    .where(eq(schema.designFiles.id, fileId));
 
-    if (await hasCollabState(fileId)) {
-      await applyText(fileId, content, "content", "agent");
-    } else {
-      await seedFromText(fileId, content);
-    }
+  // Keep SQL as the source of truth for this atomic write. The editor adopts
+  // the returned HTML content without re-saving it; applying the whole document
+  // through an existing collab text snapshot can merge against stale iframe
+  // state and duplicate the managed motion stylesheet.
+  // guard:allow-unscoped — editor access on this design is asserted in run()
+  // before this helper is invoked; this only bumps the addressed design row.
+  await db
+    .update(schema.designs)
+    .set({ updatedAt: now })
+    .where(eq(schema.designs.id, designId));
 
-    // guard:allow-unscoped — the action's run() asserts editor access via
-    // assertAccess("design", designId, "editor") before this helper is
-    // invoked; this only touches the addressed design row's updatedAt.
-    await db
-      .update(schema.designs)
-      .set({ updatedAt: now })
-      .where(eq(schema.designs.id, designId));
-  } finally {
-    agentLeaveDocument(fileId);
-  }
+  return now;
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -176,7 +131,7 @@ export default defineAction({
     "Persists the motion_timeline row, compiles tracks to CSS, injects the " +
     "managed <style data-agent-native-motion> block into the design's HTML, " +
     "and updates compiledHash — all in one atomic step. " +
-    "This is the 'Write to CSS' commit path; preview/scrubbing uses the " +
+    "This is the durable timeline persist path; preview/scrubbing uses the " +
     "motion-preview postMessage bridge, NOT this action.",
   schema: z.object({
     designId: z.string().describe("Design project ID."),
@@ -231,6 +186,14 @@ export default defineAction({
       .optional()
       .default(false)
       .describe("Include the full patched HTML in the response (large)."),
+    currentContent: z
+      .string()
+      .optional()
+      .describe(
+        "Current open editor HTML for the target file. When supplied, the " +
+          "managed motion CSS is patched into this content instead of the " +
+          "last SQL snapshot so in-flight local edits are preserved.",
+      ),
   }),
   run: async ({
     designId,
@@ -241,17 +204,15 @@ export default defineAction({
     durationMs,
     defaultEase,
     includeContent,
+    currentContent: currentContentInput,
   }) => {
-    await assertAccess("design", designId, "editor");
+    const access = await assertAccess("design", designId, "editor");
 
     const db = getDb();
     const now = new Date().toISOString();
 
     // ── 1. Resolve the target design file ──────────────────────────────────
-    const conditions = [
-      accessFilter(schema.designs, schema.designShares),
-      eq(schema.designFiles.designId, designId),
-    ];
+    const conditions = [eq(schema.designFiles.designId, designId)];
     if (fileIdInput) {
       conditions.push(eq(schema.designFiles.id, fileIdInput));
     } else {
@@ -282,7 +243,11 @@ export default defineAction({
     }
 
     const fileId = file.id;
-    const currentContent = await liveFileContent(fileId, file.content ?? "");
+    const resolvedSourceRef = sourceRef ?? fileId;
+    const currentContent =
+      currentContentInput !== undefined
+        ? currentContentInput
+        : (file.content ?? "");
 
     // ── 2. Compile tracks → CSS ─────────────────────────────────────────────
     const typedTracks = tracks as MotionTrack[];
@@ -304,7 +269,7 @@ export default defineAction({
     const { css, hash } = compile({
       id: timelineId ?? "",
       designId,
-      sourceRef: sourceRef ?? null,
+      sourceRef: resolvedSourceRef,
       filePath: null,
       tracks: typedTracks,
       durationMs,
@@ -315,7 +280,10 @@ export default defineAction({
     });
 
     // ── 3. Inject the managed CSS block into the HTML ───────────────────────
-    const patchedContent = injectMotionStyle(currentContent, css);
+    const contentPatched = canPatchManagedMotionCss(currentContent);
+    const patchedContent = contentPatched
+      ? injectManagedMotionCss(currentContent, css)
+      : currentContent;
     const bytesBefore = currentContent.length;
     const bytesAfter = patchedContent.length;
 
@@ -323,7 +291,7 @@ export default defineAction({
     // Resolve everything that can fail (existence + ownership) BEFORE touching
     // content, so we never persist HTML for a row that can't be written.
     const tracksJson = JSON.stringify(typedTracks);
-    const resolvedTimelineId = timelineId ?? nanoid();
+    let existingTimelineId = timelineId;
 
     let insertOwnerEmail: string | null = null;
     let insertOrgId: string | null = null;
@@ -347,21 +315,44 @@ export default defineAction({
         );
       }
     } else {
-      // Insert new row — derive ownership from the request context (same
-      // pattern as create-design-state and other create actions).
-      insertOwnerEmail = getRequestUserEmail() ?? null;
-      if (!insertOwnerEmail) throw new Error("no authenticated user");
-      insertOrgId = getRequestOrgId() ?? null;
+      const [existingForSource] = await db
+        .select({ id: schema.motionTimeline.id })
+        .from(schema.motionTimeline)
+        .where(
+          and(
+            eq(schema.motionTimeline.designId, designId),
+            eq(schema.motionTimeline.sourceRef, resolvedSourceRef),
+          ),
+        )
+        .orderBy(desc(schema.motionTimeline.updatedAt))
+        .limit(1);
+
+      if (existingForSource) {
+        existingTimelineId = existingForSource.id;
+      } else {
+        // Insert new row — derive ownership from the request context, falling
+        // back to the already-authorized design owner for local/public editor
+        // sessions that do not carry an authenticated request user.
+        const insertOwnership = resolveMotionTimelineInsertOwnership({
+          requestUserEmail: getRequestUserEmail(),
+          requestOrgId: getRequestOrgId(),
+          designOwnerEmail: (access.resource as { ownerEmail?: unknown })
+            .ownerEmail,
+          designOrgId: (access.resource as { orgId?: unknown }).orgId,
+        });
+        insertOwnerEmail = insertOwnership.ownerEmail;
+        insertOrgId = insertOwnership.orgId;
+      }
     }
+
+    const resolvedTimelineId = existingTimelineId ?? nanoid();
 
     // ── 5. Persist the motion_timeline row FIRST (atomic SQL portion) ───────
     // The timeline row is written before the HTML so that a failure in the
-    // HTML/collab write step cannot leave the design content mutated without a
-    // corresponding row.  The reverse (HTML first) was a false atomicity
-    // guarantee: if the row write failed after the HTML write, the managed
-    // <style> block would be permanently out of sync with the DB state.
+    // HTML write step cannot leave the design content mutated without a
+    // corresponding row.
     await db.transaction(async (tx) => {
-      if (timelineId) {
+      if (existingTimelineId) {
         await tx
           .update(schema.motionTimeline)
           .set({
@@ -369,15 +360,15 @@ export default defineAction({
             durationMs,
             defaultEase,
             compiledHash: hash,
-            sourceRef: sourceRef ?? null,
+            sourceRef: resolvedSourceRef,
             updatedAt: now,
           })
-          .where(eq(schema.motionTimeline.id, timelineId));
+          .where(eq(schema.motionTimeline.id, existingTimelineId));
       } else {
         await tx.insert(schema.motionTimeline).values({
           id: resolvedTimelineId,
           designId,
-          sourceRef: sourceRef ?? null,
+          sourceRef: resolvedSourceRef,
           filePath: null,
           tracks: tracksJson,
           durationMs,
@@ -391,22 +382,27 @@ export default defineAction({
       }
     });
 
-    // ── 6. Persist the patched HTML content SECOND (Yjs/collab + SQL) ───────
-    // Written after the row so a collab/SQL failure here leaves the timeline row
+    // ── 6. Persist the patched HTML content SECOND ─────────────────────────
+    // Written after the row so a SQL failure here leaves the timeline row
     // accurate (correct tracks + hash) and the stale HTML can be recompiled on
     // the next apply-motion-edit call via compiledHash drift detection.
-    await persistFileContent(fileId, designId, patchedContent, now);
+    const updatedAt = contentPatched
+      ? await persistFileContent(fileId, designId, patchedContent, now)
+      : now;
 
     return {
       timelineId: resolvedTimelineId,
       designId,
       fileId,
+      sourceRef: resolvedSourceRef,
       trackCount: typedTracks.length,
       compiledHash: hash,
+      updatedAt,
       bytesBefore,
       bytesAfter,
       bytesDelta: bytesAfter - bytesBefore,
       persisted: true,
+      contentPatched,
       patchedContent: includeContent ? patchedContent : undefined,
     };
   },
