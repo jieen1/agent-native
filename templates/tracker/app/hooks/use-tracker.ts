@@ -429,3 +429,29 @@ export function useRejectGate() {
     },
   });
 }
+
+// Epic decomposition hooks (M1-4).
+export function useEpicChildren(epicId: string) {
+  return useActionQuery(
+    "list-epic-children",
+    { epicId },
+    { enabled: !!epicId },
+  ) as {
+    data?: import("@shared/types").EpicChildrenResult;
+    isLoading: boolean;
+  };
+}
+
+export function useDecomposeEpic() {
+  const qc = useQueryClient();
+  return useActionMutation("decompose-epic", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-epic-children"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-tracker-activities"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "decompose-epic", "拆解失败"));
+    },
+  });
+}

@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { useCreateWorkItem, useProjects } from "@/hooks/use-tracker";
 import { toast } from "sonner";
 
-const TYPES = ["requirement", "task", "defect", "incident"] as const;
+const TYPES = ["requirement", "task", "defect", "incident", "epic"] as const;
 
 export function NewWorkItemDialog({
   children,

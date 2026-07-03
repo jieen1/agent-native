@@ -182,7 +182,7 @@ export function NewWorkItemPage() {
 
   // Type (single)
   const [type, setType] = useState<ItemType | string>("需求");
-  const TYPE_OPTIONS: ItemType[] = ["需求", "任务", "缺陷", "测试", "生产问题"];
+  const TYPE_OPTIONS: ItemType[] = ["需求", "任务", "缺陷", "测试", "生产问题", "集合"];
 
   // Priority (single)
   const [priorityLabel, setPriorityLabel] = useState("中");
@@ -236,7 +236,7 @@ export function NewWorkItemPage() {
       projectId,
       title: title.trim(),
       description: description.trim(),
-      type: type as "需求" | "任务" | "缺陷" | "测试" | "生产问题",
+      type: type as "需求" | "任务" | "缺陷" | "测试" | "生产问题" | "集合",
       priority: priorityMap(priorityLabel),
       risk,
       tags: natureTags,

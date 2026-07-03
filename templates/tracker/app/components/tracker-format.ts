@@ -79,6 +79,8 @@ const TYPE_CHIP: Record<string, string> = {
   defect: "bg-rose-500/10 text-rose-600 border-rose-500/25 dark:text-rose-400",
   incident:
     "bg-amber-500/10 text-amber-600 border-amber-500/25 dark:text-amber-400",
+  epic: "bg-indigo-500/10 text-indigo-600 border-indigo-500/25 dark:text-indigo-400",
+  集合: "bg-indigo-500/10 text-indigo-600 border-indigo-500/25 dark:text-indigo-400",
 };
 
 export function typeChip(type: string): string {

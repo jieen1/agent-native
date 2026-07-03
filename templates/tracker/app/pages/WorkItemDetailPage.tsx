@@ -15,6 +15,7 @@ import {
   useSprints,
   useTriggerStage,
   useRollbackStage,
+  useEpicChildren,
 } from "@/hooks/use-tracker";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,7 @@ import {
   IconMessageCircle,
   IconPlus,
   IconRocket,
+  IconSitemap,
   IconStack2,
   IconTag,
   IconTimeline,
@@ -462,6 +464,80 @@ function LinksPanel({ workItemId }: { workItemId: string }) {
             )}
           </Button>
         </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Epic children panel ─────────────────────────────────────────────────────
+
+function EpicChildrenPanel({ workItemId }: { workItemId: string }) {
+  const { data, isLoading } = useEpicChildren(workItemId);
+  const children = data?.children ?? [];
+  const dependencies = data?.dependencies ?? [];
+
+  const depsByChild = new Map<string, typeof dependencies>();
+  for (const dep of dependencies) {
+    const list = depsByChild.get(dep.fromId) ?? [];
+    list.push(dep);
+    depsByChild.set(dep.fromId, list);
+  }
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2">
+        <IconSitemap className="size-3.5 text-muted-foreground" />
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          子项{children.length > 0 ? ` (${children.length})` : ""}
+        </h2>
+      </div>
+      <div className="space-y-2">
+        {isLoading ? (
+          <div className="h-10 animate-pulse rounded-lg bg-muted/40" />
+        ) : children.length === 0 ? (
+          <p className="text-xs text-muted-foreground/60 py-1">
+            暂无子项，使用「拆解集合」将其拆分为子工作项。
+          </p>
+        ) : (
+          children.map((child) => {
+            const deps = depsByChild.get(child.id) ?? [];
+            const status = statusPresentation(child.status);
+            return (
+              <div
+                key={child.id}
+                className="rounded-lg border border-border bg-card/40 px-3 py-2"
+              >
+                <div className="flex items-center gap-2">
+                  <span className={cn("size-1.5 shrink-0 rounded-full", status.dot)} />
+                  <Link
+                    to={`/items/${child.id}`}
+                    className="shrink-0 text-xs font-medium hover:underline"
+                  >
+                    {child.itemKey || child.id}
+                  </Link>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {child.title}
+                  </span>
+                  <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                    {child.currentStageName || "待办"}
+                  </span>
+                </div>
+                {deps.length > 0 && (
+                  <div className="mt-1.5 space-y-0.5 pl-3.5">
+                    {deps.map((dep, i) => (
+                      <div
+                        key={i}
+                        className="text-[10px] text-orange-600 dark:text-orange-400"
+                      >
+                        {dep.fromLabel} ← blocked-by ← {dep.toLabel}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </section>
   );
@@ -1180,6 +1256,11 @@ export function WorkItemDetailPage() {
               )}
             </div>
           </section>
+
+          {/* Epic children (only for epic/集合 work items) */}
+          {(item.type === "epic" || item.type === "集合") && (
+            <EpicChildrenPanel workItemId={id} />
+          )}
 
           {/* Links */}
           <LinksPanel workItemId={id} />
