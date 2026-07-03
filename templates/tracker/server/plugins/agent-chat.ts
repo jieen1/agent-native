@@ -4,6 +4,13 @@ import {
 } from "@agent-native/core/server";
 import actionsRegistry from "../../.generated/actions-registry.js";
 import { getOrgContext } from "@agent-native/core/org";
+import { registerVllmEngine, getVllmEngine } from "../vllm-engine.js";
+
+// Register the local vLLM engine so the composer gate/model picker see it,
+// and pin a concrete instance so runs always hit vLLM (same recipe as the
+// chat and orchestrator templates). No-op without OPENAI_BASE_URL.
+registerVllmEngine();
+const vllmEngine = getVllmEngine();
 
 const TRACKER_SYSTEM_PROMPT = `## Tracker
 
@@ -46,6 +53,7 @@ const INITIAL_TOOL_NAMES = [
 
 export default createAgentChatPlugin({
   appId: "tracker",
+  engine: vllmEngine,
   systemPrompt: TRACKER_SYSTEM_PROMPT,
   leanPrompt: true,
   initialToolNames: INITIAL_TOOL_NAMES,
