@@ -124,7 +124,7 @@ export default defineAction({
     const message =
       `Work item ${item.id} (${project.key}) — "${item.title}".\n\n` +
       `Requirement:\n${requirement}\n\n` +
-      `Work in the checked-out workspace. Follow the orchestrating-v3 skill. Coding/development work MUST go through the local vLLM: analyze the requirement and the existing code yourself, then after workspaceCreate call workflowRun with template 'sdlc-dev' and inputs { spec, workspaceId } to hand the actual coding to the vLLM develop node. You (the brain) only analyze, review the resulting git diff, fix anything wrong, and commit — do NOT write the business code yourself. Monitor by polling, then workspaceCommitPush to open a PR. When done, report the run id and the PR url.`;
+      `Work in the checked-out workspace. Follow the orchestrating-v3 skill. Coding/development work DEFAULTS to the configurable development engine: analyze the requirement and the existing code yourself, then after workspaceCreate call workflowRun with template 'sdlc-dev' and inputs { spec, workspaceId, devEngine } to hand the actual coding to the develop node. The dev engine defaults to the local vLLM but is configurable — pass a devEngine when the item or project specifies one. You (the brain) analyze, review the resulting git diff, fix anything wrong, and commit — rather than writing the business code yourself. Monitor by polling, then workspaceCommitPush to open a PR. When done, report the run id and the PR url.`;
 
     // brain-send (additive `tags` param) instructs the brain to attach these
     // tags to every workflowRun/workspaceCreate/spawnOnce so the activity is
