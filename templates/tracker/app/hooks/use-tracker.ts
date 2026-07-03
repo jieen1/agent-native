@@ -353,3 +353,32 @@ export function useUpdateProject() {
     },
   });
 }
+
+// Sprint artifact hooks (M1-2).
+export function useSprintArtifacts(sprintId: string) {
+  return useActionQuery(
+    "list-sprint-artifacts",
+    { sprintId },
+    { enabled: !!sprintId },
+  ) as { data?: import("@shared/types").SprintArtifactsByDocKey; isLoading: boolean };
+}
+
+export function useSprintArtifact(id: string) {
+  return useActionQuery(
+    "get-sprint-artifact",
+    { id },
+    { enabled: !!id },
+  ) as { data?: import("@shared/types").SprintArtifact; isLoading: boolean };
+}
+
+export function useCreateSprintArtifact() {
+  const qc = useQueryClient();
+  return useActionMutation("create-sprint-artifact", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-sprint-artifacts"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "create-sprint-artifact", "创建产物失败"));
+    },
+  });
+}

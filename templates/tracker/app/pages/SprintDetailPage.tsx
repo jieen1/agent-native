@@ -1,13 +1,16 @@
+import { useState } from "react";
 import { useParams } from "react-router";
 import { Link } from "react-router";
-import { useSprint } from "@/hooks/use-tracker";
-import type { SprintDetail, TrackerWorkItem, Stage } from "@shared/types";
+import { useSprint, useSprintArtifacts } from "@/hooks/use-tracker";
+import type { SprintDetail, TrackerWorkItem, Stage, SprintArtifact } from "@shared/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   IconArrowLeft,
   IconCalendar,
+  IconFileText,
   IconGitBranch,
   IconPackage,
   IconPlus,
@@ -306,6 +309,152 @@ function SprintItemsCard({
   );
 }
 
+// ── Sprint Artifacts Section ──────────────────────────────────────────────────
+
+function ArtifactBadge({ kind }: { kind: string }) {
+  const isHuman = kind === "human";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold",
+        isHuman
+          ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+          : "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+      )}
+    >
+      {isHuman ? "人工" : "智能体"}
+    </span>
+  );
+}
+
+function ArtifactViewDialog({
+  artifact,
+  open,
+  onClose,
+}: {
+  artifact: SprintArtifact | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  if (!artifact) return null;
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <IconFileText className="size-4 shrink-0 text-muted-foreground" />
+            {artifact.name}
+            <ArtifactBadge kind={artifact.producedByKind} />
+            <span className="ml-1 text-xs font-normal text-muted-foreground">
+              v{artifact.version}
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="max-h-96 overflow-y-auto p-1">
+          {artifact.content ? (
+            <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed">
+              {artifact.content}
+            </pre>
+          ) : (
+            <p className="text-sm italic text-muted-foreground">（内容为空）</p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SprintArtifactsSection({ sprintId }: { sprintId: string }) {
+  const { data, isLoading } = useSprintArtifacts(sprintId);
+  const [selectedArtifact, setSelectedArtifact] = useState<SprintArtifact | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const byDocKey = data?.byDocKey ?? {};
+  const docKeys = Object.keys(byDocKey);
+
+  if (isLoading) {
+    return (
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        <h3 className="mb-4 text-sm font-semibold">产物</h3>
+        <Skeleton className="h-20 w-full" />
+      </div>
+    );
+  }
+
+  if (docKeys.length === 0) {
+    return (
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold">
+          <IconFileText className="size-4 text-muted-foreground" />
+          产物
+        </h3>
+        <p className="text-sm text-muted-foreground">本 Sprint 暂无产物。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border bg-card p-5 shadow-sm">
+      <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold">
+        <IconFileText className="size-4 text-muted-foreground" />
+        产物 · {docKeys.length} 类
+      </h3>
+      <div className="space-y-4">
+        {docKeys.map((docKey) => {
+          const versions = byDocKey[docKey] ?? [];
+          const latest = versions[versions.length - 1];
+          if (!latest) return null;
+          return (
+            <div key={docKey} className="rounded-lg border p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="font-mono text-xs font-semibold text-foreground/80">
+                  {docKey}
+                </span>
+                <span className="text-xs text-muted-foreground">{latest.kind}</span>
+                <span className="ml-auto text-[11px] text-muted-foreground">
+                  共 {versions.length} 版
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {versions.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedArtifact(a);
+                      setDialogOpen(true);
+                    }}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded border px-2 py-1 text-xs transition-colors hover:bg-accent",
+                      a.id === latest.id
+                        ? "border-primary/50 bg-primary/5"
+                        : "border-border bg-background",
+                    )}
+                  >
+                    <ArtifactBadge kind={a.producedByKind} />
+                    <span className="font-mono">v{a.version}</span>
+                    <span className="max-w-[120px] truncate text-muted-foreground">
+                      {a.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <ArtifactViewDialog
+        artifact={selectedArtifact}
+        open={dialogOpen}
+        onClose={() => {
+          setDialogOpen(false);
+          setSelectedArtifact(null);
+        }}
+      />
+    </div>
+  );
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export function SprintDetailPage() {
@@ -397,10 +546,11 @@ export function SprintDetailPage() {
 
       {/* ── Body ── */}
       <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
-        {/* Left column: progress + items */}
+        {/* Left column: progress + items + artifacts */}
         <div className="order-2 min-w-0 space-y-5 lg:order-1">
           <DeliveryProgressCard items={items} />
           <SprintItemsCard sprint={sprint} items={items} stages={stages} />
+          <SprintArtifactsSection sprintId={id} />
         </div>
 
         {/* Right column: meta */}

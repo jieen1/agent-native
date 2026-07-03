@@ -151,3 +151,21 @@ export interface TrackerComment { id:string; workItemId:string; authorKind:'agen
 export interface ItemLink { id:string; fromItemId:string; toItemId:string; linkType:string; otherItemId:string; otherItemTitle:string; direction:'from'|'to'; }
 export interface QueueItem { id:string; workItemId:string; priority:number; status:string; currentStage:string; enqueuedAt:string; startedAt:string|null; workItem:TrackerWorkItem; }
 export interface QueueStats { queued:number; running:number; paused:number; }
+
+// Sprint artifact types (M1-2).
+export interface SprintArtifact {
+  id: string;
+  sprintId: string;
+  docKey: string;
+  kind: string;
+  name: string;
+  version: number;
+  supersedes: string | null;
+  producedByKind: "agent" | "human";
+  content: string;
+  contentRef: string | null;
+  createdAt: string;
+}
+export interface SprintArtifactsByDocKey {
+  byDocKey: Record<string, SprintArtifact[]>;
+}

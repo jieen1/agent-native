@@ -235,3 +235,26 @@ export const projectRepos = table("tracker_project_repos", {
   updatedAt: text("updated_at").notNull(),
   ...ownableColumns(),
 });
+
+// ---------------------------------------------------------------------------
+// Sprint artifacts — sprint-level versioned documents.
+// docKey examples: sprint-doc | test-plan | tech-design | brief:{itemKey} |
+//   shared-brief | audit-report:{n} | story | verify-report
+// Each (sprintId, docKey) pair has its own monotonic version chain; supersedes
+// points to the immediately preceding artifact id.
+// producedByKind: 'agent' | 'human' — human-protection enforced in the action.
+// ---------------------------------------------------------------------------
+export const sprintArtifacts = table("tracker_sprint_artifacts", {
+  id: text("id").primaryKey(),
+  sprintId: text("sprint_id").notNull(),
+  docKey: text("doc_key").notNull(),
+  kind: text("kind").notNull(),
+  name: text("name").notNull(),
+  version: integer("version").notNull().default(1),
+  supersedes: text("supersedes").default(null),
+  producedByKind: text("produced_by_kind").notNull().default("agent"),
+  content: text("content").notNull().default(""),
+  contentRef: text("content_ref").default(null),
+  createdAt: text("created_at").notNull(),
+  ...ownableColumns(),
+});

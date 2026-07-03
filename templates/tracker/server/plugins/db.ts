@@ -244,6 +244,28 @@ ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS nature TEXT NOT NULL DEF
 CREATE UNIQUE INDEX IF NOT EXISTS tracker_project_repos_project_name_idx ON tracker_project_repos (owner_email, project_id, name);
 CREATE INDEX IF NOT EXISTS tracker_project_repos_project_idx ON tracker_project_repos (project_id)`,
     },
+    {
+      // M1-2: sprint-level versioned artifact library.
+      version: 14,
+      sql: `CREATE TABLE IF NOT EXISTS tracker_sprint_artifacts (
+  id TEXT PRIMARY KEY,
+  sprint_id TEXT NOT NULL,
+  doc_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  supersedes TEXT,
+  produced_by_kind TEXT NOT NULL DEFAULT 'agent',
+  content TEXT NOT NULL DEFAULT '',
+  content_ref TEXT,
+  created_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE INDEX IF NOT EXISTS tracker_sprint_artifacts_sprint_idx ON tracker_sprint_artifacts (sprint_id, doc_key);
+CREATE INDEX IF NOT EXISTS tracker_sprint_artifacts_owner_idx ON tracker_sprint_artifacts (owner_email, org_id)`,
+    },
   ],
   { table: "tracker_migrations" },
 );
