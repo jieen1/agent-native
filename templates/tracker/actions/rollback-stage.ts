@@ -40,6 +40,11 @@ export default defineAction({
     )[0];
     if (!item) throw new Error("Work item not found or not accessible");
 
+    // Rollback protection: reject if item is bound to a running/dispatched run
+    if (item.orchestratorRunId && (item.status === "dispatched" || item.status === "running")) {
+      throw new Error("该工作项绑定的运行任务正在执行中，请先取消该运行后再进行回退操作");
+    }
+
     const fromStage = item.currentStageName;
     if (!fromStage) throw new Error("Work item has no current stage");
 

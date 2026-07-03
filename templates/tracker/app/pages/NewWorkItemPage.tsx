@@ -341,10 +341,10 @@ export function NewWorkItemPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="低">低</SelectItem>
-                    <SelectItem value="中">中</SelectItem>
-                    <SelectItem value="高">高</SelectItem>
                     <SelectItem value="紧急">紧急</SelectItem>
+                    <SelectItem value="高">高</SelectItem>
+                    <SelectItem value="中">中</SelectItem>
+                    <SelectItem value="低">低</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
@@ -513,10 +513,10 @@ export function NewWorkItemPage() {
 
 function priorityMap(label: string): number {
   switch (label) {
-    case "紧急": return 4;
-    case "高": return 3;
-    case "中": return 2;
-    case "低": return 1;
-    default: return 2;
+    case "紧急": return 1;
+    case "高": return 2;
+    case "中": return 3;
+    case "低": return 4;
+    default: return 3;
   }
 }

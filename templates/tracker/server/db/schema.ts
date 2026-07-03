@@ -87,6 +87,10 @@ export const sprints = table("tracker_sprints", {
   name: text("name").notNull(),
   goal: text("goal").default(""),
   status: text("status").default("规划"),
+  // Single `phase` column reused by M1-7 (single-active-sprint / fine-grained
+  // phase markers) and M1-8 (execution phase visibility). NOT NULL DEFAULT
+  // 'planning' matches the v19 migration; values include planning | executing |
+  // verifying | auditing | promoting | designing | storytelling | done.
   phase: text("phase").notNull().default("planning"),
   executorThreadId: text("executor_thread_id"),
   branch: text("branch").default(""),
