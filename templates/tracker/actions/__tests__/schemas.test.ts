@@ -78,6 +78,45 @@ const updateWorkItemSchema = z.object({
   branch: z.string().nullable().optional(),
 });
 
+// Mirrors create-work-item.ts's schema.type enum (M1-6: adds "from-audit").
+const createWorkItemSchema = z.object({
+  projectId: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  type: z
+    .enum([
+      "需求",
+      "任务",
+      "缺陷",
+      "测试",
+      "生产问题",
+      "集合",
+      "from-audit",
+      "requirement",
+      "task",
+      "defect",
+      "incident",
+      "story",
+      "epic",
+    ])
+    .optional(),
+  priority: z.coerce.number().int().optional(),
+  risk: z.enum(["low", "medium", "high"]).optional(),
+  tags: z.array(z.string()).optional(),
+  nature: z.array(z.string()).optional(),
+  owner: z.string().nullable().optional(),
+  sprintId: z.string().optional(),
+  executionMode: z.enum(["auto", "manual"]).optional(),
+});
+
+// Mirrors advance-stage.ts's schema (M1-6).
+const advanceStageSchema = z.object({
+  scope: z.enum(["item", "sprint"]),
+  id: z.string().min(1),
+  fromStage: z.string().min(1),
+  expectedRunId: z.string().optional(),
+});
+
 // ============================================================================
 // STAGE_ORDER constant (from shared/types.ts)
 // ============================================================================
@@ -862,6 +901,131 @@ describe('update-work-item schema', () => {
       id: 'wi1',
       plannedStages: ['分析', '设计', '实施'],
     });
+    expect(result.success).toBe(true);
+  });
+});
+
+// ============================================================================
+// Tests for create-work-item schema (M1-6: from-audit type)
+// ============================================================================
+
+describe('create-work-item schema', () => {
+  it('validates valid input with only required fields', () => {
+    const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 'A task' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects missing projectId', () => {
+    const result = createWorkItemSchema.safeParse({ title: 'A task' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing title', () => {
+    const result = createWorkItemSchema.safeParse({ projectId: 'p1' });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts all Chinese type values', () => {
+    for (const type of ['需求', '任务', '缺陷', '测试', '生产问题', '集合']) {
+      const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 't', type });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it('accepts "from-audit" as a real type value (not just a tag)', () => {
+    const result = createWorkItemSchema.safeParse({
+      projectId: 'p1',
+      title: 't',
+      type: 'from-audit',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an unrecognized type value', () => {
+    const result = createWorkItemSchema.safeParse({
+      projectId: 'p1',
+      title: 't',
+      type: 'not-a-real-type',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts legacy English type aliases', () => {
+    for (const type of ['requirement', 'task', 'defect', 'incident', 'story', 'epic']) {
+      const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 't', type });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it('accepts null owner (unassigned)', () => {
+    const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 't', owner: null });
+    expect(result.success).toBe(true);
+  });
+
+  it('coerces string priority to number', () => {
+    const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 't', priority: '1' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.priority).toBe(1);
+    }
+  });
+});
+
+// ============================================================================
+// Tests for advance-stage schema (M1-6)
+// ============================================================================
+
+describe('advance-stage schema', () => {
+  it('validates valid item-scope input', () => {
+    const result = advanceStageSchema.safeParse({
+      scope: 'item',
+      id: 'wi1',
+      fromStage: '分析',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates valid sprint-scope input', () => {
+    const result = advanceStageSchema.safeParse({
+      scope: 'sprint',
+      id: 'sp1',
+      fromStage: '实施',
+      expectedRunId: 'run_123',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an invalid scope value', () => {
+    const result = advanceStageSchema.safeParse({
+      scope: 'epic',
+      id: 'wi1',
+      fromStage: '分析',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing scope', () => {
+    const result = advanceStageSchema.safeParse({ id: 'wi1', fromStage: '分析' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing id', () => {
+    const result = advanceStageSchema.safeParse({ scope: 'item', fromStage: '分析' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing fromStage', () => {
+    const result = advanceStageSchema.safeParse({ scope: 'item', id: 'wi1' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects empty id and empty fromStage', () => {
+    expect(advanceStageSchema.safeParse({ scope: 'item', id: '', fromStage: '分析' }).success).toBe(false);
+    expect(advanceStageSchema.safeParse({ scope: 'item', id: 'wi1', fromStage: '' }).success).toBe(false);
+  });
+
+  it('accepts expectedRunId omitted', () => {
+    const result = advanceStageSchema.safeParse({ scope: 'item', id: 'wi1', fromStage: '分析' });
     expect(result.success).toBe(true);
   });
 });

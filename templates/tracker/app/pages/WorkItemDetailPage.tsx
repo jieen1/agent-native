@@ -15,6 +15,7 @@ import {
   useSprints,
   useTriggerStage,
   useRollbackStage,
+  useAdvanceStage,
   useEpicChildren,
 } from "@/hooks/use-tracker";
 import { Button } from "@/components/ui/button";
@@ -155,36 +156,48 @@ function StageLine({ prevDone }: { prevDone: boolean }) {
 function StageProgressCard({
   workItemId,
   currentStageName,
+  plannedStages,
 }: {
   workItemId: string;
   currentStageName: string;
+  plannedStages?: string[];
 }) {
   const { data, isLoading } = useStages(workItemId);
   const stages: any[] = Array.isArray(data) ? data : [];
   const stageMap: Record<string, string> = {};
   for (const s of stages) stageMap[s.stageName] = s.stageStatus;
 
-  // 待办 is completed once any real stage exists or currentStageName != 待办
-  const pendingDone = currentStageName !== "待办" || stages.length > 0;
-  const nodeStatuses: Record<string, string> = {
-    待办: pendingDone ? "已完成" : "执行中",
-    分析: stageMap["分析"] ?? "待执行",
-    设计: stageMap["设计"] ?? "待执行",
-    实施: stageMap["实施"] ?? "待执行",
-    测试: stageMap["测试"] ?? "待执行",
-    验收: stageMap["验收"] ?? "待执行",
-    交付: stageMap["交付"] ?? "待执行",
-  };
+  // Use the item's plannedStages subset when present; fall back to the full order.
+  const stageOrder: string[] =
+    plannedStages && plannedStages.length > 0
+      ? plannedStages
+      : [...STAGE_NODES];
+  const lastStage = stageOrder[stageOrder.length - 1];
+  const currentIdx = stageOrder.indexOf(currentStageName);
+
+  const nodeStatuses: Record<string, string> = {};
+  stageOrder.forEach((stageName, i) => {
+    const row = stageMap[stageName];
+    if (row) {
+      nodeStatuses[stageName] = row;
+    } else if (stageName === currentStageName) {
+      nodeStatuses[stageName] = "执行中";
+    } else if (currentIdx >= 0 && i < currentIdx) {
+      nodeStatuses[stageName] = "已完成";
+    } else {
+      nodeStatuses[stageName] = "待执行";
+    }
+  });
 
   const currentLabel =
     nodeStatuses[currentStageName] === "执行中"
       ? `${currentStageName} · 执行中`
-      : currentStageName === "交付" && nodeStatuses["交付"] === "已完成"
-        ? "交付 · 已完成"
+      : currentStageName === lastStage && nodeStatuses[lastStage] === "已完成"
+        ? `${lastStage} · 已完成`
         : `${currentStageName}`;
 
   const currentBadgeClass =
-    nodeStatuses[currentStageName] === "已完成" || currentStageName === "交付"
+    nodeStatuses[currentStageName] === "已完成" || currentStageName === lastStage
       ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-500/30"
       : "bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-1 ring-inset ring-blue-500/30";
 
@@ -208,10 +221,10 @@ function StageProgressCard({
 
       {/* Horizontal stepper */}
       <div className="flex items-start">
-        {STAGE_NODES.map((name, i) => {
+        {stageOrder.map((name, i) => {
           const st = nodeStatuses[name];
           const prevDone =
-            i === 0 ? false : nodeStatuses[STAGE_NODES[i - 1]] === "已完成";
+            i === 0 ? false : nodeStatuses[stageOrder[i - 1]] === "已完成";
           return (
             <>
               {i > 0 && <StageLine key={`line-${i}`} prevDone={prevDone} />}
@@ -993,6 +1006,7 @@ export function WorkItemDetailPage() {
   const activity = useActivity(id, dispatched);
   const triggerStage = useTriggerStage();
   const rollbackStage = useRollbackStage();
+  const advanceStage = useAdvanceStage();
 
   const [monitorInterval, setMonitorInterval] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1059,6 +1073,15 @@ export function WorkItemDetailPage() {
   const itemKey = (item as { itemKey?: string }).itemKey;
   const currentStageName =
     (item as { currentStageName?: string }).currentStageName ?? "待办";
+  const plannedStagesList: string[] = (() => {
+    try {
+      const raw = (item as { plannedStages?: unknown }).plannedStages;
+      const parsed = Array.isArray(raw) ? raw : JSON.parse((raw as string) ?? "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
   const owner = (item as { owner?: string | null }).owner ?? null;
   const nature: string[] = (() => {
     try {
@@ -1237,6 +1260,7 @@ export function WorkItemDetailPage() {
           <StageProgressCard
             workItemId={id}
             currentStageName={currentStageName}
+            plannedStages={plannedStagesList}
           />
 
           {/* Requirement */}
@@ -1338,22 +1362,41 @@ export function WorkItemDetailPage() {
           <div className="space-y-3 lg:sticky lg:top-4">
             {/* Actions card */}
             {(() => {
-              const STAGE_ORDER = ['待办','分析','设计','实施','测试','验收','交付'] as const;
-              const idx = STAGE_ORDER.indexOf(currentStageName as typeof STAGE_ORDER[number]);
-              const nextStage = idx >= 0 && idx < STAGE_ORDER.length - 1 ? STAGE_ORDER[idx + 1] : null;
-              const prevStage = idx > 0 ? STAGE_ORDER[idx - 1] : null;
+              // Use item's plannedStages; fallback to full 7-stage order
+              const FALLBACK_ORDER = ['待办','分析','设计','实施','测试','验收','交付'] as const;
+              let plannedStagesArr: string[];
+              try {
+                const raw = (item as any).plannedStages;
+                plannedStagesArr = Array.isArray(raw) ? raw : JSON.parse(raw ?? "[]");
+              } catch {
+                plannedStagesArr = [];
+              }
+              const stageOrder = plannedStagesArr.length > 0 ? plannedStagesArr : FALLBACK_ORDER;
+              const idx = stageOrder.indexOf(currentStageName);
+              const nextStage = idx >= 0 && idx < stageOrder.length - 1 ? stageOrder[idx + 1] : null;
+              const prevStage = idx > 0 ? stageOrder[idx - 1] : null;
               return (
                 <div className="rounded-xl border border-border bg-card p-3 space-y-2">
                   <Button
                     className="w-full gap-1.5"
                     size="sm"
-                    disabled={triggerStage.isPending || !nextStage}
-                    onClick={() => nextStage && triggerStage.mutate(
-                      { workItemId: id, stageName: nextStage },
-                      { onSuccess: () => toast.success(`已触发阶段 ${nextStage}`) },
+                    disabled={!nextStage || advanceStage.isPending}
+                    onClick={() => nextStage && advanceStage.mutate(
+                      { scope: 'item', id, fromStage: currentStageName },
+                      {
+                        onSuccess: (res: any) => {
+                          if (res?.noop) {
+                            toast.info('无变化(状态已更新)');
+                          } else if (res?.blocked) {
+                            toast.error(`阶段推进被阻塞: ${(res.missing || []).join('、')}`);
+                          } else {
+                            toast.success(`已推进至「${res?.stageName}」`);
+                          }
+                        },
+                      },
                     )}
                   >
-                    {triggerStage.isPending ? (
+                    {advanceStage.isPending ? (
                       <IconLoader2 className="size-3.5 animate-spin" />
                     ) : (
                       <IconRocket className="size-3.5" />

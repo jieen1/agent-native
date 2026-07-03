@@ -14,6 +14,7 @@ export default defineAction({
     description: z.string().optional(),
     gitRemote: z.string().optional(),
     defaultBranch: z.string().optional(),
+    stageGateConfig: z.string().optional().describe("JSON string: per-stage gate criteria config"),
   }),
   http: { method: "POST" },
   run: async (args) => {
@@ -42,6 +43,7 @@ export default defineAction({
     if (args.gitRemote !== undefined) patch.gitRemote = args.gitRemote;
     if (args.defaultBranch !== undefined)
       patch.defaultBranch = args.defaultBranch;
+    if (args.stageGateConfig !== undefined) patch.stageGateConfig = args.stageGateConfig;
 
     if (Object.keys(patch).length === 1) {
       throw new Error("No fields provided to update");

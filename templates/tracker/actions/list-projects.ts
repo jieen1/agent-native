@@ -18,6 +18,7 @@ export default defineAction({
         description: schema.projects.description,
         gitRemote: schema.projects.gitRemote,
         defaultBranch: schema.projects.defaultBranch,
+        stageGateConfig: schema.projects.stageGateConfig,
         createdAt: schema.projects.createdAt,
         updatedAt: schema.projects.updatedAt,
       })

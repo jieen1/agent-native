@@ -23,9 +23,9 @@ export default defineAction({
       .optional()
       .describe("The requirement / intent handed to the orchestrator brain"),
     type: z
-      .enum(["需求", "任务", "缺陷", "测试", "生产问题", "集合", "requirement", "task", "defect", "incident", "story", "epic"])
+      .enum(["需求", "任务", "缺陷", "测试", "生产问题", "集合", "from-audit", "requirement", "task", "defect", "incident", "story", "epic"])
       .optional()
-      .describe("Work item type: 需求/任务/缺陷/测试/生产问题/集合(epic,汇总子项的容器) (or legacy English names)"),
+      .describe("Work item type: 需求/任务/缺陷/测试/生产问题/集合(epic,汇总子项的容器)/from-audit(审计发起,阶段子集实施+测试) (or legacy English names)"),
     priority: z.coerce.number().int().optional().describe("Priority: 0=P0 (Critical), 1=P1, 2=P2, 3=P3 (Low)"),
     risk: z.enum(["low", "medium", "high"]).optional().describe("Risk level"),
     tags: z.array(z.string()).optional().describe("Feature/label tags"),
@@ -64,6 +64,17 @@ export default defineAction({
 
     const id = nanoid();
     const now = new Date().toISOString();
+
+    // Compute default plannedStages based on item type and tags
+    const tags = args.tags ?? [];
+    const isNarrowScope =
+      args.type === "缺陷" ||
+      args.type === "defect" ||
+      args.type === "from-audit" ||
+      tags.includes("from-audit");
+    const defaultPlannedStages = isNarrowScope ? ["实施", "测试"] : ["待办","分析","设计","实施","测试","验收","交付"];
+    const defaultCurrentStageName = defaultPlannedStages[0];
+
     await db.insert(schema.workItems).values({
       id,
       projectId: args.projectId,
@@ -79,6 +90,8 @@ export default defineAction({
       sprintId: args.sprintId ?? null,
       executionMode: args.executionMode ?? "manual",
       itemKey,
+      plannedStages: JSON.stringify(defaultPlannedStages),
+      currentStageName: defaultCurrentStageName,
       createdAt: now,
       updatedAt: now,
       ownerEmail,
@@ -99,6 +112,8 @@ export default defineAction({
       tags: args.tags ?? [],
       sprintId: args.sprintId ?? null,
       executionMode: args.executionMode ?? "manual",
+      plannedStages: defaultPlannedStages,
+      currentStageName: defaultCurrentStageName,
       createdAt: now,
       updatedAt: now,
     };

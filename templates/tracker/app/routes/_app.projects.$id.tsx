@@ -535,6 +535,10 @@ export default function ProjectSettingsRoute() {
   const [description, setDescription] = useState("");
   const [gitRemote, setGitRemote] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("");
+  const [stageGateConfigText, setStageGateConfigText] = useState("{}");
+  const [stageGateConfigError, setStageGateConfigError] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     if (project) {
@@ -542,6 +546,17 @@ export default function ProjectSettingsRoute() {
       setDescription(project.description ?? "");
       setGitRemote((project as any).gitRemote ?? "");
       setDefaultBranch((project as any).defaultBranch ?? "main");
+      const raw = (project as any).stageGateConfig;
+      if (raw) {
+        try {
+          setStageGateConfigText(JSON.stringify(JSON.parse(raw), null, 2));
+        } catch {
+          setStageGateConfigText(raw);
+        }
+      } else {
+        setStageGateConfigText("{}");
+      }
+      setStageGateConfigError(null);
     }
   }, [project?.id]);
 
@@ -554,6 +569,33 @@ export default function ProjectSettingsRoute() {
       gitRemote,
       defaultBranch: defaultBranch || "main",
     });
+  }
+
+  function handleStageGateConfigChange(value: string) {
+    setStageGateConfigText(value);
+    if (!value.trim()) {
+      setStageGateConfigError(null);
+      return;
+    }
+    try {
+      JSON.parse(value);
+      setStageGateConfigError(null);
+    } catch {
+      setStageGateConfigError("JSON 格式无效");
+    }
+  }
+
+  function handleSaveStageGateConfig() {
+    if (!project) return;
+    const text = stageGateConfigText.trim() || "{}";
+    try {
+      JSON.parse(text);
+    } catch {
+      setStageGateConfigError("JSON 格式无效");
+      return;
+    }
+    setStageGateConfigError(null);
+    update.mutate({ id, stageGateConfig: text });
   }
 
   return (
@@ -641,6 +683,48 @@ export default function ProjectSettingsRoute() {
                   <IconDeviceFloppy className="size-4" />
                 )}
                 保存更改
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="text-base">阶段门控配置</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                按阶段名配置推进门槛（JSON）。未配置的阶段可自由推进。示例：
+                <code className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-xs">
+                  {'{"分析":{"requireArtifacts":["sprint-doc"],"requireApproval":"plan-signoff"}}'}
+                </code>
+              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="proj-gate-config">门控配置 JSON</Label>
+                <Textarea
+                  id="proj-gate-config"
+                  value={stageGateConfigText}
+                  onChange={(e) => handleStageGateConfigChange(e.target.value)}
+                  placeholder="{}"
+                  rows={8}
+                  className="font-mono text-sm"
+                />
+                {stageGateConfigError ? (
+                  <p className="text-xs text-destructive">
+                    {stageGateConfigError}
+                  </p>
+                ) : null}
+              </div>
+              <Button
+                className="gap-1.5"
+                onClick={handleSaveStageGateConfig}
+                disabled={update.isPending || !!stageGateConfigError}
+              >
+                {update.isPending ? (
+                  <IconLoader2 className="size-4 animate-spin" />
+                ) : (
+                  <IconDeviceFloppy className="size-4" />
+                )}
+                保存门控配置
               </Button>
             </CardContent>
           </Card>

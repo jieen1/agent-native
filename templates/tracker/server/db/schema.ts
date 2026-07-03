@@ -22,6 +22,7 @@ export const projects = table("tracker_projects", {
   defaultBranch: text("default_branch").notNull().default("main"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  stageGateConfig: text("stage_gate_config").notNull().default("{}"),
   ...ownableColumns(),
 });
 

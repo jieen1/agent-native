@@ -16,6 +16,7 @@ export interface Project {
   description: string;
   gitRemote: string;
   defaultBranch: string;
+  stageGateConfig?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -247,4 +248,21 @@ export interface GraphValidationResult {
   errors: GraphValidationIssue[];
   warnings: GraphValidationIssue[];
   topoOrder: string[];
+}
+
+// Stage gate criteria for advance-stage (M1-6).
+export interface StageGateCriteria {
+  requireArtifacts?: string[]; // docKeys that must exist in tracker_sprint_artifacts for the item's sprint
+  requireApproval?: string; // gateKey that must have an 'approved' tracker_approvals row for the item's sprint
+  requireGraphValid?: boolean; // dependency graph (scoped to item's sprint, else project) must have zero errors
+}
+export type StageGateConfig = Record<string, StageGateCriteria>;
+
+export interface AdvanceStageResult {
+  noop?: boolean;
+  blocked?: boolean;
+  missing?: string[];
+  workItemId?: string;
+  stageName?: string;
+  cascaded?: { workItemId: string; ok: boolean; error?: string }[];
 }
