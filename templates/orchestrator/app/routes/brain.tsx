@@ -80,6 +80,7 @@ const MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: "claude-opus-4-7[1m]", label: "Opus 4.7 (1M)" },
   { value: "claude-opus-4-6[1m]", label: "Opus 4.6 (1M)" },
   { value: "claude-opus-4-5", label: "Opus 4.5" },
+  { value: "claude-sonnet-5", label: "Sonnet 5" },
   { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   { value: "claude-sonnet-4-5[1m]", label: "Sonnet 4.5 (1M)" },
   { value: "claude-haiku-4-5", label: "Haiku 4.5" },
