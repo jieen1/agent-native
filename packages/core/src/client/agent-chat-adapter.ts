@@ -20,6 +20,7 @@ import {
   type AgentActivityTrailEntry,
   type AgentAutoContinueErrorInfo,
   type ContentPart,
+  type PreparingActionState,
   readSSEStream,
   settleInterruptedToolCalls,
 } from "./sse-event-processor.js";
@@ -1381,6 +1382,10 @@ export function createAgentChatAdapter(
       let runId: string | null = null;
       let lastSeq = -1;
       const seenRunSeqs = new Map<string, number>();
+      const preparingActionStatesByRun = new Map<
+        string,
+        PreparingActionState
+      >();
       let currentRunDispatchMode: string | null = null;
       let currentMessageText = normalizeMentions(
         recoveryMessageText.trim() || userMessageText,
@@ -1521,6 +1526,18 @@ export function createAgentChatAdapter(
         );
       };
 
+      const dispatchMissingApiKey = () => {
+        if (typeof window === "undefined") return;
+        window.dispatchEvent(
+          new CustomEvent("agent-chat:missing-api-key", {
+            detail: {
+              ...(tabId ? { tabId } : {}),
+              ...(threadId ? { threadId } : {}),
+            },
+          }),
+        );
+      };
+
       const tryRecoverAuthOnce = async (): Promise<boolean> => {
         if (authRecoveryAttempted || abortSignal.aborted) return false;
         authRecoveryAttempted = true;
@@ -1570,9 +1587,23 @@ export function createAgentChatAdapter(
         }
       };
 
+      const preparingActionStateForRun = (
+        id: string | null,
+      ): PreparingActionState | undefined => {
+        if (!id) return undefined;
+        const existing = preparingActionStatesByRun.get(id);
+        if (existing) return existing;
+        const state: PreparingActionState = {};
+        preparingActionStatesByRun.set(id, state);
+        return state;
+      };
+
       const currentSSEOptions = () => ({
         durableBackgroundRun:
           currentRunDispatchMode?.startsWith("background") === true,
+        ...(runId
+          ? { preparingActionState: preparingActionStateForRun(runId) }
+          : {}),
       });
 
       const captureChatClientError = (
@@ -2270,11 +2301,18 @@ export function createAgentChatAdapter(
                 // can report a just-finished run as active for up to
                 // RUN_STALE_MS while its terminal status write lands) — adopting
                 // `activeRunId` below would reconnect to that prior run, replay
-                // its final answer, and silently drop this turn. Wait for the
-                // run to clear and retry THIS prompt instead. Only genuine
-                // internal continuations (deliberate resumes of the active run)
-                // fall through to the reconnect path.
-                if (!internalContinuationRequest && activeRunId) {
+                // its final answer, and silently drop this turn. The same race
+                // can happen after an internal auto-continue: if the reported
+                // active run is one this adapter already consumed, reconnecting
+                // to it replays the terminal auto_continue and exits instead of
+                // posting the continuation. Wait for stale/previous active runs
+                // to clear and retry THIS prompt. A genuinely newer background
+                // run still falls through to the reconnect path below.
+                const shouldRetryConflictingActiveRun =
+                  activeRunId !== null &&
+                  (!internalContinuationRequest ||
+                    attemptedRunIds.includes(activeRunId));
+                if (shouldRetryConflictingActiveRun) {
                   queuedConflictRetries += 1;
                   if (queuedConflictRetries <= MAX_QUEUED_CONFLICT_RETRIES) {
                     await delay(500, abortSignal);
@@ -2399,9 +2437,7 @@ export function createAgentChatAdapter(
                 if (isMissingCredentialMessage(body)) {
                   const failure = missingCredentialFailure(body);
                   if (typeof window !== "undefined") {
-                    window.dispatchEvent(
-                      new Event("agent-chat:missing-api-key"),
-                    );
+                    dispatchMissingApiKey();
                     window.dispatchEvent(
                       new CustomEvent("agent-chat:run-error", {
                         detail: { ...failure.runError, tabId },
@@ -2614,7 +2650,7 @@ export function createAgentChatAdapter(
             if (isMissingCredentialMessage(errMsg)) {
               const failure = missingCredentialFailure(errMsg);
               if (typeof window !== "undefined") {
-                window.dispatchEvent(new Event("agent-chat:missing-api-key"));
+                dispatchMissingApiKey();
                 window.dispatchEvent(
                   new CustomEvent("agent-chat:run-error", {
                     detail: { ...failure.runError, tabId },

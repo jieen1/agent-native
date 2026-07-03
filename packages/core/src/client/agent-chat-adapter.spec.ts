@@ -751,7 +751,10 @@ describe("createAgentChatAdapter", () => {
     );
 
     expect(dispatchEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "agent-chat:missing-api-key" }),
+      expect.objectContaining({
+        type: "agent-chat:missing-api-key",
+        detail: { tabId: "chat-missing-credentials" },
+      }),
     );
     expect(dispatchEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: "agent-chat:run-error" }),
@@ -5117,6 +5120,84 @@ describe("createAgentChatAdapter", () => {
     expect(postCount).toBe(2);
     expect(fetchSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("/runs/run-foreground-other/events"),
+      expect.any(Object),
+    );
+    const last = results.at(-1) as any;
+    expect(last.content.at(-1).text).toContain("Working continued");
+  });
+
+  it("retries an internal continuation when 409 reports the same completed run", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", { dispatchEvent: vi.fn() });
+    vi.stubGlobal(
+      "CustomEvent",
+      class CustomEvent {
+        type: string;
+        detail: unknown;
+        constructor(type: string, init?: { detail?: unknown }) {
+          this.type = type;
+          this.detail = init?.detail;
+        }
+      },
+    );
+
+    let chatPostCount = 0;
+    let abortCount = 0;
+    const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/_agent-native/agent-chat" && init?.method === "POST") {
+        chatPostCount += 1;
+        if (chatPostCount === 1) {
+          return sseResponse(
+            [
+              { type: "text", text: "Working" },
+              { type: "auto_continue", reason: "no_progress" },
+            ],
+            "run-first",
+          );
+        }
+        if (chatPostCount === 2) {
+          return jsonResponse({ activeRunId: "run-first" }, 409);
+        }
+        return sseResponse(
+          [{ type: "text", text: " continued" }, { type: "done" }],
+          "run-self-continuation",
+        );
+      }
+      if (url.includes("/runs/run-first/abort")) {
+        abortCount += 1;
+        return jsonResponse({ ok: true });
+      }
+      if (url.includes("/runs/run-first/events")) {
+        return jsonResponse({ error: "should not reconnect stale run" }, 500);
+      }
+      return jsonResponse({ error: "unexpected" }, 500);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter = createAgentChatAdapter({
+      apiUrl: "/_agent-native/agent-chat",
+      tabId: "chat-same-run-conflict",
+      threadId: "thread-same-run-conflict",
+    });
+    const promise = drain(
+      adapter.run({
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "continue after quiet stream" }],
+          },
+        ],
+        abortSignal: new AbortController().signal,
+      } as any),
+    );
+
+    await vi.advanceTimersByTimeAsync(2000);
+    const results = await promise;
+
+    expect(chatPostCount).toBe(3);
+    expect(abortCount).toBe(1);
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/runs/run-first/events"),
       expect.any(Object),
     );
     const last = results.at(-1) as any;

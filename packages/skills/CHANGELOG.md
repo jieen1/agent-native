@@ -1,5 +1,109 @@
 # @agent-native/skills
 
+## 0.2.239
+
+### Patch Changes
+
+- Updated dependencies [d569c7a]
+  - @agent-native/core@0.84.65
+
+## 0.2.238
+
+### Patch Changes
+
+- Updated dependencies [70e18ac]
+  - @agent-native/core@0.84.64
+
+## 0.2.237
+
+### Patch Changes
+
+- Updated dependencies [231460f]
+  - @agent-native/core@0.84.63
+
+## 0.2.236
+
+### Patch Changes
+
+- Updated dependencies [b9cac68]
+  - @agent-native/core@0.84.62
+
+## 0.2.235
+
+### Patch Changes
+
+- Updated dependencies [3a66817]
+  - @agent-native/core@0.84.61
+
+## 0.2.234
+
+### Patch Changes
+
+- Updated dependencies [4b6ca6c]
+  - @agent-native/core@0.84.60
+
+## 0.2.233
+
+### Patch Changes
+
+- Updated dependencies [13379f1]
+  - @agent-native/core@0.84.59
+
+## 0.2.232
+
+### Patch Changes
+
+- Updated dependencies [cdc9033]
+- Updated dependencies [cdc9033]
+- Updated dependencies [cdc9033]
+  - @agent-native/core@0.84.58
+
+## 0.2.231
+
+### Patch Changes
+
+- Updated dependencies [5250e7f]
+  - @agent-native/core@0.84.57
+
+## 0.2.230
+
+### Patch Changes
+
+- Updated dependencies [a0615f8]
+  - @agent-native/core@0.84.56
+
+## 0.2.229
+
+### Patch Changes
+
+- Updated dependencies [ea97dc1]
+  - @agent-native/core@0.84.55
+
+## 0.2.228
+
+### Patch Changes
+
+- Updated dependencies [a259f96]
+- Updated dependencies [df3fcfd]
+  - @agent-native/core@0.84.54
+
+## 0.2.227
+
+### Patch Changes
+
+- Updated dependencies [899ebf1]
+- Updated dependencies [c1e18fb]
+  - @agent-native/core@0.84.53
+
+## 0.2.226
+
+### Patch Changes
+
+- Updated dependencies [ca38cc7]
+- Updated dependencies [899ebf1]
+- Updated dependencies [c1e18fb]
+  - @agent-native/core@0.84.52
+
 ## 0.2.225
 
 ### Patch Changes

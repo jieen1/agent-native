@@ -1,5 +1,100 @@
 # @agent-native/core
 
+## 0.84.65
+
+### Patch Changes
+
+- d569c7a: Retry internal chat continuations when the server briefly reports the same completed run as active.
+
+## 0.84.64
+
+### Patch Changes
+
+- 70e18ac: Recover agent runs when a model stream stays open with keepalives but stops producing text, tool input, or tool calls.
+
+## 0.84.63
+
+### Patch Changes
+
+- 231460f: Recover action preparation stalls even when the model stream goes silent before sending any tool input bytes.
+
+## 0.84.62
+
+### Patch Changes
+
+- b9cac68: Mark interrupted activity-only tool cards as errors so stopped agent actions do not appear successful.
+
+## 0.84.61
+
+### Patch Changes
+
+- 3a66817: Recover share access lookups when a hosted database is missing newer additive resource columns, and prefer Netlify unpooled database URLs for migrations.
+
+## 0.84.60
+
+### Patch Changes
+
+- 4b6ca6c: Loosen the document script CSP allowances so hosted Google Tag Manager scripts and framework inline bootstrap scripts do not trigger CSP violations.
+
+## 0.84.59
+
+### Patch Changes
+
+- 13379f1: Fix empty responses from non-Anthropic models (GPT-5.x, Gemini) on the Builder
+  gateway. Action tool schemas generated from `z.record(...)` emitted a
+  `propertyNames` JSON Schema keyword that OpenAI's function-calling validator
+  rejects with `400 invalid_function_parameters`, producing an empty assistant
+  turn. Tool schemas now strip `propertyNames` so they stay portable across
+  providers (Anthropic already ignored it).
+
+## 0.84.58
+
+### Patch Changes
+
+- cdc9033: Recover durable background chat runs when action input preparation stops making byte progress, and avoid duplicate tool cards when reconnects replay completed tool events.
+- cdc9033: Remove the shadow from agent chat context scope pills.
+- cdc9033: Prevent agent chat sidebars from jittering around nested scroll areas and suppress replayed reconnect tool cards that are already rendered in the saved thread.
+
+## 0.84.57
+
+### Patch Changes
+
+- 5250e7f: Document temporary agent links for session replays and private clips.
+
+## 0.84.56
+
+### Patch Changes
+
+- a0615f8: Make PR visual recap screenshots link directly to the interactive recap and publish source-author metadata for recap comments.
+
+## 0.84.55
+
+### Patch Changes
+
+- ea97dc1: Make agent chat setup, auth, and title state resilient to transient status checks and hidden context payloads.
+
+## 0.84.54
+
+### Patch Changes
+
+- a259f96: Keep centered chat composers stable when the Connect AI setup card appears.
+- df3fcfd: Allow wireframe and diagram blocks to opt in or out of their outer visual frame.
+
+## 0.84.53
+
+### Patch Changes
+
+- 899ebf1: Hide the diff "Show all lines" footer when annotation anchoring already renders every line.
+- c1e18fb: Make session replay uploads retry failed batches without advancing sequence ids.
+
+## 0.84.52
+
+### Patch Changes
+
+- ca38cc7: Carry action-preparation stall detection across reconnect reads for the same run so zero-byte tool input retries cannot keep background chats alive indefinitely.
+- 899ebf1: Hide the diff "Show all lines" footer when annotation anchoring already renders every line.
+- c1e18fb: Make session replay uploads retry failed batches without advancing sequence ids.
+
 ## 0.84.51
 
 ### Patch Changes
