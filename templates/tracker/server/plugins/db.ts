@@ -266,6 +266,33 @@ CREATE INDEX IF NOT EXISTS tracker_project_repos_project_idx ON tracker_project_
 CREATE INDEX IF NOT EXISTS tracker_sprint_artifacts_sprint_idx ON tracker_sprint_artifacts (sprint_id, doc_key);
 CREATE INDEX IF NOT EXISTS tracker_sprint_artifacts_owner_idx ON tracker_sprint_artifacts (owner_email, org_id)`,
     },
+    {
+      // M1-3: approval gate sign-off records (plan-signoff/design-signoff/
+      // escalation/audit-deferral). Previously the Drizzle schema (schema.ts)
+      // declared this table but no CREATE TABLE migration was added, so the
+      // table never existed at runtime — request-approval/list-approvals
+      // 500'd with "relation tracker_approvals does not exist". Columns match
+      // schema.ts's `approvals` table exactly.
+      version: 15,
+      sql: `CREATE TABLE IF NOT EXISTS tracker_approvals (
+  id TEXT PRIMARY KEY,
+  sprint_id TEXT NOT NULL,
+  work_item_id TEXT,
+  gate_key TEXT NOT NULL,
+  gate_ref TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  requested_by TEXT NOT NULL,
+  decided_by TEXT,
+  reason TEXT,
+  decided_at TEXT,
+  created_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE INDEX IF NOT EXISTS tracker_approvals_sprint_idx ON tracker_approvals (sprint_id, status);
+CREATE INDEX IF NOT EXISTS tracker_approvals_owner_org_idx ON tracker_approvals (owner_email, org_id)`,
+    },
   ],
   { table: "tracker_migrations" },
 );
