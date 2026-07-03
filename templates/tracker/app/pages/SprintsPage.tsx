@@ -61,6 +61,27 @@ function sprintStatusColor(status: string): string {
   }
 }
 
+const SPRINT_PHASE_LABEL: Record<string, string> = {
+  planning: '规划',
+  executing: '执行中',
+  done: '已完成',
+};
+function sprintPhaseLabel(phase: string): string {
+  return SPRINT_PHASE_LABEL[phase] ?? phase;
+}
+function sprintPhaseColor(phase: string): string {
+  switch (phase) {
+    case 'planning':
+      return 'bg-secondary text-secondary-foreground';
+    case 'executing':
+      return 'bg-blue-500 text-white';
+    case 'done':
+      return 'bg-emerald-500 text-white';
+    default:
+      return 'bg-muted text-muted-foreground';
+  }
+}
+
 function fmtDate(d: string): string {
   if (!d) return "—";
   return d.slice(0, 10);
@@ -116,12 +137,19 @@ function SprintCard({ sprint }: { sprint: Sprint }) {
         <h3 className="line-clamp-1 text-base font-semibold leading-snug text-foreground">
           {sprint.name}
         </h3>
-        <Badge
-          variant={sprintStatusVariant(sprint.status)}
-          className={cn("shrink-0 px-2 text-[11px]", sprintStatusColor(sprint.status))}
-        >
-          {sprint.status}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Badge
+            variant={sprintStatusVariant(sprint.status)}
+            className={cn("px-2 text-[11px]", sprintStatusColor(sprint.status))}
+          >
+            {sprint.status}
+          </Badge>
+          <Badge
+            className={cn("px-2 text-[11px]", sprintPhaseColor(sprint.phase ?? "planning"))}
+          >
+            {sprintPhaseLabel(sprint.phase ?? "planning")}
+          </Badge>
+        </div>
       </div>
 
       {/* Goal */}

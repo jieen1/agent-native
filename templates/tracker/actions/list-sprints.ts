@@ -25,6 +25,8 @@ export default defineAction({
         name: schema.sprints.name,
         goal: schema.sprints.goal,
         status: schema.sprints.status,
+        phase: schema.sprints.phase,
+        executorThreadId: schema.sprints.executorThreadId,
         branch: schema.sprints.branch,
         startDate: schema.sprints.startDate,
         endDate: schema.sprints.endDate,

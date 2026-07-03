@@ -325,6 +325,12 @@ CREATE INDEX IF NOT EXISTS tracker_approvals_owner_org_idx ON tracker_approvals 
 );
 CREATE INDEX IF NOT EXISTS tracker_work_item_documents_work_item_idx ON tracker_work_item_documents (work_item_id, doc_type)`,
     },
+    {
+      // M1-8: sprint 执行相位可见 + executorThreadId 绑定
+      version: 19,
+      sql: `ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'planning';
+ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS executor_thread_id TEXT`,
+    },
   ],
   { table: "tracker_migrations" },
 );
