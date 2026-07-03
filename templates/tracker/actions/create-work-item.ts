@@ -23,9 +23,9 @@ export default defineAction({
       .optional()
       .describe("The requirement / intent handed to the orchestrator brain"),
     type: z
-      .enum(["需求", "任务", "缺陷", "测试", "生产问题", "requirement", "task", "defect", "incident", "story"])
+      .enum(["需求", "任务", "缺陷", "测试", "生产问题", "集合", "requirement", "task", "defect", "incident", "story", "epic"])
       .optional()
-      .describe("Work item type: 需求/任务/缺陷/测试/生产问题 (or legacy English names)"),
+      .describe("Work item type: 需求/任务/缺陷/测试/生产问题/集合(epic,汇总子项的容器) (or legacy English names)"),
     priority: z.coerce.number().int().optional().describe("Priority: 0=P0 (Critical), 1=P1, 2=P2, 3=P3 (Low)"),
     risk: z.enum(["low", "medium", "high"]).optional().describe("Risk level"),
     tags: z.array(z.string()).optional().describe("Feature/label tags"),

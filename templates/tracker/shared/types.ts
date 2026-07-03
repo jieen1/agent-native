@@ -1,6 +1,6 @@
 // Shared tracker types (UI + actions).
 
-export type WorkItemType = "requirement" | "task" | "defect" | "incident";
+export type WorkItemType = "requirement" | "task" | "defect" | "incident" | "epic";
 export type WorkItemStatus =
   | "open"
   | "queued"
@@ -133,7 +133,7 @@ export interface ActivityResponse {
 
 // Sprint / stage / artifact tracker types.
 
-export type ItemType = '需求' | '任务' | '缺陷' | '测试' | '生产问题';
+export type ItemType = '需求' | '任务' | '缺陷' | '测试' | '生产问题' | '集合';
 export type ItemRisk = 'low' | 'medium' | 'high';
 export type ExecutionMode = 'manual' | 'auto';
 export type SprintStatus = '规划' | '进行中' | '已完成' | '已发布';
@@ -168,4 +168,46 @@ export interface SprintArtifact {
 }
 export interface SprintArtifactsByDocKey {
   byDocKey: Record<string, SprintArtifact[]>;
+}
+
+// Epic decomposition types (M1-4).
+
+export interface DecomposeEpicChildInput {
+  title: string;
+  description?: string;
+  repoName?: string;
+  dependsOnTitles?: string[];
+}
+
+export interface DecomposeEpicResultChild {
+  id: string;
+  title: string;
+  itemKey?: string;
+  created: boolean;
+}
+
+export interface DecomposeEpicResult {
+  epicId: string;
+  children: DecomposeEpicResultChild[];
+}
+
+export interface EpicChildItem {
+  id: string;
+  itemKey?: string;
+  title: string;
+  status: string;
+  currentStageName?: string;
+  priority: number;
+}
+
+export interface EpicChildDependency {
+  fromId: string;
+  toId: string;
+  fromLabel: string;
+  toLabel: string;
+}
+
+export interface EpicChildrenResult {
+  children: EpicChildItem[];
+  dependencies: EpicChildDependency[];
 }

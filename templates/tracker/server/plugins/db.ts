@@ -266,6 +266,14 @@ CREATE INDEX IF NOT EXISTS tracker_project_repos_project_idx ON tracker_project_
 CREATE INDEX IF NOT EXISTS tracker_sprint_artifacts_sprint_idx ON tracker_sprint_artifacts (sprint_id, doc_key);
 CREATE INDEX IF NOT EXISTS tracker_sprint_artifacts_owner_idx ON tracker_sprint_artifacts (owner_email, org_id)`,
     },
+    {
+      // M1-4: epic type + decompose-epic. No new columns needed (work_items.type
+      // and links.link_type are already free-text); add an index so "find an
+      // epic's children" (links WHERE to_item_id = epic AND link_type = 'child-of')
+      // and idempotency lookups stay fast.
+      version: 15,
+      sql: `CREATE INDEX IF NOT EXISTS tracker_links_to_item_type_idx ON tracker_links (to_item_id, link_type)`,
+    },
   ],
   { table: "tracker_migrations" },
 );
