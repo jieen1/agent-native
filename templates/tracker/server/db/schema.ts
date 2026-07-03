@@ -205,3 +205,33 @@ export const execQueue = table("tracker_exec_queue", {
   startedAt: text("started_at").default(null),
   ...ownableColumns(),
 });
+
+// ---------------------------------------------------------------------------
+// Project repos — each project can register multiple code repositories.
+// Mirrors design project.yaml repos[] — name is unique within a project.
+// ciMode: 'none' | 'github'; gateMode: 'tests-only' | 'stack' | 'none'
+// buildTool: free text (e.g. 'npm', 'pnpm', 'gradle').
+// devModel: optional model override for agent work on this repo.
+// ---------------------------------------------------------------------------
+export const projectRepos = table("tracker_project_repos", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  // Short repo name, unique within a project (e.g. "demo-app").
+  name: text("name").notNull(),
+  gitRemote: text("git_remote").notNull().default(""),
+  baseBranch: text("base_branch").notNull().default("main"),
+  testCmdUnit: text("test_cmd_unit").notNull().default(""),
+  testCmdFull: text("test_cmd_full").notNull().default(""),
+  e2eTestPath: text("e2e_test_path").notNull().default(""),
+  integrationTestPath: text("integration_test_path").notNull().default(""),
+  buildTool: text("build_tool").notNull().default(""),
+  // CI/CD integration mode.
+  ciMode: text("ci_mode").notNull().default("none"),
+  // Gate strategy used when dispatching work on this repo.
+  gateMode: text("gate_mode").notNull().default("tests-only"),
+  // Optional model override for agent-driven work on this repo.
+  devModel: text("dev_model"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  ...ownableColumns(),
+});

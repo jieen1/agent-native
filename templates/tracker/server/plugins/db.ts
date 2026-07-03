@@ -218,6 +218,32 @@ ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS started_at TEXT`,
       sql: `ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS owner TEXT;
 ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS nature TEXT NOT NULL DEFAULT '[]'`,
     },
+    {
+      // M1-1: multi-repo registry per project.
+      version: 13,
+      sql: `CREATE TABLE IF NOT EXISTS tracker_project_repos (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  git_remote TEXT NOT NULL DEFAULT '',
+  base_branch TEXT NOT NULL DEFAULT 'main',
+  test_cmd_unit TEXT NOT NULL DEFAULT '',
+  test_cmd_full TEXT NOT NULL DEFAULT '',
+  e2e_test_path TEXT NOT NULL DEFAULT '',
+  integration_test_path TEXT NOT NULL DEFAULT '',
+  build_tool TEXT NOT NULL DEFAULT '',
+  ci_mode TEXT NOT NULL DEFAULT 'none',
+  gate_mode TEXT NOT NULL DEFAULT 'tests-only',
+  dev_model TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tracker_project_repos_project_name_idx ON tracker_project_repos (owner_email, project_id, name);
+CREATE INDEX IF NOT EXISTS tracker_project_repos_project_idx ON tracker_project_repos (project_id)`,
+    },
   ],
   { table: "tracker_migrations" },
 );
