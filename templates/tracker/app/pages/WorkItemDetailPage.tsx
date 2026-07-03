@@ -5,9 +5,14 @@ import {
   IconCheck,
   IconClock,
   IconEdit,
+  IconCircleCheck,
   IconExternalLink,
   IconFileText,
   IconFlag,
+  IconPaperclip,
+  IconPalette,
+  IconPhoto,
+  IconRuler,
   IconGitBranch,
   IconHash,
   IconLayoutKanban,
@@ -427,6 +432,13 @@ const DOC_TYPE_COLORS: Record<string, string> = {
   spec: "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/30",
   other: "bg-secondary text-secondary-foreground ring-border",
 };
+const DOC_TYPE_ICONS: Record<string, any> = {
+  design: IconPalette,
+  prototype: IconPhoto,
+  acceptance: IconCircleCheck,
+  spec: IconRuler,
+  other: IconFileText,
+};
 
 function LinksPanel({ workItemId }: { workItemId: string }) {
   const { data, isLoading } = useLinks(workItemId);
@@ -581,7 +593,7 @@ function DocumentsPanel({ workItemId }: { workItemId: string }) {
     <section>
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <IconFileText className="size-3.5 text-muted-foreground" />
+          <IconPaperclip className="size-3.5 text-muted-foreground" />
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             关联文档{totalDocs > 0 ? ` (${totalDocs})` : ""}
           </h2>
@@ -659,15 +671,17 @@ function DocumentsPanel({ workItemId }: { workItemId: string }) {
             const docs = byDocType[dt] ?? [];
             const label = DOC_TYPE_LABELS[dt];
             const color = DOC_TYPE_COLORS[dt];
+            const DocTypeIcon = DOC_TYPE_ICONS[dt];
             return (
               <div key={dt}>
                 <div className="mb-1.5 flex items-center gap-1.5">
                   <span
                     className={cn(
-                      "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                      "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
                       color,
                     )}
                   >
+                    <DocTypeIcon className="size-3" />
                     {label}
                   </span>
                 </div>
@@ -684,12 +698,14 @@ function DocumentsPanel({ workItemId }: { workItemId: string }) {
                       >
                         <span
                           className={cn(
-                            "shrink-0 inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                            "shrink-0 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
                             color,
                           )}
                         >
+                          <DocTypeIcon className="size-3" />
                           {label}
                         </span>
+                        <IconFileText className="size-3.5 text-muted-foreground shrink-0" />
                         <a
                           href={doc.url}
                           target="_blank"
