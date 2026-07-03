@@ -131,6 +131,12 @@ export function Layout({ children }: LayoutProps) {
         <AgentSidebar
           position="right"
           chatViewTransition
+          // Upstream changed getInitialAgentSidebarOpen: persisted "true" can
+          // no longer open a default-closed sidebar, and the closed state
+          // renders no open affordance — without defaultOpen the sidebar chat
+          // became unreachable after the merge. Open by default on desktop;
+          // a user's explicit close ("false") is still honored.
+          defaultOpen
           storageKey="chat"
           browserTabId={TAB_ID}
           onFullscreenRequest={openAskAgentFullscreen}

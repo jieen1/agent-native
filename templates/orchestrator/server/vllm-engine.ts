@@ -2,6 +2,29 @@ import {
   registerAgentEngine,
   createAISDKEngine,
 } from "@agent-native/core/agent/engine";
+import type { AgentEngine } from "@agent-native/core/agent/engine";
+
+/**
+ * Re-brand the underlying AI-SDK engine instance as "vllm" WITHOUT losing its
+ * prototype methods. createAISDKEngine returns an instance whose `.name` is
+ * "ai-sdk:openai"; upstream's send-time credential preflight
+ * (`isResolvedEngineUsableForRequest`) looks the engine up in the registry BY
+ * INSTANCE NAME — under "ai-sdk:openai" it finds the built-in entry
+ * (requiredEnvVars: [OPENAI_API_KEY], deploy-env fallback blocked in workspace
+ * mode) and fails every send with missing_credentials. Keeping the instance
+ * name "vllm" makes the preflight find OUR registry entry
+ * (requiredEnvVars: []) instead.
+ */
+function asVllmEngine(inner: AgentEngine): AgentEngine {
+  return {
+    name: "vllm",
+    label: "本地 vLLM",
+    defaultModel: inner.defaultModel,
+    supportedModels: inner.supportedModels,
+    capabilities: inner.capabilities,
+    stream: (opts) => inner.stream(opts),
+  };
+}
 
 /**
  * Local-vLLM chat engine for the orchestrator's in-app (sidebar) agent chat —
@@ -22,11 +45,13 @@ import {
 export function getVllmEngine() {
   const baseUrl = process.env.OPENAI_BASE_URL;
   if (!baseUrl) return undefined;
-  return createAISDKEngine("openai", {
-    baseUrl,
-    apiKey: process.env.OPENAI_API_KEY || "vllm-local",
-    model: process.env.VLLM_DEFAULT_MODEL || "claude-sonnet-4-6",
-  });
+  return asVllmEngine(
+    createAISDKEngine("openai", {
+      baseUrl,
+      apiKey: process.env.OPENAI_API_KEY || "vllm-local",
+      model: process.env.VLLM_DEFAULT_MODEL || "claude-sonnet-4-6",
+    }),
+  );
 }
 
 let registered = false;
@@ -59,10 +84,12 @@ export function registerVllmEngine(): void {
     ],
     requiredEnvVars: [],
     create: (config) =>
-      createAISDKEngine("openai", {
-        ...config,
-        baseUrl,
-        apiKey: process.env.OPENAI_API_KEY || "vllm-local",
-      }),
+      asVllmEngine(
+        createAISDKEngine("openai", {
+          ...config,
+          baseUrl,
+          apiKey: process.env.OPENAI_API_KEY || "vllm-local",
+        }),
+      ),
   });
 }
