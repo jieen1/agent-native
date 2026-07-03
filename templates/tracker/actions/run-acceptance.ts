@@ -12,7 +12,9 @@ import { ownerScope } from "../server/lib/access.js";
 import {
   contentDocumentUrl,
   createContentDocument,
+  uploadContentImage,
 } from "../server/lib/content-client.js";
+import { captureScreenshot } from "../server/lib/screenshot.js";
 import actionsRegistry from "../.generated/actions-registry.js";
 
 // Lazily materialize the static action registry INSIDE run(), never at module
@@ -63,7 +65,7 @@ export default defineAction({
       .array(
         z.object({
           name: z.string().min(1),
-          kind: z.enum(["action", "http"]),
+          kind: z.enum(["action", "http", "screenshot"]),
           action: z
             .string()
             .optional()
@@ -74,7 +76,7 @@ export default defineAction({
             .record(z.string(), z.unknown())
             .optional()
             .describe("kind=action 时传给该 action 的参数"),
-          url: z.string().optional().describe("kind=http 时的请求 URL"),
+          url: z.string().optional().describe("kind=http 时的请求 URL；kind=screenshot 时为要截图的页面 URL"),
           method: z
             .string()
             .optional()
@@ -86,7 +88,10 @@ export default defineAction({
             .describe("kind=http 时的请求体,会 JSON.stringify"),
           expect: z
             .record(z.string(), z.unknown())
-            .describe("期望的返回值/响应,部分匹配"),
+            .optional()
+            .describe(
+              "期望的返回值/响应,部分匹配；kind=screenshot 时可选 { text: string } 表示页面应包含的文本，用于同时做断言",
+            ),
         }),
       )
       .min(1),
@@ -120,8 +125,8 @@ export default defineAction({
     // --- Execute scenarios sequentially ---
     interface ScenarioResult {
       name: string;
-      kind: "action" | "http";
-      expect: Record<string, unknown>;
+      kind: "action" | "http" | "screenshot";
+      expect: Record<string, unknown> | undefined;
       actual: Record<string, unknown>;
       pass: boolean;
     }
@@ -174,9 +179,40 @@ export default defineAction({
             actual = { error: String(e) };
           }
         }
+      } else if (sc.kind === "screenshot") {
+        if (!sc.url) {
+          actual = { error: "Missing URL for screenshot scenario" };
+        } else {
+          try {
+            const { png, pageText } = await captureScreenshot(sc.url);
+            const safeName = sc.name.replace(/[^a-zA-Z0-9-_]/g, "_").slice(0, 60);
+            const filename = `acceptance-${itemKey}-${safeName}-${Date.now()}.png`;
+            const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
+            const uploaded = await uploadContentImage(ownerEmail, {
+              data: dataUrl,
+              filename,
+            });
+            const expectText =
+              sc.expect && typeof sc.expect.text === "string"
+                ? (sc.expect.text as string)
+                : undefined;
+            actual = {
+              screenshotUrl: uploaded.url,
+              ...(expectText !== undefined
+                ? { textFound: pageText.includes(expectText) }
+                : {}),
+            };
+          } catch (e) {
+            actual = { error: String(e) };
+          }
+        }
       }
 
-      const pass = !("error" in actual) && partialMatch(actual, sc.expect);
+      const pass =
+        sc.kind === "screenshot"
+          ? !("error" in actual) &&
+            (!("textFound" in actual) || actual.textFound === true)
+          : !("error" in actual) && partialMatch(actual, sc.expect ?? {});
 
       results.push({
         name: sc.name,
@@ -206,6 +242,14 @@ export default defineAction({
         `### ${i + 1}. ${r.name} — ${r.pass ? "PASS" : "FAIL"}`,
         "",
         `- kind: ${r.kind}`,
+        ...(r.kind === "screenshot" &&
+          typeof (r.actual as Record<string, unknown>).screenshotUrl === "string"
+          ? [
+              "",
+              `![${r.name}](${(r.actual as Record<string, unknown>).screenshotUrl})`,
+            ]
+          : []),
+        "",
         "- 预期:",
         "```json",
         JSON.stringify(r.expect, null, 2),

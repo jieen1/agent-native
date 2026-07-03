@@ -293,3 +293,46 @@ export async function createContentDocument(
 
   return { ...data, id };
 }
+
+/**
+ * Normalize a URL returned by the content app's `upload-image` action into an
+ * absolute, publicly reachable URL. The content app's upload provider returns
+ * a path relative to ITS OWN app root (e.g. `/api/uploads/local/2026/07/x.png`
+ * or already-absolute when an S3 public base URL is configured) — mirrors the
+ * same `/content` gateway-prefix convention as `contentDocumentUrl` above.
+ */
+export function contentImageUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  const path = url.startsWith("/") ? url : `/${url}`;
+  return `${contentPublicBaseUrl()}/content${path}`;
+}
+
+/**
+ * Upload image bytes (as a base64 data URL) to the content app's storage via
+ * its shared `upload-image` core action (S3/MinIO when content has storage
+ * env vars configured, else content's local-disk fallback — see
+ * templates/content/server/lib/upload-storage-provider.ts). Returns an
+ * absolute, publicly reachable image URL suitable for embedding in markdown.
+ */
+export async function uploadContentImage(
+  actorEmail: string,
+  params: { data: string; filename?: string },
+): Promise<{ url: string; id?: string; provider?: string }> {
+  const result = await callContentTool(actorEmail, "upload-image", params);
+  const data = (result.data ?? {}) as {
+    url?: string;
+    id?: string;
+    provider?: string;
+    error?: string;
+  };
+  if (data.error || !data.url) {
+    throw new Error(
+      data.error || "Content MCP upload-image: no url in response",
+    );
+  }
+  return {
+    url: contentImageUrl(data.url),
+    id: data.id,
+    provider: data.provider,
+  };
+}
