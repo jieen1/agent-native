@@ -681,6 +681,26 @@ interface AppendEventInput {
  * (thread_id, seq) constraint plus a COALESCE(MAX)+1 keeps ordering stable
  * even under concurrent appends.
  */
+// Postgres text AND jsonb reject the NUL byte (U+0000); strip it (deep) from
+// every persisted value so no tool_result file content can crash the transcript.
+function stripNul<T>(value: T): T {
+  if (typeof value === "string") {
+    // eslint-disable-next-line no-control-regex
+    return value.replace(/\u0000/g, "") as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => stripNul(v)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = stripNul(v);
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
 async function appendEvent(
   threadId: string,
   ownerEmail: string,
@@ -702,11 +722,13 @@ async function appendEvent(
     threadId,
     seq: next,
     type: input.type,
-    text: input.text ?? null,
+    // Strip NUL bytes: Postgres text/jsonb reject U+0000, and tool_results
+    // carry raw file content that may contain one.
+    text: input.text != null ? stripNul(input.text) : null,
     toolName: input.toolName ?? null,
     toolUseId: input.toolUseId ?? null,
-    toolInput: input.toolInput ?? null,
-    toolResult: input.toolResult ?? null,
+    toolInput: input.toolInput != null ? stripNul(input.toolInput) : null,
+    toolResult: input.toolResult != null ? stripNul(input.toolResult) : null,
     ownerEmail,
     orgId,
   });
