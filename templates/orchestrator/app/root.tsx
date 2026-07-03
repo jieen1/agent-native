@@ -135,7 +135,13 @@ export default function Root() {
   const [queryClient] = useState(() => createAgentNativeQueryClient());
   return (
     <I18nextProvider i18n={i18n}>
-      <AppProviders queryClient={queryClient}>
+      {/* i18n={false}: this app runs its own react-i18next instance (the
+          I18nextProvider above, zh-CN catalog in app/lib/i18n.ts). Upstream
+          AppProviders now mounts core's AgentNativeI18nProvider by default,
+          which would nest an English-fallback instance INSIDE ours and shadow
+          every useTranslation() — pages then render raw keys like
+          "settings.title". Opt out until we migrate to the core catalog API. */}
+      <AppProviders queryClient={queryClient} i18n={false}>
         <DbSyncSetup />
         <AppContent />
       </AppProviders>
