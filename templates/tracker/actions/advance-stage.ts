@@ -387,6 +387,36 @@ export default defineAction({
       .limit(2000);
 
     const now = new Date().toISOString();
+
+    // ── Single-active-sprint assertion (M1-7) ──────────────────────────────
+    // Only when advancing from "设计" (targeting "实施"): ensure no other
+    // sprint in the same project is already in an active phase.
+    if (args.fromStage === "设计") {
+      const allSprints = await db
+        .select()
+        .from(schema.sprints)
+        .where(
+          and(
+            eq(schema.sprints.projectId, sprint.projectId),
+            ownerScope(schema.sprints),
+          ),
+        );
+      const ACTIVE_PHASES = ["executing", "verifying", "auditing", "promoting"];
+      const conflict = allSprints.find(
+        (s) => s.id !== args.id && s.phase && ACTIVE_PHASES.includes(s.phase),
+      );
+      if (conflict) {
+        throw new Error(
+          `已有活跃 sprint 「${conflict.name}」处于 ${conflict.phase} 阶段，请先完成或关闭该 sprint 后再推进本 sprint 至实施阶段`,
+        );
+      }
+      // Mark current sprint as executing before cascading work items
+      await db
+        .update(schema.sprints)
+        .set({ phase: "executing", updatedAt: now })
+        .where(eq(schema.sprints.id, args.id));
+    }
+
     const cascaded: { workItemId: string; ok: boolean; error?: string }[] = [];
 
     for (const item of items) {

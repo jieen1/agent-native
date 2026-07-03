@@ -87,6 +87,7 @@ export const sprints = table("tracker_sprints", {
   name: text("name").notNull(),
   goal: text("goal").default(""),
   status: text("status").default("规划"),
+  phase: text("phase"), // 可空；executing|verifying|auditing|promoting|planning|designing|storytelling|done 等细粒度阶段标记（M1-7）
   branch: text("branch").default(""),
   startDate: text("start_date").default(""),
   endDate: text("end_date").default(""),
