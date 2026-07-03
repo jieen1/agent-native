@@ -169,11 +169,15 @@ export const runCancel = defineAction({
       .set({ status: "cancelled" as any, completedAt: new Date() })
       .where(eq(v3Schema.v3Runs.id, args.runId));
 
-    // Cancel all running spawns for this run
-    await db.execute(sql.raw(`
+    // Cancel all running spawns for this run. Use the `sql` tagged template
+    // (NOT sql.raw): sql.raw interpolates the runId as a bare, unquoted token,
+    // so Postgres reads it as a column identifier and the query fails with
+    // "Failed query" every time (a run could never actually be cancelled, and
+    // it was an injection shape). The tagged template parameterizes ${args.runId}.
+    await db.execute(sql`
       UPDATE v3_spawns SET status = 'cancelled', completed_at = NOW()
       WHERE run_id = ${args.runId} AND status = 'running'
-    `));
+    `);
 
     return { runId: args.runId, previousStatus: prev, status: "cancelled" };
   },
