@@ -307,12 +307,69 @@ export function contentImageUrl(url: string): string {
   return `${contentPublicBaseUrl()}/content${path}`;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Fallback helpers for upload-image MCP response
+//
+// Background (packages/core side limitation, bypassed here on tracker side):
+//
+//   `upload-image` is a "pure" core action — it does NOT declare `mcpApp.resource`
+//   nor `readOnly:true`.  The MCP server (packages/core/src/mcp/build-server.ts)
+//   will therefore never return `structuredContent` for it, regardless of
+//   `x-agent-native-mcp-inline-apps` header.  Instead `content[].text` carries a
+//   lossy, human-readable summary produced by `conciseToolResultText`, whose field
+//   priority is: message/summary → id → url → JSON.stringify fallback.
+//
+//   Because the upload-storage-provider always returns a non-empty `id` field
+//   (e.g. `"local:2026/07/xxx.png"` or `"s3:2026/07/xxx.png"`), the concise text
+//   short-circuits at `id` and produces:
+//     `"upload-image completed for local:2026/07/xxx.png."`
+//   — the `url` field is lost.  `callContentTool` above tries `JSON.parse` on this
+//   text, fails, and falls through to assigning the raw string to `result.data`.
+//
+//   The helpers below scrape the id out of that summary string, then map the
+//   storage id back to the content app's proxy route
+//   `/api/uploads/<local|s3>/<objectKey>` which is always readable (see
+//   templates/content/server/lib/upload-storage-provider.ts top comments).
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract the storage id out of the concise summary text emitted by
+ * `conciseToolResultText` when structuredContent is not available.
+ *
+ * Expected format: `"upload-image completed for <id>."`
+ * The trailing period is optional (the core code trims inconsistently).
+ */
+function extractUploadIdFromConciseText(text: string): string | undefined {
+  const match = text.trim().match(/completed for (\S+?)\.?$/);
+  return match?.[1];
+}
+
+/**
+ * Map a content storage id (e.g. `"local:2026/07/xxx.png"` or
+ * `"s3:2026/07/xxx.png"`) back to the content app's always-readable
+ * proxy route `/api/uploads/<kind>/<objectKey>`.
+ *
+ * See templates/content/server/lib/upload-storage-provider.ts — the provider
+ * always returns `local:<key>` or `s3:<key>`, and the content app registers
+ * `/api/uploads/:provider/:key*` proxy routes that work regardless of S3
+ * public base URL configuration.
+ */
+function uploadPathFromStorageId(id: string): string | undefined {
+  const match = id.trim().match(/^(local|s3):(.+)$/);
+  if (!match) return undefined;
+  const [, kind, objectKey] = match;
+  return `/api/uploads/${kind}/${objectKey}`;
+}
+
 /**
  * Upload image bytes (as a base64 data URL) to the content app's storage via
  * its shared `upload-image` core action (S3/MinIO when content has storage
  * env vars configured, else content's local-disk fallback — see
  * templates/content/server/lib/upload-storage-provider.ts). Returns an
  * absolute, publicly reachable image URL suitable for embedding in markdown.
+ *
+ * Falls back to scraping the concise summary text when structuredContent is
+ * missing (see helpers above for background on why this is necessary).
  */
 export async function uploadContentImage(
   actorEmail: string,
@@ -325,14 +382,34 @@ export async function uploadContentImage(
     provider?: string;
     error?: string;
   };
-  if (data.error || !data.url) {
+
+  let rawUrl =
+    typeof data.url === "string" && data.url ? data.url : undefined;
+  let id = typeof data.id === "string" && data.id ? data.id : undefined;
+
+  // upload-image is a "pure" core action (no mcpApp.resource / readOnly), so
+  // the MCP server never returns structuredContent for it.  content[].text is a
+  // lossy summary that drops the url field (see module-level comment above).
+  // When result.data is a string, it is that summary text — scrape the id out
+  // and convert it to a readable proxy path as a fallback.
+  if (!rawUrl && !data.error && typeof result.data === "string") {
+    const scrapedId = extractUploadIdFromConciseText(result.data);
+    const path = scrapedId ? uploadPathFromStorageId(scrapedId) : undefined;
+    if (path) {
+      rawUrl = path;
+      id = id ?? scrapedId;
+    }
+  }
+
+  if (data.error || !rawUrl) {
     throw new Error(
       data.error || "Content MCP upload-image: no url in response",
     );
   }
+
   return {
-    url: contentImageUrl(data.url),
-    id: data.id,
+    url: contentImageUrl(rawUrl),
+    id,
     provider: data.provider,
   };
 }
