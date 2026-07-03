@@ -15,7 +15,23 @@ import {
 } from "../server/lib/content-client.js";
 import actionsRegistry from "../.generated/actions-registry.js";
 
-const localActionRegistry = loadActionsFromStaticRegistry(actionsRegistry);
+// Lazily materialize the static action registry INSIDE run(), never at module
+// top level: actions-registry.js imports every action (including this one), so
+// touching it during this module's evaluation hits a circular-import temporal
+// dead zone ("Cannot access '<registry>' before initialization") that crashes
+// the whole tracker server on boot. By the time run() executes, the registry
+// module has finished initializing.
+let _localActionRegistry: ReturnType<
+  typeof loadActionsFromStaticRegistry
+> | null = null;
+function getLocalActionRegistry(): ReturnType<
+  typeof loadActionsFromStaticRegistry
+> {
+  if (!_localActionRegistry) {
+    _localActionRegistry = loadActionsFromStaticRegistry(actionsRegistry);
+  }
+  return _localActionRegistry;
+}
 
 // Recursive partial-match helper: every key present in `expect` must exist in
 // `actual` with an equal value. Objects/arrays are compared recursively;
@@ -123,7 +139,7 @@ export default defineAction({
           };
         } else {
           try {
-            const entry = localActionRegistry[sc.action];
+            const entry = getLocalActionRegistry()[sc.action];
             if (!entry) {
               actual = { error: `Unknown action: ${sc.action}` };
             } else {
