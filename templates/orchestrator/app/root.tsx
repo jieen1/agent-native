@@ -134,18 +134,21 @@ function AppContent() {
 export default function Root() {
   const [queryClient] = useState(() => createAgentNativeQueryClient());
   return (
-    <I18nextProvider i18n={i18n}>
-      {/* i18n={false}: this app runs its own react-i18next instance (the
-          I18nextProvider above, zh-CN catalog in app/lib/i18n.ts). Upstream
-          AppProviders now mounts core's AgentNativeI18nProvider by default,
-          which would nest an English-fallback instance INSIDE ours and shadow
-          every useTranslation() — pages then render raw keys like
-          "settings.title". Opt out until we migrate to the core catalog API. */}
-      <AppProviders queryClient={queryClient} i18n={false}>
+    <AppProviders queryClient={queryClient}>
+      {/* This app runs its own react-i18next instance (zh-CN catalog in
+          app/lib/i18n.ts). Core's AgentNativeI18nProvider (mounted by
+          AppProviders) must stay OUTSIDE so core components can useLocale();
+          our I18nextProvider must be INSIDE so app pages' useTranslation()
+          resolves the zh-CN instance instead of core's English-fallback one
+          (outside-in the app rendered raw keys like "settings.title";
+          opting out entirely crashes core components on useLocale). Core
+          components under our instance fall back to core's built-in English
+          messages via useT's fallbackMessage — never raw keys. */}
+      <I18nextProvider i18n={i18n}>
         <DbSyncSetup />
         <AppContent />
-      </AppProviders>
-    </I18nextProvider>
+      </I18nextProvider>
+    </AppProviders>
   );
 }
 
