@@ -15,12 +15,26 @@ import type { AgentEngine } from "@agent-native/core/agent/engine";
  * name "vllm" makes the preflight find OUR registry entry
  * (requiredEnvVars: []) instead.
  */
+const VLLM_MODELS = [
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5-20251001",
+  "qwen3.6",
+  "ornith-1.0-35b",
+] as const;
+
+function vllmDefaultModel(): string {
+  return process.env.VLLM_DEFAULT_MODEL || "claude-sonnet-4-6";
+}
+
 function asVllmEngine(inner: AgentEngine): AgentEngine {
   return {
     name: "vllm",
     label: "本地 vLLM",
-    defaultModel: inner.defaultModel,
-    supportedModels: inner.supportedModels,
+    // NOT inner.defaultModel — the wrapped AI-SDK engine reports the OpenAI
+    // provider default (gpt-5.5), which vLLM does not serve; a send without an
+    // explicit model then 404s ("The model gpt-5.5 does not exist").
+    defaultModel: vllmDefaultModel(),
+    supportedModels: VLLM_MODELS,
     capabilities: inner.capabilities,
     stream: (opts) => inner.stream(opts),
   };
