@@ -1,22 +1,27 @@
 /**
  * Custom onboarding plugin for Content.
  *
- * Mounts the framework default onboarding routes and adds an optional
- * "Media uploads" step so document media blocks point users at Builder.io file
- * storage when they need uploads.
+ * Mounts the framework default onboarding routes, registers the
+ * `contentFileUploadProvider` fallback (S3-compatible storage, or local disk
+ * on a persistent volume) so self-hosted deployments can upload media
+ * without Builder.io, and adds an optional "Media uploads" step that lets
+ * users connect Builder.io for one-click storage instead.
  */
 
-import { getActiveFileUploadProvider } from "@agent-native/core/file-upload";
+import { registerFileUploadProvider } from "@agent-native/core/file-upload";
 import {
   createOnboardingPlugin,
   registerOnboardingStep,
 } from "@agent-native/core/onboarding";
-import { resolveHasBuilderPrivateKey } from "@agent-native/core/server";
+
+import { contentFileUploadProvider } from "../lib/upload-storage-provider.js";
 
 const basePlugin = createOnboardingPlugin();
 
 export default async (nitroApp: any): Promise<void> => {
   await basePlugin(nitroApp);
+
+  registerFileUploadProvider(contentFileUploadProvider);
 
   registerOnboardingStep({
     id: "media-uploads",
@@ -24,7 +29,7 @@ export default async (nitroApp: any): Promise<void> => {
     required: false,
     title: "Media uploads",
     description:
-      "Connect Builder.io to upload and embed images, videos, and audio files in Content documents.",
+      "Connect Builder.io for one-click media storage, or leave unconnected to use this deployment's built-in S3/local-disk storage.",
     methods: [
       {
         id: "builder",
@@ -37,15 +42,9 @@ export default async (nitroApp: any): Promise<void> => {
         payload: { scope: "browser" },
       },
     ],
-    isComplete: async () => {
-      const active = getActiveFileUploadProvider();
-      if (active && active.id !== "builder") return true;
-      try {
-        if (await resolveHasBuilderPrivateKey()) return true;
-      } catch {
-        // Fall back to sync provider status below.
-      }
-      return !!active;
-    },
+    // A fallback upload provider (S3 if configured, otherwise local disk) is
+    // always registered above, so media uploads are always available —
+    // Builder.io is an optional upgrade, not a requirement.
+    isComplete: async () => true,
   });
 };
