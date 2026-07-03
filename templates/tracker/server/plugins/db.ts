@@ -218,6 +218,12 @@ ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS started_at TEXT`,
       sql: `ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS owner TEXT;
 ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS nature TEXT NOT NULL DEFAULT '[]'`,
     },
+    {
+      // M1-8: sprint 执行相位可见 + executorThreadId 绑定
+      version: 19,
+      sql: `ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'planning';
+ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS executor_thread_id TEXT`,
+    },
   ],
   { table: "tracker_migrations" },
 );

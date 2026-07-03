@@ -81,6 +81,8 @@ export const sprints = table("tracker_sprints", {
   name: text("name").notNull(),
   goal: text("goal").default(""),
   status: text("status").default("规划"),
+  phase: text("phase").notNull().default("planning"),
+  executorThreadId: text("executor_thread_id"),
   branch: text("branch").default(""),
   startDate: text("start_date").default(""),
   endDate: text("end_date").default(""),

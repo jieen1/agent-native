@@ -41,6 +41,8 @@ export default defineAction({
       name: sprint.name,
       goal: sprint.goal,
       status: sprint.status,
+      phase: sprint.phase,
+      executorThreadId: sprint.executorThreadId,
       branch: sprint.branch,
       startDate: sprint.startDate,
       endDate: sprint.endDate,

@@ -11,6 +11,8 @@ export default defineAction({
     name: z.string().optional().describe("New sprint name"),
     goal: z.string().optional().describe("New sprint goal"),
     status: z.string().optional().describe("New status (规划|进行中|已完成)"),
+    phase: z.enum(['planning', 'executing', 'done']).optional().describe("执行相位:planning(规划)|executing(执行中)|done(已完成)"),
+    executorThreadId: z.string().nullable().optional().describe("绑定的 orchestrator brain 线程 id,传 null 可清空"),
     branch: z.string().optional().describe("New git branch"),
     startDate: z.string().optional().describe("New start date (ISO-8601)"),
     endDate: z.string().optional().describe("New end date (ISO-8601)"),
@@ -34,6 +36,8 @@ export default defineAction({
     if (args.name !== undefined) values.name = args.name.trim();
     if (args.goal !== undefined) values.goal = args.goal.trim();
     if (args.status !== undefined) values.status = args.status;
+    if (args.phase !== undefined) values.phase = args.phase;
+    if (args.executorThreadId !== undefined) values.executorThreadId = args.executorThreadId;
     if (args.branch !== undefined) values.branch = args.branch.trim();
     if (args.startDate !== undefined) values.startDate = args.startDate.trim();
     if (args.endDate !== undefined) values.endDate = args.endDate.trim();
@@ -58,6 +62,8 @@ export default defineAction({
       name: row.name,
       goal: row.goal,
       status: row.status,
+      phase: row.phase,
+      executorThreadId: row.executorThreadId,
       branch: row.branch,
       startDate: row.startDate,
       endDate: row.endDate,
