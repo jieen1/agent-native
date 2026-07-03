@@ -169,3 +169,15 @@ export interface SprintArtifact {
 export interface SprintArtifactsByDocKey {
   byDocKey: Record<string, SprintArtifact[]>;
 }
+
+// Dependency-graph validation (M1-5): validate-dependency-graph action result.
+export interface GraphValidationIssue {
+  code: "self-dependency" | "cycle" | "chain-too-deep" | "no-parallelism" | "orphan";
+  message: string;
+  path?: string[];
+}
+export interface GraphValidationResult {
+  errors: GraphValidationIssue[];
+  warnings: GraphValidationIssue[];
+  topoOrder: string[];
+}

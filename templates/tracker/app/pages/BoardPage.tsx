@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { useWorkItems, useSprints } from "@/hooks/use-tracker";
+import { useWorkItems, useSprints, useValidateDependencyGraph } from "@/hooks/use-tracker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,15 +12,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
   IconSearch,
   IconPlus,
+  IconAffiliate,
+  IconAlertTriangle,
+  IconCircleCheck,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import {
   statusPresentation,
   typeChip,
 } from "@/components/tracker-format";
-import type { TrackerWorkItem, Sprint } from "@shared/types";
+import type { TrackerWorkItem, Sprint, GraphValidationIssue } from "@shared/types";
 
 // ── Stage constants ──────────────────────────────────────────────────────────
 
@@ -224,6 +235,131 @@ function WorkItemCard({ item }: { item: TrackerWorkItem }) {
   );
 }
 
+// ── Dependency-graph validation dialog (M1-5) ───────────────────────────────
+
+const ISSUE_LABELS: Record<GraphValidationIssue["code"], string> = {
+  "self-dependency": "自依赖",
+  cycle: "依赖环",
+  "chain-too-deep": "链过深",
+  "no-parallelism": "无并行度",
+  orphan: "孤儿节点",
+};
+
+function IssueRow({
+  issue,
+  tone,
+}: {
+  issue: GraphValidationIssue;
+  tone: "error" | "warning";
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border px-3 py-2 text-xs leading-relaxed",
+        tone === "error"
+          ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
+          : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+      )}
+    >
+      <span className="mr-1.5 font-semibold">
+        [{ISSUE_LABELS[issue.code] ?? issue.code}]
+      </span>
+      {issue.message}
+    </div>
+  );
+}
+
+function GraphValidationDialog({
+  open,
+  onOpenChange,
+  scope,
+  scopeId,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  scope: "epic" | "sprint" | undefined;
+  scopeId: string | undefined;
+}) {
+  const { data, isLoading } = useValidateDependencyGraph(scope, scopeId, open);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>图校验结果</DialogTitle>
+        </DialogHeader>
+
+        <ScrollArea className="max-h-[60vh] pr-3">
+          {isLoading ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              校验中…
+            </p>
+          ) : !data ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              暂无数据
+            </p>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {data.errors.length === 0 && data.warnings.length === 0 ? (
+                <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+                  <IconCircleCheck className="size-4 shrink-0" />
+                  未发现问题
+                </div>
+              ) : null}
+
+              {data.errors.length > 0 ? (
+                <div className="flex flex-col gap-1.5">
+                  <h4 className="text-xs font-semibold text-muted-foreground">
+                    错误 ({data.errors.length})
+                  </h4>
+                  {data.errors.map((issue, i) => (
+                    <IssueRow key={`err-${i}`} issue={issue} tone="error" />
+                  ))}
+                </div>
+              ) : null}
+
+              {data.warnings.length > 0 ? (
+                <div className="flex flex-col gap-1.5">
+                  <h4 className="text-xs font-semibold text-muted-foreground">
+                    警告 ({data.warnings.length})
+                  </h4>
+                  {data.warnings.map((issue, i) => (
+                    <IssueRow key={`warn-${i}`} issue={issue} tone="warning" />
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="flex flex-col gap-1.5">
+                <h4 className="text-xs font-semibold text-muted-foreground">
+                  拓扑排序{data.topoOrder.length === 0 ? "(存在环,无法排序)" : ""}
+                </h4>
+                {data.topoOrder.length > 0 ? (
+                  <ol className="flex flex-col gap-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+                    {data.topoOrder.map((key, i) => (
+                      <li key={key} className="flex items-center gap-2">
+                        <span className="font-mono text-muted-foreground">
+                          {i + 1}.
+                        </span>
+                        {key}
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </ScrollArea>
+
+        <DialogFooter>
+          <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Board page ───────────────────────────────────────────────────────────────
 
 export function BoardPage() {
@@ -245,6 +381,14 @@ export function BoardPage() {
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [riskFilter, setRiskFilter] = useState("all");
   const [search, setSearch] = useState("");
+
+  // 图校验 dialog (M1-5): scope is sprint when one is selected, else falls
+  // back to the epic (project) from the URL. Disabled when neither resolves.
+  const [graphDialogOpen, setGraphDialogOpen] = useState(false);
+  const graphScope: "epic" | "sprint" | undefined =
+    selectedSprintId !== "all" ? "sprint" : projectId ? "epic" : undefined;
+  const graphScopeId =
+    selectedSprintId !== "all" ? selectedSprintId : projectId;
 
   // Derive unique filter values from items
   const uniqueTypes = useMemo(() => {
@@ -388,6 +532,17 @@ export function BoardPage() {
           </SelectContent>
         </Select>
 
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1.5 text-xs"
+          disabled={!graphScopeId}
+          onClick={() => setGraphDialogOpen(true)}
+        >
+          <IconAffiliate className="size-3.5" />
+          图校验
+        </Button>
+
         <div className="ml-auto flex items-center gap-1.5">
           <IconSearch className="size-3.5 text-muted-foreground" />
           <Input
@@ -398,6 +553,13 @@ export function BoardPage() {
           />
         </div>
       </div>
+
+      <GraphValidationDialog
+        open={graphDialogOpen}
+        onOpenChange={setGraphDialogOpen}
+        scope={graphScope}
+        scopeId={graphScopeId}
+      />
 
       {/* ── Board columns ── */}
       <div className="flex flex-1 gap-4 overflow-hidden p-4">

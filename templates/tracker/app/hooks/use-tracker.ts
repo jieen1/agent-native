@@ -382,3 +382,22 @@ export function useCreateSprintArtifact() {
     },
   });
 }
+
+// Dependency-graph validation (M1-5). On-demand: only fetches while a scope
+// (epic/project or sprint) + id is set and the caller enables it (e.g. while
+// the validation dialog is open).
+export function useValidateDependencyGraph(
+  scope: "epic" | "sprint" | undefined,
+  id: string | undefined,
+  enabled: boolean,
+) {
+  return useActionQuery(
+    "validate-dependency-graph",
+    { scope, id },
+    { enabled: enabled && !!scope && !!id },
+  ) as {
+    data?: import("@shared/types").GraphValidationResult;
+    isLoading: boolean;
+    error: unknown;
+  };
+}
