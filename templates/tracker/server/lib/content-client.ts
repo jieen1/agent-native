@@ -110,6 +110,15 @@ export async function callContentTool(
       Accept: "application/json, text/event-stream",
       Authorization: `Bearer ${jwt}`,
       "X-Agent-Native-Owner-Email": actorEmail,
+      // Content's `create-document` is a mutating action that declares an
+      // `mcpApp.resource` (embeddable editor), so the MCP server only puts
+      // the action's full result object into `structuredContent` when the
+      // caller opts into inline MCP-App rendering — otherwise it only
+      // returns a lossy, human-readable summary string in `content[].text`
+      // (e.g. "<title> (<id>) is ready.") and NO `structuredContent` at all.
+      // Request inline rendering so we reliably get `{id, urlPath, ...}`
+      // back in `structuredContent` instead of having to scrape prose text.
+      "x-agent-native-mcp-inline-apps": "1",
     },
     body: JSON.stringify(body),
   });
@@ -178,8 +187,68 @@ function parseMcpResponse(text: string): unknown {
 }
 
 /**
+ * Fallback: pull a document id out of the `_meta["agent-native/openLink"]`
+ * webUrl/desktopUrl query string (`?...&documentId=<id>&...`). This metadata
+ * is attached to the tool result independent of the structuredContent gating,
+ * so it's a reliable fallback when the inline-apps header is somehow ignored
+ * or an older content deployment doesn't set it.
+ */
+function extractDocumentIdFromOpenLink(
+  meta: Record<string, unknown> | undefined,
+): string | undefined {
+  const openLink = meta?.["agent-native/openLink"] as
+    | { webUrl?: string; desktopUrl?: string }
+    | undefined;
+  if (!openLink) return undefined;
+  for (const candidate of [openLink.webUrl, openLink.desktopUrl]) {
+    if (!candidate) continue;
+    try {
+      const url = new URL(candidate);
+      const id = url.searchParams.get("documentId");
+      if (id) return id;
+    } catch {
+      const qIdx = candidate.indexOf("?");
+      if (qIdx >= 0) {
+        const id = new URLSearchParams(candidate.slice(qIdx + 1)).get(
+          "documentId",
+        );
+        if (id) return id;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Last-resort fallback: scrape the concise human-readable summary text
+ * (e.g. "<title> (<id>) is ready.") that the MCP server emits in
+ * `content[].text` when structuredContent isn't available.
+ */
+function extractDocumentIdFromText(
+  content: Array<{ type: string; text?: string }> | undefined,
+): string | undefined {
+  if (!content) return undefined;
+  for (const block of content) {
+    if (block.type !== "text" || !block.text) continue;
+    const match = block.text.match(/\(([^()\s]+)\)\s*is ready\.?\s*$/);
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
+}
+
+/**
  * Convenience: create a document in the content app.
  * Returns the document metadata (id, urlPath, deepLink, etc.).
+ *
+ * The primary path relies on `callContentTool` requesting inline MCP-App
+ * rendering so `structuredContent` carries the full `{id, urlPath, ...}`
+ * object. Belt-and-suspenders: if `id` is still missing (an older content
+ * deployment, a gateway that strips the header, etc.), fall back to the
+ * `_meta["agent-native/openLink"]` URL's `documentId` query param, then to
+ * regex-scraping the concise summary text. If none of those resolve an id,
+ * throw a clear error instead of silently returning `undefined` (the
+ * original bug: a bad id produced `.../content/page/undefined` with no
+ * exception raised).
  */
 export async function createContentDocument(
   actorEmail: string,
@@ -191,10 +260,36 @@ export async function createContentDocument(
   [k: string]: unknown;
 }> {
   const result = await callContentTool(actorEmail, "create-document", params);
-  return result.data as {
-    id: string;
+  const data = (result.data ?? {}) as {
+    id?: string;
     urlPath?: string;
     deepLink?: string;
     [k: string]: unknown;
   };
+
+  let id = typeof data.id === "string" && data.id ? data.id : undefined;
+
+  const rpcResult = (
+    result.raw as {
+      result?: {
+        _meta?: Record<string, unknown>;
+        content?: Array<{ type: string; text?: string }>;
+      };
+    }
+  )?.result;
+
+  if (!id) {
+    id = extractDocumentIdFromOpenLink(rpcResult?._meta);
+  }
+  if (!id) {
+    id = extractDocumentIdFromText(rpcResult?.content);
+  }
+  if (!id) {
+    throw new Error(
+      "Content MCP create-document: could not resolve a document id from " +
+        "structuredContent, openLink metadata, or the summary text.",
+    );
+  }
+
+  return { ...data, id };
 }
