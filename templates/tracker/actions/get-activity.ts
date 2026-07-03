@@ -296,6 +296,25 @@ export default defineAction({
     if (nextStatus && nextStatus !== item.status) patch.status = nextStatus;
     if (orchestratorRunId && orchestratorRunId !== item.orchestratorRunId)
       patch.orchestratorRunId = orchestratorRunId;
+
+    // ── Stage advancement on completion ───────────────────────────────────────
+    // When a run completes (status → done), advance currentStageName to 测试 so
+    // the board card moves to the Testing column. Stages before or at 实施 are
+    // eligible; already-later stages are not rolled back.
+    // When a run fails, leave currentStageName at 实施 (set by dispatch); no
+    // change needed here — the status chip shows the red failed state.
+    const PRE_TEST_STAGES = new Set(["待办", "分析", "设计", "实施"]);
+    const TEST_STAGE = "测试";
+    let nextStageName: string | null = null;
+    if (
+      nextStatus === "done" &&
+      PRE_TEST_STAGES.has(item.currentStageName ?? "待办") &&
+      item.currentStageName !== TEST_STAGE
+    ) {
+      nextStageName = TEST_STAGE;
+      patch.currentStageName = TEST_STAGE;
+    }
+
     if (Object.keys(patch).length) {
       patch.updatedAt = new Date().toISOString();
       await db
@@ -318,6 +337,7 @@ export default defineAction({
       // The live slot state for THIS item + the global gate snapshot.
       slot: slot ?? null,
       itemStatus: nextStatus ?? item.status,
+      currentStageName: nextStageName ?? item.currentStageName,
       orchestratorRunId,
       queue,
       errors: Object.keys(errors).length ? errors : undefined,

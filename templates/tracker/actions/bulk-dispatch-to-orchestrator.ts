@@ -1,10 +1,14 @@
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
+import { getRequestUserEmail, getRequestOrgId } from "@agent-native/core/server/request-context";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
+
+// Stages that precede implementation — dispatch should advance past these.
+const PRE_IMPL_STAGES = new Set(["待办", "分析", "设计"]);
+const IMPL_STAGE = "实施";
 
 // Bulk-dispatch many work items to the orchestrator brain in one atomic action.
 // Loops the proven single-item dispatch logic (mint JWT → MCP `brain-send` with
@@ -69,6 +73,7 @@ export default defineAction({
   run: async (args) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
+    const orgId = getRequestOrgId() ?? null;
 
     const db = getDb();
     const ids = Array.from(new Set(args.workItemIds));
@@ -154,6 +159,10 @@ export default defineAction({
 
         const status = statusForSlot(result.status);
         const now = new Date().toISOString();
+
+        // Advance to 实施 if still in a pre-implementation stage.
+        const shouldAdvance = PRE_IMPL_STAGES.has(item.currentStageName ?? "待办");
+
         await db
           .update(schema.workItems)
           .set({
@@ -163,13 +172,54 @@ export default defineAction({
             orchestratorWorkspaceId: result.workspaceId ?? null,
             dispatchedAt: now,
             updatedAt: now,
+            ...(shouldAdvance ? { currentStageName: IMPL_STAGE } : {}),
           })
           .where(eq(schema.workItems.id, item.id));
+
+        // Upsert the 实施 stage row so the board shows it as 执行中.
+        if (shouldAdvance) {
+          const existing = (
+            await db
+              .select()
+              .from(schema.stages)
+              .where(
+                and(
+                  eq(schema.stages.workItemId, item.id),
+                  eq(schema.stages.stageName, IMPL_STAGE),
+                ),
+              )
+              .limit(1)
+          )[0];
+
+          if (existing) {
+            await db
+              .update(schema.stages)
+              .set({ stageStatus: "执行中", startedAt: now, updatedAt: now })
+              .where(eq(schema.stages.id, existing.id));
+          } else {
+            await db.insert(schema.stages).values({
+              id: `stage_${item.id.slice(0, 6)}_impl_${now.replace(/\D/g, "").slice(0, 14)}`,
+              workItemId: item.id,
+              stageName: IMPL_STAGE,
+              stageStatus: "执行中",
+              deliveryItems: "[]",
+              verdict: null,
+              startedAt: now,
+              completedAt: null,
+              createdAt: now,
+              updatedAt: now,
+              ownerEmail: ownerEmail!,
+              orgId,
+              visibility: "private",
+            });
+          }
+        }
 
         return {
           workItemId: id,
           ok: true,
           status,
+          currentStageName: shouldAdvance ? IMPL_STAGE : item.currentStageName,
           threadId,
           taskId: result.taskId ?? null,
           queuePosition: result.queuePosition ?? null,

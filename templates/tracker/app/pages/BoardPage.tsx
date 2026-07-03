@@ -123,18 +123,44 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
+// ── Execution indicator ──────────────────────────────────────────────────────
+
+function ExecutionBadge({ status }: { status: string }) {
+  if (status === "running" || status === "dispatched") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+        <span className="size-1.5 animate-pulse rounded-full bg-blue-500" />
+        执行中
+      </span>
+    );
+  }
+  if (status === "queued") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+        <span className="size-1.5 rounded-full bg-amber-500" />
+        排队中
+      </span>
+    );
+  }
+  return null;
+}
+
 // ── Work item card ───────────────────────────────────────────────────────────
 
 function WorkItemCard({ item }: { item: TrackerWorkItem }) {
   const isFailed = item.status === "failed";
-  const statusPres = statusPresentation(item.status);
+  const isRunning = item.status === "running" || item.status === "dispatched";
 
   return (
     <Link to={`/items/${item.id}`} className="block">
       <div
         className={cn(
           "group rounded-lg border bg-card p-3 shadow-sm transition-all hover:border-foreground/20 hover:shadow",
-          isFailed ? "border-red-300 dark:border-red-700" : "border-border",
+          isFailed
+            ? "border-red-300 dark:border-red-700"
+            : isRunning
+              ? "border-blue-300/60 dark:border-blue-700/60"
+              : "border-border",
         )}
         data-testid={`work-item-${item.id}`}
         data-status={item.status}
@@ -176,11 +202,12 @@ function WorkItemCard({ item }: { item: TrackerWorkItem }) {
           </div>
         ) : null}
 
-        {/* Bottom: current stage + status chip */}
+        {/* Bottom: current stage + execution badge + status chip */}
         <div className="flex items-center gap-1.5 border-t border-border/60 pt-2">
           <span className="text-[10px] text-muted-foreground">
             当前: {item.currentStageName}
           </span>
+          <ExecutionBadge status={item.status} />
           <span className="ml-auto">
             <StatusChip status={item.status} />
           </span>
