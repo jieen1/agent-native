@@ -4822,7 +4822,7 @@ importers:
         version: link:../../packages/core
       '@ai-sdk/openai':
         specifier: ^3.0.73
-        version: 3.0.73(zod@4.4.3)
+        version: 3.0.74(zod@4.4.3)
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.2.8
@@ -4879,7 +4879,7 @@ importers:
         version: 3.44.0(react@19.2.7)
       ai:
         specifier: ^6.0.208
-        version: 6.0.208(zod@4.4.3)
+        version: 6.0.209(zod@4.4.3)
       cmdk:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
