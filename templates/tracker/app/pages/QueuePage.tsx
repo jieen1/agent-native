@@ -4,15 +4,19 @@ import {
   useQueue,
   useDequeueWorkItem,
   useWorkItems,
+  useApprovals,
+  useApproveGate,
+  useRejectGate,
 } from "@/hooks/use-tracker";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   IconLoader2,
   IconPlayerPause,
@@ -24,9 +28,11 @@ import {
   IconClock,
   IconGitBranch,
   IconRepeat,
+  IconShieldCheck,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import type { QueueItem, TrackerWorkItem } from "@shared/types";
+import type { QueueItem, TrackerWorkItem, Approval, GateKey } from "@shared/types";
+import { GATE_KEY_LABELS as gateLabels } from "@shared/types";
 
 // ── Status presentation ─────────────────────────────────────────────────────
 
@@ -297,21 +303,143 @@ function HumanGateCard({
   );
 }
 
+// ── Approval gate card (queue page) ─────────────────────────────────────────
+
+function QueueApprovalCard({
+  approval,
+  onApprove,
+  onReject,
+}: {
+  approval: Approval;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+}) {
+  return (
+    <Card className="border-border/80">
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <IconShieldCheck className="size-4 text-amber-500 shrink-0" />
+            <span className="text-sm font-medium">
+              {gateLabels[approval.gateKey as GateKey] ?? approval.gateKey}
+            </span>
+            <Badge variant="secondary" className="bg-amber-400/20 text-amber-700">
+              待审批
+            </Badge>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+            <span>Sprint: {approval.sprintId}</span>
+            {approval.workItemId ? <span>工作项: {approval.workItemId}</span> : null}
+            <span className="flex items-center gap-1">
+              <IconClock className="size-3" />
+              {approval.createdAt?.slice(0, 16).replace("T", " ") ?? "—"}
+            </span>
+            <span>发起人: {approval.requestedBy}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            size="sm"
+            variant="default"
+            className="gap-1"
+            onClick={() => onApprove(approval.id)}
+          >
+            <IconCheck className="size-3.5" />
+            批准
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            onClick={() => onReject(approval.id)}
+          >
+            <IconRepeat className="size-3.5" />
+            驳回
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Queue reject dialog ──────────────────────────────────────────────────────
+
+function QueueRejectDialog({
+  approvalId,
+  open,
+  onClose,
+}: {
+  approvalId: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const rejectGate = useRejectGate();
+  const [reason, setReason] = useState("");
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!reason.trim()) return;
+    void rejectGate.mutateAsync({ id: approvalId, reason: reason.trim() }).then(onClose);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>驳回原因</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="rejectReason">原因（必填）</Label>
+            <Input
+              id="rejectReason"
+              placeholder="请填写驳回原因"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              required
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              取消
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              disabled={rejectGate.isPending || !reason.trim()}
+            >
+              {rejectGate.isPending ? "提交中…" : "确认驳回"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export function QueuePage() {
   const { data: queueData, isLoading } = useQueue();
   const { data: allItemsData } = useWorkItems();
   const dequeue = useDequeueWorkItem();
+  const { data: pendingApprovalsData, isLoading: approvalsLoading } = useApprovals({ status: "pending" });
+  const approveGate = useApproveGate();
 
   const items: QueueItem[] = useMemo(
     () => (Array.isArray(queueData) ? queueData : []),
     [queueData],
   );
 
+  const pendingApprovals: Approval[] = useMemo(
+    () => (Array.isArray(pendingApprovalsData) ? pendingApprovalsData : []),
+    [pendingApprovalsData],
+  );
+
   const [reconcilerPaused, setReconcilerPaused] = useState(false);
   const [reconcilerToggleLoading, setReconcilerToggleLoading] =
     useState(false);
+  const [rejectTarget, setRejectTarget] = useState<string | null>(null);
 
   // Stats
   const queuedCount = items.filter(
@@ -379,6 +507,14 @@ export function QueuePage() {
     handleRemove(id);
   }
 
+  function handleApprovalApprove(approvalId: string) {
+    void approveGate.mutateAsync({ id: approvalId });
+  }
+
+  function handleApprovalReject(approvalId: string) {
+    setRejectTarget(approvalId);
+  }
+
   async function toggleReconciler() {
     setReconcilerToggleLoading(true);
     try {
@@ -436,7 +572,7 @@ export function QueuePage() {
           />
           <StatCard
             label="失败 · 待审批"
-            value={String(failedCount)}
+            value={String(failedCount + pendingApprovals.length)}
             accent="bg-destructive"
           />
         </div>
@@ -486,6 +622,31 @@ export function QueuePage() {
           </CardContent>
         </Card>
 
+        {/* ── Pending approvals (real data) ── */}
+        {approvalsLoading ? (
+          <div className="space-y-2">
+            <div className="h-4 w-32 animate-pulse rounded bg-muted/40" />
+            <div className="h-16 animate-pulse rounded-lg border border-border bg-muted/40" />
+          </div>
+        ) : pendingApprovals.length > 0 ? (
+          <div className="space-y-2">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+              <IconShieldCheck className="size-4" />
+              待审批 · {pendingApprovals.length}
+            </h3>
+            <div className="space-y-2">
+              {pendingApprovals.map((approval) => (
+                <QueueApprovalCard
+                  key={approval.id}
+                  approval={approval}
+                  onApprove={handleApprovalApprove}
+                  onReject={handleApprovalReject}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {/* ── Queue list ── */}
         <div className="space-y-1">
           <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
@@ -529,7 +690,7 @@ export function QueuePage() {
           )}
         </div>
 
-        {/* ── Human gate ── */}
+        {/* ── Human gate (queue-paused items) ── */}
         {humanGateItems.length > 0 ? (
           <div className="space-y-2">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
@@ -548,6 +709,15 @@ export function QueuePage() {
           </div>
         ) : null}
       </div>
+
+      {/* ── Reject dialog ── */}
+      {rejectTarget ? (
+        <QueueRejectDialog
+          approvalId={rejectTarget}
+          open={!!rejectTarget}
+          onClose={() => setRejectTarget(null)}
+        />
+      ) : null}
     </div>
   );
 }
