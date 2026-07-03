@@ -1,12 +1,29 @@
 import { useState } from "react";
 import { useParams } from "react-router";
 import { Link } from "react-router";
-import { useSprint, useSprintArtifacts } from "@/hooks/use-tracker";
-import type { SprintDetail, TrackerWorkItem, Stage, SprintArtifact } from "@shared/types";
+import {
+  useSprint,
+  useSprintArtifacts,
+  useApprovals,
+  useRequestApproval,
+  useApproveGate,
+  useRejectGate,
+} from "@/hooks/use-tracker";
+import type { SprintDetail, TrackerWorkItem, Stage, SprintArtifact, Approval, GateKey } from "@shared/types";
+import { GATE_KEY_LABELS as gateLabels } from "@shared/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   IconArrowLeft,
   IconCalendar,
@@ -15,6 +32,9 @@ import {
   IconPackage,
   IconPlus,
   IconClock,
+  IconCheck,
+  IconX,
+  IconShieldCheck,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 
@@ -455,6 +475,297 @@ function SprintArtifactsSection({ sprintId }: { sprintId: string }) {
   );
 }
 
+// ── Sprint Approvals Section ──────────────────────────────────────────────────
+
+function approvalStatusBadge(status: string) {
+  switch (status) {
+    case "pending":
+      return (
+        <Badge variant="secondary" className="bg-amber-400/20 text-amber-700">
+          待审批
+        </Badge>
+      );
+    case "approved":
+      return (
+        <Badge variant="secondary" className="bg-emerald-400/20 text-emerald-700">
+          已批准
+        </Badge>
+      );
+    case "rejected":
+      return (
+        <Badge variant="destructive">已拒绝</Badge>
+      );
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
+
+function fmtApprovalTime(iso?: string | null): string {
+  if (!iso) return "—";
+  return iso.slice(0, 16).replace("T", " ");
+}
+
+function RequestApprovalDialog({
+  sprintId,
+  open,
+  onClose,
+}: {
+  sprintId: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const requestApproval = useRequestApproval();
+  const [gateKey, setGateKey] = useState<string>("plan-signoff");
+  const [workItemId, setWorkItemId] = useState("");
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void requestApproval
+      .mutateAsync({
+        sprintId,
+        gateKey: gateKey as GateKey,
+        workItemId: workItemId.trim() || undefined,
+      })
+      .then(onClose);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>发起审批</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="gateKey">门类型</Label>
+            <Select value={gateKey} onValueChange={setGateKey}>
+              <SelectTrigger id="gateKey">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.entries(gateLabels) as [string, string][]).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>{v}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="workItemId">工作项 ID（可选）</Label>
+            <Input
+              id="workItemId"
+              placeholder="留空则关联整个 Sprint"
+              value={workItemId}
+              onChange={(e) => setWorkItemId(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              取消
+            </Button>
+            <Button type="submit" disabled={requestApproval.isPending}>
+              {requestApproval.isPending ? "发起中…" : "发起"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RejectDialog({
+  approvalId,
+  open,
+  onClose,
+}: {
+  approvalId: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const rejectGate = useRejectGate();
+  const [reason, setReason] = useState("");
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!reason.trim()) return;
+    void rejectGate.mutateAsync({ id: approvalId, reason: reason.trim() }).then(onClose);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>拒绝原因</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="reason">原因（必填）</Label>
+            <Input
+              id="reason"
+              placeholder="请填写拒绝原因"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              required
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              取消
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              disabled={rejectGate.isPending || !reason.trim()}
+            >
+              {rejectGate.isPending ? "提交中…" : "确认拒绝"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SprintApprovalsSection({ sprintId }: { sprintId: string }) {
+  const { data, isLoading } = useApprovals({ sprintId });
+  const approveGate = useApproveGate();
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+
+  const approvals: Approval[] = Array.isArray(data) ? data : [];
+  const pending = approvals.filter((a) => a.status === "pending");
+  const history = approvals.filter((a) => a.status !== "pending");
+
+  return (
+    <div className="rounded-xl border bg-card p-5 shadow-sm">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <IconShieldCheck className="size-4 text-muted-foreground" />
+          审批
+          {pending.length > 0 ? (
+            <Badge variant="secondary" className="bg-amber-400/20 text-amber-700 ml-1">
+              {pending.length} 待审
+            </Badge>
+          ) : null}
+        </h3>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          onClick={() => setRequestOpen(true)}
+        >
+          <IconPlus className="size-4" />
+          发起审批
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <Skeleton className="h-16 w-full" />
+      ) : approvals.length === 0 ? (
+        <p className="text-sm text-muted-foreground">本 Sprint 暂无审批记录。</p>
+      ) : (
+        <div className="space-y-3">
+          {/* Pending approvals */}
+          {pending.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                待审批 · {pending.length}
+              </p>
+              {pending.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/30 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium">
+                        {gateLabels[a.gateKey as GateKey] ?? a.gateKey}
+                      </span>
+                      {approvalStatusBadge(a.status)}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                      <span>发起人: {a.requestedBy}</span>
+                      {a.workItemId ? (
+                        <span>工作项: {a.workItemId}</span>
+                      ) : null}
+                      <span>{fmtApprovalTime(a.createdAt)}</span>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="gap-1"
+                      onClick={() => void approveGate.mutateAsync({ id: a.id })}
+                      disabled={approveGate.isPending}
+                    >
+                      <IconCheck className="size-3.5" />
+                      批准
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1 text-destructive hover:text-destructive"
+                      onClick={() => setRejectTarget(a.id)}
+                    >
+                      <IconX className="size-3.5" />
+                      拒绝
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {/* History */}
+          {history.length > 0 ? (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                历史记录 · {history.length}
+              </p>
+              {history.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex flex-col gap-1 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium">
+                        {gateLabels[a.gateKey as GateKey] ?? a.gateKey}
+                      </span>
+                      {approvalStatusBadge(a.status)}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                      <span>发起人: {a.requestedBy}</span>
+                      {a.decidedBy ? <span>决策人: {a.decidedBy}</span> : null}
+                      {a.reason ? <span>原因: {a.reason}</span> : null}
+                      {a.decidedAt ? (
+                        <span>决策时间: {fmtApprovalTime(a.decidedAt)}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      <RequestApprovalDialog
+        sprintId={sprintId}
+        open={requestOpen}
+        onClose={() => setRequestOpen(false)}
+      />
+      {rejectTarget ? (
+        <RejectDialog
+          approvalId={rejectTarget}
+          open={!!rejectTarget}
+          onClose={() => setRejectTarget(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export function SprintDetailPage() {
@@ -546,11 +857,12 @@ export function SprintDetailPage() {
 
       {/* ── Body ── */}
       <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
-        {/* Left column: progress + items + artifacts */}
+        {/* Left column: progress + items + artifacts + approvals */}
         <div className="order-2 min-w-0 space-y-5 lg:order-1">
           <DeliveryProgressCard items={items} />
           <SprintItemsCard sprint={sprint} items={items} stages={stages} />
           <SprintArtifactsSection sprintId={id} />
+          <SprintApprovalsSection sprintId={id} />
         </div>
 
         {/* Right column: meta */}

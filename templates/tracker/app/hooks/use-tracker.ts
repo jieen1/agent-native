@@ -382,3 +382,50 @@ export function useCreateSprintArtifact() {
     },
   });
 }
+
+// Approval hooks (M1-3).
+export function useApprovals(params: { sprintId?: string; status?: string } = {}) {
+  return useActionQuery(
+    "list-approvals",
+    params,
+    { refetchInterval: 5000 },
+  ) as { data?: import("@shared/types").Approval[]; isLoading: boolean };
+}
+
+export function useRequestApproval() {
+  const qc = useQueryClient();
+  return useActionMutation("request-approval", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-approvals"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "request-approval", "发起审批失败"));
+    },
+  });
+}
+
+export function useApproveGate() {
+  const qc = useQueryClient();
+  return useActionMutation("approve-gate", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-approvals"] });
+      toast.success("已批准");
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "approve-gate", "批准失败"));
+    },
+  });
+}
+
+export function useRejectGate() {
+  const qc = useQueryClient();
+  return useActionMutation("reject-gate", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-approvals"] });
+      toast.success("已拒绝");
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "reject-gate", "拒绝失败"));
+    },
+  });
+}
