@@ -77,6 +77,26 @@ When merging upstream, search each patch's anchor and re-confirm it survived.
 - **Revert:** restore the plain `group.models.includes(...)` checks (drops the
   `configured` condition and the `findDefaultGroup` helper).
 
+## 3. db-exec tool schema: drop top-level `oneOf` (Anthropic API rejects it)
+
+- **File:** `packages/core/src/scripts/db/tool-schemas.ts`
+- **Anchor:** `dbExecToolParameters()` — the removed
+  `oneOf: [{ required: ["sql"] }, { required: ["statements"] }]` line.
+- **Why:** the Anthropic Messages API rejects any tool whose `input_schema`
+  carries a top-level combinator: `tools.N.custom.input_schema: input_schema
+  does not support oneOf, allOf, or anyOf at the top level`. Because the
+  orchestrator brain (a Claude Code session) receives the FULL action registry
+  as MCP tools, this single schema 400-failed **every** brain turn on dispatch
+  (first hit 2026-07-04 during the tracker→brain smoke test). OpenAI-compatible
+  engines tolerate it, which is why in-app vLLM chats never tripped.
+- **Change:** remove the top-level `oneOf`; the either-`sql`-or-`statements`
+  rule remains documented in the field descriptions and is still enforced at
+  `run()` time (`exec.ts` fails on both-given and neither-given).
+- **Side effect:** `production-agent.spec.ts` / `tool-schemas.spec.ts` cases
+  asserting oneOf-based pre-validation will fail upstream-style; acceptable in
+  this fork, revisit on upstream merge.
+- **Revert:** restore the `oneOf` line.
+
 ## Pre-existing (not from this work)
 
 - `packages/core/src/server/better-auth-instance.ts` — a Postgres

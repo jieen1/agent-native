@@ -26,6 +26,11 @@ export function dbExecToolParameters(): NonNullable<ActionTool["parameters"]> {
       },
     },
     additionalProperties: false,
-    oneOf: [{ required: ["sql"] }, { required: ["statements"] }],
+    // CORE-PATCHES.md #3: no top-level oneOf/anyOf/allOf here. The Anthropic
+    // Messages API rejects any tool whose input_schema carries a top-level
+    // combinator ("input_schema does not support oneOf, allOf, or anyOf at
+    // the top level"), which broke every Claude Code brain/MCP turn that
+    // included this tool. The either-`sql`-or-`statements` rule is documented
+    // in the field descriptions and still enforced at run() time.
   };
 }
