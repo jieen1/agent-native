@@ -3,15 +3,19 @@ import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
+import { loadActionsFromStaticRegistry } from "@agent-native/core/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import {
-  contentBaseUrl,
+  contentDocumentUrl,
   createContentDocument,
 } from "../server/lib/content-client.js";
+import actionsRegistry from "../.generated/actions-registry.js";
+
+const localActionRegistry = loadActionsFromStaticRegistry(actionsRegistry);
 
 // Recursive partial-match helper: every key present in `expect` must exist in
 // `actual` with an equal value. Objects/arrays are compared recursively;
@@ -119,11 +123,15 @@ export default defineAction({
           };
         } else {
           try {
-            const mod = await import(`../actions/${sc.action}.js`);
-            actual = (await mod.default.run(sc.args ?? {})) as Record<
-              string,
-              unknown
-            >;
+            const entry = localActionRegistry[sc.action];
+            if (!entry) {
+              actual = { error: `Unknown action: ${sc.action}` };
+            } else {
+              actual = (await entry.run(sc.args ?? {})) as Record<
+                string,
+                unknown
+              >;
+            }
           } catch (e) {
             actual = { error: String(e) };
           }
@@ -209,11 +217,7 @@ export default defineAction({
       );
     }
 
-    const deepLink = contentDoc.deepLink;
-    const evidenceDocUrl =
-      deepLink && /^https?:\/\//.test(deepLink)
-        ? deepLink
-        : `${contentBaseUrl()}/content${contentDoc.urlPath ?? ""}`;
+    const evidenceDocUrl = contentDocumentUrl(contentDoc.urlPath, contentDoc.id);
 
     // --- Trigger + complete the 验收 stage ---
     const triggerStageAction = await import("./trigger-stage.js");

@@ -24,6 +24,20 @@ export function contentBaseUrl(): string {
   );
 }
 
+export function contentPublicBaseUrl(): string {
+  return (
+    process.env.CONTENT_PUBLIC_BASE?.replace(/\/$/, "") ||
+    "http://192.168.1.101"
+  );
+}
+
+export function contentDocumentUrl(
+  urlPath: string | undefined,
+  docId: string,
+): string {
+  return `${contentPublicBaseUrl()}/content${urlPath || `/page/${docId}`}`;
+}
+
 function mcpEndpoint(): string {
   return `${contentBaseUrl()}/content/_agent-native/mcp`;
 }
