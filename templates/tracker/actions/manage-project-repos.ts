@@ -99,7 +99,11 @@ export default defineAction({
             )
             .limit(1)
         )[0];
-        if (existing) throw new Error(`仓库名 "${name}" 在项目中已存在`);
+        if (existing) {
+          const dupErr = new Error(`仓库名 "${name}" 在项目中已存在`);
+          (dupErr as any).statusCode = 409;
+          throw dupErr;
+        }
 
         const id = nanoid();
         const now = new Date().toISOString();

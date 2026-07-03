@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router";
 import { useProjects } from "@/hooks/use-tracker";
-import { useActionMutation, useActionQuery } from "@agent-native/core/client";
+import { useActionMutation } from "@agent-native/core/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -108,20 +108,41 @@ const emptyRepoForm = (): RepoFormState => ({
 // Repos section component
 // ---------------------------------------------------------------------------
 function ProjectReposSection({ projectId }: { projectId: string }) {
-  const qc = useQueryClient();
+  // Repos list state — loaded via POST because manage-project-repos is POST-only.
+  const [repos, setRepos] = useState<ProjectRepo[]>([]);
+  const [reposLoading, setReposLoading] = useState(true);
 
-  const { data: reposData, isLoading: reposLoading } = useActionQuery(
-    "manage-project-repos",
-    { projectId, op: "list" },
-  ) as { data?: ProjectRepo[]; isLoading: boolean };
+  const listRepos = useActionMutation("manage-project-repos", {
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "加载仓库列表失败";
+      toast.error(msg);
+      setReposLoading(false);
+    },
+  });
 
-  const repos = Array.isArray(reposData) ? reposData : [];
+  const refreshRepos = useCallback(() => {
+    setReposLoading(true);
+    listRepos.mutate(
+      { projectId, op: "list" },
+      {
+        onSuccess: (data: unknown) => {
+          setRepos(Array.isArray(data) ? (data as ProjectRepo[]) : []);
+          setReposLoading(false);
+        },
+        onError: () => {
+          setReposLoading(false);
+        },
+      },
+    );
+  }, [projectId]);
+
+  useEffect(() => {
+    refreshRepos();
+  }, [projectId]);
 
   const manageRepo = useActionMutation("manage-project-repos", {
     onSuccess: () => {
-      qc.invalidateQueries({
-        queryKey: ["action", "manage-project-repos"],
-      });
+      refreshRepos();
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : "操作失败";
