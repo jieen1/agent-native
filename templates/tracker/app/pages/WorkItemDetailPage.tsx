@@ -1,5 +1,76 @@
+import {
+  IconAlertTriangle,
+  IconArrowLeft,
+  IconBrandGithub,
+  IconCheck,
+  IconClock,
+  IconEdit,
+  IconCircleCheck,
+  IconExternalLink,
+  IconFileText,
+  IconFlag,
+  IconPaperclip,
+  IconPalette,
+  IconPhoto,
+  IconRuler,
+  IconGitBranch,
+  IconHash,
+  IconLayoutKanban,
+  IconLink,
+  IconListCheck,
+  IconLoader2,
+  IconMessageCircle,
+  IconPlus,
+  IconRocket,
+  IconSitemap,
+  IconStack2,
+  IconTag,
+  IconTimeline,
+  IconTrash,
+  IconUser,
+  IconX,
+} from "@tabler/icons-react";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router";
+import { toast } from "sonner";
+
+import { ActivityFeed } from "@/components/ActivityFeed";
+import {
+  fmtDateTime,
+  orchestratorBrainHref,
+  repoHref,
+  repoLabel,
+  statusPresentation,
+  typeChip,
+} from "@/components/tracker-format";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   useActivity,
   useComments,
@@ -17,63 +88,11 @@ import {
   useRollbackStage,
   useAdvanceStage,
   useEpicChildren,
+  useDocuments,
+  useAddDocument,
+  useDeleteDocument,
 } from "@/hooks/use-tracker";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-  IconAlertTriangle,
-  IconArrowLeft,
-  IconBrandGithub,
-  IconCheck,
-  IconClock,
-  IconEdit,
-  IconExternalLink,
-  IconFlag,
-  IconGitBranch,
-  IconHash,
-  IconLayoutKanban,
-  IconLink,
-  IconListCheck,
-  IconLoader2,
-  IconMessageCircle,
-  IconPlus,
-  IconRocket,
-  IconSitemap,
-  IconStack2,
-  IconTag,
-  IconTimeline,
-  IconUser,
-  IconTrash,
-  IconX,
-} from "@tabler/icons-react";
-import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { ActivityFeed } from "@/components/ActivityFeed";
-import {
-  fmtDateTime,
-  orchestratorBrainHref,
-  repoHref,
-  repoLabel,
-  statusPresentation,
-  typeChip,
-} from "@/components/tracker-format";
 
 // ── Stage stepper ────────────────────────────────────────────────────────────
 
@@ -197,7 +216,8 @@ function StageProgressCard({
         : `${currentStageName}`;
 
   const currentBadgeClass =
-    nodeStatuses[currentStageName] === "已完成" || currentStageName === lastStage
+    nodeStatuses[currentStageName] === "已完成" ||
+    currentStageName === lastStage
       ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-500/30"
       : "bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-1 ring-inset ring-blue-500/30";
 
@@ -376,11 +396,48 @@ const LINK_TYPE_LABELS: Record<string, string> = {
 const LINK_TYPE_COLORS: Record<string, string> = {
   "bug-of": "bg-red-500/15 text-red-600 dark:text-red-400 ring-red-500/30",
   "test-of": "bg-teal-500/15 text-teal-600 dark:text-teal-400 ring-teal-500/30",
-  blocks: "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/30",
-  "blocked-by": "bg-orange-500/15 text-orange-600 dark:text-orange-400 ring-orange-500/30",
-  "duplicate-of": "bg-slate-500/15 text-slate-600 dark:text-slate-400 ring-slate-500/30",
+  blocks:
+    "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/30",
+  "blocked-by":
+    "bg-orange-500/15 text-orange-600 dark:text-orange-400 ring-orange-500/30",
+  "duplicate-of":
+    "bg-slate-500/15 text-slate-600 dark:text-slate-400 ring-slate-500/30",
   "relates-to": "bg-secondary text-secondary-foreground ring-border",
-  "depends-on": "bg-violet-500/15 text-violet-600 dark:text-violet-400 ring-violet-500/30",
+  "depends-on":
+    "bg-violet-500/15 text-violet-600 dark:text-violet-400 ring-violet-500/30",
+};
+
+// ── Document types ────────────────────────────────────────────────────────────
+
+const DOC_TYPE_ORDER = [
+  "design",
+  "prototype",
+  "acceptance",
+  "spec",
+  "other",
+] as const;
+const DOC_TYPE_LABELS: Record<string, string> = {
+  design: "设计",
+  prototype: "原型",
+  acceptance: "验收",
+  spec: "规格",
+  other: "其他",
+};
+const DOC_TYPE_COLORS: Record<string, string> = {
+  design: "bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-blue-500/30",
+  prototype:
+    "bg-purple-500/15 text-purple-600 dark:text-purple-400 ring-purple-500/30",
+  acceptance:
+    "bg-green-500/15 text-green-600 dark:text-green-400 ring-green-500/30",
+  spec: "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/30",
+  other: "bg-secondary text-secondary-foreground ring-border",
+};
+const DOC_TYPE_ICONS: Record<string, any> = {
+  design: IconPalette,
+  prototype: IconPhoto,
+  acceptance: IconCircleCheck,
+  spec: IconRuler,
+  other: IconFileText,
 };
 
 function LinksPanel({ workItemId }: { workItemId: string }) {
@@ -426,10 +483,13 @@ function LinksPanel({ workItemId }: { workItemId: string }) {
               key={l.id}
               className="flex items-center gap-2 rounded-lg border border-border bg-card/40 px-3 py-2"
             >
-              <span className={cn(
-                "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
-                LINK_TYPE_COLORS[l.linkType] ?? "bg-secondary text-secondary-foreground ring-border",
-              )}>
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                  LINK_TYPE_COLORS[l.linkType] ??
+                    "bg-secondary text-secondary-foreground ring-border",
+                )}
+              >
                 {LINK_TYPE_LABELS[l.linkType] ?? l.linkType}
               </span>
               <span className="text-[10px] text-muted-foreground">
@@ -482,6 +542,206 @@ function LinksPanel({ workItemId }: { workItemId: string }) {
   );
 }
 
+// ── Documents panel ───────────────────────────────────────────────────────────
+
+function DocumentsPanel({ workItemId }: { workItemId: string }) {
+  const { data, isLoading } = useDocuments(workItemId);
+  const addDoc = useAddDocument();
+  const deleteDoc = useDeleteDocument();
+  const [open, setOpen] = useState(false);
+  const [formDocType, setFormDocType] = useState<string>("design");
+  const [formTitle, setFormTitle] = useState("");
+  const [formUrl, setFormUrl] = useState("");
+
+  const byDocType: Record<string, any[]> = data?.byDocType ?? {};
+  const totalDocs = DOC_TYPE_ORDER.reduce(
+    (n, dt) => n + (byDocType[dt]?.length ?? 0),
+    0,
+  );
+
+  function submitDoc() {
+    const title = formTitle.trim();
+    const url = formUrl.trim();
+    if (!title) {
+      toast.error("标题不能为空");
+      return;
+    }
+    if (!url) {
+      toast.error("URL 不能为空");
+      return;
+    }
+    addDoc.mutate(
+      {
+        workItemId,
+        docType: formDocType as (typeof DOC_TYPE_ORDER)[number],
+        title,
+        url,
+      },
+      {
+        onSuccess: () => {
+          setOpen(false);
+          setFormTitle("");
+          setFormUrl("");
+          setFormDocType("design");
+          toast.success("文档已添加");
+        },
+      },
+    );
+  }
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <IconPaperclip className="size-3.5 text-muted-foreground" />
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            关联文档{totalDocs > 0 ? ` (${totalDocs})` : ""}
+          </h2>
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm" className="h-6 gap-1 text-xs">
+              <IconPlus className="size-3" /> 添加文档
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>添加文档</DialogTitle>
+              <DialogDescription>
+                关联设计/原型/验收/规格等文档到当前工作项。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>文档类型</Label>
+                <Select value={formDocType} onValueChange={setFormDocType}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DOC_TYPE_ORDER.map((dt) => (
+                      <SelectItem key={dt} value={dt}>
+                        {DOC_TYPE_LABELS[dt]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="doc-title">标题</Label>
+                <Input
+                  id="doc-title"
+                  value={formTitle}
+                  onChange={(e) => setFormTitle(e.target.value)}
+                  placeholder="文档标题"
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="doc-url">URL</Label>
+                <Input
+                  id="doc-url"
+                  type="url"
+                  value={formUrl}
+                  onChange={(e) => setFormUrl(e.target.value)}
+                  placeholder="https://..."
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => setOpen(false)}
+                disabled={addDoc.isPending}
+              >
+                取消
+              </Button>
+              <Button onClick={submitDoc} disabled={addDoc.isPending}>
+                {addDoc.isPending ? "添加中..." : "确认添加"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+      <div className="space-y-3">
+        {isLoading ? (
+          <div className="h-10 animate-pulse rounded-lg bg-muted/40" />
+        ) : (
+          DOC_TYPE_ORDER.map((dt) => {
+            const docs = byDocType[dt] ?? [];
+            const label = DOC_TYPE_LABELS[dt];
+            const color = DOC_TYPE_COLORS[dt];
+            const DocTypeIcon = DOC_TYPE_ICONS[dt];
+            return (
+              <div key={dt}>
+                <div className="mb-1.5 flex items-center gap-1.5">
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                      color,
+                    )}
+                  >
+                    <DocTypeIcon className="size-3" />
+                    {label}
+                  </span>
+                </div>
+                {docs.length === 0 ? (
+                  <p className="text-xs text-muted-foreground/60 py-1">
+                    暂无{label}文档。
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {docs.map((doc: any) => (
+                      <div
+                        key={doc.id}
+                        className="group flex items-center gap-2 rounded-lg border border-border bg-card/40 px-3 py-2 transition-colors hover:bg-muted/40"
+                      >
+                        <span
+                          className={cn(
+                            "shrink-0 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                            color,
+                          )}
+                        >
+                          <DocTypeIcon className="size-3" />
+                          {label}
+                        </span>
+                        <IconFileText className="size-3.5 text-muted-foreground shrink-0" />
+                        <a
+                          href={doc.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 truncate text-xs font-medium hover:underline"
+                        >
+                          {doc.title}
+                          <IconExternalLink className="inline size-3 ml-1 opacity-60" />
+                        </a>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          onClick={() =>
+                            deleteDoc.mutate(
+                              { id: doc.id },
+                              { onSuccess: () => toast.success("文档已删除") },
+                            )
+                          }
+                          disabled={deleteDoc.isPending}
+                        >
+                          <IconTrash className="size-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ── Epic children panel ─────────────────────────────────────────────────────
 
 function EpicChildrenPanel({ workItemId }: { workItemId: string }) {
@@ -521,7 +781,9 @@ function EpicChildrenPanel({ workItemId }: { workItemId: string }) {
                 className="rounded-lg border border-border bg-card/40 px-3 py-2"
               >
                 <div className="flex items-center gap-2">
-                  <span className={cn("size-1.5 shrink-0 rounded-full", status.dot)} />
+                  <span
+                    className={cn("size-1.5 shrink-0 rounded-full", status.dot)}
+                  />
                   <Link
                     to={`/items/${child.id}`}
                     className="shrink-0 text-xs font-medium hover:underline"
@@ -912,9 +1174,12 @@ function EditableNature({ id, nature }: { id: string; nature: string[] }) {
     const next = nature.includes(tag)
       ? nature.filter((t) => t !== tag)
       : [...nature, tag];
-    update.mutate({ id, nature: next }, {
-      onSuccess: () => toast.success("性质已更新"),
-    });
+    update.mutate(
+      { id, nature: next },
+      {
+        onSuccess: () => toast.success("性质已更新"),
+      },
+    );
   }
 
   return (
@@ -977,18 +1242,29 @@ function EditableOwner({ id, owner }: { id: string; owner: string | null }) {
       onValueChange={(v) => {
         update.mutate(
           { id, owner: v === "none" ? null : v },
-          { onSuccess: () => { setEditing(false); toast.success("负责人已更新"); } },
+          {
+            onSuccess: () => {
+              setEditing(false);
+              toast.success("负责人已更新");
+            },
+          },
         );
       }}
       open
-      onOpenChange={(o) => { if (!o) setEditing(false); }}
+      onOpenChange={(o) => {
+        if (!o) setEditing(false);
+      }}
     >
       <SelectTrigger className="h-7 w-[140px] text-xs">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="none" className="text-xs">未分配</SelectItem>
-        <SelectItem value="agent" className="text-xs">智能体</SelectItem>
+        <SelectItem value="none" className="text-xs">
+          未分配
+        </SelectItem>
+        <SelectItem value="agent" className="text-xs">
+          智能体
+        </SelectItem>
       </SelectContent>
     </Select>
   );
@@ -1010,7 +1286,9 @@ export function WorkItemDetailPage() {
 
   const [monitorInterval, setMonitorInterval] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [activityTab, setActivityTab] = useState<"activity" | "comments">("activity");
+  const [activityTab, setActivityTab] = useState<"activity" | "comments">(
+    "activity",
+  );
 
   function onDispatch() {
     const trimmed = monitorInterval.trim();
@@ -1076,7 +1354,9 @@ export function WorkItemDetailPage() {
   const plannedStagesList: string[] = (() => {
     try {
       const raw = (item as { plannedStages?: unknown }).plannedStages;
-      const parsed = Array.isArray(raw) ? raw : JSON.parse((raw as string) ?? "[]");
+      const parsed = Array.isArray(raw)
+        ? raw
+        : JSON.parse((raw as string) ?? "[]");
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
@@ -1289,6 +1569,9 @@ export function WorkItemDetailPage() {
           {/* Links */}
           <LinksPanel workItemId={id} />
 
+          {/* Documents */}
+          <DocumentsPanel workItemId={id} />
+
           {/* Unified activity + comments tab panel */}
           <section className="rounded-xl border border-border bg-card/40">
             {/* Tab header */}
@@ -1363,17 +1646,31 @@ export function WorkItemDetailPage() {
             {/* Actions card */}
             {(() => {
               // Use item's plannedStages; fallback to full 7-stage order
-              const FALLBACK_ORDER = ['待办','分析','设计','实施','测试','验收','交付'] as const;
+              const FALLBACK_ORDER = [
+                "待办",
+                "分析",
+                "设计",
+                "实施",
+                "测试",
+                "验收",
+                "交付",
+              ] as const;
               let plannedStagesArr: string[];
               try {
                 const raw = (item as any).plannedStages;
-                plannedStagesArr = Array.isArray(raw) ? raw : JSON.parse(raw ?? "[]");
+                plannedStagesArr = Array.isArray(raw)
+                  ? raw
+                  : JSON.parse(raw ?? "[]");
               } catch {
                 plannedStagesArr = [];
               }
-              const stageOrder = plannedStagesArr.length > 0 ? plannedStagesArr : FALLBACK_ORDER;
+              const stageOrder =
+                plannedStagesArr.length > 0 ? plannedStagesArr : FALLBACK_ORDER;
               const idx = stageOrder.indexOf(currentStageName);
-              const nextStage = idx >= 0 && idx < stageOrder.length - 1 ? stageOrder[idx + 1] : null;
+              const nextStage =
+                idx >= 0 && idx < stageOrder.length - 1
+                  ? stageOrder[idx + 1]
+                  : null;
               const prevStage = idx > 0 ? stageOrder[idx - 1] : null;
               return (
                 <div className="rounded-xl border border-border bg-card p-3 space-y-2">
@@ -1381,20 +1678,25 @@ export function WorkItemDetailPage() {
                     className="w-full gap-1.5"
                     size="sm"
                     disabled={!nextStage || advanceStage.isPending}
-                    onClick={() => nextStage && advanceStage.mutate(
-                      { scope: 'item', id, fromStage: currentStageName },
-                      {
-                        onSuccess: (res: any) => {
-                          if (res?.noop) {
-                            toast.info('无变化(状态已更新)');
-                          } else if (res?.blocked) {
-                            toast.error(`阶段推进被阻塞: ${(res.missing || []).join('、')}`);
-                          } else {
-                            toast.success(`已推进至「${res?.stageName}」`);
-                          }
+                    onClick={() =>
+                      nextStage &&
+                      advanceStage.mutate(
+                        { scope: "item", id, fromStage: currentStageName },
+                        {
+                          onSuccess: (res: any) => {
+                            if (res?.noop) {
+                              toast.info("无变化(状态已更新)");
+                            } else if (res?.blocked) {
+                              toast.error(
+                                `阶段推进被阻塞: ${(res.missing || []).join("、")}`,
+                              );
+                            } else {
+                              toast.success(`已推进至「${res?.stageName}」`);
+                            }
+                          },
                         },
-                      },
-                    )}
+                      )
+                    }
                   >
                     {advanceStage.isPending ? (
                       <IconLoader2 className="size-3.5 animate-spin" />
@@ -1408,10 +1710,16 @@ export function WorkItemDetailPage() {
                     size="sm"
                     variant="outline"
                     disabled={rollbackStage.isPending || !prevStage}
-                    onClick={() => prevStage && rollbackStage.mutate(
-                      { workItemId: id, targetStage: prevStage },
-                      { onSuccess: () => toast.success(`已回退至 ${prevStage}`) },
-                    )}
+                    onClick={() =>
+                      prevStage &&
+                      rollbackStage.mutate(
+                        { workItemId: id, targetStage: prevStage },
+                        {
+                          onSuccess: () =>
+                            toast.success(`已回退至 ${prevStage}`),
+                        },
+                      )
+                    }
                   >
                     {rollbackStage.isPending ? (
                       <IconLoader2 className="size-3.5 animate-spin" />
@@ -1422,105 +1730,107 @@ export function WorkItemDetailPage() {
               );
             })()}
 
-          {/* Attributes card */}
-          <div className="divide-y divide-border rounded-xl border border-border bg-card">
-            {itemKey ? (
-              <MetaRow icon={IconHash} label="编号">
-                <span className="font-mono text-xs">{itemKey}</span>
+            {/* Attributes card */}
+            <div className="divide-y divide-border rounded-xl border border-border bg-card">
+              {itemKey ? (
+                <MetaRow icon={IconHash} label="编号">
+                  <span className="font-mono text-xs">{itemKey}</span>
+                </MetaRow>
+              ) : null}
+
+              <MetaRow icon={IconUser} label="负责人">
+                <EditableOwner id={id} owner={owner} />
               </MetaRow>
-            ) : null}
 
-            <MetaRow icon={IconUser} label="负责人">
-              <EditableOwner id={id} owner={owner} />
-            </MetaRow>
+              <MetaRow icon={IconStack2} label="Sprint">
+                <EditableSprint id={id} sprint={sprint} />
+              </MetaRow>
 
-            <MetaRow icon={IconStack2} label="Sprint">
-              <EditableSprint id={id} sprint={sprint} />
-            </MetaRow>
+              <MetaRow icon={IconListCheck} label="当前阶段">
+                <span className="text-sm">{currentStageName}</span>
+              </MetaRow>
 
-            <MetaRow icon={IconListCheck} label="当前阶段">
-              <span className="text-sm">{currentStageName}</span>
-            </MetaRow>
+              <MetaRow icon={IconFlag} label="优先级">
+                <EditablePriority id={id} priority={item.priority} />
+              </MetaRow>
 
-            <MetaRow icon={IconFlag} label="优先级">
-              <EditablePriority id={id} priority={item.priority} />
-            </MetaRow>
+              <MetaRow icon={IconAlertTriangle} label="风险">
+                <EditableRisk id={id} risk={riskVal} />
+              </MetaRow>
 
-            <MetaRow icon={IconAlertTriangle} label="风险">
-              <EditableRisk id={id} risk={riskVal} />
-            </MetaRow>
+              <MetaRow icon={IconTag} label="性质">
+                <EditableNature id={id} nature={nature} />
+              </MetaRow>
 
-            <MetaRow icon={IconTag} label="性质">
-              <EditableNature id={id} nature={nature} />
-            </MetaRow>
+              <MetaRow icon={IconTag} label="标签">
+                <EditableTags id={id} tags={tags} />
+              </MetaRow>
 
-            <MetaRow icon={IconTag} label="标签">
-              <EditableTags id={id} tags={tags} />
-            </MetaRow>
-
-            <MetaRow icon={IconLayoutKanban} label="项目">
-              <Link
-                to={`/board?project=${encodeURIComponent(item.projectId)}`}
-                className="truncate font-medium text-foreground hover:underline"
-              >
-                {item.project?.name ?? item.projectId}
-              </Link>
-            </MetaRow>
-
-            <MetaRow icon={IconBrandGithub} label="仓库">
-              {ghHref ? (
-                <a
-                  href={ghHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1 break-all font-mono text-xs hover:text-foreground hover:underline"
-                  title={remote ?? undefined}
+              <MetaRow icon={IconLayoutKanban} label="项目">
+                <Link
+                  to={`/board?project=${encodeURIComponent(item.projectId)}`}
+                  className="truncate font-medium text-foreground hover:underline"
                 >
-                  {ghLabel}
-                  <IconExternalLink className="size-3 shrink-0 opacity-60" />
-                </a>
-              ) : (
-                <span className="break-all font-mono text-xs text-muted-foreground">
-                  {ghLabel ?? "未配置仓库"}
-                </span>
-              )}
-            </MetaRow>
-
-            <MetaRow icon={IconGitBranch} label="分支">
-              <span className="font-mono text-xs text-foreground/80">
-                {branch}
-              </span>
-            </MetaRow>
-
-            {item.orchestratorThreadId ? (
-              <MetaRow icon={IconMessageCircle} label="大脑">
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <a
-                        href={orchestratorBrainHref(item.orchestratorThreadId)}
-                        className="flex items-center gap-1 font-mono text-xs text-foreground/80 hover:text-foreground hover:underline"
-                      >
-                        {item.orchestratorThreadId.slice(0, 16)}…
-                        <IconExternalLink className="size-3 shrink-0 opacity-60" />
-                      </a>
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      <span className="font-mono text-xs">
-                        {item.orchestratorThreadId}
-                      </span>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                  {item.project?.name ?? item.projectId}
+                </Link>
               </MetaRow>
-            ) : null}
 
-            <MetaRow icon={IconClock} label="创建时间">
-              <span className="text-xs text-muted-foreground">
-                {fmtDateTime(item.createdAt)}
-              </span>
-            </MetaRow>
-          </div>
+              <MetaRow icon={IconBrandGithub} label="仓库">
+                {ghHref ? (
+                  <a
+                    href={ghHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 break-all font-mono text-xs hover:text-foreground hover:underline"
+                    title={remote ?? undefined}
+                  >
+                    {ghLabel}
+                    <IconExternalLink className="size-3 shrink-0 opacity-60" />
+                  </a>
+                ) : (
+                  <span className="break-all font-mono text-xs text-muted-foreground">
+                    {ghLabel ?? "未配置仓库"}
+                  </span>
+                )}
+              </MetaRow>
+
+              <MetaRow icon={IconGitBranch} label="分支">
+                <span className="font-mono text-xs text-foreground/80">
+                  {branch}
+                </span>
+              </MetaRow>
+
+              {item.orchestratorThreadId ? (
+                <MetaRow icon={IconMessageCircle} label="大脑">
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <a
+                          href={orchestratorBrainHref(
+                            item.orchestratorThreadId,
+                          )}
+                          className="flex items-center gap-1 font-mono text-xs text-foreground/80 hover:text-foreground hover:underline"
+                        >
+                          {item.orchestratorThreadId.slice(0, 16)}…
+                          <IconExternalLink className="size-3 shrink-0 opacity-60" />
+                        </a>
+                      </TooltipTrigger>
+                      <TooltipContent side="left">
+                        <span className="font-mono text-xs">
+                          {item.orchestratorThreadId}
+                        </span>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </MetaRow>
+              ) : null}
+
+              <MetaRow icon={IconClock} label="创建时间">
+                <span className="text-xs text-muted-foreground">
+                  {fmtDateTime(item.createdAt)}
+                </span>
+              </MetaRow>
+            </div>
           </div>
         </aside>
       </div>
