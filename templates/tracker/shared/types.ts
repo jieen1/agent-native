@@ -152,6 +152,31 @@ export interface ItemLink { id:string; fromItemId:string; toItemId:string; linkT
 export interface QueueItem { id:string; workItemId:string; priority:number; status:string; currentStage:string; enqueuedAt:string; startedAt:string|null; workItem:TrackerWorkItem; }
 export interface QueueStats { queued:number; running:number; paused:number; }
 
+// Approval types (M1-3).
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+export type GateKey = 'plan-signoff' | 'design-signoff' | 'escalation' | 'audit-deferral';
+
+export const GATE_KEY_LABELS: Record<GateKey, string> = {
+  'plan-signoff': '计划签批',
+  'design-signoff': '设计签批',
+  'escalation': '升级审批',
+  'audit-deferral': '审计推迟',
+};
+
+export interface Approval {
+  id: string;
+  sprintId: string;
+  workItemId: string | null;
+  gateKey: GateKey | string;
+  gateRef: string | null;
+  status: ApprovalStatus | string;
+  requestedBy: string;
+  decidedBy: string | null;
+  reason: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+}
+
 // Sprint artifact types (M1-2).
 export interface SprintArtifact {
   id: string;

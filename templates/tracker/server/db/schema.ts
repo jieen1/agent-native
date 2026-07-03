@@ -237,6 +237,29 @@ export const projectRepos = table("tracker_project_repos", {
 });
 
 // ---------------------------------------------------------------------------
+// Approvals — gate sign-off records for plan/design/escalation/audit-deferral.
+//
+// gateKey: 'plan-signoff' | 'design-signoff' | 'escalation' | 'audit-deferral'
+// gateRef: optional JSON {runId, nodeId} linking to an orchestrator workflow gate.
+// status: 'pending' | 'approved' | 'rejected'
+// Idempotency: at most one pending row per (sprintId, gateKey, workItemId).
+// ---------------------------------------------------------------------------
+export const approvals = table("tracker_approvals", {
+  id: text("id").primaryKey(),
+  sprintId: text("sprint_id").notNull(),
+  workItemId: text("work_item_id").default(null),
+  gateKey: text("gate_key").notNull(),
+  gateRef: text("gate_ref").default(null),
+  status: text("status").notNull().default("pending"),
+  requestedBy: text("requested_by").notNull(),
+  decidedBy: text("decided_by").default(null),
+  reason: text("reason").default(null),
+  decidedAt: text("decided_at").default(null),
+  createdAt: text("created_at").notNull(),
+  ...ownableColumns(),
+});
+
+// ---------------------------------------------------------------------------
 // Sprint artifacts — sprint-level versioned documents.
 // docKey examples: sprint-doc | test-plan | tech-design | brief:{itemKey} |
 //   shared-brief | audit-report:{n} | story | verify-report
