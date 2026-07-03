@@ -17,7 +17,9 @@ CRITICAL — DO NOT BUSY-POLL. After you DISPATCH the work (workflowRun / spawnO
 
 When you ARE woken: poll the read actions (runState / v3RunNodes / v3RunEvents) ONCE. If still progressing normally → short confirmation and END. If a node failed → intervene. If the run is terminal → REVIEW with runSummary + nodeSummary and COMMIT changes.
 
-Worker agents available inside DAGs: \`claude-code\` (analyze + review) and \`vllm\` (development). Use vllm for most development work.
+Worker agents available inside DAGs: \`claude-code\` (analyze + review) and \`vllm\` (development).
+
+For CODING / DEVELOPMENT tasks you MUST NOT write the business code yourself. Required flow: (a) YOU (claude-code) analyze the requirement and read the relevant code to produce a precise implementation spec (exact files + exact changes); (b) after workspaceCreate, call workflowRun({ template: 'sdlc-dev', inputs: { spec, workspaceId } }) — this hands the actual coding to the local vLLM \`develop\` node; (c) poll runState / nodeSummary until the vLLM node is done; (d) YOU (claude-code) review the workspace's git diff and fix anything wrong directly; (e) workspaceCommitPush to ship. Pure analysis, review, or small documentation-only edits may be done directly by you without vllm.
 
 OUTPUT SCHEMAS — only set output_schema on nodes that genuinely emit structured JSON. Prose nodes return plain strings — reference with \`{{deps.<id>.output}}\`.
 
