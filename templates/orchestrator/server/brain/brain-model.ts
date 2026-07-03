@@ -14,6 +14,13 @@ import { getSetting, putSetting } from "@agent-native/core/settings";
 export const BRAIN_MODEL_KEY = "brain-model";
 
 /**
+ * The default brain model used when no override is saved. Changing this
+ * upgrades all new sessions to the specified model without requiring users to
+ * explicitly pick one.
+ */
+export const DEFAULT_BRAIN_MODEL = "claude-sonnet-5";
+
+/**
  * Settings key controlling which model tier is permitted for the CC subscription
  * brain. Defaults to "sonnet" (Opus blocked); can be relaxed to "all".
  */
@@ -86,6 +93,7 @@ export const ACCEPTED_BRAIN_MODELS = [
   "claude-opus-4-7[1m]",
   "claude-opus-4-6[1m]",
   "claude-opus-4-5",
+  "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-sonnet-4-5[1m]",
   "claude-haiku-4-5",
@@ -108,6 +116,7 @@ export const BRAIN_MODEL_LABELS: Record<string, string> = {
   "claude-opus-4-7[1m]": "Opus 4.7 (1M)",
   "claude-opus-4-6[1m]": "Opus 4.6 (1M)",
   "claude-opus-4-5": "Opus 4.5",
+  "claude-sonnet-5": "Sonnet 5",
   "claude-sonnet-4-6": "Sonnet 4.6",
   "claude-sonnet-4-5[1m]": "Sonnet 4.5 (1M)",
   "claude-haiku-4-5": "Haiku 4.5",
@@ -123,21 +132,25 @@ export function isAcceptedBrainModel(id: string): id is BrainModelId {
 }
 
 /**
- * Read the saved brain model override, or null when none is set (CLI default).
- * A throwing getSetting degrades to null rather than failing the turn.
+ * Read the saved brain model override, falling back to DEFAULT_BRAIN_MODEL
+ * when none is explicitly set. Returns null only when the stored value is the
+ * sentinel "default" (meaning: use CLI default without pinning a model id).
+ * A throwing getSetting degrades to the built-in default rather than failing.
  */
 export async function getBrainModel(): Promise<string | null> {
   let raw: unknown = null;
   try {
     raw = await getSetting(BRAIN_MODEL_KEY);
   } catch {
-    return null;
+    return DEFAULT_BRAIN_MODEL;
   }
   const value =
     raw && typeof raw === "object" ? (raw as { model?: unknown }).model : raw;
-  if (typeof value !== "string") return null;
+  if (typeof value !== "string") return DEFAULT_BRAIN_MODEL;
   const trimmed = value.trim();
-  if (!trimmed || !isAcceptedBrainModel(trimmed)) return null;
+  // Explicit "clear" — user wants bare CLI default, no model flag.
+  if (trimmed === "" || trimmed === "default") return null;
+  if (!isAcceptedBrainModel(trimmed)) return DEFAULT_BRAIN_MODEL;
   return trimmed;
 }
 
