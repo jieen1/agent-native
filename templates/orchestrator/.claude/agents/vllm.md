@@ -2,7 +2,7 @@
 name: vllm
 description: General agent running on the local vLLM / OpenAI-compatible engine.
 runtime: none
-engine: ai-sdk:openai
+engine: vllm
 model: qwen3.6
 tools: [Read, Edit, Write, Bash, Glob, Grep]
 max_summary_tokens: 2000

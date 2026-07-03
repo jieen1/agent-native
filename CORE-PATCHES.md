@@ -102,3 +102,19 @@ When merging upstream, search each patch's anchor and re-confirm it survived.
 - `packages/core/src/server/better-auth-instance.ts` — a Postgres
   `pg_type_typname_nsp_index` 23505 guard around shared-DB table creation. Was
   already modified before this work; left as-is.
+
+## 4. vLLM V3 worker agent uses the custom `vllm` engine (not built-in ai-sdk:openai)
+
+- **File:** `templates/orchestrator/.claude/agents/vllm.md` — `engine: vllm` (was `ai-sdk:openai`).
+- **Why:** the built-in `ai-sdk:openai` engine fails `isAgentEnginePackageInstalled`
+  in the bundled Nitro build (`@ai-sdk/openai` is inlined, `require.resolve` can't
+  see it), so V3 dev nodes errored with "requires optional packages that are not
+  installed" and the brain fell back to doing dev work on CC — vLLM was never used.
+  The orchestrator already registers a custom `vllm` engine (server/vllm-engine.ts,
+  no installPackage → skips the check, baked apiKey, baseUrl=OPENAI_BASE_URL) for
+  the in-app chat; pointing the worker agent at it makes V3 dev nodes hit the local
+  vLLM. Verified: vLLM request counter incremented + node wrote the file.
+- **Deployment note (NOT core):** `.claude/agents/` was never rsynced to 101 (only
+  `.output/` was). The agent-loader resolves `process.cwd()/.claude/agents` at
+  runtime, so the worker defs must be deployed alongside `.output`. Fixed the deploy
+  to sync `.claude/`.
