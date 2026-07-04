@@ -456,6 +456,58 @@ CREATE INDEX IF NOT EXISTS audit_log_at_idx ON audit_log (at);
 CREATE INDEX IF NOT EXISTS audit_log_target_idx ON audit_log (target_type, target_id);
 CREATE INDEX IF NOT EXISTS audit_log_owner_idx ON audit_log (owner_email, org_id, at)`,
     },
+    {
+      // Agent definitions table (DESIGN §7). Worker agent configs — name, engine,
+      // model, tools, system prompt, runtime. `name` is globally unique; used as
+      // the key the DAG nodes reference and the dispatcher resolves. created_at/
+      // updated_at are written by the app layer as ISO strings (no DB now() needed).
+      version: 19,
+      sql: `CREATE TABLE IF NOT EXISTS orchestrator_agent_defs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    engine TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    tools TEXT NOT NULL DEFAULT '[]',
+    system_prompt TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    runtime TEXT NOT NULL DEFAULT 'none',
+    builtin INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+    org_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private'
+  );
+CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_agent_defs_name_idx ON orchestrator_agent_defs (name)`,
+    },
+    {
+      // Agent definition shares table — mirrors the node_def_shares structure
+      // (v14). Postgres uses now(), SQLite uses datetime('now').
+      version: 20,
+      sql: {
+        postgres: `CREATE TABLE IF NOT EXISTS orchestrator_agent_def_shares (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL,
+  principal_type TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (now())
+);
+CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchestrator_agent_def_shares (resource_id, principal_type, principal_id)`,
+        sqlite: `CREATE TABLE IF NOT EXISTS orchestrator_agent_def_shares (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL,
+  principal_type TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchestrator_agent_def_shares (resource_id, principal_type, principal_id)`,
+      },
+    },
   ],
   { table: "orchestrator_migrations" },
 );

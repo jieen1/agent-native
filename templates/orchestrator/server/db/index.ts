@@ -81,3 +81,13 @@ registerShareableResource({
   getResourcePath: (n) => `/library/${(n as { id: string }).id}`,
   getDb,
 });
+
+registerShareableResource({
+  type: "agent_def",
+  resourceTable: schema.agentDefs,
+  sharesTable: schema.agentDefShares,
+  displayName: "Agent Definition",
+  titleColumn: "name",
+  getResourcePath: (a) => `/agents/${(a as { id: string }).id}`,
+  getDb,
+});

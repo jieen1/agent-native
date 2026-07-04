@@ -1,6 +1,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "./db/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Resolve `.claude/agents/` at RUNTIME. In a built bundle `__dirname` points
@@ -61,7 +63,12 @@ function parseTools(raw: string): string[] {
   return inner.split(",").map((s) => s.trim().replace(/['"]/g, "")).filter(Boolean);
 }
 
-export function loadAgent(name: string): AgentConfig {
+/**
+ * Load an agent definition from a `.claude/agents/<name>.md` file.
+ * Kept for backwards compatibility — used as the fallback when the SQL table
+ * has no matching row or is unavailable.
+ */
+export function loadAgentFromFile(name: string): AgentConfig {
   const filePath = join(agentsDir(), `${name}.md`);
   const content = readFileSync(filePath, "utf-8");
   const { meta, body } = parseFrontmatter(content);
@@ -92,4 +99,48 @@ export function loadAgent(name: string): AgentConfig {
     maxSummaryTokens,
     systemPrompt: body.trim(),
   };
+}
+
+/**
+ * SQL-first agent loader with file fallback.
+ *
+ * Queries `orchestrator_agent_defs` by `name` (globally unique). Falls back to
+ * the original file-based loader (`.claude/agents/<name>.md`) when:
+ *   – DB is unavailable, or
+ *   – no matching row exists.
+ *
+ * This is called from the V3 dispatcher queue-worker context where there is
+ * no HTTP request scope, so we do a plain `eq(name)` select with no access
+ * filtering (name is globally unique).
+ */
+export async function loadAgent(name: string): Promise<AgentConfig> {
+  try {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(schema.agentDefs)
+      .where(eq(schema.agentDefs.name, name))
+      .limit(1);
+    if (rows.length > 0) {
+      const row = rows[0] as any;
+      const rawRuntime = row.runtime || "none";
+      const isAcp = rawRuntime.startsWith("acp:");
+      let tools: string[] = [];
+      try { tools = JSON.parse(row.tools || "[]"); } catch { tools = []; }
+      return {
+        name: row.name,
+        description: row.description || "",
+        runtime: isAcp ? rawRuntime : rawRuntime === "microvm" ? "microvm" : "none",
+        isAcp,
+        acpHarnessRef: isAcp ? rawRuntime : undefined,
+        engine: row.engine || "",
+        model: row.model || "",
+        tools,
+        systemPrompt: row.systemPrompt || "",
+      };
+    }
+  } catch {
+    // DB unavailable or query failed — fall back to file-based agent defs.
+  }
+  return loadAgentFromFile(name);
 }

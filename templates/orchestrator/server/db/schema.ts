@@ -334,3 +334,27 @@ export const auditLog = table("audit_log", {
   ownerEmail: text("owner_email").notNull().default("local@localhost"),
   orgId: text("org_id"),
 });
+
+// ─── Worker agent definitions (DESIGN §7) — SQL-first, file fallback ──────────
+
+// Agent definition: a named worker agent (e.g. vllm, claude-code) with engine,
+// model, tools, system prompt, and runtime. Builtin agents are seeded at boot;
+// user-defined agents can be created/edited via the UI. `name` is globally unique
+// and is the key the DAG nodes reference and the dispatcher resolves.
+export const agentDefs = table("orchestrator_agent_defs", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  engine: text("engine").notNull().default(""),
+  model: text("model").notNull().default(""),
+  tools: text("tools").notNull().default("[]"), // JSON string[]
+  systemPrompt: text("system_prompt").notNull().default(""),
+  description: text("description").notNull().default(""),
+  runtime: text("runtime").notNull().default("none"),
+  builtin: integer("builtin").notNull().default(0),
+  version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  ...ownableColumns(),
+});
+
+export const agentDefShares = createSharesTable("orchestrator_agent_def_shares");
