@@ -25,6 +25,7 @@ import {
   claudeWorkerEnv,
   getManagedClaudeStatus,
 } from "../claude-managed-auth.js";
+import { refreshManagedTokenIfNeeded } from "../claude-login.js";
 import { writeBrainMcpConfig } from "./brain-mcp-config.js";
 import { ensureBrainSchema } from "../db/brain-schema.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
@@ -418,6 +419,21 @@ async function streamBrainChild(opts: {
   ];
   if (opts.resumeSessionId) {
     argv.push("--resume", opts.resumeSessionId);
+  }
+
+  // Proactively refresh the managed OAuth access token before spawning the CC
+  // child. The managed access token lives only ~8h; each brain turn is a fresh
+  // short-lived `claude -p` process that cannot renew a token that already
+  // expired between turns, so it 403s and the operator is forced to re-login
+  // "after a day". refreshManagedTokenIfNeeded() is a no-op that touches no
+  // network unless the token is within the 5-minute expiry skew (single-flight),
+  // so calling it on every spawn adds ~zero cost while keeping the credential
+  // valid as long as the (long-lived) refresh token survives. Failure here is
+  // non-fatal — the CLI still tries with the current token.
+  try {
+    await refreshManagedTokenIfNeeded();
+  } catch {
+    // Advisory; proceed with whatever credential is on disk.
   }
 
   const child = spawn("claude", argv, {

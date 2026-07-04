@@ -21,7 +21,7 @@ import { managedClaudeConfigDir } from "./claude-managed-auth.js";
  * host's HTTP proxy (which egresses via the allowed IP) is what unblocks login.
  * Set `HTTPS_PROXY=http://172.18.0.1:20171` on the container. Empty = direct.
  */
-function oauthProxyUrl(): string {
+export function oauthProxyUrl(): string {
   return (
     process.env.CLAUDE_OAUTH_PROXY ||
     process.env.HTTPS_PROXY ||
@@ -123,6 +123,134 @@ function proxiedHttpsPost(
     );
     connectReq.end();
   });
+}
+
+/**
+ * GET an HTTPS URL through the same CONNECT tunnel as {@link proxiedHttpsPost}.
+ * The container's WAN IP is Cloudflare-blocked at the edge, so a bare fetch to
+ * api.anthropic.com/api/oauth/{usage,profile} returns 403 "Request not allowed"
+ * before reaching the OAuth handler — identical to the token endpoint. Routing
+ * the GET through the host proxy (allowed IP) with the CLI User-Agent unblocks
+ * it. No body; otherwise the tunnel/TLS/HTTP-over-TLS handling mirrors POST.
+ */
+function proxiedHttpsGet(
+  targetUrl: string,
+  proxyUrl: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(targetUrl);
+    const proxy = new URL(proxyUrl);
+    const targetPort = target.port || "443";
+    let settled = false;
+    const fail = (err: Error) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    };
+    const connectReq = http.request({
+      host: proxy.hostname,
+      port: Number(proxy.port) || 80,
+      method: "CONNECT",
+      path: `${target.hostname}:${targetPort}`,
+      headers: { Host: `${target.hostname}:${targetPort}` },
+      timeout: timeoutMs,
+    });
+    connectReq.once("connect", (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        fail(
+          new Error(
+            `Proxy CONNECT to ${target.hostname} failed: HTTP ${res.statusCode}`,
+          ),
+        );
+        return;
+      }
+      const secure = tls.connect(
+        { socket, servername: target.hostname, ALPNProtocols: ["http/1.1"] },
+        () => {
+          const req = http.request(
+            {
+              createConnection: () => secure,
+              method: "GET",
+              path: `${target.pathname}${target.search}`,
+              headers: { ...headers, Host: target.hostname },
+              timeout: timeoutMs,
+            },
+            (r) => {
+              const chunks: Buffer[] = [];
+              r.on("data", (c) => chunks.push(c as Buffer));
+              r.on("end", () => {
+                if (!settled) {
+                  settled = true;
+                  resolve({
+                    status: r.statusCode || 0,
+                    text: Buffer.concat(chunks).toString("utf8"),
+                  });
+                }
+              });
+            },
+          );
+          req.once("error", fail);
+          req.once("timeout", () =>
+            req.destroy(new Error("oauth GET timeout")),
+          );
+          req.end();
+        },
+      );
+      secure.once("error", fail);
+    });
+    connectReq.once("error", fail);
+    connectReq.once("timeout", () =>
+      connectReq.destroy(new Error("proxy CONNECT timeout")),
+    );
+    connectReq.end();
+  });
+}
+
+/**
+ * Authenticated GET to an Anthropic OAuth endpoint (usage/profile) using the
+ * managed access token, the CLI User-Agent, and — when a proxy is configured —
+ * the CONNECT tunnel that bypasses the container's Cloudflare edge block. Falls
+ * back to a direct fetch when no proxy is set (local dev). Returns the parsed
+ * JSON on 2xx, else throws so the caller can serve its cached snapshot.
+ */
+export async function oauthApiGet(
+  url: string,
+  token: string,
+  timeoutMs: number,
+): Promise<unknown> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "User-Agent":
+      process.env.CLAUDE_CLI_USER_AGENT || "claude-cli/2.1.191 (external, cli)",
+    Accept: "application/json",
+  };
+  const proxyUrl = oauthProxyUrl();
+  if (proxyUrl) {
+    const { status, text } = await proxiedHttpsGet(
+      url,
+      proxyUrl,
+      headers,
+      timeoutMs,
+    );
+    if (status < 200 || status >= 300) {
+      throw new Error(`oauth GET ${url} failed: HTTP ${status}`);
+    }
+    return JSON.parse(text);
+  }
+  // No proxy configured (e.g. local dev): direct fetch with the same UA.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { headers, signal: controller.signal });
+    if (!res.ok) throw new Error(`oauth GET ${url} failed: HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Container-owned Claude Code SUBSCRIPTION login (DESIGN §13: NO ~/.claude

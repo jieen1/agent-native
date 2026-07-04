@@ -29,6 +29,7 @@ import { z } from "zod";
 import {
   refreshManagedTokenIfNeeded,
   readManagedAccessToken,
+  oauthApiGet,
 } from "../server/claude-login.js";
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
@@ -100,27 +101,30 @@ function mapWindow(node: unknown): WindowUsage | null {
   };
 }
 
-/** A timed fetch that throws on non-2xx (so the caller falls back to cache). */
+/**
+ * Fetch an oauth endpoint via {@link oauthApiGet}, which sends the CLI
+ * User-Agent and routes through the host CONNECT proxy when configured. A bare
+ * fetch here previously hit Cloudflare's 403 "Request not allowed" at the edge
+ * (the container WAN IP is blocked), so usage was ALWAYS "temporarily
+ * unavailable" regardless of token validity. Throws-to-false so the caller
+ * falls back to its cached snapshot. Frequency is unchanged (12-min snapshot +
+ * single-flight); only the transport is fixed.
+ */
 async function fetchJson(
   url: string,
   token: string,
 ): Promise<
   { ok: true; body: Record<string, unknown> } | { ok: false; status: number }
 > {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: controller.signal,
-    });
-    if (!res.ok) return { ok: false, status: res.status };
-    const body = (await res.json()) as Record<string, unknown>;
+    const body = (await oauthApiGet(
+      url,
+      token,
+      FETCH_TIMEOUT_MS,
+    )) as Record<string, unknown>;
     return { ok: true, body };
   } catch {
     return { ok: false, status: 0 };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
