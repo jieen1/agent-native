@@ -394,7 +394,7 @@ export class V3Dispatcher {
     const outputSchema = agentDagNode?.output_schema;
 
     // ── Step 2: Resolve agent config — use dagNode.agent field (G8) ───────
-    const agentConfig = this.resolveAgentConfig(nodeRow, dagNodeAgentName);
+    const agentConfig = await this.resolveAgentConfig(nodeRow, dagNodeAgentName);
 
     // ── Step 3: Build interpolation context ───────────────────────────────
     const context = await this.buildInterpolationContext(runId, nodeRow);
@@ -792,14 +792,14 @@ export class V3Dispatcher {
    * Resolve agent config from the DAG node's `agent` field (G8).
    * Falls back to nodeRow.nodeIdInDag if dagNodeAgentName is absent.
    */
-  private resolveAgentConfig(
+  private async resolveAgentConfig(
     nodeRow: NodeRow,
     dagNodeAgentName?: string,
-  ): AgentConfig {
+  ): Promise<AgentConfig> {
     // G8: use dagNode.agent (the node field), not nodeRow.nodeIdInDag.
     const agentName = dagNodeAgentName ?? nodeRow.nodeIdInDag;
     try {
-      return loadAgent(agentName);
+      return await loadAgent(agentName);
     } catch {
       // Agent file not found — return a minimal config so the spawn can still
       // proceed with the rendered prompt alone.

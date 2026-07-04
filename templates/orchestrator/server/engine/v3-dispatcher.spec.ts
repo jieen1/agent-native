@@ -10,7 +10,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 // ── Mock dependencies ───────────────────────────────────────────────────────
 
 vi.mock("../agent-loader.js", () => ({
-  loadAgent: vi.fn(),
+  loadAgent: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("./interpolation.js", () => ({
@@ -222,7 +222,7 @@ describe("Output classification", () => {
   it("output classification: string — no schema", async () => {
     const { V3Dispatcher } = await import("./v3-dispatcher.js");
 
-    vi.mocked(loadAgent).mockReturnValue({
+    vi.mocked(loadAgent).mockResolvedValue({
       name: "test-agent",
       description: "",
       runtime: "none" as const,
@@ -253,7 +253,7 @@ describe("Output classification", () => {
   it("output classification: object with schema match", async () => {
     const { V3Dispatcher } = await import("./v3-dispatcher.js");
 
-    vi.mocked(loadAgent).mockReturnValue({
+    vi.mocked(loadAgent).mockResolvedValue({
       name: "reviewer",
       description: "",
       runtime: "none" as const,
@@ -295,7 +295,7 @@ describe("Output classification", () => {
   it("output classification: schema-violation when output mismatches schema", async () => {
     const { V3Dispatcher } = await import("./v3-dispatcher.js");
 
-    vi.mocked(loadAgent).mockReturnValue({
+    vi.mocked(loadAgent).mockResolvedValue({
       name: "reviewer",
       description: "",
       runtime: "none" as const,
@@ -347,7 +347,7 @@ describe("Interpolation context", () => {
   it("buildInterpolationContext returns expected shape", async () => {
     const { V3Dispatcher } = await import("./v3-dispatcher.js");
 
-    vi.mocked(loadAgent).mockReturnValue({
+    vi.mocked(loadAgent).mockResolvedValue({
       name: "downstream",
       description: "",
       runtime: "none" as const,
