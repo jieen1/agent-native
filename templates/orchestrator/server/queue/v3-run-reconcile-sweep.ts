@@ -39,7 +39,7 @@
 //  - Modeled on server/brain/brain-monitor.ts (durable, unref'd setInterval,
 //    best-effort per-item error swallowing, idempotent start/stop).
 
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getV3Db, isV3PostgresConfigured } from "../db/v3.js";
 import { v3Runs, v3Nodes } from "../db/v3-schema.js";
 import { triggerTickSafe } from "../plugins/v3-reconciler.js";
@@ -113,25 +113,30 @@ export async function reconcileStrandedV3RunsOnce(): Promise<string[]> {
 
   for (const run of candidateRuns) {
     try {
-      // Bail early if ANY non-terminal node exists — this run is still
-      // actively progressing, not stranded.
-      const [nonTerminal] = await db
+      // Bail early only if a node is actively RUNNING — that run is genuinely
+      // being processed (an agent is mid-flight), so re-ticking would be
+      // pointless. A run whose remaining non-terminal nodes are all `pending`
+      // (or `awaiting-approval`) with NOTHING running is either fully terminal
+      // (all nodes resolved) OR stalled: the event-driven tick after the last
+      // node finished did not dispatch the next ready node (multi-stage brain
+      // orchestration and directly-launched multi-node DAGs both hit this — a
+      // node completes but the chained tick is lost, so develop:done leaves
+      // review:pending forever). In BOTH cases a re-tick is the right, safe,
+      // idempotent action: tick() dispatches any ready pending node (advancing
+      // a stalled run) or finalizes an all-terminal run.
+      const [running] = await db
         .select({ id: v3Nodes.id })
         .from(v3Nodes)
-        .where(
-          and(
-            eq(v3Nodes.runId, run.id),
-            notInArray(v3Nodes.status, [...TERMINAL_NODE_STATUSES]),
-          ),
-        )
+        .where(and(eq(v3Nodes.runId, run.id), eq(v3Nodes.status, "running")))
         .limit(1);
 
-      if (nonTerminal) continue;
+      if (running) continue;
 
       // Fetch all nodes once to (a) confirm at least one exists and (b) find
       // the most recent activity timestamp for the silence check.
       const nodes = await db
         .select({
+          status: v3Nodes.status,
           startedAt: v3Nodes.startedAt,
           completedAt: v3Nodes.completedAt,
         })
@@ -154,15 +159,20 @@ export async function reconcileStrandedV3RunsOnce(): Promise<string[]> {
       if (lastActivityMs === 0) continue;
       if (now - lastActivityMs < silentThresholdMs) continue;
 
+      const pendingCount = nodes.filter(
+        (n) => !TERMINAL_NODE_STATUSES.includes(n.status as never),
+      ).length;
       console.log(
-        `[v3-run-reconcile-sweep] stranded run detected: ${run.id} ` +
-          `(status=${run.status}, all ${nodes.length} node(s) terminal, ` +
-          `silent for ${now - lastActivityMs}ms)`,
+        `[v3-run-reconcile-sweep] stuck run detected: ${run.id} ` +
+          `(status=${run.status}, ${nodes.length} node(s), ` +
+          `${pendingCount} non-terminal & none running, ` +
+          `silent for ${now - lastActivityMs}ms) — re-ticking`,
       );
 
       // Re-tick via the exact same path every other caller uses. The
-      // reconciler's tick() re-reads nodes, sees they are all resolved, and
-      // calls its own finalizeRun(). triggerTickSafe never throws.
+      // reconciler's tick() re-reads nodes and either dispatches the next
+      // ready node (advancing a stalled run) or, when all are resolved, calls
+      // its own idempotent finalizeRun(). triggerTickSafe never throws.
       await triggerTickSafe(run.id);
       reconciled.push(run.id);
     } catch (err) {
