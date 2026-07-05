@@ -11,12 +11,10 @@ import {
   IconPlus,
   IconServer2,
   IconSparkles,
-  IconStack2,
   IconTrash,
 } from "@tabler/icons-react";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "sonner";
@@ -24,13 +22,11 @@ import { APP_TITLE } from "@/lib/app-config";
 import {
   useActivateRuntime,
   useDeleteRuntimeConfig,
-  useQueueStatus,
   useRuntimeConfigs,
   useRuntimeCredentials,
   useRuntimeImages,
   useRuntimeStatus,
   useSaveRuntimeConfig,
-  useSetConcurrency,
   useTestRuntimeConfig,
 } from "@/hooks/use-orchestrator";
 import { Button } from "@/components/ui/button";
@@ -398,95 +394,7 @@ function ModelsTab() {
         </div>
       </section>
 
-      <ConcurrencySection />
       <ImagesSection />
-    </div>
-  );
-}
-
-// ── Concurrency: degree slider + microVM ceiling + live counts ───────────────
-
-function ConcurrencySection() {
-  const { t } = useTranslation();
-  const { data: queue, refetch } = useQueueStatus();
-  const setConcurrency = useSetConcurrency();
-  const [pending, setPending] = useState<number | null>(null);
-
-  const degree = pending ?? queue?.concurrencyDegree ?? 3;
-  const maxVMs = queue?.maxConcurrentVMs ?? 0;
-
-  function commit(value: number) {
-    setConcurrency.mutate(
-      { degree: value },
-      {
-        onSuccess: () => {
-          setPending(null);
-          toast.success(t("settings.concurrencySaved"));
-          refetch();
-        },
-        onError: (e: unknown) => {
-          setPending(null);
-          toast.error(e instanceof Error ? e.message : t("common.actionFailed"));
-        },
-      },
-    );
-  }
-
-  return (
-    <section>
-      <SectionHeading
-        icon={<IconStack2 className="size-5" />}
-        title={t("settings.concurrencyTitle")}
-      />
-
-      <div className="grid gap-5 rounded-lg border bg-card p-4">
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <Label className="text-sm">{t("settings.concurrencyDegree")}</Label>
-            <span className="text-sm font-medium tabular-nums">{degree}</span>
-          </div>
-          <Slider
-            min={1}
-            max={16}
-            step={1}
-            value={[degree]}
-            onValueChange={(v) => setPending(v[0])}
-            onValueCommit={(v) => commit(v[0])}
-            disabled={setConcurrency.isPending}
-          />
-        </div>
-
-        <div className="flex items-center justify-between border-t pt-3">
-          <Label className="text-sm text-muted-foreground">
-            {t("settings.maxConcurrentVMs")}
-          </Label>
-          <span className="text-sm font-medium tabular-nums">{maxVMs}</span>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3 border-t pt-3">
-          <Stat
-            label={t("settings.concurrencyRunning")}
-            value={queue?.running ?? 0}
-          />
-          <Stat
-            label={t("settings.concurrencyQueued")}
-            value={queue?.queued ?? 0}
-          />
-          <Stat
-            label={t("settings.concurrencyVmsInUse")}
-            value={queue?.vmsInUse ?? 0}
-          />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-lg font-semibold tabular-nums">{value}</p>
     </div>
   );
 }

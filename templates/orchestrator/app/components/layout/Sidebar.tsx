@@ -29,7 +29,6 @@ import {
   type ChatThreadSummary,
 } from "@agent-native/core/client";
 import { ExtensionsSidebarSection } from "@agent-native/core/client/extensions";
-import { CapacityChip } from "./CapacityChip";
 import { AccountUsageChip } from "./AccountUsageChip";
 import { OrgSwitcher } from "@agent-native/core/client/org";
 import { cn } from "@/lib/utils";
@@ -532,7 +531,6 @@ export function Sidebar({
           collapsed && "border-t border-sidebar-border py-2",
         )}
       >
-        {!collapsed ? <CapacityChip /> : null}
         {/* Single GLOBAL account-usage indicator (account-level, shown once —
             NOT per brain session). On-demand + ~12-min background + SQL-cached. */}
         {!collapsed ? <AccountUsageChip /> : null}

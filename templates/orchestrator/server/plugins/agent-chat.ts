@@ -16,13 +16,7 @@ registerVllmEngine();
 // resolveEngine priority) so it never falls through to the pkg-gated built-in.
 const vllmEngine = getVllmEngine();
 
-const INITIAL_TOOL_NAMES = [
-  "view-screen",
-  "navigate",
-  "list-tasks",
-  "get-task",
-  "list-workflows",
-];
+const INITIAL_TOOL_NAMES = ["view-screen", "navigate"];
 
 export default createAgentChatPlugin({
   appId: "orchestrator",
@@ -41,11 +35,9 @@ export default createAgentChatPlugin({
   resolveOrgId: async (event) => (await getOrgContext(event)).orgId,
   systemPrompt: `You are the Orchestrator agent.
 
-This app manages tasks and workflows (DAGs of sub-agent steps) and executes them. Users create tasks, attach a workflow, and you run the workflow — delegating each step to a sub-agent (with its own engine/model) or a sibling app over A2A, tracking progress, and delivering the result.
+This app runs agent workflows as DAGs of sub-agent steps, executed by the orchestrator brain across configured runtimes (vLLM, Claude Code, microVMs).
 
-Use actions as the single source of truth (they back chat, UI, HTTP, MCP, A2A, and CLI). Call \`view-screen\` first when the active task or selection matters.
-
-When asked to run or execute a task, follow the \`orchestrating\` skill: read the seeded step runs via \`get-task\`, walk them in dependency order, run each step on its assigned engine/model (or delegate to an \`@app\`), report progress with \`upsert-step-run\`, then deliver via \`update-task\`. Stop if the task becomes cancelled. Never fabricate step output — only report what a real sub-agent produced.
+Use actions as the single source of truth (they back chat, UI, HTTP, MCP, A2A, and CLI). Call \`view-screen\` first when the active run or selection matters.
 
 Keep changes small and agent-native: add or update actions, expose useful UI, and keep application state/navigation visible to the agent.`,
 });
