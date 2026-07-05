@@ -13,32 +13,44 @@
 // NON-BLOCKING background process with a STREAMING line reader so the page can
 // watch a live transcript, and it captures + reuses the CC session_id.
 //
-// KEPT ON RAW SPAWN — investigated migrating this file to the framework's
-// `@agent-native/core/agent/harness` primitive (startAgentHarnessRun +
-// resolveAgentHarness) and deliberately did NOT, for three concrete,
-// code-verified reasons:
-//   1. `resolveAgentHarness("acp:claude-code")` requires the optional
+// GATED HARNESS MIGRATION (default OFF — byte-identical to the raw spawn until
+// flipped) — this file previously stayed on a raw `claude` child_process spawn
+// because migrating to the framework's `@agent-native/core/agent/harness`
+// primitive had three concrete, code-verified blockers:
+//   1. `resolveAgentHarness("acp:claude-code")` required the optional
 //      `@zed-industries/agent-client-protocol` + `@zed-industries/claude-code-acp`
 //      packages (packages/core/src/agent/harness/registry.ts calls
 //      assertAgentHarnessPackagesInstalled() and throws without them). Neither
-//      is in this app's dependency tree.
-//   2. Even installed, packages/core/src/agent/harness/acp-adapter.ts
-//      hardcodes `newSession({ cwd, mcpServers: [] })` — there is no plumbing
-//      from AgentHarnessCreateSessionOptions to ACP's mcpServers, so the brain
-//      would lose ALL `mcp__orchestrator__*` tool access. That's a hard
-//      regression for a brain whose entire job is calling those tools.
+//      was in this app's dependency tree.
+//   2. `packages/core/src/agent/harness/acp-adapter.ts` hardcoded
+//      `newSession({ cwd, mcpServers: [] })` — there was no plumbing from
+//      AgentHarnessCreateSessionOptions to ACP's mcpServers, so the brain
+//      would have lost ALL `mcp__orchestrator__*` tool access.
 //   3. The other built-in, `ai-sdk-harness:claude-code`
 //      (packages/core/src/agent/harness/ai-sdk-adapter.ts), requires a REMOTE
 //      sandbox provider (only `@ai-sdk/sandbox-vercel` is supported, not
 //      installed, no credentials) and API-key/gateway auth — incompatible
 //      with the local managed-OAuth-login model `claudeWorkerEnv()` relies on.
-// Neither adapter can be fixed from templates/orchestrator (the gaps are in
-// packages/core; see also docs/DESIGN.md §7.0b, which independently reproduced
-// the ai-sdk-harness:claude-code crash end-to-end against THIS app's installed
-// canary packages — `_acquireSandbox` dereferences an undefined sandbox
-// provider). See server/engine/v3-acp-adapter.ts for where the harness WAS
-// usable (the O2 CC-worker path, which needs neither MCP tools nor a local
-// sandbox).
+//      That adapter remains unusable for this brain; unrelated to (1)/(2).
+// (1) and (2) are now fixed upstream: the ACP packages are renamed
+// (`@agentclientprotocol/sdk` / `@agentclientprotocol/claude-agent-acp`,
+// installed as direct deps) and `acp-adapter.ts` forwards `mcpServers` +
+// `metadata` (as ACP `_meta`) instead of hardcoding `[]`. `runBrainHarnessTurn`
+// below drives the SAME `acp:claude-code` harness `runAcpClaudeCodeWorker`
+// (server/engine/v3-acp-adapter.ts) already proved usable for the O2 CC-worker
+// path, calling `resolveAgentHarness` → `adapter.createSession` →
+// `session.streamTurn` directly (NOT `startAgentHarnessRun`, which wraps
+// run-manager's interactive-chat 40s soft-timeouts — wrong for this long-lived
+// daemon, and writes to runs/run_events tables nothing here reads).
+//
+// The new path is gated behind `ORCH_BRAIN_HARNESS=1` (default unset/OFF) AND
+// requires the ACP packages to actually be installed+resolvable
+// (`isBrainHarnessEnabled()` below) — with the flag off, or the packages
+// missing, every turn takes the EXACT same raw-spawn path as before this
+// migration; deploying this change is byte-identical to today until the flag
+// flips. The brain's own liveness system (`brain_threads`/`brain_events`/
+// `brain_tasks` + brain-driver/reap/thread-reconcile/monitor) is UNCHANGED
+// either way — only the CC execution engine for a turn differs.
 //
 // SESSION PERSISTENCE, however, DOES migrate cleanly (it is pure bookkeeping,
 // not execution): every turn now ALSO records its resumable session — the CC
@@ -57,9 +69,10 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { getV3Db, v3Schema } from "../db/index.js";
@@ -68,17 +81,22 @@ import {
   getManagedClaudeStatus,
 } from "../claude-managed-auth.js";
 import { refreshManagedTokenIfNeeded } from "../claude-login.js";
-import { writeBrainMcpConfig } from "./brain-mcp-config.js";
+import { writeBrainMcpConfig, buildBrainMcpServers } from "./brain-mcp-config.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import { getBrainModel } from "./brain-model.js";
 import { deriveContextWindow } from "../../actions/brain-usage.js";
 import { runSdkBrainTurn } from "./sdk-brain-session.js";
+import { registerOrchestratorRuntime } from "../register-runtime.js";
 import {
   ensureAgentHarnessSessionTables,
+  getAgentHarnessEntry,
   getLatestAgentHarnessSessionForThread,
+  isAgentHarnessPackageInstalled,
+  resolveAgentHarness,
   saveAgentHarnessSession,
   updateAgentHarnessSession,
   markAgentHarnessSessionStopped,
+  type AgentHarnessSession,
 } from "@agent-native/core/agent/harness";
 
 /** Harness-name tag for the brain's row in the shared `agent_harness_sessions` store. */
@@ -87,6 +105,78 @@ const BRAIN_HARNESS_NAME = "orchestrator:claude-cli-brain";
 /** Stable id for a brain thread's row in `agent_harness_sessions` (one per thread). */
 function brainHarnessSessionId(threadId: string): string {
   return `bhs_${threadId}`;
+}
+
+const require = createRequire(import.meta.url);
+
+/**
+ * The `@agent-native/core` agent-harness registry entry this file drives when
+ * the harness path is enabled (see {@link isBrainHarnessEnabled}). Distinct
+ * from {@link BRAIN_HARNESS_NAME}, which tags the brain's row in the
+ * `agent_harness_sessions` STORE — this is the harness REGISTRY name.
+ */
+const ACP_CLAUDE_CODE_HARNESS = "acp:claude-code";
+
+/**
+ * The built-in `acp:claude-code` preset spawns `npx -y
+ * @agentclientprotocol/claude-agent-acp` (packages/core/src/agent/harness/
+ * acp-builtin.ts). `npx`'s "already installed locally?" check walks up
+ * `node_modules/.bin` from the CHILD PROCESS'S OWN cwd — which for this brain
+ * is the TASK'S workspace/scratch dir (a checked-out target repo), not this
+ * app's own directory. Verified: even though `@agentclientprotocol/
+ * claude-agent-acp` is a direct dependency of this app (Phase 2),
+ * `npx --no-install @agentclientprotocol/claude-agent-acp` still fails when
+ * run from an unrelated cwd — so left on the npx default, EVERY brain turn
+ * would need npm-registry network access (or a pre-warmed npx cache) inside
+ * the container, purely because of where the turn's cwd happens to be.
+ *
+ * This resolves the package's own `bin` entry directly via `require.resolve`
+ * (which — unlike `npx` — is NOT cwd-relative; it walks up from THIS file's
+ * own location, where the dependency is actually declared) and runs it with
+ * plain `node`, so the harness path never depends on npm-registry reachability
+ * at turn time. Returns null (falling back to the built-in npx-based preset)
+ * if anything about that resolution is unexpected — never hard-fails a turn
+ * over this optimization.
+ */
+function resolveClaudeAgentAcpEntry(): { command: string; args: string[] } | null {
+  try {
+    const pkgJsonPath = require.resolve(
+      "@agentclientprotocol/claude-agent-acp/package.json",
+    );
+    const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8")) as {
+      bin?: Record<string, string> | string;
+    };
+    const binRel =
+      typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.["claude-agent-acp"];
+    if (!binRel) return null;
+    return {
+      command: process.execPath,
+      args: [join(dirname(pkgJsonPath), binRel)],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Env flag gating `runBrainHarnessTurn` (default unset/OFF — see file banner). */
+export const BRAIN_HARNESS_ENV = "ORCH_BRAIN_HARNESS";
+
+/**
+ * Whether this turn should run through the harness adapter path instead of
+ * the raw `claude` spawn. Requires BOTH the opt-in env flag AND the ACP
+ * packages to actually be installed+resolvable, so an app that sets the flag
+ * without the packages installed still gets the raw-spawn path instead of a
+ * hard failure every turn.
+ */
+function isBrainHarnessEnabled(): boolean {
+  if (process.env[BRAIN_HARNESS_ENV] !== "1") return false;
+  try {
+    registerOrchestratorRuntime();
+    const entry = getAgentHarnessEntry(ACP_CLAUDE_CODE_HARNESS);
+    return !!entry && isAgentHarnessPackageInstalled(entry);
+  } catch {
+    return false;
+  }
 }
 
 /** Shape of the opaque `resumeState` this module stores/reads. */
@@ -165,6 +255,9 @@ export async function startBrainTurn(
   // SDK brain (vLLM). Only throw if BOTH CC and the SDK path fail.
   const login = getManagedClaudeStatus();
   const useSdkBrain = !login.loggedIn;
+  // Within the CC path, gated opt-in to the harness-adapter execution engine
+  // instead of the raw `claude` spawn (see file banner + isBrainHarnessEnabled).
+  const useHarnessBrain = !useSdkBrain && isBrainHarnessEnabled();
 
   // 1) Resolve / create the thread.
   //
@@ -344,14 +437,23 @@ export async function startBrainTurn(
             .where(eq(v3Schema.brainThreads.id, threadId!));
         }
       })
-    : runBrainChild({
-        threadId: threadId!,
-        ownerEmail: args.ownerEmail,
-        orgId: args.orgId ?? null,
-        message: args.message,
-        cwd,
-        resumeSessionId: sessionId,
-      });
+    : useHarnessBrain
+      ? runBrainHarnessTurn({
+          threadId: threadId!,
+          ownerEmail: args.ownerEmail,
+          orgId: args.orgId ?? null,
+          message: args.message,
+          cwd,
+          resumeSessionId: sessionId,
+        })
+      : runBrainChild({
+          threadId: threadId!,
+          ownerEmail: args.ownerEmail,
+          orgId: args.orgId ?? null,
+          message: args.message,
+          cwd,
+          resumeSessionId: sessionId,
+        });
 
   void bgTask.catch(async (err) => {
     const msg = err instanceof Error ? err.message : String(err);
@@ -432,6 +534,230 @@ async function runBrainChild(opts: {
   }
 
   await finalizeThreadStatus(db, opts.threadId, outcome);
+}
+
+/**
+ * The background entrypoint for the gated harness-adapter path (see file
+ * banner + {@link isBrainHarnessEnabled}). Same opts contract as
+ * {@link runBrainChild} so `startBrainTurn` can swap the two 1:1.
+ *
+ * Resolves the `acp:claude-code` harness, creates ONE session for this turn
+ * (resuming the prior ACP session when `resumeSessionId` is given), streams
+ * the turn, and tears the session down again in `finally` — there is no
+ * long-lived session held between turns; resumability comes from ACP's own
+ * `loadSession`/`--resume`-equivalent plus the sessionId this function
+ * persists, exactly like the raw-spawn path persists CC's `--resume` id.
+ *
+ * Fallback contract: if `resolveAgentHarness`/`createSession` throws BEFORE
+ * any event is read, nothing has been written to the transcript yet, so it is
+ * safe to fall back to the raw-spawn path (`runBrainChild`) for this turn. A
+ * failure DURING streaming is surfaced as a normal brain error instead —
+ * falling back there would re-run the turn and double-write the transcript.
+ */
+async function runBrainHarnessTurn(opts: {
+  threadId: string;
+  ownerEmail: string;
+  orgId: string | null;
+  message: string;
+  cwd: string;
+  resumeSessionId: string | null;
+}): Promise<void> {
+  const db = getV3Db();
+  let brainModel: string | null = null;
+  let session: AgentHarnessSession;
+
+  try {
+    registerOrchestratorRuntime();
+    // Override the preset's npx spawn with a directly-resolved local
+    // invocation when possible (see resolveClaudeAgentAcpEntry) — falls back
+    // to the built-in npx-based preset (config override omitted) if that
+    // resolution fails for any reason.
+    const entryOverride = resolveClaudeAgentAcpEntry();
+    const adapter = resolveAgentHarness(ACP_CLAUDE_CODE_HARNESS, {
+      env: claudeWorkerEnv(),
+      ...(entryOverride ?? {}),
+    });
+    brainModel = await getBrainModel();
+    // Mirrors the raw-spawn path's `--allowedTools "mcp__orchestrator" Bash
+    // Read Edit Write`: restrict the built-in tool surface to this set so the
+    // harness path does not silently grant the brain a WIDER tool surface
+    // (Grep/Glob/WebFetch/Task/…) than the raw path has today.
+    // `mcp__orchestrator__*` tools are a separate channel (mcpServers below)
+    // and are unaffected by this list. `model`, when a non-default override is
+    // saved, threads through the SAME `_meta.claudeCode.options` escape hatch.
+    const metadata: Record<string, unknown> = {
+      claudeCode: {
+        options: {
+          tools: ["Bash", "Read", "Edit", "Write"],
+          ...(brainModel ? { model: brainModel } : {}),
+        },
+      },
+    };
+    session = await adapter.createSession({
+      cwd: opts.cwd,
+      permissionMode: "allow-all",
+      mcpServers: buildBrainMcpServers(opts.ownerEmail),
+      resumeState: opts.resumeSessionId
+        ? { sessionId: opts.resumeSessionId, cwd: opts.cwd }
+        : undefined,
+      metadata,
+    });
+  } catch (err) {
+    // Nothing streamed yet — safe to fall back to the raw-spawn path for this
+    // turn (e.g. the ACP packages are missing/broken, or the ACP agent
+    // process failed to launch/initialize).
+    await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+      type: "error",
+      text: `Harness brain unavailable this turn, falling back to the CLI brain: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    });
+    await runBrainChild(opts);
+    return;
+  }
+
+  // ACP has no separate system-prompt turn field (unlike the raw CLI's
+  // `--append-system-prompt`), so the brain's system prompt is prepended to
+  // the turn's user-role prompt text instead.
+  //
+  // A fresh session was silently forced despite a resume request when the
+  // real ACP session id (session.id, fixed in the same core patch to reflect
+  // it — see packages/core/src/agent/harness/acp-adapter.ts) differs from
+  // what we asked to resume. Mirror the raw path's resumeNotFound recap so
+  // the brain re-establishes its own context instead of silently losing it.
+  const forcedFresh =
+    !!opts.resumeSessionId && session.id !== opts.resumeSessionId;
+  if (forcedFresh) {
+    await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+      type: "error",
+      text:
+        `Could not resume prior session ${opts.resumeSessionId}. Starting a ` +
+        `fresh session seeded with a recap so monitoring/delivery still completes.`,
+    });
+  }
+  const recap = forcedFresh
+    ? `(Resuming work — the prior Claude Code session for this task could not ` +
+      `be reloaded, so this is a fresh session. Re-establish context yourself: ` +
+      `call mcp__orchestrator__runsList to find this task's run(s), then ` +
+      `runState / v3RunNodes / runSummary to see where it stands, and finish ` +
+      `the job.)\n\n`
+    : "";
+  const prompt = `${BRAIN_PROMPT}\n\n${recap}${opts.message}`;
+
+  // Buffer text-deltas and flush to ONE brain_events row per boundary (a tool
+  // call or turn end) instead of one row per delta chunk — ACP streams text in
+  // many small chunks, and writing each straight through would leave hundreds
+  // of tiny rows per turn (mirrors the accumulate-then-flush shape
+  // sdk-brain-session.ts uses for its own message-history buffering).
+  let textBuffer = "";
+  const flushText = async (): Promise<void> => {
+    if (!textBuffer) return;
+    const text = textBuffer;
+    textBuffer = "";
+    await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+      type: "assistant",
+      text,
+    });
+  };
+
+  let sawError = false;
+  let doneReason: string | undefined;
+  try {
+    for await (const event of session.streamTurn({ prompt })) {
+      switch (event.type) {
+        case "text-delta":
+          textBuffer += event.text;
+          break;
+        case "tool-start":
+          await flushText();
+          await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+            type: "tool_use",
+            toolName: event.name,
+            toolUseId: event.id ?? null,
+            toolInput: event.input ?? null,
+          });
+          break;
+        case "tool-done":
+          await flushText();
+          await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+            type: "tool_result",
+            toolName: event.name,
+            toolUseId: event.id ?? null,
+            toolResult: event.result ?? null,
+          });
+          break;
+        case "error":
+          await flushText();
+          sawError = true;
+          await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+            type: "error",
+            text: event.error,
+          });
+          break;
+        case "done":
+          doneReason = event.reason;
+          break;
+        // thinking-delta / activity / file-change / compaction / usage /
+        // approval-request: no brain_events analogue in today's raw-spawn
+        // transcript either (it only ever writes user/assistant/tool_use/
+        // tool_result/result/error rows — see streamBrainChild above), so
+        // these are intentionally not persisted here. Known gap: ACP's
+        // "usage_update" session updates (real token/context-window data) are
+        // not even translated into an AgentHarnessEvent yet by
+        // acpUpdateToHarnessEvents — see this migration's RISKS notes.
+        default:
+          break;
+      }
+    }
+    await flushText();
+    await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+      type: "result",
+      text: `(${doneReason ?? "done"})`,
+    });
+  } catch (err) {
+    // A failure DURING streaming is a normal brain error — never mid-stream
+    // fallback to the raw-spawn path here, which would double-write the
+    // transcript for this turn.
+    await flushText();
+    sawError = true;
+    await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+      type: "error",
+      text: err instanceof Error ? err.message : String(err),
+    });
+  } finally {
+    let detachedSessionId: string | null = null;
+    try {
+      const detached = (await session.detach?.()) as
+        | { sessionId?: string }
+        | undefined;
+      if (typeof detached?.sessionId === "string") {
+        detachedSessionId = detached.sessionId;
+      }
+    } catch {
+      // Best-effort — the id we already observed via session.id still works.
+    }
+    const finalSessionId = detachedSessionId ?? session.id;
+    await db
+      .update(v3Schema.brainThreads)
+      .set({
+        sessionId: finalSessionId,
+        status: sawError ? "error" : "done",
+        // Best-effort label: the harness path currently has no usage/model
+        // readback (see RISKS), so this is the requested override (or a
+        // generic fallback label) rather than a confirmed-resolved model id.
+        model: brainModel ?? "claude-code-acp",
+        updatedAt: new Date(),
+      })
+      .where(eq(v3Schema.brainThreads.id, opts.threadId));
+    await updateAgentHarnessSession(brainHarnessSessionId(opts.threadId), {
+      status: sawError ? "errored" : "idle",
+      providerSessionId: finalSessionId,
+      resumeState: {
+        sessionId: finalSessionId,
+        cwd: opts.cwd,
+      } satisfies BrainResumeState,
+    }).catch(() => {});
+  }
 }
 
 /** Flip the thread to done/error based on a run outcome. */

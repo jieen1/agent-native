@@ -1,3 +1,4 @@
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
@@ -5,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACP_PACKAGE,
+  AcpHarnessSession,
   acpAutoPermissionDecision,
   acpContentBlockToText,
   acpFileChangeEventsFromToolContent,
@@ -305,6 +307,121 @@ describe("createAcpHarnessAdapter", () => {
     await expect(createAcpHarnessAdapter({}).createSession({})).rejects.toThrow(
       /requires a command/,
     );
+  });
+});
+
+describe("AcpHarnessSession — mcpServers + metadata forwarding", () => {
+  // `createSession`'s dynamic import of the optional ACP transport package
+  // deliberately defeats static analysis (see the `dynamicImport` comment
+  // above), which also makes it unmockable via `vi.mock` — confirmed: it
+  // throws "A dynamic import callback was not specified" under vitest's
+  // module runner. So these tests construct `AcpHarnessSession` (exported
+  // above solely for this purpose) directly with a fake `acp` transport,
+  // exercising the real `initialize()` forwarding logic without going
+  // through `createAcpHarnessAdapter`'s dynamic import. A real (trivial)
+  // child process is still spawned because `initialize()` wires its stdio
+  // through `Writable.toWeb` / `Readable.toWeb`, which require real streams.
+  function fakeAcp(calls: {
+    newSession: unknown[];
+    loadSession: unknown[];
+  }) {
+    return {
+      PROTOCOL_VERSION: 1,
+      ndJsonStream: () => ({}) as never,
+      ClientSideConnection: class {
+        constructor(
+          _toClient: unknown,
+          _stream: unknown,
+        ) {}
+        async initialize() {
+          return { agentCapabilities: { loadSession: true } };
+        }
+        async newSession(params: unknown) {
+          calls.newSession.push(params);
+          return { sessionId: "fresh-session-id" };
+        }
+        async loadSession(params: unknown) {
+          calls.loadSession.push(params);
+          return {};
+        }
+        async prompt() {
+          return { stopReason: "end_turn" };
+        }
+        async cancel() {}
+      },
+    };
+  }
+
+  async function withTrivialChild(
+    fn: (child: ChildProcessWithoutNullStreams) => Promise<void>,
+  ): Promise<void> {
+    const child = spawn(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000);",
+    ]);
+    try {
+      await fn(child);
+    } finally {
+      child.kill("SIGKILL");
+    }
+  }
+
+  it("forwards mcpServers and metadata as ACP _meta on a fresh session (newSession), not hardcoded []", async () => {
+    await withTrivialChild(async (child) => {
+      const calls = { newSession: [] as unknown[], loadSession: [] as unknown[] };
+      const session = new AcpHarnessSession({
+        acp: fakeAcp(calls),
+        child,
+        command: process.execPath,
+        cwd: os.tmpdir(),
+        permissionMode: "allow-all",
+      });
+      const mcpServers = [
+        { type: "http", name: "orchestrator", url: "http://x", headers: [] },
+      ];
+      const metadata = { claudeCode: { options: { tools: ["Bash"] } } };
+      await session.initialize({ mcpServers, metadata });
+
+      expect(calls.newSession).toEqual([
+        expect.objectContaining({ mcpServers, _meta: metadata }),
+      ]);
+      expect(calls.loadSession).toEqual([]);
+      expect(session.id).toBe("fresh-session-id");
+    });
+  });
+
+  it("forwards mcpServers and metadata as ACP _meta on a resumed session (loadSession), not hardcoded []", async () => {
+    await withTrivialChild(async (child) => {
+      const calls = { newSession: [] as unknown[], loadSession: [] as unknown[] };
+      const session = new AcpHarnessSession({
+        acp: fakeAcp(calls),
+        child,
+        command: process.execPath,
+        cwd: os.tmpdir(),
+        permissionMode: "allow-all",
+      });
+      const mcpServers = [
+        { type: "http", name: "orchestrator", url: "http://x", headers: [] },
+      ];
+      const metadata = { claudeCode: { options: { model: "claude-sonnet-5" } } };
+      await session.initialize({
+        mcpServers,
+        metadata,
+        resumeState: { sessionId: "resume-id-123" },
+      });
+
+      expect(calls.loadSession).toEqual([
+        expect.objectContaining({
+          sessionId: "resume-id-123",
+          mcpServers,
+          _meta: metadata,
+        }),
+      ]);
+      expect(calls.newSession).toEqual([]);
+      // The brain's fallback-detection (`session.id !== resumeSessionId`)
+      // depends on `session.id` reflecting the real resumed ACP session id.
+      expect(session.id).toBe("resume-id-123");
+    });
   });
 });
 

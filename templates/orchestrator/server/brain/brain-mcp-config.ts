@@ -114,3 +114,30 @@ export function writeBrainMcpConfig(
   writeFileSync(path, JSON.stringify(config, null, 2), "utf8");
   return path;
 }
+
+/**
+ * Build the ACP `McpServer[]` list for the brain's harness-adapter path — the
+ * ACP-transport equivalent of `writeBrainMcpConfig`'s `.mcp.json` for the
+ * raw-spawn `claude` CLI path. Passed as
+ * `AgentHarnessCreateSessionOptions.mcpServers`; the ACP adapter forwards it
+ * verbatim to the underlying agent's `newSession`/`loadSession` call (see
+ * packages/core/src/agent/harness/acp-adapter.ts). Shape verified against
+ * `@agentclientprotocol/claude-agent-acp`'s `createSession()`, which maps
+ * `{type:"http", name, url, headers: [{name,value}]}` entries onto the
+ * Claude Agent SDK's `mcpServers` option 1:1.
+ */
+export function buildBrainMcpServers(
+  ownerEmail: string,
+): Array<Record<string, unknown>> {
+  return [
+    {
+      type: "http",
+      name: "orchestrator",
+      url: MCP_URL,
+      headers: [
+        { name: "Authorization", value: `Bearer ${mintBrainToken(ownerEmail)}` },
+        { name: "X-Agent-Native-Owner-Email", value: ownerEmail },
+      ],
+    },
+  ];
+}

@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "@agent-native/core": "workspace:*",
+    "@agentclientprotocol/claude-agent-acp": "^0.55.0",
+    "@agentclientprotocol/sdk": "^1.1.0",
     "@ai-sdk/harness": "1.0.0-canary.13",
     "@ai-sdk/harness-claude-code": "1.0.0-canary.9",
     "@ai-sdk/openai": "^3.0.73",

@@ -45,6 +45,15 @@ export interface AgentHarnessCreateSessionOptions {
   permissionMode?: AgentHarnessPermissionMode;
   sandbox?: unknown;
   /**
+   * Opaque, adapter-specific MCP server list. Each adapter interprets this in
+   * whatever shape its native transport expects — e.g. the ACP adapter expects
+   * ACP's own `McpServer[]` (`{ type: "http" | "sse" | "stdio", name, ... }`,
+   * see https://agentclientprotocol.com) and forwards it verbatim to the
+   * underlying agent's `newSession`/`loadSession` call. Adapters that have no
+   * concept of MCP servers ignore this field.
+   */
+  mcpServers?: unknown[];
+  /**
    * Opaque value previously returned by detach()/stop(). Agent Native stores it
    * but does not interpret it.
    */

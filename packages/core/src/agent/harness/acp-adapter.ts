@@ -46,8 +46,11 @@ const STDERR_TAIL_LIMIT = 8_000;
 /**
  * The optional package that carries the ACP protocol transport. Loaded lazily;
  * `resolveAgentHarness` surfaces a clear install error when it is missing.
+ *
+ * `@zed-industries/agent-client-protocol` was renamed upstream to
+ * `@agentclientprotocol/sdk` (the old name is deprecated but API-compatible).
  */
-export const ACP_PACKAGE = "@zed-industries/agent-client-protocol";
+export const ACP_PACKAGE = "@agentclientprotocol/sdk";
 
 export interface AcpHarnessAdapterOptions {
   /** Adapter id, e.g. "acp:gemini". Defaults to "acp". */
@@ -143,7 +146,13 @@ export function createAcpHarnessAdapter(
   };
 }
 
-interface AcpHarnessSessionDeps {
+/**
+ * Exported (only) so tests can construct a session directly with a fake `acp`
+ * transport, bypassing the dynamic-import indirection in `createSession`
+ * above (that indirection deliberately defeats bundler/test-runner static
+ * analysis, so it cannot be mocked — see acp-adapter.spec.ts).
+ */
+export interface AcpHarnessSessionDeps {
   acp: any;
   child: ChildProcessWithoutNullStreams;
   command: string;
@@ -156,9 +165,23 @@ interface PendingPermission {
   options: AcpPermissionOption[];
 }
 
-class AcpHarnessSession implements AgentHarnessSession {
-  readonly id: string;
+/** Exported for testing — see {@link AcpHarnessSessionDeps}. */
+export class AcpHarnessSession implements AgentHarnessSession {
+  /**
+   * Reflects the real ACP session id once `initialize()` assigns
+   * `acpSessionId` (either the resumed id or the id `newSession` returned).
+   * Falls back to a stable per-instance placeholder before that — callers
+   * only ever observe this after `createSession()` resolves, by which point
+   * `initialize()` has already completed, so in practice this always reads
+   * as the real ACP session id. A caller comparing `session.id` against a
+   * requested `resumeState.sessionId` can therefore detect whether the agent
+   * silently started a fresh session instead of resuming.
+   */
+  get id(): string {
+    return this.acpSessionId || this.placeholderId;
+  }
 
+  private readonly placeholderId: string;
   private readonly acp: any;
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly command: string;
@@ -184,7 +207,7 @@ class AcpHarnessSession implements AgentHarnessSession {
     this.cwd = deps.cwd;
     this.permissionMode = deps.permissionMode;
     // Placeholder until newSession/loadSession assigns the real id.
-    this.id = `acp-${Math.random().toString(36).slice(2)}`;
+    this.placeholderId = `acp-${Math.random().toString(36).slice(2)}`;
 
     this.child.stderr?.on("data", (chunk: Buffer) => {
       this.stderrTail = (this.stderrTail + chunk.toString()).slice(
@@ -243,7 +266,8 @@ class AcpHarnessSession implements AgentHarnessSession {
         await this.connection.loadSession({
           sessionId: resume.sessionId,
           cwd: this.cwd,
-          mcpServers: [],
+          mcpServers: opts.mcpServers ?? [],
+          ...(opts.metadata ? { _meta: opts.metadata } : {}),
         });
         this.acpSessionId = resume.sessionId;
         return;
@@ -254,10 +278,11 @@ class AcpHarnessSession implements AgentHarnessSession {
 
     const created = await this.connection.newSession({
       cwd: this.cwd,
-      mcpServers: [],
+      mcpServers: opts.mcpServers ?? [],
+      ...(opts.metadata ? { _meta: opts.metadata } : {}),
     });
     this.acpSessionId =
-      typeof created?.sessionId === "string" ? created.sessionId : this.id;
+      typeof created?.sessionId === "string" ? created.sessionId : this.placeholderId;
   }
 
   async *streamTurn(

@@ -39,7 +39,9 @@ export const BUILTIN_ACP_PRESETS: AcpPreset[] = [
     label: "Claude Code (ACP)",
     description: "Drives Claude Code as a local ACP coding agent.",
     command: "npx",
-    args: ["-y", "@zed-industries/claude-code-acp"],
+    // `@zed-industries/claude-code-acp` was renamed upstream to
+    // `@agentclientprotocol/claude-agent-acp` (deprecated but API-compatible).
+    args: ["-y", "@agentclientprotocol/claude-agent-acp"],
   },
 ];
 
