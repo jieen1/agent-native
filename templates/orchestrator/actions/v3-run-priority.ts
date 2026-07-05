@@ -9,10 +9,9 @@
  */
 
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 export const runPriority = defineAction({
   description:
@@ -27,10 +26,11 @@ export const runPriority = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    const callerEmail = getRequestUserEmail();
-    const runFilter = callerEmail
-      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
-      : eq(v3Schema.v3Runs.id, args.runId);
+    // Fail-closed owner scope — resolve once and reuse for read + write.
+    const runFilter = and(
+      eq(v3Schema.v3Runs.id, args.runId),
+      eq(v3Schema.v3Runs.ownerEmail, resolveOwnerEmail()),
+    );
     const rows = await db
       .select({ id: v3Schema.v3Runs.id, status: v3Schema.v3Runs.status, priority: v3Schema.v3Runs.priority })
       .from(v3Schema.v3Runs)
@@ -48,7 +48,7 @@ export const runPriority = defineAction({
     await db
       .update(v3Schema.v3Runs)
       .set({ priority: args.value })
-      .where(eq(v3Schema.v3Runs.id, args.runId));
+      .where(runFilter);
 
     return {
       runId: args.runId,

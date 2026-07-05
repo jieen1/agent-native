@@ -12,8 +12,9 @@ import { defineAction } from "@agent-native/core";
 import {
   getRequestUserEmail,
 } from "@agent-native/core/server/request-context";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 import { V3Patcher } from "../server/engine/v3-patcher.js";
 import type { DagMutation } from "../server/engine/v3-patcher.js";
 import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";
@@ -139,6 +140,20 @@ export const workflowPatch = defineAction({
   run: async (args) => {
     const db = getV3Db();
     const patcher = new V3Patcher(db as any);
+
+    // Fail-closed owner scope — only the run's owner may mutate its live DAG.
+    // Without this, any caller could patch another owner's running run by id.
+    const [ownedRun] = await db
+      .select({ id: v3Schema.v3Runs.id })
+      .from(v3Schema.v3Runs)
+      .where(
+        and(
+          eq(v3Schema.v3Runs.id, args.runId),
+          eq(v3Schema.v3Runs.ownerEmail, resolveOwnerEmail()),
+        ),
+      )
+      .limit(1);
+    if (!ownedRun) throw new Error(`Run '${args.runId}' not found`);
 
     const actorEmail = getRequestUserEmail() ?? "system";
 

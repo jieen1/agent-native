@@ -7,10 +7,9 @@
 // stop it first. Owner-scoped: a thread is only mutable by its owner.
 
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 import { ensureBrainSchema } from "../server/db/brain-schema.js";
 import { sql as drizzleSql } from "drizzle-orm";
 
@@ -28,7 +27,12 @@ export default defineAction({
   run: async (args) => {
     await ensureBrainSchema();
     const db = getV3Db();
-    const ownerEmail = getRequestUserEmail();
+    // Fail-closed owner scope — a thread is only mutable by its owner.
+    const ownerEmail = resolveOwnerEmail();
+    const ownerScope = and(
+      eq(v3Schema.brainThreads.id, args.threadId),
+      eq(v3Schema.brainThreads.ownerEmail, ownerEmail),
+    );
 
     const [thread] = await db
       .select({
@@ -37,13 +41,10 @@ export default defineAction({
         ownerEmail: v3Schema.brainThreads.ownerEmail,
       })
       .from(v3Schema.brainThreads)
-      .where(eq(v3Schema.brainThreads.id, args.threadId))
+      .where(ownerScope)
       .limit(1);
 
     if (!thread) throw new Error(`Brain thread '${args.threadId}' not found`);
-    if (ownerEmail && thread.ownerEmail !== ownerEmail) {
-      throw new Error(`Brain thread '${args.threadId}' not found`);
-    }
 
     // Guard: don't archive an actively-working session. "Active" = either the
     // transient per-turn thread status is running, OR the durable task-level
@@ -69,7 +70,7 @@ export default defineAction({
         archived: args.archived,
         archivedAt: args.archived ? drizzleSql`now()` : null,
       })
-      .where(eq(v3Schema.brainThreads.id, args.threadId));
+      .where(ownerScope);
 
     return { threadId: args.threadId, archived: args.archived };
   },

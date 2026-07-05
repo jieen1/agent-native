@@ -1,7 +1,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and, desc, ilike, isNotNull, isNull, sql, gte, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 export interface V3SpawnRow {
   id: string;
@@ -62,6 +62,11 @@ export const spawnList = defineAction({
   run: async (args) => {
     const db = getV3Db();
     const conditions: Array<import("drizzle-orm").SQL> = [];
+
+    // Fail-closed owner scope — ALWAYS constrain to the resolved owner's spawns
+    // so no request (including an unauthenticated A2A peer) can enumerate
+    // another owner's spawns.
+    conditions.push(eq(v3Schema.v3Spawns.ownerEmail, resolveOwnerEmail()));
 
     // Scope filter: run-scoped has nodeId, ad-hoc has no nodeId
     if (args.scope === "run-scoped") {
@@ -182,10 +187,16 @@ export const spawnGet = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
+    // Fail-closed owner scope — a foreign spawn simply isn't found.
     const spawnRows = await db
       .select()
       .from(v3Schema.v3Spawns)
-      .where(eq(v3Schema.v3Spawns.id, args.spawnId))
+      .where(
+        and(
+          eq(v3Schema.v3Spawns.id, args.spawnId),
+          eq(v3Schema.v3Spawns.ownerEmail, resolveOwnerEmail()),
+        ),
+      )
       .limit(1);
 
     if (!spawnRows.length) {

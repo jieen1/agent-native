@@ -5,8 +5,39 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import $ from "postgres";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+
+/**
+ * The local single-user owner identity. Every V3 row is CREATED with
+ * `ownerEmail = getRequestUserEmail() ?? LOCAL_DEFAULT_OWNER` (see the write
+ * actions + the `ownableColumns()` column default in v3-schema.ts), so reads
+ * MUST resolve the same value or a self-host caller would never see its own
+ * rows.
+ */
+export const LOCAL_DEFAULT_OWNER = "local@localhost";
+
+/**
+ * Resolve the owner-scope identity for a V3 read or write, FAIL-CLOSED.
+ *
+ * Mirrors the exact write-side default the V3 actions already use
+ * (`getRequestUserEmail() ?? "local@localhost"`), so:
+ *  - an authenticated request is always constrained to the caller's own rows;
+ *  - a self-host request with no resolved identity resolves to the local
+ *    single-user owner — NOT "all owners".
+ *
+ * This NEVER returns undefined, so callers can apply the owner filter
+ * unconditionally. That is the fix for the O9 fail-open pattern where the owner
+ * filter was gated behind `if (ownerEmail)` and an empty identity returned every
+ * owner's rows. A request can never read or write another owner's V3 rows: a
+ * real hosted user's rows are owned by their real email (never
+ * "local@localhost"), so an unauthenticated caller resolving to
+ * "local@localhost" cannot reach them.
+ */
+export function resolveOwnerEmail(): string {
+  return getRequestUserEmail() ?? LOCAL_DEFAULT_OWNER;
+}
 
 // Re-export schema so consumers import from this module
 import * as v3Schema from "./v3-schema.js";

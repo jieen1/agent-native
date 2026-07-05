@@ -1,15 +1,20 @@
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, desc, asc, sql } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
-/** Returns a WHERE clause that constrains runId + owner when authenticated. */
+/**
+ * Returns a WHERE clause that constrains runId + owner, ALWAYS (fail-closed).
+ * The owner resolves to the local single-user identity when the request has no
+ * authenticated user, so an absent identity scopes to that owner's rows — never
+ * every owner's. All the run-detail reads (nodes/events/dag/patches) gate on
+ * this via assertRunAccess, so they inherit the same scope.
+ */
 function runOwnerFilter(runId: string) {
-  const callerEmail = getRequestUserEmail();
-  return callerEmail
-    ? and(eq(v3Schema.v3Runs.id, runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
-    : eq(v3Schema.v3Runs.id, runId);
+  return and(
+    eq(v3Schema.v3Runs.id, runId),
+    eq(v3Schema.v3Runs.ownerEmail, resolveOwnerEmail()),
+  );
 }
 
 /** Verifies run exists and belongs to caller; throws if not found. */

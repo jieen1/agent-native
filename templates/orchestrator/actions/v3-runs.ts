@@ -1,8 +1,7 @@
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 /** List V3 runs with optional status/tag filters and pagination. */
 export const runsList = defineAction({
@@ -30,13 +29,12 @@ export const runsList = defineAction({
     const db = getV3Db();
     const conditions: Array<import("drizzle-orm").SQL> = [];
 
-    // Scope to the authenticated caller — prevents cross-tenant run enumeration.
-    // Unauthenticated A2A callers (requiresAuth: false) see all runs for
-    // backwards-compatible cross-app tag-match read-back (design §16).
-    const callerEmail = getRequestUserEmail();
-    if (callerEmail) {
-      conditions.push(eq(v3Schema.v3Runs.ownerEmail, callerEmail));
-    }
+    // Owner scope is ALWAYS applied (fail-closed). An absent request identity
+    // resolves to the local single-user owner, never "all owners" — so no
+    // caller, including an unauthenticated A2A peer, can enumerate another
+    // owner's runs. (Previously this was gated behind `if (callerEmail)`, which
+    // returned every owner's rows when the identity was empty — the O9 bug.)
+    conditions.push(eq(v3Schema.v3Runs.ownerEmail, resolveOwnerEmail()));
 
     if (args.status) {
       conditions.push(eq(v3Schema.v3Runs.status, args.status as any));
@@ -96,10 +94,11 @@ export const runState = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    const callerEmail = getRequestUserEmail();
-    const runFilter = callerEmail
-      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
-      : eq(v3Schema.v3Runs.id, args.runId);
+    // Fail-closed owner scope — the run is only visible to its owner.
+    const runFilter = and(
+      eq(v3Schema.v3Runs.id, args.runId),
+      eq(v3Schema.v3Runs.ownerEmail, resolveOwnerEmail()),
+    );
 
     const runRows = await db
       .select()
@@ -148,10 +147,12 @@ export const runCancel = defineAction({
   }),
   run: async (args) => {
     const db = getV3Db();
-    const callerEmail = getRequestUserEmail();
-    const runFilter = callerEmail
-      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
-      : eq(v3Schema.v3Runs.id, args.runId);
+    // Fail-closed owner scope — resolve once and reuse for read + write.
+    const ownerEmail = resolveOwnerEmail();
+    const runFilter = and(
+      eq(v3Schema.v3Runs.id, args.runId),
+      eq(v3Schema.v3Runs.ownerEmail, ownerEmail),
+    );
     const rows = await db
       .select({ id: v3Schema.v3Runs.id, status: v3Schema.v3Runs.status })
       .from(v3Schema.v3Runs)
@@ -167,7 +168,7 @@ export const runCancel = defineAction({
     await db
       .update(v3Schema.v3Runs)
       .set({ status: "cancelled" as any, completedAt: new Date() })
-      .where(eq(v3Schema.v3Runs.id, args.runId));
+      .where(runFilter);
 
     // Cancel all running spawns for this run. Use the `sql` tagged template
     // (NOT sql.raw): sql.raw interpolates the runId as a bare, unquoted token,
@@ -217,10 +218,12 @@ async function updateRunStatus(
   allowedPrevious: string[],
 ): Promise<void> {
   const db = getV3Db();
-  const callerEmail = getRequestUserEmail();
-  const runFilter = callerEmail
-    ? and(eq(v3Schema.v3Runs.id, runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
-    : eq(v3Schema.v3Runs.id, runId);
+  // Fail-closed owner scope — resolve once and reuse for read + write.
+  const ownerEmail = resolveOwnerEmail();
+  const runFilter = and(
+    eq(v3Schema.v3Runs.id, runId),
+    eq(v3Schema.v3Runs.ownerEmail, ownerEmail),
+  );
   const rows = await db
     .select({ id: v3Schema.v3Runs.id, status: v3Schema.v3Runs.status })
     .from(v3Schema.v3Runs)
@@ -237,5 +240,5 @@ async function updateRunStatus(
   await db
     .update(v3Schema.v3Runs)
     .set({ status: newStatus as any })
-    .where(eq(v3Schema.v3Runs.id, runId));
+    .where(runFilter);
 }

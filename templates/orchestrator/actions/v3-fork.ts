@@ -6,8 +6,9 @@
 // After forking, the new run is immediately ticked.
 
 import { defineAction } from "@agent-native/core";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 import { forkRun } from "../server/engine/v3-fork.js";
 import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";
 
@@ -52,6 +53,21 @@ export const runFork = defineAction({
   }),
   run: async (args) => {
     const db = getV3Db();
+
+    // Fail-closed owner scope — only the source run's owner may fork it. The
+    // forked run inherits the source run's owner, so this gate also keeps the
+    // new run owned by the caller.
+    const [srcRun] = await db
+      .select({ id: v3Schema.v3Runs.id })
+      .from(v3Schema.v3Runs)
+      .where(
+        and(
+          eq(v3Schema.v3Runs.id, args.runId),
+          eq(v3Schema.v3Runs.ownerEmail, resolveOwnerEmail()),
+        ),
+      )
+      .limit(1);
+    if (!srcRun) throw new Error(`Run '${args.runId}' not found`);
 
     const result = await forkRun(db as any, args.runId, {
       fromNode: args.fromNode,

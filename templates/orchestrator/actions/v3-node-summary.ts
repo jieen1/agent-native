@@ -9,7 +9,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 export const nodeSummary = defineAction({
   description:
@@ -30,7 +30,7 @@ export const nodeSummary = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    // Load node row
+    // Load node row — fail-closed owner scope so a foreign node isn't found.
     const nodeRows = await db
       .select({
         id: v3Schema.v3Nodes.id,
@@ -51,6 +51,7 @@ export const nodeSummary = defineAction({
         and(
           eq(v3Schema.v3Nodes.id, args.nodeId),
           eq(v3Schema.v3Nodes.runId, args.runId),
+          eq(v3Schema.v3Nodes.ownerEmail, resolveOwnerEmail()),
         ),
       )
       .limit(1);

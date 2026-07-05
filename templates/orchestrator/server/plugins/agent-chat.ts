@@ -28,6 +28,13 @@ export default createAgentChatPlugin({
   appId: "orchestrator",
   actions: loadActionsFromStaticRegistry(actionsRegistry),
   initialToolNames: INITIAL_TOOL_NAMES,
+  // SECURITY: do NOT expose the raw DB tools (db-query/db-exec/db-patch/db-schema)
+  // on the agent + MCP/A2A surface. The framework default is "write", but this
+  // app's MCP catalog is reached by the brain and any A2A/MCP caller holding the
+  // shared A2A_SECRET, so raw SQL here bypasses per-owner accessFilter and the
+  // audit log entirely. The brain drives work through scoped actions (runsList,
+  // workflowRun, ...) and never needs raw SQL. Matches tracker/forms.
+  databaseTools: false,
   // Pin local vLLM as the sidebar chat engine when configured (composer usable,
   // runs always hit vLLM). Falls back to the framework default when unset.
   engine: vllmEngine,

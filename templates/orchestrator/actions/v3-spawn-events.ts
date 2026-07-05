@@ -5,16 +5,15 @@
  * instead of only a tool-call count.
  *
  * Rows come from the additive `spawn_events` table the dispatcher now writes
- * after each spawn (claude-code analyze/review + vLLM develop). Scoped by spawn
- * existence + run-membership join — the same pattern the sibling V3 reads
- * (`spawnGet`, `nodeSummary`, `nodeSpawnLog`) use; the V3 read surface does not
- * apply owner/org filtering.
+ * after each spawn (claude-code analyze/review + vLLM develop). The parent spawn
+ * lookup is FAIL-CLOSED owner-scoped, so a foreign spawn's transcript is not
+ * readable; the events themselves belong to that owned spawn.
  */
 
 import { defineAction } from "@agent-native/core";
-import { eq, asc } from "drizzle-orm";
+import { and, eq, asc } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 /** One ordered step in a spawn's execution timeline. */
 export interface V3SpawnEvent {
@@ -47,8 +46,7 @@ export const spawnEvents = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    // Verify the spawn exists (and resolve its run for context). Mirrors the
-    // run-membership scoping the sibling V3 reads use.
+    // Verify the spawn exists AND belongs to the resolved owner (fail-closed).
     const spawnRows = await db
       .select({
         id: v3Schema.v3Spawns.id,
@@ -56,7 +54,12 @@ export const spawnEvents = defineAction({
         status: v3Schema.v3Spawns.status,
       })
       .from(v3Schema.v3Spawns)
-      .where(eq(v3Schema.v3Spawns.id, args.spawnId))
+      .where(
+        and(
+          eq(v3Schema.v3Spawns.id, args.spawnId),
+          eq(v3Schema.v3Spawns.ownerEmail, resolveOwnerEmail()),
+        ),
+      )
       .limit(1);
 
     if (!spawnRows.length) {

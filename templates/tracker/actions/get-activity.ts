@@ -1,5 +1,4 @@
 import { defineAction } from "@agent-native/core";
-import { getDbExec } from "@agent-native/core/db";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -70,48 +69,51 @@ function extractDelivery(events: BrainEventRow[]): {
   };
 }
 
-// The orchestrator's brain_task slot state for this item's brain thread. The
-// tracker shares the orchestrator's Postgres, so we read the admission-gate row
-// directly (keyed by thread_id) to learn whether the item is queued, running,
-// done, failed, or cancelled — and the bound run id once it starts executing.
-// This is the live slot gate the board reflects. Best-effort: returns null if
-// the table isn't present (e.g. non-Postgres dev) so activity still renders.
-async function readBrainTaskSlot(threadId: string): Promise<{
-  status: string;
-  runId: string | null;
-} | null> {
-  try {
-    const { rows } = await getDbExec().execute({
-      sql: `SELECT status, run_id FROM brain_tasks WHERE thread_id = ? ORDER BY created_at DESC LIMIT 1`,
-      args: [threadId],
-    });
-    if (!rows.length) return null;
-    const row = rows[0] as { status?: string; run_id?: string | null };
-    return {
-      status: String(row.status ?? ""),
-      runId: (row.run_id as string | null) ?? null,
-    };
-  } catch {
-    return null;
-  }
+// The orchestrator's slot state for this item's brain thread. APP-ISOLATION:
+// the tracker MUST NOT reach into the orchestrator's private `brain_tasks` table
+// even though both apps happen to share one Postgres. Instead we derive the same
+// {status, runId} the board reflects from the bound run returned by the
+// orchestrator's `runsList` action over the app boundary (MCP) — the run this
+// item's brain dispatch created (matched by the tracker tags). The bound run IS
+// the authoritative "is it still in flight / terminal" signal the brain_task
+// slot itself keys its release on, so its status is a faithful stand-in.
+//
+// Mapping v3 run status → the brain_task slot vocabulary consumed by
+// deriveItemStatus() and the detail-page slot chips:
+//   running → running · done → done · failed/cancelled → (failed) ·
+//   pending → queued (run exists but no node has started) · paused → passthrough
+//     (unknown to deriveItemStatus, so the stored status is left untouched).
+// `runs` is newest-first (runsList orders by startedAt DESC); the primary run is
+// runs[0], matching the existing runIdFromRuns fallback. Returns null when there
+// is no bound run yet (e.g. the brain task is still queued pre-admission, before
+// any run exists) so activity still renders and the status is left untouched.
+function deriveSlotFromRuns(
+  runs: Array<Record<string, unknown>>,
+): { status: string; runId: string | null } | null {
+  const primary = runs[0];
+  if (!primary) return null;
+  const runStatus = typeof primary.status === "string" ? primary.status : "";
+  const runId = typeof primary.id === "string" ? primary.id : null;
+  const status = runStatus === "pending" ? "queued" : runStatus;
+  return { status, runId };
 }
 
 // Map the orchestrator slot state onto the work-item lifecycle so the board
 // reflects queued → running → done.
 //
-// CRITICAL: the brain_TASK lifecycle is authoritative, NOT the brain thread and
-// NOT a parsed "delivery". The brain's first turn dispatches work then ENDS (a
-// token-saving pattern), so the brain thread flips idle/done immediately while
+// CRITICAL: the bound DAG RUN lifecycle is authoritative, NOT the brain thread
+// and NOT a parsed "delivery". The brain's first turn dispatches work then ENDS
+// (a token-saving pattern), so the brain thread flips idle/done immediately while
 // the bound DAG run is still executing — and a delivery regex can false-match
 // the requirement text (e.g. a path like `orchestrator/app/routes/...`). The
-// brain_task row is released to `done`/`failed` ONLY when the bound run reaches
-// terminal (releaseBrainTaskForThread) or the reaper confirms real completion.
-// So:
+// orchestrator's brain_task slot is itself released to `done`/`failed` ONLY when
+// the bound run reaches terminal, so the run status (read over the app boundary
+// via runsList and mapped by deriveSlotFromRuns) is a faithful stand-in. So:
 //   - slot running/queued  → item is still in flight; NEVER mark it done, even
 //     if a "delivery" was parsed from the transcript.
 //   - slot done            → mark done; a parsed delivery is corroboration only.
 //   - slot failed/cancelled → mark failed.
-//   - no slot row at all   → fall back to delivery (legacy / non-Postgres).
+//   - no bound run yet     → fall back to delivery (or leave status untouched).
 function deriveItemStatus(
   slotStatus: string | null,
   hasDelivery: boolean,
@@ -168,11 +170,12 @@ export default defineAction({
 
     const tagMatch = { source: "tracker", item_id: item.id };
 
-    // Fan out: brain transcript + tagged runs + tagged spawns + the global
-    // brain queue snapshot (the live concurrency gate). Plus the per-item
-    // brain_task slot read straight from the shared DB. Tolerate partial
-    // failures so a transient orchestrator hiccup still shows what it can.
-    const [threadRes, runsRes, spawnsRes, queueRes, slot] = await Promise.all([
+    // Fan out over the app boundary (MCP): brain transcript + tagged runs +
+    // tagged spawns + the global brain queue snapshot (the live concurrency
+    // gate). The per-item slot state is derived from the tagged runs below —
+    // NOT read out of the orchestrator's private DB. Tolerate partial failures
+    // so a transient orchestrator hiccup still shows what it can.
+    const [threadRes, runsRes, spawnsRes, queueRes] = await Promise.all([
       Promise.allSettled([
         callOrchestratorTool(ownerEmail, "brain-thread", {
           threadId: item.orchestratorThreadId,
@@ -187,8 +190,6 @@ export default defineAction({
       Promise.allSettled([
         callOrchestratorTool(ownerEmail, "brain-queue-status", {}),
       ]).then((r) => r[0]!),
-      // Per-item slot state, read directly from the shared brain_tasks table.
-      readBrainTaskSlot(item.orchestratorThreadId),
     ]);
 
     const errors: Record<string, string> = {};
@@ -224,6 +225,13 @@ export default defineAction({
       errors.runs = String(runsRes.reason?.message ?? runsRes.reason);
     if (spawnsRes.status === "rejected")
       errors.spawns = String(spawnsRes.reason?.message ?? spawnsRes.reason);
+
+    // Per-item slot state, derived from the bound run over the app boundary
+    // instead of a cross-app read of the orchestrator's private brain_tasks
+    // table. If the runsList call failed (network) `runs` is empty and slot is
+    // null, so the status writeback below is a no-op — the stored status is left
+    // unchanged exactly as the old best-effort read degraded.
+    const slot = deriveSlotFromRuns(runs);
 
     // For each run, pull its DAG node statuses (design / develop / review / …)
     // so the panel can show node-level progress. Best-effort + bounded.

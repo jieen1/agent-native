@@ -3,10 +3,9 @@
 // nodes, spawns, artifacts, and events.
 
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 export const runArchive = defineAction({
   description:
@@ -19,11 +18,11 @@ export const runArchive = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    // Verify the run exists and is in a terminal state — scope to caller.
-    const callerEmail = getRequestUserEmail();
-    const runFilter = callerEmail
-      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
-      : eq(v3Schema.v3Runs.id, args.runId);
+    // Verify the run exists and is in a terminal state — fail-closed owner scope.
+    const runFilter = and(
+      eq(v3Schema.v3Runs.id, args.runId),
+      eq(v3Schema.v3Runs.ownerEmail, resolveOwnerEmail()),
+    );
     const runRows = await db
       .select({
         id: v3Schema.v3Runs.id,
@@ -51,11 +50,11 @@ export const runArchive = defineAction({
       return { runId: args.runId, archived: true, purged: false, message: "Already archived" };
     }
 
-    // Mark archived
+    // Mark archived (reuse the owner-scoped filter).
     await db
       .update(v3Schema.v3Runs)
       .set({ archived: 1 })
-      .where(eq(v3Schema.v3Runs.id, args.runId));
+      .where(runFilter);
 
     if (!args.purge) {
       return { runId: args.runId, archived: true, purged: false };

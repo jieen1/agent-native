@@ -12,10 +12,9 @@
  */
 
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 type WaitingFor = "deps" | "vm" | "approval" | "acp";
 
@@ -33,12 +32,10 @@ export const dispatchQueue = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    // Load non-terminal nodes — scope to caller's runs to prevent cross-tenant reads.
-    const callerEmail = getRequestUserEmail();
+    // Load non-terminal nodes — ALWAYS scope to the caller's own nodes
+    // (fail-closed) so no request can read another owner's queued nodes.
     const statusCondition = sql`${v3Schema.v3Nodes.status} IN ('pending', 'ready', 'awaiting-approval')`;
-    const ownerCondition = callerEmail
-      ? sql`${v3Schema.v3Nodes.ownerEmail} = ${callerEmail}`
-      : undefined;
+    const ownerCondition = sql`${v3Schema.v3Nodes.ownerEmail} = ${resolveOwnerEmail()}`;
     const runCondition = args.runId ? eq(v3Schema.v3Nodes.runId, args.runId) : undefined;
     const whereCondition = and(statusCondition, ownerCondition, runCondition);
 

@@ -16,10 +16,9 @@
 // sort order, and include-archived. Archived threads are hidden by default.
 
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq, or, ilike, sql } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 import { ensureBrainSchema } from "../server/db/brain-schema.js";
 import { isV3PostgresConfigured } from "../server/db/v3.js";
 
@@ -50,11 +49,13 @@ export default defineAction({
     if (!isV3PostgresConfigured()) return [];
     await ensureBrainSchema();
     const db = getV3Db();
-    const ownerEmail = getRequestUserEmail();
+    // Fail-closed owner scope — ALWAYS list only the resolved owner's threads.
+    // An absent identity resolves to the local single-user owner, never every
+    // owner's threads (the O9 fail-open bug was `if (ownerEmail)`).
+    const ownerEmail = resolveOwnerEmail();
 
     const conds = [] as ReturnType<typeof eq>[];
-    if (ownerEmail)
-      conds.push(eq(v3Schema.brainThreads.ownerEmail, ownerEmail));
+    conds.push(eq(v3Schema.brainThreads.ownerEmail, ownerEmail));
     if (!args.includeArchived)
       conds.push(eq(v3Schema.brainThreads.archived, false));
     if (args.status !== "all")

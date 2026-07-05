@@ -5,10 +5,9 @@
 // page polls this ~1.5s while the thread is running to render a live transcript.
 
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
-import { eq, asc } from "drizzle-orm";
+import { and, eq, asc } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 export default defineAction({
   description:
@@ -22,19 +21,23 @@ export default defineAction({
   http: { method: "GET" },
   run: async (args) => {
     const db = getV3Db();
-    const ownerEmail = getRequestUserEmail();
+    // Fail-closed owner scope: a thread is only visible to its owner (V3 has no
+    // shares). The SELECT is owner-scoped so a foreign thread simply isn't found
+    // — an absent identity resolves to the local owner, never "any thread".
+    const ownerEmail = resolveOwnerEmail();
 
     const [thread] = await db
       .select()
       .from(v3Schema.brainThreads)
-      .where(eq(v3Schema.brainThreads.id, args.threadId))
+      .where(
+        and(
+          eq(v3Schema.brainThreads.id, args.threadId),
+          eq(v3Schema.brainThreads.ownerEmail, ownerEmail),
+        ),
+      )
       .limit(1);
 
     if (!thread) throw new Error(`Brain thread '${args.threadId}' not found`);
-    // Owner-scope: a thread is only visible to its owner (V3 has no shares).
-    if (ownerEmail && thread.ownerEmail !== ownerEmail) {
-      throw new Error(`Brain thread '${args.threadId}' not found`);
-    }
 
     const events = await db
       .select({

@@ -5,9 +5,9 @@
  */
 
 import { defineAction } from "@agent-native/core";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 export const spawnLog = defineAction({
   description:
@@ -33,7 +33,13 @@ export const spawnLog = defineAction({
         errorClass: v3Schema.v3Spawns.errorClass,
       })
       .from(v3Schema.v3Spawns)
-      .where(eq(v3Schema.v3Spawns.id, args.spawnId))
+      // Fail-closed owner scope — a foreign spawn's log is not readable.
+      .where(
+        and(
+          eq(v3Schema.v3Spawns.id, args.spawnId),
+          eq(v3Schema.v3Spawns.ownerEmail, resolveOwnerEmail()),
+        ),
+      )
       .limit(1);
 
     if (!rows.length) {

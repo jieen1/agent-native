@@ -7,7 +7,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and, asc } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 export const nodeSpawnLog = defineAction({
   description:
@@ -25,7 +25,7 @@ export const nodeSpawnLog = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    // Verify node exists in run
+    // Verify node exists in run AND belongs to the resolved owner (fail-closed).
     const nodeRows = await db
       .select({
         id: v3Schema.v3Nodes.id,
@@ -37,6 +37,7 @@ export const nodeSpawnLog = defineAction({
         and(
           eq(v3Schema.v3Nodes.id, args.nodeId),
           eq(v3Schema.v3Nodes.runId, args.runId),
+          eq(v3Schema.v3Nodes.ownerEmail, resolveOwnerEmail()),
         ),
       )
       .limit(1);

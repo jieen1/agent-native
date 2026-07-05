@@ -5,9 +5,9 @@
  */
 
 import { defineAction } from "@agent-native/core";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 export const spawnCancel = defineAction({
   description:
@@ -19,10 +19,17 @@ export const spawnCancel = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
+    // Fail-closed owner scope — resolve once and reuse for read + write so no
+    // request can cancel another owner's spawn.
+    const ownerScope = and(
+      eq(v3Schema.v3Spawns.id, args.spawnId),
+      eq(v3Schema.v3Spawns.ownerEmail, resolveOwnerEmail()),
+    );
+
     const rows = await db
       .select({ id: v3Schema.v3Spawns.id, status: v3Schema.v3Spawns.status })
       .from(v3Schema.v3Spawns)
-      .where(eq(v3Schema.v3Spawns.id, args.spawnId))
+      .where(ownerScope)
       .limit(1);
 
     if (!rows.length) {
@@ -37,7 +44,7 @@ export const spawnCancel = defineAction({
     await db
       .update(v3Schema.v3Spawns)
       .set({ status: "cancelled" as any, completedAt: new Date() })
-      .where(eq(v3Schema.v3Spawns.id, args.spawnId));
+      .where(ownerScope);
 
     return { spawnId: args.spawnId, previousStatus: prev, status: "cancelled" };
   },

@@ -9,10 +9,9 @@
  */
 
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 
 export const runSummary = defineAction({
   description:
@@ -27,11 +26,11 @@ export const runSummary = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
-    // Load run row — scope to caller to prevent cross-tenant reads.
-    const callerEmail = getRequestUserEmail();
-    const runFilter = callerEmail
-      ? and(eq(v3Schema.v3Runs.id, args.runId), eq(v3Schema.v3Runs.ownerEmail, callerEmail))
-      : eq(v3Schema.v3Runs.id, args.runId);
+    // Load run row — fail-closed owner scope prevents cross-tenant reads.
+    const runFilter = and(
+      eq(v3Schema.v3Runs.id, args.runId),
+      eq(v3Schema.v3Runs.ownerEmail, resolveOwnerEmail()),
+    );
     const runRows = await db
       .select({
         id: v3Schema.v3Runs.id,

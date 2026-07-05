@@ -261,24 +261,22 @@ function classifyOutput(
     }
   }
 
-  // BUG 2 leniency: the agent returned a non-object (typically PROSE — a plain
-  // string analysis/plan/review) but an object `output_schema` was attached.
-  // Rather than hard-failing the node (which kills the run), COERCE the text to
-  // `{ text: <output> }` and accept it as the object output. The brain authors
-  // analysis/review nodes that return natural-language plans; an over-strict
-  // schema on such a node must NOT abort delivery. Downstream deps should read
-  // the whole text as `{{deps.<id>.output}}` (or `.text`). We log a warning so
-  // the over-strict schema is still visible, but we do not fail.
+  // A schema-typed node that returns a bare, non-JSON string is a schema
+  // VIOLATION — prose must never masquerade as a structured object by being
+  // silently wrapped in `{ text: <output> }`. Returning "schema-violation"
+  // routes it through the ONE corrective re-prompt (attemptSchemaCorrection,
+  // G14, DESIGN §6.2 step 5); if the corrected output STILL does not conform,
+  // the caller fails the node with errorClass "schema-violation". An over-strict
+  // schema on a genuine prose node must be fixed at the schema/node definition,
+  // not masked here.
   if (typeof output === "string") {
-    console.warn(
-      `[v3-dispatcher] output_schema expected an object but the agent returned ` +
-        `text; coercing to { text } and accepting (prose-node leniency). ` +
-        `Length=${output.length}.`,
-    );
     return {
-      path: "object",
+      path: "schema-violation",
       schema: outputSchema,
-      value: { text: output },
+      raw: output,
+      error:
+        `Output does not match schema: expected a JSON object but the agent ` +
+        `returned a bare string (length=${output.length}).`,
     };
   }
 

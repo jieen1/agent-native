@@ -88,22 +88,6 @@ const DEFAULT_POOL_CAPACITY = 8;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Compute a 32-bit signed integer lock id for the given runId.
- *
- * Postgres advisory locks take a bigint.  The design doc specifies
- * `hashtext(runId)` — we delegate to Postgres' hashtext() for the lock
- * acquisition query and use the raw runId string parameterised via the
- * raw SQL call.  This helper only exists for the explicit unlock call
- * (same expression, same value).
- */
-function buildLockExpr(runId: string): string {
-  // Use hashtext() in PG so lock/unlock use identical expression.
-  // Value is passed via the raw SQL string — runId is a caller-controlled
-  // opaque uuid, safe to embed (no user input).
-  return `hashtext('${runId.replace(/'/g, "''")}')`;
-}
-
 /** Generate a unique id for DB rows. */
 function uid(): string {
   return crypto.randomUUID();
@@ -162,11 +146,12 @@ export class V3Reconciler {
    *  7. All mutations are recorded as v3_events
    */
   public async tick(runId: string): Promise<void> {
-    const lockExpr = buildLockExpr(runId);
-
     // 0. Advisory lock — non-blocking; skip if another tick holds it.
+    // hashtext() derives the bigint lock id inside Postgres; runId is a BOUND
+    // parameter ($1), never string-concatenated into the SQL text.
     const lockResult = await v3DbExec(
-      `SELECT pg_try_advisory_lock(${lockExpr}) AS locked`,
+      `SELECT pg_try_advisory_lock(hashtext($1)) AS locked`,
+      [runId],
     );
     const locked = (lockResult.rows[0]?.locked ?? false) as boolean;
 
@@ -178,7 +163,8 @@ export class V3Reconciler {
       await this._tickLocked(runId);
     } finally {
       // Unlock in finally — connection drop auto-releases anyway, but be explicit.
-      await v3DbExec(`SELECT pg_advisory_unlock(${lockExpr})`);
+      // Same bound-parameter hashtext() expression as the lock acquisition.
+      await v3DbExec(`SELECT pg_advisory_unlock(hashtext($1))`, [runId]);
     }
   }
 
@@ -490,13 +476,44 @@ export class V3Reconciler {
         if (!guardExpr) continue;
 
         let guardPassed = true;
+        let guardError: unknown = null;
         try {
           const ctx = await this.buildGuardContext(run, node, nodes, dag);
           const result = evaluateExpression(guardExpr, ctx);
           guardPassed = this.toBool(result);
-        } catch {
-          // Guard evaluation error — treat as pass (let the node run)
-          guardPassed = true;
+        } catch (err) {
+          // A guard that cannot be evaluated must NOT let the node through.
+          // Capture the error and fail the node below (fail-loud) instead of
+          // silently treating a broken guard as a pass.
+          guardError = err;
+        }
+
+        if (guardError) {
+          // Guard eval error → FAIL the node with a clear errorClass so a broken
+          // guard is visible and never silently admits the node.
+          const msg =
+            guardError instanceof Error
+              ? guardError.message
+              : String(guardError);
+          statusMap.set(node.id, "failed");
+          dagStatusMap.set(node.nodeIdInDag, "failed");
+          changed = true;
+          await this.db
+            .update(v3Nodes)
+            .set({
+              status: "failed",
+              error: `guard-eval-error: ${msg}`.slice(0, 1000),
+              completedAt: new Date(),
+            })
+            .where(eq(v3Nodes.id, node.id));
+          await this.writeEvent(runId, "node.failed", {
+            nodeId: node.nodeIdInDag,
+            reason: "guard-eval-error",
+            errorClass: "guard-eval-error",
+            guard: guardExpr,
+            error: msg,
+          });
+          continue;
         }
 
         if (!guardPassed) {
@@ -596,9 +613,10 @@ export class V3Reconciler {
         // G16: Atomic status-conditioned UPDATE — only dispatch when rowcount == 1
         const updateResult = await v3DbExec(
           `UPDATE v3_nodes SET status = 'running', started_at = now()
-           WHERE id = '${node.id.replace(/'/g, "''")}'
+           WHERE id = $1
              AND status IN ('pending', 'ready')
            RETURNING id`,
+          [node.id],
         );
 
         if ((updateResult.rows?.length ?? 0) !== 1) {
@@ -608,8 +626,15 @@ export class V3Reconciler {
 
         // G17: fire-and-track — do not synchronously await the entire spawn.
         // Schedule the spawn asynchronously and re-trigger a tick when done.
-        this.fireAndTrackSpawn(runId, node, dag).catch(() => {
-          // Errors handled inside fireAndTrackSpawn; log nothing here.
+        // fireAndTrackSpawn owns its retry/fail bookkeeping; an error that still
+        // escapes it is a real dispatch fault — LOG it loudly (never silently
+        // swallow) while keeping this call deliberately fire-and-forget.
+        this.fireAndTrackSpawn(runId, node, dag).catch((err) => {
+          console.error(
+            `[v3-reconciler] fireAndTrackSpawn escaped for node ` +
+              `${node.nodeIdInDag} (run ${runId}):`,
+            err,
+          );
         });
 
         events.push({
@@ -918,9 +943,10 @@ export class V3Reconciler {
         // Re-attempt: transition node back to running atomically
         const rerun = await v3DbExec(
           `UPDATE v3_nodes SET status = 'running', started_at = now(), error = null
-           WHERE id = '${node.id.replace(/'/g, "''")}'
+           WHERE id = $1
              AND status = 'failed'
            RETURNING id`,
+          [node.id],
         );
         if ((rerun.rows?.length ?? 0) !== 1) {
           // Node was cancelled or otherwise modified — abort retry

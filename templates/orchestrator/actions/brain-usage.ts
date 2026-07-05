@@ -13,10 +13,9 @@
 // action makes ZERO outbound network calls and never reads the managed token.
 
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 import { ensureBrainSchema } from "../server/db/brain-schema.js";
 import { getBrainModel } from "../server/brain/brain-model.js";
 
@@ -55,7 +54,9 @@ export default defineAction({
   readOnly: true,
   http: { method: "GET" },
   run: async (args) => {
-    const ownerEmail = getRequestUserEmail();
+    // Fail-closed owner scope — even an explicit threadId is constrained to the
+    // resolved owner so no request can read another owner's thread context.
+    const ownerEmail = resolveOwnerEmail();
     await ensureBrainSchema();
     const db = getV3Db();
 
@@ -78,10 +79,15 @@ export default defineAction({
       const rows = await db
         .select(select)
         .from(v3Schema.brainThreads)
-        .where(eq(v3Schema.brainThreads.id, args.threadId))
+        .where(
+          and(
+            eq(v3Schema.brainThreads.id, args.threadId),
+            eq(v3Schema.brainThreads.ownerEmail, ownerEmail),
+          ),
+        )
         .limit(1);
       threadRow = rows[0];
-    } else if (ownerEmail) {
+    } else {
       // Latest thread that actually has a captured model (so a brand-new empty
       // thread doesn't blank the panel).
       const rows = await db
