@@ -415,6 +415,13 @@ export async function startBrainTurn(
     }).catch(() => {});
   }
 
+  // Observability: record which execution engine this turn resolved to. The
+  // three paths are mutually exclusive and chosen above from the managed-CC
+  // login state (SDK/vLLM when logged out) and the harness opt-in gate.
+  console.log(
+    `[brain] engine=${useSdkBrain ? "vllm-sdk" : useHarnessBrain ? "harness-acp" : "raw-spawn-cc"} thread=${threadId} ccLoggedIn=${!useSdkBrain} harnessEnabled=${isBrainHarnessEnabled()}`,
+  );
+
   // 4) Run the brain in the background (do not await).
   // Use the SDK brain (vLLM) when CC is not logged in; otherwise CC path.
   const bgTask = useSdkBrain
