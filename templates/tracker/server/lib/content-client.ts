@@ -24,11 +24,24 @@ export function contentBaseUrl(): string {
   );
 }
 
+/**
+ * Publicly reachable base URL for the content app, used to build evidence
+ * links (documents, screenshots) that a human opens in a browser — as
+ * opposed to `contentBaseUrl()`, which is the container-internal address
+ * used for server-to-server MCP calls and is never browser-reachable.
+ *
+ * Set `CONTENT_PUBLIC_BASE` in any deployment where the tracker and content
+ * app are NOT served from the same origin behind a shared gateway. When
+ * unset, this falls back to an empty (relative) base, so links resolve as
+ * `/content/...` against whatever origin is serving the page — correct for
+ * the common case where a gateway proxies `/content` to the content app on
+ * the same host. It intentionally does NOT fall back to `CONTENT_BASE_URL`
+ * (that address is container-internal DNS, e.g. `http://an-content:3002`,
+ * and would produce a link no browser outside the container network could
+ * ever open).
+ */
 export function contentPublicBaseUrl(): string {
-  return (
-    process.env.CONTENT_PUBLIC_BASE?.replace(/\/$/, "") ||
-    "http://192.168.1.101"
-  );
+  return process.env.CONTENT_PUBLIC_BASE?.replace(/\/$/, "") || "";
 }
 
 export function contentDocumentUrl(

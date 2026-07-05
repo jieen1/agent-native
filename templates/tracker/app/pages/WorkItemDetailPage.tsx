@@ -1,6 +1,7 @@
 import {
   IconAlertTriangle,
   IconArrowLeft,
+  IconArrowRight,
   IconBrandGithub,
   IconCheck,
   IconClock,
@@ -87,6 +88,7 @@ import {
   useTriggerStage,
   useRollbackStage,
   useAdvanceStage,
+  useRunAcceptance,
   useEpicChildren,
   useDocuments,
   useAddDocument,
@@ -492,8 +494,12 @@ function LinksPanel({ workItemId }: { workItemId: string }) {
               >
                 {LINK_TYPE_LABELS[l.linkType] ?? l.linkType}
               </span>
-              <span className="text-[10px] text-muted-foreground">
-                {l.direction === "from" ? "→" : "←"}
+              <span className="text-muted-foreground">
+                {l.direction === "from" ? (
+                  <IconArrowRight className="size-3" />
+                ) : (
+                  <IconArrowLeft className="size-3" />
+                )}
               </span>
               <span className="text-xs font-medium truncate">
                 {l.otherItemTitle || l.otherItemId}
@@ -802,9 +808,13 @@ function EpicChildrenPanel({ workItemId }: { workItemId: string }) {
                     {deps.map((dep, i) => (
                       <div
                         key={i}
-                        className="text-[10px] text-orange-600 dark:text-orange-400"
+                        className="flex items-center gap-1 text-[10px] text-orange-600 dark:text-orange-400"
                       >
-                        {dep.fromLabel} ← blocked-by ← {dep.toLabel}
+                        <span className="truncate">{dep.fromLabel}</span>
+                        <IconArrowLeft className="size-2.5 shrink-0" />
+                        <span className="shrink-0">blocked-by</span>
+                        <IconArrowLeft className="size-2.5 shrink-0" />
+                        <span className="truncate">{dep.toLabel}</span>
                       </div>
                     ))}
                   </div>
@@ -1283,12 +1293,15 @@ export function WorkItemDetailPage() {
   const triggerStage = useTriggerStage();
   const rollbackStage = useRollbackStage();
   const advanceStage = useAdvanceStage();
+  const runAcceptance = useRunAcceptance();
 
   const [monitorInterval, setMonitorInterval] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activityTab, setActivityTab] = useState<"activity" | "comments">(
     "activity",
   );
+  const [acceptDialogOpen, setAcceptDialogOpen] = useState(false);
+  const [acceptUrl, setAcceptUrl] = useState("");
 
   function onDispatch() {
     const trimmed = monitorInterval.trim();
@@ -1304,6 +1317,42 @@ export function WorkItemDetailPage() {
       {
         onSuccess: (res: { threadId: string }) => {
           toast.success(`已派发 — 大脑线程 ${res.threadId.slice(0, 12)}…`);
+        },
+      },
+    );
+  }
+
+  function submitAcceptance() {
+    const url = acceptUrl.trim();
+    if (!url) {
+      toast.error("请输入待验证页面 URL");
+      return;
+    }
+    runAcceptance.mutate(
+      {
+        workItemId: id,
+        scenarios: [
+          {
+            name: "手动截图验收",
+            kind: "screenshot" as const,
+            url,
+          },
+        ],
+      },
+      {
+        onSuccess: (res: {
+          verdict: "pass" | "reject";
+          passed: number;
+          scenarios: unknown[];
+        }) => {
+          setAcceptDialogOpen(false);
+          setAcceptUrl("");
+          const total = res.scenarios?.length ?? 0;
+          if (res.verdict === "pass") {
+            toast.success(`验收通过 — ${res.passed}/${total}`);
+          } else {
+            toast.error(`验收驳回 — ${res.passed}/${total}`);
+          }
         },
       },
     );
@@ -1726,6 +1775,59 @@ export function WorkItemDetailPage() {
                     ) : null}
                     回退至{prevStage ? `「${prevStage}」` : "上一阶段"}
                   </Button>
+                  <Dialog
+                    open={acceptDialogOpen}
+                    onOpenChange={setAcceptDialogOpen}
+                  >
+                    <DialogTrigger asChild>
+                      <Button
+                        className="w-full gap-1.5"
+                        size="sm"
+                        variant="outline"
+                      >
+                        <IconCircleCheck className="size-3.5" />
+                        运行验收
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>运行验收</DialogTitle>
+                        <DialogDescription>
+                          对指定页面截图验证，生成验收报告并完成「验收」阶段。
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="accept-url">待验证页面 URL</Label>
+                        <Input
+                          id="accept-url"
+                          type="url"
+                          value={acceptUrl}
+                          onChange={(e) => setAcceptUrl(e.target.value)}
+                          placeholder="https://..."
+                          autoFocus
+                        />
+                      </div>
+                      <DialogFooter>
+                        <Button
+                          variant="ghost"
+                          onClick={() => setAcceptDialogOpen(false)}
+                        >
+                          取消
+                        </Button>
+                        <Button
+                          disabled={runAcceptance.isPending}
+                          onClick={submitAcceptance}
+                        >
+                          {runAcceptance.isPending ? (
+                            <IconLoader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <IconCircleCheck className="size-3.5" />
+                          )}
+                          运行
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               );
             })()}

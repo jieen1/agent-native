@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import {
   IconArrowLeft,
+  IconArrowRight,
   IconCalendar,
   IconFileText,
   IconGitBranch,
@@ -873,7 +874,7 @@ export function SprintDetailPage() {
               <IconCalendar className="size-3.5" />
               <span className="text-xs">{fmtDate(sprint.startDate)}</span>
               {sprint.startDate && sprint.endDate ? (
-                <span className="text-muted-foreground/50">→</span>
+                <IconArrowRight className="size-3 text-muted-foreground/50" />
               ) : null}
               <span className="text-xs">{fmtDate(sprint.endDate)}</span>
             </div>

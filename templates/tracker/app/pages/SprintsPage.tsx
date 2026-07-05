@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  IconArrowLeft,
+  IconArrowRight,
   IconCalendar,
   IconFilter,
   IconGitBranch,
@@ -164,7 +166,9 @@ function SprintCard({ sprint }: { sprint: Sprint }) {
         <p className="mb-2 flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
           <IconGitBranch className="size-3.5 shrink-0" />
           {sprint.branch}
-          <span className="text-muted-foreground/50">← main</span>
+          <span className="inline-flex items-center gap-0.5 text-muted-foreground/50">
+            <IconArrowLeft className="size-3" /> main
+          </span>
         </p>
       ) : null}
 
@@ -173,7 +177,9 @@ function SprintCard({ sprint }: { sprint: Sprint }) {
         <p className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
           <IconCalendar className="size-3.5 shrink-0" />
           {fmtDate(sprint.startDate)}
-          {sprint.startDate && sprint.endDate ? " → " : ""}
+          {sprint.startDate && sprint.endDate ? (
+            <IconArrowRight className="size-3" />
+          ) : null}
           {fmtDate(sprint.endDate)}
         </p>
       ) : null}

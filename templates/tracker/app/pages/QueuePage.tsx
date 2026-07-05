@@ -548,7 +548,7 @@ export function QueuePage() {
           ) : (
             <IconPlayerPause className="size-4" />
           )}
-          {reconcilerPaused ? "▶ 恢复 reconciler" : "⏸ 暂停 reconciler"}
+          {reconcilerPaused ? "恢复 reconciler" : "暂停 reconciler"}
         </Button>
       </div>
 
@@ -590,9 +590,7 @@ export function QueuePage() {
                 )}
               />
               <span className="text-sm font-medium">
-                {reconcilerPaused
-                  ? "● reconciler 已暂停"
-                  : "● reconciler 运行中"}
+                {reconcilerPaused ? "reconciler 已暂停" : "reconciler 运行中"}
               </span>
             </div>
             <span className="text-xs text-muted-foreground">

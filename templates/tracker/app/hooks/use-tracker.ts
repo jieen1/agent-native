@@ -213,6 +213,25 @@ export function useAdvanceStage() {
   });
 }
 
+// Run acceptance (T-H): executes the scenario list, archives an evidence
+// report, and triggers + completes the 验收 stage. Gives the UI parity with
+// the agent/MCP-only run-acceptance action.
+export function useRunAcceptance() {
+  const qc = useQueryClient();
+  return useActionMutation("run-acceptance", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-stages"] });
+      qc.invalidateQueries({ queryKey: ["action", "get-work-item"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-artifacts"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-tracker-activities"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "run-acceptance", "验收执行失败"));
+    },
+  });
+}
+
 // Artifact hooks.
 export function useArtifacts(workItemId: string) {
   return useActionQuery(
