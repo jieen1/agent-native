@@ -7,12 +7,18 @@
 // The dispatcher detects runtime: "acp:*" and routes through this module
 // before falling into the NodeRunner pipeline.
 
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   resolveAgentHarness,
   startAgentHarnessRun,
 } from "@agent-native/core/agent/harness";
 import { getV3Db, v3Schema } from "../db/v3.js";
 import { eq } from "drizzle-orm";
+import { registerOrchestratorRuntime } from "../register-runtime.js";
+import type { NodeRunnerResult } from "../runtime/node-runner.js";
+import type { RuntimeExecStep } from "../runtime/executors/types.js";
 
 // ── Runtime Detection ────────────────────────────────────────────────────────
 
@@ -263,4 +269,135 @@ export async function getAcpSession(
     throw new Error(`ACP session "${sessionId}" not found`);
   }
   return handle;
+}
+
+// ── CC-Worker Dispatch Wiring (O2) ──────────────────────────────────────────
+//
+// Wires this (previously dead) module into the v3-dispatcher CC-worker call
+// site as an OPT-IN alternative to server/runtime/claude-code-worker.ts's raw
+// `claude` spawn. Default is OFF: v3-dispatcher.ts tries this path only when
+// ORCH_CC_WORKER_HARNESS=1, and falls back to the raw spawn on ANY failure —
+// see the try/catch around runAcpClaudeCodeWorker() in v3-dispatcher.ts.
+//
+// KNOWN GAPS vs. the raw-spawn worker (why this defaults OFF):
+//   - Requires the optional `@zed-industries/agent-client-protocol` +
+//     `@zed-industries/claude-code-acp` packages. NEITHER is in this app's
+//     dependency tree today (verified: not under node_modules/.pnpm, not in
+//     templates/orchestrator/package.json). resolveAgentHarness("acp:claude-code")
+//     calls assertAgentHarnessPackagesInstalled() (packages/core/src/agent/
+//     harness/registry.ts) which throws synchronously without them — so today
+//     this flag is a no-op and every call falls back to the raw spawn.
+//   - No token-usage accounting: acp-adapter.ts's acpUpdateToHarnessEvents()
+//     has no branch that emits an AgentHarnessEvent of type "usage", so
+//     `tokensSpent` is always 0 through this path.
+//   - No model override: AgentHarnessCreateSessionOptions has no `model`
+//     field and the ACP transport does not expose one. `opts.model` is kept
+//     in the function signature for shape-parity with runClaudeCodeWorker but
+//     is NOT forwarded to the underlying agent.
+export const ACP_CLAUDE_CODE_WORKER_ENV = "ORCH_CC_WORKER_HARNESS";
+
+/** Whether the dispatcher should attempt the ACP harness path for CC-worker nodes. */
+export function isAcpClaudeCodeWorkerEnabled(): boolean {
+  return process.env[ACP_CLAUDE_CODE_WORKER_ENV] === "1";
+}
+
+/**
+ * Run one CC-worker DAG-node turn through the framework's `acp:claude-code`
+ * harness adapter instead of the raw `claude` spawn. Mirrors
+ * runClaudeCodeWorker's opts/return shape 1:1 so v3-dispatcher.ts can swap it
+ * in as a like-for-like call.
+ *
+ * Uses the adapter/session primitives directly (resolveAgentHarness +
+ * createSession + streamTurn) rather than startAgentHarnessRun. This is a
+ * one-shot, non-resumable DAG-node call — the exact same contract
+ * runClaudeCodeWorker already has — so it does not need
+ * startAgentHarnessRun's run-manager wrapper (a separate SQL-tracked
+ * run/heartbeat/per-thread-abort system built for the interactive agent-chat
+ * surface, see agent/run-manager.ts) or the harness session store (built for
+ * cross-turn resume, which no CC-worker node does).
+ */
+export async function runAcpClaudeCodeWorker(opts: {
+  prompt: string;
+  model?: string;
+  cwd?: string;
+  signal?: AbortSignal;
+  onStep?: (step: RuntimeExecStep) => void;
+}): Promise<NodeRunnerResult> {
+  const startedAt = Date.now();
+  registerOrchestratorRuntime();
+  const adapter = resolveAgentHarness("acp:claude-code");
+  const cwd = opts.cwd || mkdtempSync(join(tmpdir(), "v3-claude-acp-"));
+  const session = await adapter.createSession({
+    cwd,
+    permissionMode: "allow-edits",
+    signal: opts.signal,
+  });
+
+  try {
+    let seq = 0;
+    let finalText = "";
+    let toolCallCount = 0;
+    let doneReason: string | undefined;
+    const steps: RuntimeExecStep[] = [];
+    const pushStep = (step: RuntimeExecStep): void => {
+      steps.push(step);
+      try {
+        opts.onStep?.(step);
+      } catch {
+        // A sink error must never break the stream drain (mirrors
+        // claude-code-worker.ts's onStep contract).
+      }
+    };
+
+    for await (const event of session.streamTurn({
+      prompt: opts.prompt,
+      abortSignal: opts.signal,
+    })) {
+      if (event.type === "text-delta") {
+        finalText += event.text;
+        pushStep({ seq: seq++, type: "text", text: event.text });
+      } else if (event.type === "tool-start") {
+        toolCallCount += 1;
+        pushStep({
+          seq: seq++,
+          type: "tool_use",
+          name: event.name,
+          toolUseId: event.id,
+          input: event.input,
+        });
+      } else if (event.type === "tool-done") {
+        pushStep({
+          seq: seq++,
+          type: "tool_result",
+          name: event.name,
+          toolUseId: event.id,
+          result: event.result,
+        });
+      } else if (event.type === "done") {
+        doneReason = event.reason;
+      } else if (event.type === "error") {
+        throw new Error(event.error);
+      }
+    }
+
+    const model = opts.model ?? "claude-code-acp";
+    return {
+      output: {
+        text: finalText,
+        toolCallCount,
+        model,
+        resultSubtype: doneReason ?? "success",
+      },
+      tokensSpent: 0,
+      toolCallCount,
+      model,
+      vmName: null,
+      durationMs: Date.now() - startedAt,
+      attempts: 1,
+      steps,
+      detail: { harness: "acp:claude-code" },
+    };
+  } finally {
+    await session.destroy?.();
+  }
 }

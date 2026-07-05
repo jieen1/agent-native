@@ -12,6 +12,48 @@
 // server/claude-managed-auth.ts. Unlike that single-shot worker, this runs a
 // NON-BLOCKING background process with a STREAMING line reader so the page can
 // watch a live transcript, and it captures + reuses the CC session_id.
+//
+// KEPT ON RAW SPAWN — investigated migrating this file to the framework's
+// `@agent-native/core/agent/harness` primitive (startAgentHarnessRun +
+// resolveAgentHarness) and deliberately did NOT, for three concrete,
+// code-verified reasons:
+//   1. `resolveAgentHarness("acp:claude-code")` requires the optional
+//      `@zed-industries/agent-client-protocol` + `@zed-industries/claude-code-acp`
+//      packages (packages/core/src/agent/harness/registry.ts calls
+//      assertAgentHarnessPackagesInstalled() and throws without them). Neither
+//      is in this app's dependency tree.
+//   2. Even installed, packages/core/src/agent/harness/acp-adapter.ts
+//      hardcodes `newSession({ cwd, mcpServers: [] })` — there is no plumbing
+//      from AgentHarnessCreateSessionOptions to ACP's mcpServers, so the brain
+//      would lose ALL `mcp__orchestrator__*` tool access. That's a hard
+//      regression for a brain whose entire job is calling those tools.
+//   3. The other built-in, `ai-sdk-harness:claude-code`
+//      (packages/core/src/agent/harness/ai-sdk-adapter.ts), requires a REMOTE
+//      sandbox provider (only `@ai-sdk/sandbox-vercel` is supported, not
+//      installed, no credentials) and API-key/gateway auth — incompatible
+//      with the local managed-OAuth-login model `claudeWorkerEnv()` relies on.
+// Neither adapter can be fixed from templates/orchestrator (the gaps are in
+// packages/core; see also docs/DESIGN.md §7.0b, which independently reproduced
+// the ai-sdk-harness:claude-code crash end-to-end against THIS app's installed
+// canary packages — `_acquireSandbox` dereferences an undefined sandbox
+// provider). See server/engine/v3-acp-adapter.ts for where the harness WAS
+// usable (the O2 CC-worker path, which needs neither MCP tools nor a local
+// sandbox).
+//
+// SESSION PERSISTENCE, however, DOES migrate cleanly (it is pure bookkeeping,
+// not execution): every turn now ALSO records its resumable session — the CC
+// `session_id` + the cwd it must resume in — through the framework's standard
+// `agent_harness_sessions` store (ensureAgentHarnessSessionTables /
+// getLatestAgentHarnessSessionForThread / saveAgentHarnessSession /
+// updateAgentHarnessSession / markAgentHarnessSessionStopped), the same
+// durable, queryable surface every other harness-driven agent in this app
+// uses. It is preferred over the legacy `brain_threads.session_id`/`.cwd`
+// columns when a row is present, falling back to those columns otherwise (see
+// startBrainTurn below) — so a thread that was already resumable before this
+// shipped has no `agent_harness_sessions` row on its first post-deploy wake,
+// and falls back instead of silently starting a fresh (context-losing)
+// session. The legacy columns are still written every turn unchanged (nothing
+// destructive here), and the two stay in lockstep from that point on.
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -32,6 +74,27 @@ import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import { getBrainModel } from "./brain-model.js";
 import { deriveContextWindow } from "../../actions/brain-usage.js";
 import { runSdkBrainTurn } from "./sdk-brain-session.js";
+import {
+  ensureAgentHarnessSessionTables,
+  getLatestAgentHarnessSessionForThread,
+  saveAgentHarnessSession,
+  updateAgentHarnessSession,
+  markAgentHarnessSessionStopped,
+} from "@agent-native/core/agent/harness";
+
+/** Harness-name tag for the brain's row in the shared `agent_harness_sessions` store. */
+const BRAIN_HARNESS_NAME = "orchestrator:claude-cli-brain";
+
+/** Stable id for a brain thread's row in `agent_harness_sessions` (one per thread). */
+function brainHarnessSessionId(threadId: string): string {
+  return `bhs_${threadId}`;
+}
+
+/** Shape of the opaque `resumeState` this module stores/reads. */
+interface BrainResumeState {
+  sessionId?: string | null;
+  cwd?: string | null;
+}
 
 /**
  * The brain's system prompt. Appended via --append-system-prompt on every turn.
@@ -165,6 +228,28 @@ export async function startBrainTurn(
     });
   }
 
+  // 1b) Harness session-store lookup (additive — see the file banner above).
+  // Prefers the framework store's resumeState when a row already exists;
+  // falls back to the brainThreads columns just read above otherwise, so a
+  // thread resumable before this migration shipped never loses context on its
+  // first post-deploy wake. Best-effort: any failure here (e.g. a transient
+  // DDL-guard hiccup) must never block the brain turn, so it just falls
+  // through to the pre-migration behavior.
+  try {
+    await ensureAgentHarnessSessionTables();
+    const harnessSession = await getLatestAgentHarnessSessionForThread(
+      threadId,
+      BRAIN_HARNESS_NAME,
+    );
+    const resumeState = (harnessSession?.resumeState ?? null) as
+      | BrainResumeState
+      | null;
+    if (resumeState?.sessionId) sessionId = resumeState.sessionId;
+    if (resumeState?.cwd && !storedCwd) storedCwd = resumeState.cwd;
+  } catch {
+    // Best-effort — falls through to the brainThreads-derived values above.
+  }
+
   // 2) Resolve the working directory.
   //
   // Priority (so a resume lands in the SAME project dir the session was created
@@ -223,6 +308,21 @@ export async function startBrainTurn(
     .update(v3Schema.brainThreads)
     .set(runningUpdate)
     .where(eq(v3Schema.brainThreads.id, threadId));
+
+  // Mirror the "running" transition into the harness session store (additive
+  // — see the file banner above). Only meaningful for the CC path: the SDK/
+  // vLLM fallback has no CC session_id/cwd to resume, so it is skipped there.
+  if (!useSdkBrain) {
+    await saveAgentHarnessSession({
+      id: brainHarnessSessionId(threadId),
+      harnessName: BRAIN_HARNESS_NAME,
+      threadId,
+      status: "running",
+      resumeState: { sessionId, cwd } satisfies BrainResumeState,
+      ownerEmail: args.ownerEmail,
+      orgId: args.orgId ?? null,
+    }).catch(() => {});
+  }
 
   // 4) Run the brain in the background (do not await).
   // Use the SDK brain (vLLM) when CC is not logged in; otherwise CC path.
@@ -352,6 +452,10 @@ async function finalizeThreadStatus(
       .update(v3Schema.brainThreads)
       .set({ status: "error", error: msg, updatedAt: new Date() })
       .where(eq(v3Schema.brainThreads.id, threadId));
+    await markAgentHarnessSessionStopped(
+      brainHarnessSessionId(threadId),
+      "errored",
+    ).catch(() => {});
     return;
   }
   await db
@@ -490,6 +594,12 @@ async function streamBrainChild(opts: {
           .update(v3Schema.brainThreads)
           .set({ sessionId: sid, updatedAt: new Date() })
           .where(eq(v3Schema.brainThreads.id, opts.threadId));
+        // Mirror into the harness session store (additive — see file banner).
+        await updateAgentHarnessSession(brainHarnessSessionId(opts.threadId), {
+          status: "running",
+          providerSessionId: sid,
+          resumeState: { sessionId: sid, cwd: opts.cwd } satisfies BrainResumeState,
+        }).catch(() => {});
       }
       // system/init also carries the resolved model id (e.g.
       // claude-opus-4-8[1m]) — persist it so the usage panel shows the live
@@ -668,6 +778,17 @@ async function streamBrainChild(opts: {
       .update(v3Schema.brainThreads)
       .set({ sessionId: capturedSessionId, updatedAt: new Date() })
       .where(eq(v3Schema.brainThreads.id, opts.threadId));
+    // Mirror into the harness session store (additive — see file banner).
+    // "idle" mirrors runner.ts's own convention for a harness session between
+    // turns: not destroyed, ready to resume on the next wake.
+    await updateAgentHarnessSession(brainHarnessSessionId(opts.threadId), {
+      status: "idle",
+      providerSessionId: capturedSessionId,
+      resumeState: {
+        sessionId: capturedSessionId,
+        cwd: opts.cwd,
+      } satisfies BrainResumeState,
+    }).catch(() => {});
   }
 
   const failed = exitCode !== 0 && !sawResult;

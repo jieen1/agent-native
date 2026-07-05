@@ -36,10 +36,49 @@ import {
   runClaudeCodeWorker,
   isClaudeCodeRuntime,
 } from "../runtime/claude-code-worker.js";
+import {
+  runAcpClaudeCodeWorker,
+  isAcpClaudeCodeWorkerEnabled,
+} from "./v3-acp-adapter.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import type { RuntimeExecutor } from "../runtime/executors/types.js";
 import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
+import type { NodeRunnerResult } from "../runtime/node-runner.js";
 import { getWorkspace } from "./v3-workspace.js";
+
+/**
+ * Route a CC-worker DAG-node turn. Tries the framework `acp:claude-code`
+ * harness (O2 migration, off by default — see v3-acp-adapter.ts) ONLY when
+ * ORCH_CC_WORKER_HARNESS=1 AND the node has no per-node model override (the
+ * ACP transport has no channel to carry a model override — see
+ * v3-acp-adapter.ts's KNOWN GAPS comment — so a node that explicitly asked for
+ * a specific model always stays on the raw spawn, never silently switching
+ * models even if the flag is on), and falls back to the proven raw `claude`
+ * spawn (server/runtime/claude-code-worker.ts) on ANY failure so a
+ * misconfigured or unavailable harness (missing optional ACP packages, spawn
+ * error, etc.) can never break a CC-worker node — it just silently reverts to
+ * today's path.
+ */
+async function runClaudeCodeNode(opts: {
+  prompt: string;
+  model?: string;
+  cwd?: string;
+  signal?: AbortSignal;
+  onStep?: (step: RuntimeExecStep) => void;
+}): Promise<NodeRunnerResult> {
+  if (isAcpClaudeCodeWorkerEnabled() && !opts.model) {
+    try {
+      return await runAcpClaudeCodeWorker(opts);
+    } catch (err) {
+      console.warn(
+        `[v3-dispatcher] ACP claude-code harness failed, falling back to raw claude spawn: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+  return runClaudeCodeWorker(opts);
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -590,7 +629,7 @@ export class V3Dispatcher {
     };
 
     const runnerResult = isClaudeCodeRuntime(agentConfig.runtime)
-      ? await runClaudeCodeWorker({
+      ? await runClaudeCodeNode({
           prompt: renderedPrompt,
           model: runnerNode.model,
           cwd: localWorkspaceDir,
