@@ -1,9 +1,8 @@
 import { defineAction } from "@agent-native/core";
 import { resolveSecret } from "@agent-native/core/server";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, or, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
 import { MicrosandboxRuntime } from "../server/runtime/microsandbox-runtime.js";
 import {
   addAll,
@@ -50,6 +49,53 @@ export interface V3WorkspaceRow {
   createdBy: string | null;
 }
 
+/**
+ * SECURITY — fail-closed owner-scope predicate for v3_workspaces, shared by
+ * every workspace action below.
+ *
+ * Workspaces don't use the simple direct `ownerEmail` model most V3 tables
+ * use: `v3_workspaces` records ownership as `ownerKind` ("user" | "run") +
+ * `ownerId` (the real user's email for "user", or the owning `v3_runs.id` for
+ * "run"), and historically left the `ownerEmail` column (added by the
+ * framework's `ownableColumns()`) at its unpopulated default
+ * ("local@localhost") — createLocalWorkspace now populates it (see
+ * server/v3-workspace-local.ts), but pre-existing rows may not have it set.
+ *
+ * A caller may access a workspace when ANY of the following hold:
+ *  - `ownerEmail` matches directly (the value every NEW workspace gets); or
+ *  - it's a "user"-kind workspace whose `ownerId` (the real email, per the
+ *    create-time convention) matches — covers rows written before this fix
+ *    populated `ownerEmail`; or
+ *  - it's a "run"-kind workspace (`ownerId` = the owning run's id) whose run
+ *    is owned by the caller — the run-linked owner model workspaces
+ *    fundamentally use.
+ *
+ * A caller who satisfies none of these must get "not found" — never a row
+ * belonging to someone else (fail-closed, never fail-open).
+ */
+function workspaceOwnerScope(
+  db: ReturnType<typeof getV3Db>,
+  callerEmail: string,
+): SQL {
+  return or(
+    eq(v3Schema.v3Workspaces.ownerEmail, callerEmail),
+    and(
+      eq(v3Schema.v3Workspaces.ownerKind, "user"),
+      eq(v3Schema.v3Workspaces.ownerId, callerEmail),
+    ),
+    and(
+      eq(v3Schema.v3Workspaces.ownerKind, "run"),
+      inArray(
+        v3Schema.v3Workspaces.ownerId,
+        db
+          .select({ id: v3Schema.v3Runs.id })
+          .from(v3Schema.v3Runs)
+          .where(eq(v3Schema.v3Runs.ownerEmail, callerEmail)),
+      ),
+    ),
+  )!;
+}
+
 /** List V3 workspaces with optional owner_kind, ownerId, state, and tagMatch filters. */
 export const workspaceList = defineAction({
   description:
@@ -75,6 +121,13 @@ export const workspaceList = defineAction({
   run: async (args) => {
     const db = getV3Db();
     const conditions: Array<import("drizzle-orm").SQL> = [];
+
+    // Fail-closed owner scope — ALWAYS applied regardless of the ownerKind /
+    // ownerId filters below (SECURITY — this action is also reachable
+    // unauthenticated via publicAgent, so it must never fall through to
+    // "every owner's workspaces"). An absent identity resolves to the local
+    // single-user owner, never "all owners".
+    conditions.push(workspaceOwnerScope(db, resolveOwnerEmail()));
 
     if (args.ownerKind) {
       conditions.push(eq(v3Schema.v3Workspaces.ownerKind, args.ownerKind));
@@ -139,10 +192,17 @@ export const workspaceGet = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
+    // Fail-closed owner scope — a workspace the caller cannot resolve to their
+    // own identity reads as not-found, never as another owner's row.
     const rows = await db
       .select()
       .from(v3Schema.v3Workspaces)
-      .where(eq(v3Schema.v3Workspaces.id, args.workspaceId))
+      .where(
+        and(
+          eq(v3Schema.v3Workspaces.id, args.workspaceId),
+          workspaceOwnerScope(db, resolveOwnerEmail()),
+        ),
+      )
       .limit(1);
 
     if (!rows.length) {
@@ -176,13 +236,21 @@ export const workspaceDestroy = defineAction({
   run: async (args) => {
     const db = getV3Db();
 
+    // Fail-closed owner scope, reused for the read + the write below — the
+    // highest-risk of the 7 actions (destructive), so the same filter gates
+    // both the existence check and the mutation itself.
+    const wsFilter = and(
+      eq(v3Schema.v3Workspaces.id, args.workspaceId),
+      workspaceOwnerScope(db, resolveOwnerEmail()),
+    );
+
     const rows = await db
       .select({
         id: v3Schema.v3Workspaces.id,
         state: v3Schema.v3Workspaces.state,
       })
       .from(v3Schema.v3Workspaces)
-      .where(eq(v3Schema.v3Workspaces.id, args.workspaceId))
+      .where(wsFilter)
       .limit(1);
 
     if (!rows.length) {
@@ -202,7 +270,7 @@ export const workspaceDestroy = defineAction({
         state: "destroying" as any,
         destroyedAt: new Date(),
       })
-      .where(eq(v3Schema.v3Workspaces.id, args.workspaceId));
+      .where(wsFilter);
 
     return {
       workspaceId: args.workspaceId,
@@ -234,10 +302,14 @@ export const workspaceCreate = defineAction({
     tags: z.unknown().optional(),
   }),
   run: async (args) => {
-    // Resolve the real requesting user from the framework request context (the
-    // same identity every other action records). This becomes the owner of a
-    // user-created workspace and the audit `created_by` in all cases.
-    const requesterEmail = getRequestUserEmail() ?? "local@localhost";
+    // Resolve the real requesting user via the same fail-closed resolver every
+    // other V3 action uses (never undefined — an absent identity resolves to
+    // the local single-user owner). This becomes the owner of a user-created
+    // workspace, the audit `created_by` in all cases, AND — SECURITY — the
+    // `ownerEmail` column every workspace action's owner-scope filter checks
+    // directly, so future reads/writes never rely solely on the ownerKind
+    // === "run" join through v3_runs.
+    const requesterEmail = resolveOwnerEmail();
 
     // A run-owned workspace keeps the run id as its owner (passed as ownerId); a
     // person-owned one is owned by the real requesting user (legacy "cc" maps to
@@ -254,6 +326,7 @@ export const workspaceCreate = defineAction({
       ownerKind,
       ownerId,
       createdBy: requesterEmail,
+      ownerEmail: requesterEmail,
     });
 
     return {
@@ -539,14 +612,27 @@ export const workspaceCommitPush = defineAction({
 
 /* ─── Helpers ─────────────────────────────────────────────────────────────── */
 
-async function assertWorkspaceExists(
+/**
+ * Resolve a workspace by id, fail-closed owner-scoped (SECURITY — shared by
+ * workspaceDiff/Files/Read/CommitPush above, and by the separate
+ * `workspaceCommit` action, which performs the same class of write and must
+ * be gated identically). A workspace the caller cannot resolve to their own
+ * identity (directly, or via the owning run) throws "not found" — it is never
+ * returned to a caller who doesn't own it.
+ */
+export async function assertWorkspaceExists(
   workspaceId: string,
 ): Promise<V3WorkspaceRow> {
   const db = getV3Db();
   const rows = await db
     .select()
     .from(v3Schema.v3Workspaces)
-    .where(eq(v3Schema.v3Workspaces.id, workspaceId))
+    .where(
+      and(
+        eq(v3Schema.v3Workspaces.id, workspaceId),
+        workspaceOwnerScope(db, resolveOwnerEmail()),
+      ),
+    )
     .limit(1);
 
   if (!rows.length) {

@@ -30,7 +30,7 @@ import { join, normalize, relative, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 
-import { getV3Db, v3Schema } from "./db/v3.js";
+import { getV3Db, v3Schema, LOCAL_DEFAULT_OWNER } from "./db/v3.js";
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
@@ -97,6 +97,15 @@ export interface CreateLocalWorkspaceOptions {
    * Defaults to `<ownerKind>:<ownerId>` when not supplied.
    */
   createdBy?: string;
+  /**
+   * SECURITY — the framework `ownableColumns()` owner-scope identity
+   * (`resolveOwnerEmail()` at the call site: `getRequestUserEmail() ?? "local@localhost"`,
+   * or the equivalent already-resolved identity carried on a background task
+   * row). This is what every workspace action's fail-closed owner filter
+   * checks directly. Defaults to `LOCAL_DEFAULT_OWNER` when omitted — never
+   * silently open to every owner.
+   */
+  ownerEmail?: string;
 }
 
 /** Result of {@link createLocalWorkspace}. */
@@ -327,6 +336,14 @@ export async function createLocalWorkspace(
     opts.createdBy && opts.createdBy.trim() !== ""
       ? opts.createdBy.trim()
       : `${ownerKind}:${ownerId}`;
+  // SECURITY — populate the real owner-scope identity at create time so every
+  // workspace action's fail-closed owner filter can match directly, instead of
+  // relying solely on the ownerKind==="run" join through v3_runs. Never leave
+  // this at the column default when the caller resolved a real identity.
+  const ownerEmail =
+    opts.ownerEmail && opts.ownerEmail.trim() !== ""
+      ? opts.ownerEmail.trim()
+      : LOCAL_DEFAULT_OWNER;
   const db = getV3Db();
 
   const id = crypto.randomUUID();
@@ -352,6 +369,7 @@ export async function createLocalWorkspace(
     destroyedAt: null,
     createdBy,
     hostPath: dir,
+    ownerEmail,
   });
 
   try {

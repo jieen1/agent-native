@@ -122,6 +122,7 @@ export default defineAction({
             ownerKind: "user",
             ownerId: ownerEmail,
             createdBy: ownerEmail,
+            ownerEmail,
           });
           workspaceId = ws.id;
         }

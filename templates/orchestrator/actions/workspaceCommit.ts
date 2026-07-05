@@ -5,6 +5,7 @@
 import { defineAction } from "@agent-native/core";
 import { z } from "zod";
 import { commitAndPush } from "../server/v3-workspace-local.js";
+import { assertWorkspaceExists } from "./v3-workspace.js";
 
 export default defineAction({
   description:
@@ -19,6 +20,13 @@ export default defineAction({
     baseBranch: z.string().optional(),
   }),
   run: async (args) => {
+    // SECURITY — this is the same commit+push write surface as
+    // `workspaceCommitPush` (v3-workspace.ts) and must be gated identically:
+    // fail-closed owner scoping, or a caller could bypass workspaceCommitPush's
+    // scope entirely by calling this action instead. Throws "not found" for a
+    // workspace the caller does not own.
+    await assertWorkspaceExists(args.workspaceId);
+
     return await commitAndPush({
       id: args.workspaceId,
       message: args.message,

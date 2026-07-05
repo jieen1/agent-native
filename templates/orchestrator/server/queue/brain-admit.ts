@@ -241,6 +241,7 @@ async function startBrainTaskTurn(
       ownerKind: "user",
       ownerId: task.ownerEmail,
       createdBy: task.ownerEmail,
+      ownerEmail: task.ownerEmail,
     });
     workspaceId = ws.id;
   }
