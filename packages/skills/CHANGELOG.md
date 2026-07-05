@@ -1,5 +1,115 @@
 # @agent-native/skills
 
+## 0.2.251
+
+### Patch Changes
+
+- Updated dependencies [097d59b]
+- Updated dependencies [097d59b]
+- Updated dependencies [097d59b]
+- Updated dependencies [097d59b]
+  - @agent-native/core@0.86.1
+
+## 0.2.250
+
+### Patch Changes
+
+- 622d552: Add `/visualize-repo` and a local visual docs CLI for repo-backed Plan workspaces.
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+- Updated dependencies [622d552]
+  - @agent-native/core@0.86.0
+
+## 0.2.249
+
+### Patch Changes
+
+- Updated dependencies [b2e1b6c]
+  - @agent-native/core@0.85.7
+
+## 0.2.248
+
+### Patch Changes
+
+- Updated dependencies [be6d307]
+  - @agent-native/core@0.85.6
+
+## 0.2.247
+
+### Patch Changes
+
+- Updated dependencies [bd7c040]
+  - @agent-native/core@0.85.5
+
+## 0.2.246
+
+### Patch Changes
+
+- Updated dependencies [00c6f16]
+  - @agent-native/core@0.85.4
+
+## 0.2.245
+
+### Patch Changes
+
+- Updated dependencies [c213eb8]
+  - @agent-native/core@0.85.3
+
+## 0.2.244
+
+### Patch Changes
+
+- Updated dependencies [b4c0b9d]
+  - @agent-native/core@0.85.2
+
+## 0.2.243
+
+### Patch Changes
+
+- Updated dependencies [c67d671]
+  - @agent-native/core@0.85.1
+
+## 0.2.242
+
+### Patch Changes
+
+- Updated dependencies [b68e4f7]
+- Updated dependencies [b68e4f7]
+- Updated dependencies [b68e4f7]
+- Updated dependencies [b68e4f7]
+- Updated dependencies [b68e4f7]
+- Updated dependencies [b68e4f7]
+  - @agent-native/core@0.85.0
+
+## 0.2.241
+
+### Patch Changes
+
+- Updated dependencies [171f6e6]
+  - @agent-native/core@0.84.67
+
+## 0.2.240
+
+### Patch Changes
+
+- Updated dependencies [70a6085]
+  - @agent-native/core@0.84.66
+
 ## 0.2.239
 
 ### Patch Changes
