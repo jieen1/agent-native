@@ -21,6 +21,15 @@ read the relevant skill before changing that area.
 - When adding package dependencies or framework integrations, verify the current
   latest version first with `npm view`/`pnpm view` or current docs. Do not rely
   on remembered versions.
+- Before implementing or changing any non-trivial framework behavior (actions,
+  access/audit, application state, cross-app calls, background/harness/agent-team
+  runs, human approval, migrations), consult the version-matched docs FIRST — do
+  not code `@agent-native/core` APIs from memory. They match the installed core
+  version, which may differ from public docs or model memory. From any app dir:
+  `pnpm action docs-search --slug <slug>` (also `--query "…"`, `--list`) and
+  `pnpm action source-search --query "…"` for real usage examples; or read
+  `packages/core/docs/content/<slug>.mdx` directly. See the pinned slugs in
+  "Framework Docs (Version-Matched)" below and the `agent-native-docs` skill.
 - When changing docs under `packages/core/docs/content`, update the matching
   localized docs under `packages/core/docs/content/locales/*` when the source
   meaning changes. If translations cannot be updated in the same change, call
@@ -84,6 +93,52 @@ step is still pending. Use `🔴` only when blocked on user input.
 
 Every feature must touch the four areas when applicable: UI, actions, skills or
 instructions, and application state.
+
+## Framework Docs (Version-Matched)
+
+The authoritative, version-matched framework docs live at
+`packages/core/docs/content/*.mdx` and are queryable from any app dir with
+`pnpm action docs-search` (`--list` | `--slug <slug>` | `--query "…"`) and
+`pnpm action source-search`. Consult them before framework-shaped work; prefer
+them over memory. Highest-leverage slugs for orchestrator/tracker-style work:
+
+| Slug | Read this when… |
+| --- | --- |
+| `actions` | defining or splitting an action; op-parameterized CRUD over many actions; hiding UI-only actions with `agentTool:false` to keep the agent tool list small |
+| `context-awareness` | exposing UI state to the agent via `application_state`, `view-screen`, `navigate` |
+| `database` | schema/migrations; keeping DDL additive and provider-agnostic (`ADD COLUMN IF NOT EXISTS`, no Postgres-only SQL) |
+| `security` | any action/route touching user data — fail-closed scoping, no hardcoded secrets/endpoints |
+| `audit-log` | recording who changed what — use the automatic action-seam audit + `list-audit-events`, not a parallel table |
+| `human-approval` | gating a high-consequence action with `needsApproval` |
+| `a2a-protocol` | calling another app's agent (`invoke` / `call-agent`); never raw-read another app's tables |
+| `multi-app-workspace` | orchestrator↔tracker boundaries — no internal imports, no copied tables, no cross-app SQL |
+| `harness-agents` | running a full coding runtime (Claude Code / Codex / Pi / ACP) as a worker |
+| `agent-teams` | in-process sub-agent delegation via `spawnTask` on run-manager |
+| `durable-background-runs`, `code-agents-ui` | long background runs, run-manager lifecycle, self-heal/reap |
+| `automations`, `recurring-jobs` | event-driven or scheduled state transitions instead of read-time writeback + polling |
+| `processors` | proof-of-done / coverage / fail-loud gates that abort before a run claims "done" |
+
+### Known justified deviations (orchestrator/tracker)
+
+These intentionally diverge from the tenets above because the framework cannot
+serve the SDLC need. They are decided and evidenced in
+`docs/agent-native-alignment-audit.md` §5 — do NOT "fix" them without reopening
+that decision:
+
+- Orchestrator brain runs as a raw `spawn("claude")` session, not Harness Agents
+  (the `acp:claude-code` harness hardcodes `mcpServers:[]`, so the brain would
+  lose its `mcp__orchestrator__*` tools).
+- V3 runs on its own Postgres pool (`server/db/v3.ts`) with PG-specific
+  primitives (advisory locks, `FOR UPDATE SKIP LOCKED`), not the framework LibSQL
+  DB layer; V3 self-heal uses reconcile sweeps + polling, not run-manager
+  streaming (V3 is a declarative DAG, not an agent-loop run).
+- Cross-app dispatch uses deterministic, signed, scoped MCP `tools/call`
+  (declared in `agent-native.json`), not an NL A2A loop.
+- Tracker scopes access with a local `ownerScope()` helper rather than
+  `accessFilter` (functionally equivalent, fail-closed).
+
+The declarative DAG engine itself (multi-round review, audit, promotion gates) is
+a deliberate keep — the framework provides no workflow engine.
 
 ## Plan Product Knowledge Chat
 
