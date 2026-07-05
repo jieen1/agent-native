@@ -8,6 +8,7 @@ import { customAlphabet } from "nanoid";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { resolveActorKind } from "../server/lib/activity.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
@@ -19,7 +20,7 @@ export default defineAction({
     authorName: z.string().optional(),
   }),
   http: { method: "POST" },
-  run: async (args) => {
+  run: async (args, ctx) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -51,7 +52,7 @@ export default defineAction({
     await db.insert(schema.activities).values({
       id: nanoid(),
       workItemId: args.workItemId,
-      actorKind: "human",
+      actorKind: resolveActorKind(ctx),
       actorName: args.authorName ?? ownerEmail,
       eventType: "评论",
       payload: JSON.stringify({ commentId: id }),

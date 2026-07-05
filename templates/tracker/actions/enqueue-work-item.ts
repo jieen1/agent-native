@@ -8,6 +8,7 @@ import { customAlphabet } from "nanoid";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
@@ -21,7 +22,7 @@ export default defineAction({
     priority: z.coerce.number().int().optional().describe("Queue priority (default 0)"),
   }),
   http: { method: "POST" },
-  run: async (args) => {
+  run: async (args, ctx) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -75,11 +76,12 @@ export default defineAction({
       .where(eq(schema.workItems.id, args.workItemId));
 
     // Append a '触发' activity record.
+    const actorKind = resolveActorKind(ctx);
     await db.insert(schema.activities).values({
       id: nanoid(),
       workItemId: args.workItemId,
-      actorKind: "agent",
-      actorName: "智能体",
+      actorKind,
+      actorName: resolveActorName(actorKind, ownerEmail),
       eventType: "触发",
       payload: JSON.stringify({ mode: "auto" }),
       createdAt: now,

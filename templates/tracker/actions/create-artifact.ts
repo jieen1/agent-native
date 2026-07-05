@@ -8,6 +8,7 @@ import { customAlphabet } from "nanoid";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { resolveActorKind } from "../server/lib/activity.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
@@ -23,7 +24,7 @@ export default defineAction({
     producedByKind: z.enum(["agent", "human"]).optional(),
   }),
   http: { method: "POST" },
-  run: async (args) => {
+  run: async (args, ctx) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -73,6 +74,11 @@ export default defineAction({
 
     const id = nanoid();
     const now = new Date().toISOString();
+    // `producedByKind` is caller-declared provenance of the artifact itself
+    // (e.g. an agent recording a human-authored design upload), which is
+    // distinct from — and takes precedence over — who *called* this action.
+    // Only fall back to the resolved caller when the producer wasn't stated.
+    const producedByKind = args.producedByKind ?? resolveActorKind(ctx);
     await db.insert(schema.artifacts).values({
       id,
       workItemId: args.workItemId,
@@ -82,7 +88,7 @@ export default defineAction({
       name: args.name,
       version: nextVersion,
       contentRef: args.contentRef ?? "",
-      producedByKind: args.producedByKind ?? "agent",
+      producedByKind,
       supersedes,
       createdAt: now,
       updatedAt: now,
@@ -95,7 +101,7 @@ export default defineAction({
     await db.insert(schema.activities).values({
       id: nanoid(),
       workItemId: args.workItemId,
-      actorKind: args.producedByKind ?? "agent",
+      actorKind: producedByKind,
       actorName: ownerEmail,
       eventType: "产物新版",
       payload: JSON.stringify({ kind: args.kind, name: args.name, version: nextVersion }),

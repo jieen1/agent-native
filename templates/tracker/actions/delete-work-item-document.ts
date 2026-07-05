@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
@@ -18,7 +19,7 @@ export default defineAction({
     id: z.string().min(1).describe("Document id to delete"),
   }),
   http: { method: "DELETE" },
-  run: async (args) => {
+  run: async (args, ctx) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -46,11 +47,12 @@ export default defineAction({
       .where(eq(schema.workItemDocuments.id, args.id));
 
     // Append an activity record on the work item.
+    const actorKind = resolveActorKind(ctx);
     await db.insert(schema.activities).values({
       id: nanoid(),
       workItemId: doc.workItemId,
-      actorKind: "human",
-      actorName: ownerEmail,
+      actorKind,
+      actorName: resolveActorName(actorKind, ownerEmail),
       eventType: "document.removed",
       payload: JSON.stringify({
         documentId: args.id,

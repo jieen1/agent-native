@@ -1,4 +1,5 @@
 import { defineAction } from "@agent-native/core";
+import type { ActionRunContext } from "@agent-native/core/action";
 import {
   getRequestUserEmail,
   getRequestOrgId,
@@ -7,6 +8,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
 import { validateDependencyGraph } from "../shared/graph-validation.js";
 
 const FULL_STAGE_ORDER = [
@@ -37,6 +39,7 @@ async function advanceOneItem(
   expectedRunId?: string,
   ownerEmail: string = "",
   orgId: string | null = null,
+  ctx?: ActionRunContext,
 ): Promise<AdvanceOneResult> {
   const now = new Date().toISOString();
 
@@ -296,11 +299,12 @@ async function advanceOneItem(
     .where(eq(schema.workItems.id, item.id));
 
   // Activity log
+  const actorKind = resolveActorKind(ctx);
   await db.insert(schema.activities).values({
     id: `act_adv_${item.id.slice(0, 6)}_${argsFromStage}_to_${nextStage}_${now.replace(/\D/g, "").slice(0, 14)}`,
     workItemId: item.id,
-    actorKind: "human",
-    actorName: ownerEmail,
+    actorKind,
+    actorName: resolveActorName(actorKind, ownerEmail),
     eventType: "推进",
     payload: JSON.stringify({ fromStage: argsFromStage, toStage: nextStage }),
     createdAt: now,
@@ -326,7 +330,7 @@ export default defineAction({
     expectedRunId: z.string().optional().describe("If provided and item.orchestratorRunId is set but differs, no-op"),
   }),
   http: { method: "POST" },
-  run: async (args) => {
+  run: async (args, ctx) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -356,6 +360,7 @@ export default defineAction({
         args.expectedRunId,
         ownerEmail,
         orgId,
+        ctx,
       );
       return result;
     }
@@ -428,6 +433,7 @@ export default defineAction({
           args.expectedRunId,
           ownerEmail,
           orgId,
+          ctx,
         );
         if (result.blocked) {
           cascaded.push({
@@ -451,11 +457,12 @@ export default defineAction({
       } catch (e) {
         const errStr = String(e);
         // Write failure activity
+        const failureActorKind = resolveActorKind(ctx);
         await db.insert(schema.activities).values({
           id: `act_adv_fail_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
           workItemId: item.id,
-          actorKind: "human",
-          actorName: ownerEmail,
+          actorKind: failureActorKind,
+          actorName: resolveActorName(failureActorKind, ownerEmail),
           eventType: "推进失败",
           payload: JSON.stringify({ error: errStr }),
           createdAt: now,

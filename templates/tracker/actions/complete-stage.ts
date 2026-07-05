@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
 
 // Complete a stage on a work item: find the stage row, set its stageStatus to
 // "已完成", record completedAt, and write an activity row. Does NOT advance
@@ -26,7 +27,7 @@ export default defineAction({
       .describe("Optional list of delivery artifact names"),
   }),
   http: { method: "POST" },
-  run: async (args) => {
+  run: async (args, ctx) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -87,11 +88,12 @@ export default defineAction({
     }
 
     // Activity log
+    const actorKind = resolveActorKind(ctx);
     await db.insert(schema.activities).values({
       id: `act_cmp_${args.workItemId.slice(0, 6)}_${args.stageName}_${now.replace(/\D/g, "").slice(0, 14)}`,
       workItemId: args.workItemId,
-      actorKind: "human",
-      actorName: ownerEmail,
+      actorKind,
+      actorName: resolveActorName(actorKind, ownerEmail),
       eventType: "完成",
       payload: JSON.stringify({
         stageName: args.stageName,
