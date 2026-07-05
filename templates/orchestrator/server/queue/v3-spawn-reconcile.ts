@@ -39,7 +39,8 @@
 // dangling current_spawn_id is cleared so the node stops pointing at a dead spawn.
 // A clear error message records that this was a reconcile, not a real failure.
 
-import { v3DbExec, isV3PostgresConfigured } from "../db/v3.js";
+import { getDbExec } from "../db/index.js";
+import { isPostgres } from "@agent-native/core/db";
 
 /**
  * A 'running' spawn with no live VM (non-microVM runtime / NULL vm_name) is
@@ -80,7 +81,7 @@ export async function reconcileV3SpawnsOnce(
   noVmGraceMs: number = V3_SPAWN_NOVM_GRACE_MS,
   staleGraceMs: number = V3_SPAWN_STALE_GRACE_MS,
 ): Promise<ReconciledV3Spawn[]> {
-  if (!isV3PostgresConfigured()) return [];
+  if (!isPostgres()) return [];
 
   const staleCutoffIso = new Date(Date.now() - staleGraceMs).toISOString();
   const reconciled: ReconciledV3Spawn[] = [];
@@ -89,7 +90,7 @@ export async function reconcileV3SpawnsOnce(
   // Candidate running spawns + their parent node/run terminality and VM liveness.
   // started_at is the spawn's own clock; coalesce to epoch so a NULL never looks
   // "recent". liveVm = a microVM runtime with a vm_name actually written.
-  const runningCandidates = await v3DbExec(
+  const runningCandidates = await getDbExec().execute(
     `SELECT
         s.id                AS id,
         s.node_id           AS node_id,
@@ -145,8 +146,8 @@ export async function reconcileV3SpawnsOnce(
     // Guard the write on status='running' so we never race a spawn that just
     // settled. Settle as 'failed' (it never completed). NULL out the parent
     // node's dangling current_spawn_id so the node stops pointing at a dead spawn.
-    const upd = await v3DbExec(
-      `UPDATE v3_spawns
+    const upd = await getDbExec().execute({
+      sql: `UPDATE v3_spawns
           SET status = 'failed',
               error = $2,
               error_class = 'reconciled-stranded',
@@ -154,20 +155,22 @@ export async function reconcileV3SpawnsOnce(
         WHERE id = $1
           AND status = 'running'
         RETURNING id`,
-      [
+      args: [
         id,
         `Reset by spawn reconcile: ${why}. The spawn was stranded 'running' ` +
           `(process restart / killed VM / parent taken terminal) with no live ` +
           `worker; cleared so the pool reflects reality.`,
       ],
-    );
+    });
     if ((upd.rows?.length ?? 0) > 0) {
       if (nodeId) {
-        await v3DbExec(
-          `UPDATE v3_nodes SET current_spawn_id = NULL
+        await getDbExec()
+          .execute({
+            sql: `UPDATE v3_nodes SET current_spawn_id = NULL
             WHERE id = $1 AND current_spawn_id = $2`,
-          [nodeId, id],
-        ).catch(() => {});
+            args: [nodeId, id],
+          })
+          .catch(() => {});
       }
       reconciled.push({ id, from: "running", to: "failed", reason });
     }
@@ -177,15 +180,15 @@ export async function reconcileV3SpawnsOnce(
   // A pending spawn never bound to a node (node_id IS NULL) and older than the
   // hard grace is a created-but-never-dispatched orphan from a killed test. A
   // bound or recent pending spawn is a real queued dispatch — left alone.
-  const pendingOrphans = await v3DbExec(
-    `SELECT s.id AS id,
+  const pendingOrphans = await getDbExec().execute({
+    sql: `SELECT s.id AS id,
             COALESCE(s.started_at, 'epoch'::timestamptz) AS started_at
        FROM v3_spawns s
       WHERE s.status = 'pending'
         AND s.node_id IS NULL
         AND COALESCE(s.started_at, 'epoch'::timestamptz) < $1`,
-    [staleCutoffIso],
-  );
+    args: [staleCutoffIso],
+  });
 
   for (const row of pendingOrphans.rows as Array<Record<string, unknown>>) {
     const id = String(row.id);
@@ -194,8 +197,8 @@ export async function reconcileV3SpawnsOnce(
       : 0;
     const ageMin = Math.round((Date.now() - startedAt) / 60_000);
     const reason = `reconciled: orphaned pending spawn (no node, ~${ageMin}m)`;
-    const upd = await v3DbExec(
-      `UPDATE v3_spawns
+    const upd = await getDbExec().execute({
+      sql: `UPDATE v3_spawns
           SET status = 'cancelled',
               error = $2,
               error_class = 'reconciled-orphan',
@@ -204,13 +207,13 @@ export async function reconcileV3SpawnsOnce(
           AND status = 'pending'
           AND node_id IS NULL
         RETURNING id`,
-      [
+      args: [
         id,
         `Reset by spawn reconcile: pending spawn never bound to a node ` +
           `(orphan from a killed/aborted dispatch); cancelled so the pool ` +
           `queue reflects reality.`,
       ],
-    );
+    });
     if ((upd.rows?.length ?? 0) > 0) {
       reconciled.push({ id, from: "pending", to: "cancelled", reason });
     }

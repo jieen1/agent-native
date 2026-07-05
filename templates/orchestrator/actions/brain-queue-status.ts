@@ -9,7 +9,8 @@ import { defineAction } from "@agent-native/core";
 import { z } from "zod";
 import { getBrainConcurrency } from "../server/queue/brain-concurrency.js";
 import { getBrainDriverHealth } from "../server/queue/brain-driver.js";
-import { v3DbExec, isV3PostgresConfigured } from "../server/db/v3.js";
+import { getDbExec } from "../server/db/index.js";
+import { isPostgres } from "@agent-native/core/db";
 
 export default defineAction({
   description:
@@ -30,9 +31,9 @@ export default defineAction({
       failed: 0,
       cancelled: 0,
     };
-    if (isV3PostgresConfigured()) {
+    if (isPostgres()) {
       try {
-        const res = await v3DbExec(
+        const res = await getDbExec().execute(
           `SELECT status, count(*)::int AS n FROM brain_tasks GROUP BY status`,
         );
         for (const row of res.rows as Array<Record<string, unknown>>) {

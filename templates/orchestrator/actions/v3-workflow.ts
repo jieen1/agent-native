@@ -5,7 +5,7 @@ import {
 } from "@agent-native/core/server/request-context";
 import { eq, ilike, and, desc } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema } from "../server/db/index.js";
 import { newId } from "./_util.js";
 import { validateDag } from "../server/engine/dag-validator.js";
 import Ajv from "ajv";

@@ -41,7 +41,9 @@ vi.mock("../runtime/networking.js", () => ({
   resolveEgress: vi.fn().mockReturnValue("direct"),
 }));
 
-// Mock v3.js DB module
+// Mock db/index.js (the merged framework db module). getV3Db is the
+// Postgres-typed accessor for v3-schema's real pg-core tables — it shares the
+// same underlying getDb() singleton connection, just re-typed.
 const hoisted = vi.hoisted(() => ({
   getV3Db: vi.fn(),
   v3Schema: {
@@ -49,7 +51,7 @@ const hoisted = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../db/v3.js", () => ({
+vi.mock("../db/index.js", () => ({
   getV3Db: hoisted.getV3Db,
   v3Schema: hoisted.v3Schema,
 }));

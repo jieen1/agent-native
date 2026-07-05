@@ -21,7 +21,7 @@ import { v3HealthEventHandler } from "../utils/v3-health.js";
 import { V3Reconciler, type V3Dispatcher as IV3Dispatcher } from "../engine/v3-reconciler.js";
 import { V3Dispatcher } from "../engine/v3-dispatcher.js";
 import { RemoteApiExecutor } from "../runtime/executors/index.js";
-import { getV3Db } from "../db/v3.js";
+import { getV3Db } from "../db/index.js";
 import { getH3App } from "@agent-native/core/server";
 
 // Singleton state — holds the reconciler and dispatcher instances.

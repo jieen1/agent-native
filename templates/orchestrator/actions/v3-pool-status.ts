@@ -13,7 +13,7 @@
 import { defineAction } from "@agent-native/core";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema } from "../server/db/index.js";
 
 /** Default pool capacity — mirrors V3Reconciler DEFAULT_POOL_CAPACITY. */
 const DEFAULT_POOL_CAPACITY = 8;

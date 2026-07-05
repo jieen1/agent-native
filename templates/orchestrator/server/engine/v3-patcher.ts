@@ -613,7 +613,7 @@ export async function applyPatch(
   appliedBy: string,
   reason?: string,
 ): Promise<ApplyPatchResult> {
-  const { getV3Db } = await import("../db/v3.js");
+  const { getV3Db } = await import("../db/index.js");
   const patcher = new V3Patcher(getV3Db() as unknown as PostgresJsDatabase);
   return patcher.applyPatch({
     runId,

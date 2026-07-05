@@ -62,14 +62,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import { getV3Db, v3Schema } from "../db/v3.js";
+import { getV3Db, v3Schema } from "../db/index.js";
 import {
   claudeWorkerEnv,
   getManagedClaudeStatus,
 } from "../claude-managed-auth.js";
 import { refreshManagedTokenIfNeeded } from "../claude-login.js";
 import { writeBrainMcpConfig } from "./brain-mcp-config.js";
-import { ensureBrainSchema } from "../db/brain-schema.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import { getBrainModel } from "./brain-model.js";
 import { deriveContextWindow } from "../../actions/brain-usage.js";
@@ -160,7 +159,6 @@ interface StartBrainTurnResult {
 export async function startBrainTurn(
   args: StartBrainTurnArgs,
 ): Promise<StartBrainTurnResult> {
-  await ensureBrainSchema();
   const db = getV3Db();
 
   // Check Claude Code login status. If CC is unavailable, fall through to the

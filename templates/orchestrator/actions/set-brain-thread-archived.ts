@@ -9,8 +9,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
-import { ensureBrainSchema } from "../server/db/brain-schema.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 import { sql as drizzleSql } from "drizzle-orm";
 
 export default defineAction({
@@ -25,7 +24,6 @@ export default defineAction({
   }),
   http: { method: "POST" },
   run: async (args) => {
-    await ensureBrainSchema();
     const db = getV3Db();
     // Fail-closed owner scope — a thread is only mutable by its owner.
     const ownerEmail = resolveOwnerEmail();

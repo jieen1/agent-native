@@ -6,7 +6,7 @@
 import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { getV3Db, v3Schema } from "../db/v3.js";
+import { getV3Db, v3Schema } from "../db/index.js";
 import { MicrosandboxRuntime, toWslPath } from "../runtime/microsandbox-runtime.js";
 import type { MountSpec, VmHandle, TeardownPolicy } from "../runtime/node-runtime.js";
 import { cloneRepo, checkoutRunBranch, runBranchName, type GitContext } from "../runtime/git-wrapper.js";

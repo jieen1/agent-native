@@ -24,8 +24,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { startBrainTurn } from "../server/brain/brain-session.js";
 import { createLocalWorkspace } from "../server/v3-workspace-local.js";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
-import { ensureBrainSchema } from "../server/db/brain-schema.js";
+import { getV3Db, v3Schema } from "../server/db/index.js";
 import {
   enqueueBrainTask,
   admitBrainTasks,
@@ -77,7 +76,6 @@ export default defineAction({
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
 
-    await ensureBrainSchema();
     const db = getV3Db();
 
     // Pin the threadId up-front (resume an existing thread or pre-generate a new

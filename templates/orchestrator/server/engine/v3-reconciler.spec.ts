@@ -16,18 +16,43 @@ vi.mock("./expression-parser.js", () => ({
   evaluateExpression: vi.fn(() => false),
 }));
 
-// ── Mock v3DbExec (advisory lock + atomic UPDATE) ───────────────────────────
-const hoisted = vi.hoisted(() => ({
-  v3DbExec: vi.fn().mockResolvedValue({ rows: [{ locked: true }] }),
-}));
+// ── Mock getDbExec (advisory xact-lock transaction + atomic UPDATE) ─────────
+// tick() wraps the (non-blocking) advisory-lock acquisition in
+// getDbExec().transaction(fn), calling fn({execute: mockExecute}); dispatchNode
+// / fireAndTrackSpawn's atomic CAS UPDATEs call getDbExec().execute(...)
+// directly (outside the transaction). Both paths share ONE mock execute fn so
+// tests can assert on either.
+const hoisted = vi.hoisted(() => {
+  const mockExecute = vi.fn(
+    async (query: string | { sql: string; args?: unknown[] }) => {
+      const sqlText = typeof query === "string" ? query : query.sql;
+      if (sqlText.includes("pg_try_advisory_xact_lock")) {
+        return { rows: [{ locked: true }] };
+      }
+      // G16: atomic CAS UPDATE for running transition — returns 1 row to
+      // signal success by default.
+      if (sqlText.includes("UPDATE v3_nodes") && sqlText.includes("RETURNING id")) {
+        return { rows: [{ id: "node-1" }] };
+      }
+      return { rows: [] };
+    },
+  );
+  const mockTransaction = vi.fn(
+    async (fn: (tx: { execute: typeof mockExecute }) => Promise<unknown>) =>
+      fn({ execute: mockExecute }),
+  );
+  return { mockExecute, mockTransaction };
+});
 
-vi.mock("../db/v3.js", () => ({
-  v3DbExec: hoisted.v3DbExec,
-  getV3Db: vi.fn(),
+vi.mock("../db/index.js", () => ({
+  getDb: vi.fn(),
+  getDbExec: vi.fn(() => ({
+    execute: hoisted.mockExecute,
+    transaction: hoisted.mockTransaction,
+  })),
   v3Schema: {},
 }));
 
-import { v3DbExec } from "../db/v3.js";
 import { evaluateExpression } from "./expression-parser.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -288,20 +313,21 @@ function makeArtifact(overrides: Partial<MockArtifactRow> = {}): MockArtifactRow
 describe("V3Reconciler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: lock acquired (rows[0].locked = true) and atomic CAS succeeds (rows.length = 1)
-    vi.mocked(hoisted.v3DbExec).mockImplementation((sql: string) => {
-      if (typeof sql === "string" && sql.includes("pg_try_advisory_lock")) {
-        return Promise.resolve({ rows: [{ locked: true }] });
-      }
-      if (typeof sql === "string" && sql.includes("pg_advisory_unlock")) {
-        return Promise.resolve({ rows: [] });
-      }
-      // G16: atomic CAS UPDATE for running transition — returns 1 row to signal success
-      if (typeof sql === "string" && sql.includes("UPDATE v3_nodes") && sql.includes("RETURNING id")) {
-        return Promise.resolve({ rows: [{ id: "node-1" }] });
-      }
-      return Promise.resolve({ rows: [] });
-    });
+    // Default: xact lock acquired (rows[0].locked = true) and atomic CAS
+    // succeeds (rows.length = 1).
+    vi.mocked(hoisted.mockExecute).mockImplementation(
+      async (query: string | { sql: string; args?: unknown[] }) => {
+        const sqlText = typeof query === "string" ? query : query.sql;
+        if (sqlText.includes("pg_try_advisory_xact_lock")) {
+          return { rows: [{ locked: true }] };
+        }
+        // G16: atomic CAS UPDATE for running transition — returns 1 row to signal success
+        if (sqlText.includes("UPDATE v3_nodes") && sqlText.includes("RETURNING id")) {
+          return { rows: [{ id: "node-1" }] };
+        }
+        return { rows: [] };
+      },
+    );
     vi.mocked(evaluateExpression).mockReturnValue(false);
   });
 
@@ -381,12 +407,15 @@ describe("V3Reconciler", () => {
       const dispatcher = makeDispatcher();
       const { db } = createMockDb(makeRun(), []);
 
-      vi.mocked(hoisted.v3DbExec).mockImplementation((sql: string) => {
-        if (typeof sql === "string" && sql.includes("pg_try_advisory_lock")) {
-          return Promise.resolve({ rows: [{ locked: false }] });
-        }
-        return Promise.resolve({ rows: [] });
-      });
+      vi.mocked(hoisted.mockExecute).mockImplementation(
+        async (query: string | { sql: string; args?: unknown[] }) => {
+          const sqlText = typeof query === "string" ? query : query.sql;
+          if (sqlText.includes("pg_try_advisory_xact_lock")) {
+            return { rows: [{ locked: false }] };
+          }
+          return { rows: [] };
+        },
+      );
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.tick("run-1");
@@ -678,7 +707,7 @@ describe("V3Reconciler", () => {
       await reconciler.tick("run-1");
 
       // With max_concurrency=1 and no running children, only 1 should be dispatched
-      // The mock v3DbExec returns 1 row for RETURNING id (CAS success)
+      // The mock getDbExec().execute() returns 1 row for RETURNING id (CAS success)
       expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
     });
   });
@@ -1142,19 +1171,19 @@ describe("V3Reconciler", () => {
 
       // CAS returns 0 rows — another tick already claimed the node.
       // Lock acquire must still succeed (locked=true) for the tick to proceed.
-      vi.mocked(hoisted.v3DbExec).mockImplementation((sql: string) => {
-        if (typeof sql === "string" && sql.includes("pg_try_advisory_lock")) {
-          return Promise.resolve({ rows: [{ locked: true }] });
-        }
-        if (typeof sql === "string" && sql.includes("pg_advisory_unlock")) {
-          return Promise.resolve({ rows: [] });
-        }
-        if (typeof sql === "string" && sql.includes("RETURNING id")) {
-          // CAS fails — 0 rows returned (node already claimed by another tick)
-          return Promise.resolve({ rows: [] });
-        }
-        return Promise.resolve({ rows: [] });
-      });
+      vi.mocked(hoisted.mockExecute).mockImplementation(
+        async (query: string | { sql: string; args?: unknown[] }) => {
+          const sqlText = typeof query === "string" ? query : query.sql;
+          if (sqlText.includes("pg_try_advisory_xact_lock")) {
+            return { rows: [{ locked: true }] };
+          }
+          if (sqlText.includes("RETURNING id")) {
+            // CAS fails — 0 rows returned (node already claimed by another tick)
+            return { rows: [] };
+          }
+          return { rows: [] };
+        },
+      );
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.tick("run-1");
@@ -1229,10 +1258,10 @@ describe("V3Reconciler", () => {
       await reconciler.tick("run-1");
 
       // After tick, node should be in "running" state (set by atomic UPDATE)
-      // In the mock, the v3DbExec RETURNING id call succeeds → node is claimed
+      // In the mock, the getDbExec().execute() RETURNING id call succeeds → node is claimed
       // The node mock update (from dispatchNode) sets status="running"
       const nodeA = nodes.find((n) => n.nodeIdInDag === "a");
-      // The in-memory mock update applies broadly; the CAS was done via v3DbExec
+      // The in-memory mock update applies broadly; the CAS was done via getDbExec()
       // We verify spawn was fired
       expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
 

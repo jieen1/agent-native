@@ -1,5 +1,5 @@
 import { startBrainDriver } from "../queue/brain-driver.js";
-import { isV3PostgresConfigured } from "../db/v3.js";
+import { isPostgres } from "@agent-native/core/db";
 
 // LEVEL-1 brain-task driver plugin — the durable admission/reap loop for the
 // brain concurrency limiter. Auto-loaded on boot. Gated on V3 Postgres being
@@ -9,6 +9,6 @@ import { isV3PostgresConfigured } from "../db/v3.js";
 // The loop is `unref`-ed so it never blocks shutdown. Mirrors the v2
 // queue-driver plugin shape.
 export default async function orchestratorBrainDriverPlugin(): Promise<void> {
-  if (!isV3PostgresConfigured()) return;
+  if (!isPostgres()) return;
   startBrainDriver();
 }

@@ -8,7 +8,7 @@
 
 import { sql, eq, and, or } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { getV3Db, v3Schema } from "../db/v3.js";
+import { getV3Db, v3Schema } from "../db/index.js";
 
 /* ─── Config ─────────────────────────────────────────────────────────────── */
 

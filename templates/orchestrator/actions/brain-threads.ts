@@ -18,9 +18,8 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq, or, ilike, sql } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
-import { ensureBrainSchema } from "../server/db/brain-schema.js";
-import { isV3PostgresConfigured } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
+import { isPostgres } from "@agent-native/core/db";
 
 export default defineAction({
   description:
@@ -46,8 +45,7 @@ export default defineAction({
   readOnly: true,
   http: { method: "GET" },
   run: async (args) => {
-    if (!isV3PostgresConfigured()) return [];
-    await ensureBrainSchema();
+    if (!isPostgres()) return [];
     const db = getV3Db();
     // Fail-closed owner scope — ALWAYS list only the resolved owner's threads.
     // An absent identity resolves to the local single-user owner, never every

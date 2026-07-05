@@ -39,7 +39,8 @@
 // against that flip by requiring a TERMINAL thread status PLUS the grace age, and
 // never releases a thread that is itself `running`.
 
-import { v3DbExec, isV3PostgresConfigured } from "../db/v3.js";
+import { getDbExec } from "../db/index.js";
+import { isPostgres } from "@agent-native/core/db";
 
 /** How often the brain driver tick runs the reap sweep. */
 export const BRAIN_REAP_TICK_MS = 30_000;
@@ -112,7 +113,7 @@ export async function reapBrainTasksOnce(
   thresholdMs: number = BRAIN_TASK_REAP_THRESHOLD_MS,
   noRunGraceSec: number = BRAIN_NORUN_RELEASE_GRACE_SEC,
 ): Promise<ReapedBrainTask[]> {
-  if (!isV3PostgresConfigured()) return [];
+  if (!isPostgres()) return [];
 
   const cutoffIso = new Date(Date.now() - thresholdMs).toISOString();
   const reaped: ReapedBrainTask[] = [];
@@ -136,27 +137,27 @@ export async function reapBrainTasksOnce(
   const noRunGraceIso = new Date(
     Date.now() - noRunGraceSec * 1000,
   ).toISOString();
-  const noRunRes = await v3DbExec(
-    `SELECT bt.id AS id, bt.thread_id AS thread_id, btr.status AS thread_status
+  const noRunRes = await getDbExec().execute({
+    sql: `SELECT bt.id AS id, bt.thread_id AS thread_id, btr.status AS thread_status
        FROM brain_tasks bt
        JOIN brain_threads btr ON btr.id = bt.thread_id
       WHERE bt.status = 'running'
         AND bt.run_id IS NULL
         AND btr.status IN ('error', 'done')
         AND (btr.updated_at IS NULL OR btr.updated_at < $1)`,
-    [noRunGraceIso],
-  );
+    args: [noRunGraceIso],
+  });
   for (const row of noRunRes.rows as Array<Record<string, unknown>>) {
     const id = String(row.id);
     const threadId = String(row.thread_id);
     const threadStatus = String(row.thread_status);
     const terminal = threadStatus === "error" ? "failed" : "done";
     const reason = `reaped: no-run thread ${threadStatus}`;
-    const upd = await v3DbExec(
-      `UPDATE brain_tasks SET status = $2, reap_reason = $3, updated_at = now()
+    const upd = await getDbExec().execute({
+      sql: `UPDATE brain_tasks SET status = $2, reap_reason = $3, updated_at = now()
          WHERE id = $1 AND status = 'running' AND run_id IS NULL RETURNING id`,
-      [id, terminal, reason],
-    );
+      args: [id, terminal, reason],
+    });
     if ((upd.rows?.length ?? 0) > 0) {
       reaped.push({ id, threadId, reason });
     }
@@ -167,15 +168,15 @@ export async function reapBrainTasksOnce(
   // it; if the task is still `running` and not freshly claimed, the slot leaked.
   // We require the age cutoff so we never race a thread that just flipped to a
   // transient non-running status mid-wake.
-  const threadDeadRes = await v3DbExec(
-    `SELECT bt.id AS id, bt.thread_id AS thread_id, btr.status AS thread_status
+  const threadDeadRes = await getDbExec().execute({
+    sql: `SELECT bt.id AS id, bt.thread_id AS thread_id, btr.status AS thread_status
        FROM brain_tasks bt
        JOIN brain_threads btr ON btr.id = bt.thread_id
       WHERE bt.status = 'running'
         AND btr.status IN ('error', 'done', 'idle')
         AND (bt.claimed_at IS NULL OR bt.claimed_at < $1)`,
-    [cutoffIso],
-  );
+    args: [cutoffIso],
+  });
 
   for (const row of threadDeadRes.rows as Array<Record<string, unknown>>) {
     const id = String(row.id);
@@ -183,11 +184,11 @@ export async function reapBrainTasksOnce(
     const threadStatus = String(row.thread_status);
     const terminal = threadStatus === "error" ? "failed" : "done";
     const reason = `reaped: thread ${threadStatus}`;
-    const upd = await v3DbExec(
-      `UPDATE brain_tasks SET status = $2, reap_reason = $3, updated_at = now()
+    const upd = await getDbExec().execute({
+      sql: `UPDATE brain_tasks SET status = $2, reap_reason = $3, updated_at = now()
          WHERE id = $1 AND status = 'running' RETURNING id`,
-      [id, terminal, reason],
-    );
+      args: [id, terminal, reason],
+    });
     if ((upd.rows?.length ?? 0) > 0) {
       reaped.push({ id, threadId, reason });
     }
@@ -204,14 +205,14 @@ export async function reapBrainTasksOnce(
   // genuinely NOT done (truly stuck / crashed isolate) is failed by this backstop.
   // We LEFT JOIN so a task with a missing thread row still falls through to the
   // stuck branch (failed). Behavior for genuinely-stuck tasks is unchanged.
-  const staleRes = await v3DbExec(
-    `SELECT bt.id AS id, bt.thread_id AS thread_id, btr.status AS thread_status
+  const staleRes = await getDbExec().execute({
+    sql: `SELECT bt.id AS id, bt.thread_id AS thread_id, btr.status AS thread_status
        FROM brain_tasks bt
        LEFT JOIN brain_threads btr ON btr.id = bt.thread_id
       WHERE bt.status = 'running'
         AND (bt.claimed_at IS NULL OR bt.claimed_at < $1)`,
-    [cutoffIso],
-  );
+    args: [cutoffIso],
+  });
   for (const row of staleRes.rows as Array<Record<string, unknown>>) {
     const id = String(row.id);
     const threadId = String(row.thread_id);
@@ -234,11 +235,11 @@ export async function reapBrainTasksOnce(
         }): ${reason}`,
       );
     }
-    const upd = await v3DbExec(
-      `UPDATE brain_tasks SET status = $2, reap_reason = $3, updated_at = now()
+    const upd = await getDbExec().execute({
+      sql: `UPDATE brain_tasks SET status = $2, reap_reason = $3, updated_at = now()
          WHERE id = $1 AND status = 'running' RETURNING id`,
-      [id, terminal, reason],
-    );
+      args: [id, terminal, reason],
+    });
     if ((upd.rows?.length ?? 0) > 0) {
       reaped.push({ id, threadId, reason });
     }

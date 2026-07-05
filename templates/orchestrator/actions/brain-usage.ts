@@ -15,8 +15,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq, desc } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
-import { ensureBrainSchema } from "../server/db/brain-schema.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 import { getBrainModel } from "../server/brain/brain-model.js";
 
 /**
@@ -57,7 +56,6 @@ export default defineAction({
     // Fail-closed owner scope — even an explicit threadId is constrained to the
     // resolved owner so no request can read another owner's thread context.
     const ownerEmail = resolveOwnerEmail();
-    await ensureBrainSchema();
     const db = getV3Db();
 
     // ── model + context from the brain thread (DB ONLY) ──────────────────────

@@ -1,5 +1,5 @@
 import { startBrainMonitorTick } from "../brain/brain-monitor.js";
-import { isV3PostgresConfigured } from "../db/v3.js";
+import { isPostgres } from "@agent-native/core/db";
 
 // Brain monitor scheduler plugin — the CONFIGURABLE TIMED/periodic wake.
 //
@@ -11,6 +11,6 @@ import { isV3PostgresConfigured } from "../db/v3.js";
 // the backstop. The loop is `unref`-ed so it never blocks shutdown. Gated on V3
 // Postgres being configured (the brain/run tables live there).
 export default async function orchestratorBrainMonitorPlugin(): Promise<void> {
-  if (!isV3PostgresConfigured()) return;
+  if (!isPostgres()) return;
   startBrainMonitorTick();
 }

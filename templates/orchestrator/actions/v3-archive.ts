@@ -5,7 +5,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export const runArchive = defineAction({
   description:

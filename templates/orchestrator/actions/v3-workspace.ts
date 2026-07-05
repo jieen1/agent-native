@@ -2,7 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { resolveSecret } from "@agent-native/core/server";
 import { eq, and, desc, or, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 import { MicrosandboxRuntime } from "../server/runtime/microsandbox-runtime.js";
 import {
   addAll,

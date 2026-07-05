@@ -30,7 +30,7 @@ import { join, normalize, relative, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 
-import { getV3Db, v3Schema, LOCAL_DEFAULT_OWNER } from "./db/v3.js";
+import { getV3Db, v3Schema, LOCAL_DEFAULT_OWNER } from "./db/index.js";
 
 // ── Config ─────────────────────────────────────────────────────────────────
 

@@ -7,7 +7,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq, asc } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export default defineAction({
   description:

@@ -31,7 +31,7 @@ import {
   v3Artifacts,
   brainThreads,
 } from "../db/v3-schema.js";
-import { v3DbExec } from "../db/v3.js";
+import { getDbExec } from "../db/index.js";
 import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import { evaluateExpression } from "./expression-parser.js";
 import type { ExpressionContext } from "./expression-parser.js";
@@ -149,23 +149,28 @@ export class V3Reconciler {
     // 0. Advisory lock — non-blocking; skip if another tick holds it.
     // hashtext() derives the bigint lock id inside Postgres; runId is a BOUND
     // parameter ($1), never string-concatenated into the SQL text.
-    const lockResult = await v3DbExec(
-      `SELECT pg_try_advisory_lock(hashtext($1)) AS locked`,
-      [runId],
-    );
-    const locked = (lockResult.rows[0]?.locked ?? false) as boolean;
-
-    if (!locked) {
-      return; // Another tick in progress — bail silently
-    }
-
-    try {
+    //
+    // TRANSACTION-SCOPED, not session-scoped: pg_try_advisory_xact_lock is
+    // held by the transaction and auto-released on commit/rollback, on the
+    // SAME connection the lock was taken on. The prior session-scoped
+    // pg_try_advisory_lock/pg_advisory_unlock pair was a foot-gun on a POOLED
+    // client — acquire and release could land on two different pooled
+    // connections, which either errors ("you don't own a lock") or, worse,
+    // leaks the lock forever and wedges every future tick for this run. The
+    // xact lock cannot leak: it always releases when the transaction ends,
+    // even if `_tickLocked` throws. `_tickLocked` itself keeps running on
+    // `this.db` (the pool) — only the lock acquisition needs the single
+    // dedicated connection a transaction provides.
+    await getDbExec().transaction!(async (tx) => {
+      const { rows } = await tx.execute({
+        sql: "SELECT pg_try_advisory_xact_lock(hashtext($1)) AS locked",
+        args: [runId],
+      });
+      if (!(rows[0]?.locked ?? false)) {
+        return; // Another tick in progress — bail silently
+      }
       await this._tickLocked(runId);
-    } finally {
-      // Unlock in finally — connection drop auto-releases anyway, but be explicit.
-      // Same bound-parameter hashtext() expression as the lock acquisition.
-      await v3DbExec(`SELECT pg_advisory_unlock(hashtext($1))`, [runId]);
-    }
+    });
   }
 
   /** Core tick logic (assumes lock is already held). */
@@ -611,13 +616,13 @@ export class V3Reconciler {
     switch (node.type) {
       case "agent": {
         // G16: Atomic status-conditioned UPDATE — only dispatch when rowcount == 1
-        const updateResult = await v3DbExec(
-          `UPDATE v3_nodes SET status = 'running', started_at = now()
+        const updateResult = await getDbExec().execute({
+          sql: `UPDATE v3_nodes SET status = 'running', started_at = now()
            WHERE id = $1
              AND status IN ('pending', 'ready')
            RETURNING id`,
-          [node.id],
-        );
+          args: [node.id],
+        });
 
         if ((updateResult.rows?.length ?? 0) !== 1) {
           // Another tick already claimed this node — skip
@@ -941,13 +946,13 @@ export class V3Reconciler {
         await new Promise((r) => setTimeout(r, backoffMs));
 
         // Re-attempt: transition node back to running atomically
-        const rerun = await v3DbExec(
-          `UPDATE v3_nodes SET status = 'running', started_at = now(), error = null
+        const rerun = await getDbExec().execute({
+          sql: `UPDATE v3_nodes SET status = 'running', started_at = now(), error = null
            WHERE id = $1
              AND status = 'failed'
            RETURNING id`,
-          [node.id],
-        );
+          args: [node.id],
+        });
         if ((rerun.rows?.length ?? 0) !== 1) {
           // Node was cancelled or otherwise modified — abort retry
           return;

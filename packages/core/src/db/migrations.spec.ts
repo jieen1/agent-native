@@ -229,6 +229,61 @@ describe("runMigrations – Postgres steady-state (no pending migrations)", () =
     expect(directExec.close).toHaveBeenCalledTimes(1);
   });
 
+  it("swallows a re-run CREATE TYPE that already exists (isPgCatalogRace)", async () => {
+    // CREATE TYPE has no IF NOT EXISTS clause, so a template that folds enum
+    // DDL into runMigrations will re-attempt it on every boot once the
+    // migration's version/name has already been recorded past it (e.g. a
+    // later unnamed migration in the same list bumps MAX(version) first) or
+    // when re-applying against a DB that already has the type from a prior
+    // partial run. Postgres raises 42710 "type ... already exists" — this
+    // must be swallowed, not crash the boot, and later statements in the same
+    // migration must still run.
+    vi.mocked(isPostgres).mockReturnValue(true);
+    const pooledExec = makeExec([{ v: 0 }]);
+    vi.mocked(getDbExec).mockReturnValue(pooledExec);
+    vi.mocked(getMigrationDatabaseUrl).mockReturnValue("postgres://direct");
+
+    const directExec = {
+      execute: vi.fn(async (sql: string | { sql: string; args: unknown[] }) => {
+        const s = typeof sql === "string" ? sql : sql.sql;
+        if (/SELECT MAX/i.test(s)) return { rows: [{ v: 0 }], rowsAffected: 0 };
+        if (/CREATE TYPE/i.test(s)) {
+          const err = new Error(
+            'type "v3_run_status" already exists',
+          ) as Error & { code?: string; routine?: string };
+          err.code = "42710";
+          err.routine = "TypeCreate";
+          throw err;
+        }
+        return { rows: [], rowsAffected: 0 };
+      }),
+      close: vi.fn(async () => {}),
+    };
+    vi.mocked(createDbExec).mockResolvedValue(directExec);
+
+    const migrations = [
+      {
+        version: 1,
+        sql: `CREATE TYPE "public"."v3_run_status" AS ENUM('pending', 'done');
+CREATE TABLE IF NOT EXISTS v3_runs (id TEXT PRIMARY KEY)`,
+      },
+    ];
+
+    const plugin = runMigrations(migrations, {
+      table: "pg_catalog_race_migrations",
+    });
+    // Must not throw despite the CREATE TYPE race.
+    await expect(plugin(null)).resolves.toBeUndefined();
+
+    const calls = directExec.execute.mock.calls.map((c) =>
+      typeof c[0] === "string" ? c[0] : (c[0] as { sql: string }).sql,
+    );
+    // The later statement in the SAME migration still ran after the swallow.
+    expect(calls.some((s) => /CREATE TABLE IF NOT EXISTS v3_runs/i.test(s))).toBe(
+      true,
+    );
+  });
+
   it("closes the direct exec even when a migration throws", async () => {
     vi.mocked(isPostgres).mockReturnValue(true);
     const pooledExec = makeExec([{ v: 0 }]);

@@ -12,7 +12,7 @@ import {
 } from "h3";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { v3Events } from "../db/v3-schema.js";
-import { getV3Db } from "../db/v3.js";
+import { getV3Db } from "../db/index.js";
 import type { H3Event } from "h3";
 
 /**

@@ -14,7 +14,7 @@ import {
 } from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 import { V3Patcher } from "../server/engine/v3-patcher.js";
 import type { DagMutation } from "../server/engine/v3-patcher.js";
 import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";

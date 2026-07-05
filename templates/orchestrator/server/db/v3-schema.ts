@@ -207,6 +207,11 @@ export const v3Artifacts = pgTable(
     byteSize: integer("byte_size"),
     truncated: integer("truncated").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    // P4-A data lifecycle (additive): expiresAt is the TTL boundary set once
+    // the artifact's run completes; keepAfterRun opts a specific artifact out
+    // of TTL cleanup. Both nullable/defaulted — never dropped or renamed.
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    keepAfterRun: integer("keep_after_run").notNull().default(0),
     ...ownableColumns(),
   },
   (t) => [index("idx_v3_artifacts_spawn_id").on(t.spawnId)],
@@ -396,6 +401,11 @@ export const brainTasks = pgTable(
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    // The reaper's release reason (e.g. "reaped: thread already done"), so a
+    // timeout-driven release is distinguishable from a real brain failure.
+    // Nullable/additive — NULL means the task reached terminal through the
+    // normal run-terminal release, not the reaper.
+    reapReason: text("reap_reason"),
     ...ownableColumns(),
   },
   (t) => [

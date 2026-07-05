@@ -20,7 +20,7 @@
 // returns. Modeled on engine/reap.ts (durable, unref-ed setInterval).
 
 import { eq, sql } from "drizzle-orm";
-import { getV3Db, v3Schema } from "../db/v3.js";
+import { getV3Db, v3Schema } from "../db/index.js";
 import { getManagedClaudeStatus } from "../claude-managed-auth.js";
 
 /** Default periodic drift-check cadence (seconds) when a thread leaves it unset. */

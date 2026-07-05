@@ -19,7 +19,8 @@
 // driven by the bound run reaching terminal (releaseBrainTaskForThread, called
 // from the reconciler) or the reaper.
 
-import { v3DbExec, isV3PostgresConfigured, getV3PgClient } from "../db/v3.js";
+import { getDbExec } from "../db/index.js";
+import { isPostgres } from "@agent-native/core/db";
 import { newId } from "../../actions/_util.js";
 import { getBrainConcurrency } from "./brain-concurrency.js";
 
@@ -41,7 +42,7 @@ interface QueuedTask {
 
 /** Count brain_tasks currently occupying a slot (status='running'). */
 export async function countRunningBrainTasks(): Promise<number> {
-  const res = await v3DbExec(
+  const res = await getDbExec().execute(
     `SELECT count(*)::int AS n FROM brain_tasks WHERE status = 'running'`,
   );
   return Number(res.rows[0]?.n ?? 0);
@@ -49,7 +50,7 @@ export async function countRunningBrainTasks(): Promise<number> {
 
 /** Count queued brain_tasks (waiting for a slot). */
 export async function countQueuedBrainTasks(): Promise<number> {
-  const res = await v3DbExec(
+  const res = await getDbExec().execute(
     `SELECT count(*)::int AS n FROM brain_tasks WHERE status = 'queued'`,
   );
   return Number(res.rows[0]?.n ?? 0);
@@ -72,12 +73,12 @@ export async function enqueueBrainTask(input: {
   priority?: number;
 }): Promise<{ taskId: string; queuePosition: number }> {
   const taskId = newId("btask");
-  await v3DbExec(
-    `INSERT INTO brain_tasks
+  await getDbExec().execute({
+    sql: `INSERT INTO brain_tasks
        (id, thread_id, status, message, repo, base_branch, workspace_id, tags,
         owner_email, org_id, priority, created_at, updated_at)
      VALUES ($1,$2,'queued',$3,$4,$5,$6,$7,$8,$9,$10, now(), now())`,
-    [
+    args: [
       taskId,
       input.threadId,
       input.message,
@@ -89,17 +90,17 @@ export async function enqueueBrainTask(input: {
       input.orgId ?? null,
       input.priority ?? 0,
     ],
-  );
+  });
 
   // Live queue position among queued tasks (1-based by priority, created_at).
-  const posRes = await v3DbExec(
-    `SELECT count(*)::int AS n FROM brain_tasks
+  const posRes = await getDbExec().execute({
+    sql: `SELECT count(*)::int AS n FROM brain_tasks
       WHERE status = 'queued'
         AND (priority < (SELECT priority FROM brain_tasks WHERE id = $1)
              OR (priority = (SELECT priority FROM brain_tasks WHERE id = $1)
                  AND created_at <= (SELECT created_at FROM brain_tasks WHERE id = $1)))`,
-    [taskId],
-  );
+    args: [taskId],
+  });
   const queuePosition = Number(posRes.rows[0]?.n ?? 1);
   return { taskId, queuePosition };
 }
@@ -112,9 +113,7 @@ export async function enqueueBrainTask(input: {
  * Returns the ids of tasks promoted (and started) this call.
  */
 export async function admitBrainTasks(): Promise<string[]> {
-  if (!isV3PostgresConfigured()) return [];
-  const pg = getV3PgClient();
-  if (!pg) return [];
+  if (!isPostgres()) return [];
 
   // ── Phase 1: claim slots under a TRANSACTION-SCOPED advisory lock ──────────
   // The slot accounting (count running → pick queued candidates → guarded
@@ -134,13 +133,17 @@ export async function admitBrainTasks(): Promise<string[]> {
   // across a clone/spawn.
   let claimed: QueuedTask[] = [];
   try {
-    claimed = await pg.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(${BRAIN_ADMIT_LOCK_KEY})`;
+    claimed = await getDbExec().transaction!(async (tx) => {
+      await tx.execute({
+        sql: "SELECT pg_advisory_xact_lock($1)",
+        args: [BRAIN_ADMIT_LOCK_KEY],
+      });
 
       const degree = await getBrainConcurrency();
-      const runningRes =
-        await tx`SELECT count(*)::int AS n FROM brain_tasks WHERE status = 'running'`;
-      const running = Number(runningRes[0]?.n ?? 0);
+      const runningRes = await tx.execute(
+        `SELECT count(*)::int AS n FROM brain_tasks WHERE status = 'running'`,
+      );
+      const running = Number(runningRes.rows[0]?.n ?? 0);
       const slots = degree - running;
       if (slots <= 0) return [];
 
@@ -148,20 +151,22 @@ export async function admitBrainTasks(): Promise<string[]> {
       // statement (priority then oldest), returning the promoted rows. A single
       // guarded UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED LIMIT n)
       // is race-free under the xact lock and avoids a per-row round-trip.
-      const promotedRows = await tx`
-        UPDATE brain_tasks
+      const promotedRows = await tx.execute({
+        sql: `UPDATE brain_tasks
            SET status = 'running', claimed_at = now(), updated_at = now()
          WHERE id IN (
            SELECT id FROM brain_tasks
             WHERE status = 'queued'
             ORDER BY priority ASC, created_at ASC, id ASC
             FOR UPDATE SKIP LOCKED
-            LIMIT ${slots}
+            LIMIT $1
          )
         RETURNING id, thread_id, message, repo, base_branch, workspace_id, tags,
-                  owner_email, org_id`;
+                  owner_email, org_id`,
+        args: [slots],
+      });
 
-      return (promotedRows as unknown as Array<Record<string, unknown>>).map(
+      return (promotedRows.rows as Array<Record<string, unknown>>).map(
         (r) => ({
           id: String(r.id),
           threadId: String(r.thread_id),
@@ -193,19 +198,21 @@ export async function admitBrainTasks(): Promise<string[]> {
         provisioned.workspaceId &&
         provisioned.workspaceId !== task.workspaceId
       ) {
-        await v3DbExec(
-          `UPDATE brain_tasks SET workspace_id = $2, updated_at = now() WHERE id = $1`,
-          [task.id, provisioned.workspaceId],
-        );
+        await getDbExec().execute({
+          sql: `UPDATE brain_tasks SET workspace_id = $2, updated_at = now() WHERE id = $1`,
+          args: [task.id, provisioned.workspaceId],
+        });
       }
       promoted.push(task.id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[brain-admit] start failed for task ${task.id}: ${msg}`);
-      await v3DbExec(
-        `UPDATE brain_tasks SET status = 'failed', updated_at = now() WHERE id = $1`,
-        [task.id],
-      ).catch(() => {});
+      await getDbExec()
+        .execute({
+          sql: `UPDATE brain_tasks SET status = 'failed', updated_at = now() WHERE id = $1`,
+          args: [task.id],
+        })
+        .catch(() => {});
     }
   }
 
@@ -274,15 +281,15 @@ export async function releaseBrainTaskForThread(
   threadId: string,
   runStatus: "done" | "failed" | "cancelled" = "done",
 ): Promise<number> {
-  if (!isV3PostgresConfigured()) return 0;
+  if (!isPostgres()) return 0;
   const terminal = runStatus === "cancelled" ? "cancelled" : "done";
-  const upd = await v3DbExec(
-    `UPDATE brain_tasks
+  const upd = await getDbExec().execute({
+    sql: `UPDATE brain_tasks
         SET status = $2, updated_at = now()
       WHERE thread_id = $1 AND status = 'running'
     RETURNING id`,
-    [threadId, terminal],
-  );
+    args: [threadId, terminal],
+  });
   const released = upd.rows?.length ?? 0;
   if (released > 0) {
     // Pull the next queued task(s) into the freed slot(s).

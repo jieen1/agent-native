@@ -16,7 +16,7 @@ import {
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
 import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/v3.js";
+import { getV3Db, v3Schema } from "../server/db/index.js";
 import { newId } from "./_util.js";
 import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";
 

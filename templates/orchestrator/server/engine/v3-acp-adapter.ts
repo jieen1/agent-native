@@ -14,7 +14,7 @@ import {
   resolveAgentHarness,
   startAgentHarnessRun,
 } from "@agent-native/core/agent/harness";
-import { getV3Db, v3Schema } from "../db/v3.js";
+import { getV3Db, v3Schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 import { registerOrchestratorRuntime } from "../register-runtime.js";
 import type { NodeRunnerResult } from "../runtime/node-runner.js";

@@ -5,6 +5,7 @@ import {
   getDialect,
   getMigrationDatabaseUrl,
   retrySqliteBusy,
+  isPgCatalogRace,
   type DbExec,
 } from "./client.js";
 
@@ -605,6 +606,15 @@ export function runMigrations(
               } catch (err) {
                 if (!pg && hadIfNotExists && isDuplicateColumnError(err)) {
                   // IF NOT EXISTS semantic: column already present, skip.
+                  continue;
+                }
+                if (pg && isPgCatalogRace(err)) {
+                  // Non-idempotent DDL re-run on Postgres (e.g. `CREATE TYPE`
+                  // has no `IF NOT EXISTS` clause) hit an "already exists"
+                  // race or a straight duplicate on a later boot — the prior
+                  // boot (or a concurrent one) already created it, so this
+                  // statement is a safe no-op. Skip and continue with the
+                  // rest of this migration's statements.
                   continue;
                 }
                 throw err;

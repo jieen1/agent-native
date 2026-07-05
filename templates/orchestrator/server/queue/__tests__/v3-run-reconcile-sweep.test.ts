@@ -5,10 +5,10 @@
 // v3_nodes are ALL terminal and silent past a threshold, then hand them to
 // the EXISTING reconciler via triggerTickSafe — it never reimplements
 // terminal-status or finalize logic itself (see the module's own header
-// comment). These tests mock the DB layer (../../db/v3.js) and the
-// reconciler entrypoint (../../plugins/v3-reconciler.js) so they run without
-// a real Postgres instance, and assert only on this module's OWN decision
-// logic:
+// comment). These tests mock the DB layer (../../db/index.js's getV3Db +
+// @agent-native/core/db's isPostgres) and the reconciler entrypoint
+// (../../plugins/v3-reconciler.js) so they run without a real Postgres
+// instance, and assert only on this module's OWN decision logic:
 //   - it no-ops when V3 Postgres isn't configured (no db call attempted)
 //   - a run with any non-terminal node is left alone (still progressing)
 //   - a run with zero nodes is left alone (not treated as stranded)
@@ -35,9 +35,12 @@ let mockIsConfigured = true;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let mockDb: any = null;
 
-vi.mock("../../db/v3.js", () => ({
-  isV3PostgresConfigured: () => mockIsConfigured,
+vi.mock("../../db/index.js", () => ({
   getV3Db: () => mockDb,
+}));
+
+vi.mock("@agent-native/core/db", () => ({
+  isPostgres: () => mockIsConfigured,
 }));
 
 type NodeRow = { status?: string; startedAt: string | null; completedAt: string | null };

@@ -8,8 +8,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/v3.js";
-import { ensureBrainSchema } from "../server/db/brain-schema.js";
+import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export default defineAction({
   description:
@@ -21,7 +20,6 @@ export default defineAction({
   }),
   http: { method: "POST" },
   run: async (args) => {
-    await ensureBrainSchema();
     const db = getV3Db();
     // Fail-closed owner scope — only the thread's owner may delete it.
     const ownerEmail = resolveOwnerEmail();

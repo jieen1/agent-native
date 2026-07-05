@@ -27,8 +27,8 @@ interface V3HealthReport {
  */
 async function checkPostgres(): Promise<HealthStatus> {
   try {
-    const { v3DbExec } = await import("../db/v3.js");
-    await v3DbExec("SELECT 1");
+    const { getDbExec } = await import("../db/index.js");
+    await getDbExec().execute("SELECT 1");
     return { status: "ok" };
   } catch (error: unknown) {
     return {

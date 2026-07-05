@@ -31,7 +31,8 @@
 // 'error'; otherwise 'done' (the same default a clean run-to-completion gives).
 // A clear error message records that this was a reconcile, not a real failure.
 
-import { v3DbExec, isV3PostgresConfigured } from "../db/v3.js";
+import { getDbExec } from "../db/index.js";
+import { isPostgres } from "@agent-native/core/db";
 
 /**
  * A 'running' brain thread is eligible for reconcile only after this long with no
@@ -64,7 +65,7 @@ export interface ReconciledBrainThread {
 export async function reconcileBrainThreadsOnce(
   graceMs: number = BRAIN_THREAD_STALE_GRACE_MS,
 ): Promise<ReconciledBrainThread[]> {
-  if (!isV3PostgresConfigured()) return [];
+  if (!isPostgres()) return [];
 
   const cutoffIso = new Date(Date.now() - graceMs).toISOString();
   const reconciled: ReconciledBrainThread[] = [];
@@ -74,7 +75,7 @@ export async function reconcileBrainThreadsOnce(
   // child streams events, so a stale max means no child is driving the thread.
   // last_task_status = the most recently updated bound brain_task's status, used
   // to decide done vs error (mirrors finalizeThreadStatus).
-  const candidates = await v3DbExec(
+  const candidates = await getDbExec().execute(
     `SELECT
         t.id AS id,
         GREATEST(
@@ -114,8 +115,8 @@ export async function reconcileBrainThreadsOnce(
       ? `Reset by thread reconcile: the brain turn ended without finalizing ` +
         `(process restart or child death). Last task ${lastTaskStatus}.`
       : null;
-    const upd = await v3DbExec(
-      `UPDATE brain_threads
+    const upd = await getDbExec().execute({
+      sql: `UPDATE brain_threads
           SET status = $2,
               error = $3,
               updated_at = now()
@@ -128,8 +129,8 @@ export async function reconcileBrainThreadsOnce(
                          'epoch'::timestamptz)
               ) < $4
         RETURNING id`,
-      [id, to, errorText, cutoffIso],
-    );
+      args: [id, to, errorText, cutoffIso],
+    });
     if ((upd.rows?.length ?? 0) > 0) {
       reconciled.push({ id, from: "running", to, reason });
     }

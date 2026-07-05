@@ -345,7 +345,15 @@ export async function retryOnDdlRace<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-function isPgCatalogRace(e: any): boolean {
+/**
+ * True when `e` is a Postgres "already exists / duplicate object" DDL race or
+ * a straight re-run of non-idempotent DDL (e.g. `CREATE TYPE` has no
+ * `IF NOT EXISTS` clause). Exported so other idempotent-DDL callers — notably
+ * `runMigrations`'s per-statement loop in `./migrations.js`, which re-attempts
+ * a template's raw enum/table DDL on every boot — can swallow the same error
+ * shapes without reinventing this code/message matching.
+ */
+export function isPgCatalogRace(e: any): boolean {
   const msg = String(e?.message ?? "");
   if (e?.code === "42P07") return true;
   if (e?.code === "42710") {

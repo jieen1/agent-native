@@ -40,7 +40,8 @@
 //    best-effort per-item error swallowing, idempotent start/stop).
 
 import { and, eq, inArray } from "drizzle-orm";
-import { getV3Db, isV3PostgresConfigured } from "../db/v3.js";
+import { getV3Db } from "../db/index.js";
+import { isPostgres } from "@agent-native/core/db";
 import { v3Runs, v3Nodes } from "../db/v3-schema.js";
 import { triggerTickSafe } from "../plugins/v3-reconciler.js";
 
@@ -99,7 +100,7 @@ export function defaultNodesSilentThresholdMs(): number {
  * Best-effort: a single run's failure never blocks the rest of the sweep.
  */
 export async function reconcileStrandedV3RunsOnce(): Promise<string[]> {
-  if (!isV3PostgresConfigured()) return [];
+  if (!isPostgres()) return [];
 
   const db = getV3Db();
   const silentThresholdMs = defaultNodesSilentThresholdMs();
@@ -204,7 +205,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 export function startReconcileSweep(
   intervalMs: number = defaultSweepIntervalMs(),
 ): void {
-  if (!isV3PostgresConfigured()) return;
+  if (!isPostgres()) return;
   if (timer) return;
 
   timer = setInterval(() => {
