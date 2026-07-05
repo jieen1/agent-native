@@ -258,6 +258,33 @@ worker 并追踪到完成"的标准答案是**一组可组合原语**,全部投�
 
 ---
 
+## 五、执行结果与修订(2026-07-05,子 agent 实现 + 审查/部署/验收)
+
+执行后对本审计的重要修订:**部分深层"偏移"经实测证明是被框架能力限制所迫的合理偏移,不是可修的错误。**
+据实区分:
+
+**✅ 已拉回(合并 main + 部署 101 实测通过)**
+
+| 项 | 结果 |
+|---|---|
+| O9/O10/O11/O16 + T‑A/T‑F(P0) | V3 越权全部 fail-closed(`resolveOwnerEmail`)、工作区越权闭合(含 `workspaceCommit` 旁路)、reconciler 裸 SQL 参数化、guard/schema fail-loud、`databaseTools:false`(线上核实 MCP db 工具=0);tracker 审批越权闭合、去跨应用裸读 `brain_tasks` |
+| O14(删 V2) | 删 21k 行 / 144 文件;actions 166→146;启动干净、全页面 200 |
+| T‑E/T‑F(P3) | 两份 ~180 行手写 MCP 客户端合并为共享 `mcp-client.ts`;新增 owner 域 `brain-task-for-thread` 收口 T‑F |
+| T‑H/T‑I/T‑J/T‑L(P5) | Tabler 图标、`run-acceptance` UI 按钮、去硬编码 IP、AGENTS.md 修正 |
+| T‑C(P4) | 活动流 `actorKind` 改为按 `ctx.caller` 派生(镜像框架 `deriveActorKind`) |
+
+**⚠️ 被迫/合理偏移(据实记录,保留)**
+
+- **O1 brain→Harness:不可行**。框架 `acp:claude-code` harness 硬编码 `mcpServers:[]`(brain 丢失全部 `mcp__orchestrator__*` 工具),ACP 包未装,`ai-sdk-harness` 与容器托管 OAuth 不兼容(崩溃在 `docs/DESIGN.md §7.0b` 复现)。保留裸 spawn;仅做会话存储对齐 + 打通 opt-in ACP worker(默认关)。
+- **O4/O5 run→run-manager:大部分被迫**。V3 是声明式 DAG,非 run-manager 的 agent-loop run;框架自愈/流式针对 agent-team run;brain 短命子进程无法持 SSE 订阅。保留。
+- **O8 V3→框架 DB:被迫+高风险**。V3 依赖 PG 专有(advisory lock/`FOR UPDATE SKIP LOCKED`/JSONB)+ 只增不删的线上数据迁移风险。保留。
+- **确定性 MCP tools/call**(T‑E 派发):`agent-native.json` 明示有意为之(非 NL A2A)。保留,仅去重。
+- **T‑B tracker 自写 `ownerScope`**:功能正确,换 `accessFilter` 属低价值 churn。保留。
+
+**部署**:按裁决「以 main 为准」,101 的 orchestrator/tracker `.output` 从 main 重建部署(旧 `/opt` 分叉树不再作为部署源),每阶段有 `.output.bak` 回滚。
+
+---
+
 ## 附:证据索引(供下钻)
 
 - 官方原语:`packages/core/src/server/agent-teams.ts`、`agent-teams-run-queue.ts`、`agent/run-manager.ts`、
