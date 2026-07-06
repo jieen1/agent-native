@@ -191,17 +191,24 @@ export default function AgentsRoute() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<AgentForm>(EMPTY_FORM);
+  // Explicit "user clicked + 新建智能体" flag — distinct from "nothing
+  // selected yet". Deriving new-mode from `selectedId === null` made the full
+  // create-agent form (engine/model/runtime/tools/systemPrompt editor) render
+  // immediately on page load, before the user asked to create anything. The
+  // idle/empty state now only shows once creatingNew is explicitly set.
+  const [creatingNew, setCreatingNew] = useState(false);
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedId) ?? null,
     [agents, selectedId],
   );
 
-  const isNewMode = selectedId === null;
+  const isNewMode = creatingNew;
   const isBuiltin = selectedAgent?.builtin === true;
 
   const handleSelect = useCallback((agent: AgentDef) => {
     setSelectedId(agent.id);
+    setCreatingNew(false);
     setForm({
       name: agent.name,
       engine: agent.engine,
@@ -215,6 +222,7 @@ export default function AgentsRoute() {
 
   const handleNew = useCallback(() => {
     setSelectedId(null);
+    setCreatingNew(true);
     setForm({ ...EMPTY_FORM, tools: [] });
   }, []);
 
@@ -257,6 +265,7 @@ export default function AgentsRoute() {
           refetch();
           if (isNewMode) {
             setSelectedId(null);
+            setCreatingNew(false);
           }
         },
         onError: (err) => {
@@ -358,8 +367,19 @@ export default function AgentsRoute() {
         {/* ── Right column: detail panel ───────────────────────────────── */}
         <div className="min-w-0 flex-1">
           {!selectedAgent && !isNewMode ? (
-            <div className="flex h-40 items-center justify-center rounded-lg border text-sm text-muted-foreground">
-              选择左侧一个智能体，或新建一个。
+            <div className="flex h-64 flex-col items-center justify-center gap-3 rounded-lg border text-center text-sm text-muted-foreground">
+              <IconRobot className="size-8 text-muted-foreground/50" />
+              {agents.length === 0 ? (
+                <>
+                  <p>还没有智能体</p>
+                  <Button size="sm" variant="secondary" onClick={handleNew}>
+                    <IconPlus className="mr-1 size-4" />
+                    新建智能体
+                  </Button>
+                </>
+              ) : (
+                <p>选择左侧一个智能体，或新建一个</p>
+              )}
             </div>
           ) : (
             <div className="space-y-5 rounded-lg border bg-card p-6">
