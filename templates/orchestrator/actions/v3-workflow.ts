@@ -13,27 +13,77 @@ import addFormats from "ajv-formats";
 import type { FormatName } from "ajv-formats";
 import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";
 
-const allFormats: FormatName[] = ["date", "time", "date-time", "duration", "uri", "uri-reference", "uri-template", "url", "email", "hostname", "ipv4", "ipv6", "regex", "uuid", "json-pointer", "json-pointer-uri-fragment", "relative-json-pointer", "byte", "int32", "int64", "float", "double"];
+const allFormats: FormatName[] = [
+  "date",
+  "time",
+  "date-time",
+  "duration",
+  "uri",
+  "uri-reference",
+  "uri-template",
+  "url",
+  "email",
+  "hostname",
+  "ipv4",
+  "ipv6",
+  "regex",
+  "uuid",
+  "json-pointer",
+  "json-pointer-uri-fragment",
+  "relative-json-pointer",
+  "byte",
+  "int32",
+  "int64",
+  "float",
+  "double",
+];
 
-/** List all V3 workflow templates. */
+/**
+ * List V3 workflow templates — one row per distinct name, the LATEST version
+ * only (workflowSave never mutates in place; every save inserts a new
+ * version row under the same name). Rows are ordered newest-first, so the
+ * first row seen per name is already its highest version.
+ */
 export const workflowList = defineAction({
-  description: "List all V3 workflow templates.",
+  description:
+    "List V3 workflow templates, one entry per name (latest version only). " +
+    "Each entry has { id, name, version, description, nodeCount, createdAt }.",
   schema: z.object({}),
   readOnly: true,
   http: { method: "GET" },
   run: async () => {
     const db = getV3Db();
     const rows = await db
-      .select()
+      .select({
+        id: v3Schema.v3WorkflowTemplates.id,
+        name: v3Schema.v3WorkflowTemplates.name,
+        version: v3Schema.v3WorkflowTemplates.version,
+        description: v3Schema.v3WorkflowTemplates.description,
+        dag: v3Schema.v3WorkflowTemplates.dag,
+        createdAt: v3Schema.v3WorkflowTemplates.createdAt,
+      })
       .from(v3Schema.v3WorkflowTemplates)
       .orderBy(desc(v3Schema.v3WorkflowTemplates.createdAt));
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      version: r.version,
-      description: r.description,
-      createdAt: r.createdAt,
-    }));
+
+    const seenNames = new Set<string>();
+    const latest: typeof rows = [];
+    for (const r of rows) {
+      if (seenNames.has(r.name)) continue;
+      seenNames.add(r.name);
+      latest.push(r);
+    }
+
+    return latest.map((r) => {
+      const nodes = (r.dag as { nodes?: unknown[] } | null)?.nodes;
+      return {
+        id: r.id,
+        name: r.name,
+        version: r.version,
+        description: r.description,
+        nodeCount: Array.isArray(nodes) ? nodes.length : 0,
+        createdAt: r.createdAt,
+      };
+    });
   },
 });
 
@@ -264,7 +314,8 @@ export const workflowRun = defineAction({
           throw new Error(`Invalid inputs: ${JSON.stringify(validate.errors)}`);
         }
       } catch (e: unknown) {
-        if (e instanceof Error && e.message.startsWith("Invalid inputs")) throw e;
+        if (e instanceof Error && e.message.startsWith("Invalid inputs"))
+          throw e;
         throw new Error(
           `Template input_schema error: ${e instanceof Error ? e.message : String(e)}`,
         );
@@ -326,5 +377,24 @@ export const workflowRun = defineAction({
       status: "pending" as const,
       nodeCount: nodes.length,
     };
+  },
+});
+
+/**
+ * Validate a DAG definition without persisting it — powers the visual
+ * workflow editor's live/"Validate" checks (structural shape, node types,
+ * dep/cycle checks, guard/expression syntax, per-type field rules). Delegates
+ * to the same `validateDag()` engine helper that `workflowSave`/`workflowRun`
+ * enforce at write time, so the editor can never show "valid" for a DAG that
+ * would then fail to save.
+ */
+export const dagValidate = defineAction({
+  description:
+    "Validate a DAG definition (an object with a nodes array) without saving it. " +
+    "Returns { ok, errors } — errors are prefixed with the offending node id where applicable.",
+  schema: z.object({ dag: z.unknown() }),
+  readOnly: true,
+  run: async (args) => {
+    return validateDag(args.dag);
   },
 });
