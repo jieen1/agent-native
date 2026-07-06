@@ -540,8 +540,15 @@ CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchest
 const migrateV3 = runMigrations(
   [
     {
+      // Version-only tracking (no `name:`) — matches every other migration table
+      // in this repo. A `name:` here would make runMigrations gate on the
+      // companion `v3_migrations_names` table instead of `v3_migrations`; the
+      // CREATE TYPE 42710-swallow on the first folded boot (existing DB) leaves
+      // that named-row insert unpersisted, so the named gate never sees it and
+      // re-applies all 32 statements every boot. The version gate (v3_migrations)
+      // records cleanly, so version-only is tracked-once on both fresh and
+      // existing databases.
       version: 1,
-      name: "v3-schema-init",
       sql: {
         postgres: `CREATE TYPE "public"."v3_node_status" AS ENUM('pending', 'ready', 'running', 'done', 'failed', 'skipped', 'awaiting-approval');
 CREATE TYPE "public"."v3_run_status" AS ENUM('pending', 'running', 'paused', 'done', 'failed', 'cancelled');
@@ -764,7 +771,6 @@ CREATE INDEX IF NOT EXISTS "idx_v3_workspaces_owner" ON "v3_workspaces" USING bt
       // ALTER). Postgres supports `ADD COLUMN IF NOT EXISTS` natively (unlike
       // `CREATE TYPE`), so no catalog-race handling is needed for these.
       version: 2,
-      name: "v3-p4-additive-columns",
       sql: {
         postgres: `ALTER TABLE v3_artifacts ADD COLUMN IF NOT EXISTS expires_at timestamp with time zone;
 ALTER TABLE v3_artifacts ADD COLUMN IF NOT EXISTS keep_after_run integer NOT NULL DEFAULT 0;

@@ -592,7 +592,29 @@ async function runBrainHarnessTurn(opts: {
     // `mcp__orchestrator__*` tools are a separate channel (mcpServers below)
     // and are unaffected by this list. `model`, when a non-default override is
     // saved, threads through the SAME `_meta.claudeCode.options` escape hatch.
+    //
+    // `systemPrompt` is a SIBLING top-level `_meta` key, NOT nested under
+    // `claudeCode.options` — confirmed from the vendored
+    // `@agentclientprotocol/claude-agent-acp` source (createSession()):
+    // `if (params._meta?.systemPrompt) { ... }` is read independently of
+    // `sessionMeta?.claudeCode?.options` (which only ever supplies
+    // tools/model/env/settings/abortController/resume). Mirrors the vendored
+    // `@anthropic-ai/claude-agent-sdk` `Options.systemPrompt` preset shape
+    // (`{ type: 'preset', preset: 'claude_code', append?: string,
+    // excludeDynamicSections?: boolean }`) that the agent forwards verbatim
+    // into its own `query()` options (with `type`/`preset` force-set
+    // regardless of what's passed, so passing them explicitly here is
+    // belt-and-suspenders, not load-bearing). This applies uniformly to BOTH
+    // `newSession` and `loadSession` — both funnel through the same internal
+    // `createSession(params)` that reads `params._meta.systemPrompt` — so a
+    // resumed turn gets the brain prompt as a real system prompt too, not
+    // just a fresh one.
     const metadata: Record<string, unknown> = {
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        append: BRAIN_PROMPT,
+      },
       claudeCode: {
         options: {
           tools: ["Bash", "Read", "Edit", "Write"],
@@ -623,9 +645,13 @@ async function runBrainHarnessTurn(opts: {
     return;
   }
 
-  // ACP has no separate system-prompt turn field (unlike the raw CLI's
-  // `--append-system-prompt`), so the brain's system prompt is prepended to
-  // the turn's user-role prompt text instead.
+  // The brain's system prompt now goes through `_meta.systemPrompt` at session
+  // creation (above) — a real system-role prompt, sent once per session
+  // instead of re-prepended into every turn's user-role prompt. Only the
+  // forced-fresh recap belongs in the user prompt below: it is turn-specific
+  // conversational context ("the prior session is gone, re-establish
+  // yourself"), not an instruction the model should treat as standing system
+  // guidance.
   //
   // A fresh session was silently forced despite a resume request when the
   // real ACP session id (session.id, fixed in the same core patch to reflect
@@ -649,7 +675,7 @@ async function runBrainHarnessTurn(opts: {
       `runState / v3RunNodes / runSummary to see where it stands, and finish ` +
       `the job.)\n\n`
     : "";
-  const prompt = `${BRAIN_PROMPT}\n\n${recap}${opts.message}`;
+  const prompt = `${recap}${opts.message}`;
 
   // Buffer text-deltas and flush to ONE brain_events row per boundary (a tool
   // call or turn end) instead of one row per delta chunk — ACP streams text in
@@ -704,14 +730,45 @@ async function runBrainHarnessTurn(opts: {
         case "done":
           doneReason = event.reason;
           break;
-        // thinking-delta / activity / file-change / compaction / usage /
+        case "usage": {
+          // ACP's "usage_update" session update (translated by
+          // acpUpdateToHarnessEvents into this "usage" harness event's
+          // contextUsedTokens/contextWindowTokens) mirrors the raw-spawn
+          // path's assistant/result usage capture in streamBrainChild above
+          // (contextUsed = tokens currently in context, contextWindow = the
+          // model's context window) — persist it the SAME way so the
+          // `brain-usage` action/panel reflects live context fill through
+          // this path too instead of staying frozen. Best-effort: a failed
+          // write here must never abort the turn.
+          const update: Record<string, unknown> = { updatedAt: new Date() };
+          if (typeof event.contextUsedTokens === "number") {
+            update.contextUsed = event.contextUsedTokens;
+          }
+          if (
+            typeof event.contextWindowTokens === "number" &&
+            event.contextWindowTokens > 0
+          ) {
+            update.contextWindow = event.contextWindowTokens;
+          }
+          if (Object.keys(update).length > 1) {
+            update.lastUsage = {
+              used: event.contextUsedTokens,
+              size: event.contextWindowTokens,
+              ...(event.costCents != null ? { costCents: event.costCents } : {}),
+            };
+            await db
+              .update(v3Schema.brainThreads)
+              .set(update)
+              .where(eq(v3Schema.brainThreads.id, opts.threadId))
+              .catch(() => {});
+          }
+          break;
+        }
+        // thinking-delta / activity / file-change / compaction /
         // approval-request: no brain_events analogue in today's raw-spawn
         // transcript either (it only ever writes user/assistant/tool_use/
         // tool_result/result/error rows — see streamBrainChild above), so
-        // these are intentionally not persisted here. Known gap: ACP's
-        // "usage_update" session updates (real token/context-window data) are
-        // not even translated into an AgentHarnessEvent yet by
-        // acpUpdateToHarnessEvents — see this migration's RISKS notes.
+        // these are intentionally not persisted here.
         default:
           break;
       }
@@ -749,9 +806,12 @@ async function runBrainHarnessTurn(opts: {
       .set({
         sessionId: finalSessionId,
         status: sawError ? "error" : "done",
-        // Best-effort label: the harness path currently has no usage/model
-        // readback (see RISKS), so this is the requested override (or a
-        // generic fallback label) rather than a confirmed-resolved model id.
+        // Best-effort label: the harness path has no model-resolution
+        // readback (ACP surfaces no equivalent of the raw path's
+        // system/init `model` field), so this is the requested override (or
+        // a generic fallback label) rather than a confirmed-resolved model
+        // id. Context usage IS now captured live via the "usage" case above
+        // (ACP's usage_update), so this only concerns the model label.
         model: brainModel ?? "claude-code-acp",
         updatedAt: new Date(),
       })

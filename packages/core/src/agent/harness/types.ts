@@ -133,6 +133,16 @@ export type AgentHarnessEvent =
       outputTokens?: number;
       totalTokens?: number;
       costCents?: number;
+      /**
+       * Running context-window fill, for adapters that report a live "tokens
+       * currently in context" / "context window size" pair instead of (or in
+       * addition to) per-call input/output/total token counts — e.g. ACP's
+       * `usage_update` session notification (`used`/`size`). Additive and
+       * optional: consumers that only understand input/output/total tokens
+       * can ignore these two fields.
+       */
+      contextUsedTokens?: number;
+      contextWindowTokens?: number;
     }
   | { type: "error"; error: string; code?: string; recoverable?: boolean }
   | { type: "done"; reason?: string };

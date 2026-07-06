@@ -596,6 +596,15 @@ export function acpUpdateToHarnessEvents(
     case "available_commands_update":
     case "current_mode_update":
       return [];
+    case "usage_update":
+      return [
+        {
+          type: "usage",
+          contextUsedTokens: update.used,
+          contextWindowTokens: update.size,
+          ...(update.cost ? { costCents: Math.round(update.cost.amount * 100) } : {}),
+        },
+      ];
     default:
       return [];
   }
@@ -830,7 +839,16 @@ export type AcpSessionUpdate =
     }
   | { sessionUpdate: "plan"; entries: AcpPlanEntry[] }
   | { sessionUpdate: "available_commands_update"; availableCommands: unknown[] }
-  | { sessionUpdate: "current_mode_update"; currentModeId: string };
+  | { sessionUpdate: "current_mode_update"; currentModeId: string }
+  | {
+      sessionUpdate: "usage_update";
+      /** Tokens currently in context. */
+      used: number;
+      /** Total context window size in tokens. */
+      size: number;
+      /** Cumulative session cost (optional). */
+      cost?: { amount: number; currency: string } | null;
+    };
 
 interface AcpSessionNotification {
   sessionId: string;

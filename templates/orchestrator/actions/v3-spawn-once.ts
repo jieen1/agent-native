@@ -89,7 +89,11 @@ export const spawnOnce = defineAction({
       id: runId,
       templateId: null,
       templateVersion: null,
-      inputs: null,
+      // `inputs` is NOT NULL jsonb — a bare spawn has no template inputs, so use
+      // an empty object (never null: the framework getDb/postgres-js path inserts
+      // a raw SQL NULL for a null jsonb value rather than the JSON `null` literal
+      // the old dedicated pool produced, which violates the NOT NULL constraint).
+      inputs: {},
       dag,
       dagVersion: 1,
       status: "pending",

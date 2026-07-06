@@ -135,6 +135,36 @@ describe("acpUpdateToHarnessEvents", () => {
     ]);
   });
 
+  it("maps a usage_update to a usage event with context fill", () => {
+    expect(
+      acpUpdateToHarnessEvents({
+        sessionUpdate: "usage_update",
+        used: 12_345,
+        size: 200_000,
+      }),
+    ).toEqual([
+      { type: "usage", contextUsedTokens: 12_345, contextWindowTokens: 200_000 },
+    ]);
+  });
+
+  it("maps a usage_update's cost to costCents (dollars -> cents)", () => {
+    expect(
+      acpUpdateToHarnessEvents({
+        sessionUpdate: "usage_update",
+        used: 500,
+        size: 1_000_000,
+        cost: { amount: 0.42, currency: "USD" },
+      }),
+    ).toEqual([
+      {
+        type: "usage",
+        contextUsedTokens: 500,
+        contextWindowTokens: 1_000_000,
+        costCents: 42,
+      },
+    ]);
+  });
+
   it("ignores command and mode updates", () => {
     expect(
       acpUpdateToHarnessEvents({
