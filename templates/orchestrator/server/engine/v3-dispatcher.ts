@@ -49,24 +49,25 @@ import { getWorkspace } from "./v3-workspace.js";
 /**
  * Route a CC-worker DAG-node turn. Tries the framework `acp:claude-code`
  * harness (O2 migration, off by default — see v3-acp-adapter.ts) ONLY when
- * ORCH_CC_WORKER_HARNESS=1 AND the node has no per-node model override (the
- * ACP transport has no channel to carry a model override — see
- * v3-acp-adapter.ts's KNOWN GAPS comment — so a node that explicitly asked for
- * a specific model always stays on the raw spawn, never silently switching
- * models even if the flag is on), and falls back to the proven raw `claude`
- * spawn (server/runtime/claude-code-worker.ts) on ANY failure so a
- * misconfigured or unavailable harness (missing optional ACP packages, spawn
- * error, etc.) can never break a CC-worker node — it just silently reverts to
- * today's path.
+ * ORCH_CC_WORKER_HARNESS=1, and falls back to the proven raw `claude` spawn
+ * (server/runtime/claude-code-worker.ts) on ANY failure so a misconfigured or
+ * unavailable harness (missing optional ACP packages, spawn error, etc.) can
+ * never break a CC-worker node — it just silently reverts to today's path.
+ *
+ * `model`/`tools` now forward into the ACP path too, via
+ * `metadata.claudeCode.options` (see runAcpClaudeCodeWorker) — the same
+ * `_meta` channel runBrainHarnessTurn uses for the brain, so a node with an
+ * explicit model/tool override no longer has to stay pinned to the raw spawn.
  */
 async function runClaudeCodeNode(opts: {
   prompt: string;
   model?: string;
+  tools?: string[];
   cwd?: string;
   signal?: AbortSignal;
   onStep?: (step: RuntimeExecStep) => void;
 }): Promise<NodeRunnerResult> {
-  if (isAcpClaudeCodeWorkerEnabled() && !opts.model) {
+  if (isAcpClaudeCodeWorkerEnabled()) {
     try {
       return await runAcpClaudeCodeWorker(opts);
     } catch (err) {
@@ -632,6 +633,7 @@ export class V3Dispatcher {
       ? await runClaudeCodeNode({
           prompt: renderedPrompt,
           model: runnerNode.model,
+          tools: agentConfig.tools.length > 0 ? agentConfig.tools : undefined,
           cwd: localWorkspaceDir,
           signal: effectiveSignal,
           onStep,

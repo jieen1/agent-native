@@ -280,20 +280,18 @@ export async function getAcpSession(
 // see the try/catch around runAcpClaudeCodeWorker() in v3-dispatcher.ts.
 //
 // KNOWN GAPS vs. the raw-spawn worker (why this defaults OFF):
-//   - Requires the optional `@zed-industries/agent-client-protocol` +
-//     `@zed-industries/claude-code-acp` packages. NEITHER is in this app's
-//     dependency tree today (verified: not under node_modules/.pnpm, not in
-//     templates/orchestrator/package.json). resolveAgentHarness("acp:claude-code")
-//     calls assertAgentHarnessPackagesInstalled() (packages/core/src/agent/
-//     harness/registry.ts) which throws synchronously without them — so today
-//     this flag is a no-op and every call falls back to the raw spawn.
+//   - `@agentclientprotocol/sdk` + `@agentclientprotocol/claude-agent-acp` are
+//     real dependencies of templates/orchestrator/package.json (renamed
+//     upstream from `@zed-industries/agent-client-protocol` /
+//     `@zed-industries/claude-code-acp`) and are installed — this path is
+//     functional today, gated only by ORCH_CC_WORKER_HARNESS=1.
 //   - No token-usage accounting: acp-adapter.ts's acpUpdateToHarnessEvents()
 //     has no branch that emits an AgentHarnessEvent of type "usage", so
 //     `tokensSpent` is always 0 through this path.
-//   - No model override: AgentHarnessCreateSessionOptions has no `model`
-//     field and the ACP transport does not expose one. `opts.model` is kept
-//     in the function signature for shape-parity with runClaudeCodeWorker but
-//     is NOT forwarded to the underlying agent.
+//   - Model + tools override: forwarded via `metadata.claudeCode.options`,
+//     which acp-adapter.ts's `initialize()` sends as ACP `_meta` on
+//     newSession/loadSession — the same channel runBrainHarnessTurn (see
+//     brain/brain-session.ts) uses to carry the brain's model/tools.
 export const ACP_CLAUDE_CODE_WORKER_ENV = "ORCH_CC_WORKER_HARNESS";
 
 /** Whether the dispatcher should attempt the ACP harness path for CC-worker nodes. */
@@ -319,6 +317,7 @@ export function isAcpClaudeCodeWorkerEnabled(): boolean {
 export async function runAcpClaudeCodeWorker(opts: {
   prompt: string;
   model?: string;
+  tools?: string[];
   cwd?: string;
   signal?: AbortSignal;
   onStep?: (step: RuntimeExecStep) => void;
@@ -327,10 +326,23 @@ export async function runAcpClaudeCodeWorker(opts: {
   registerOrchestratorRuntime();
   const adapter = resolveAgentHarness("acp:claude-code");
   const cwd = opts.cwd || mkdtempSync(join(tmpdir(), "v3-claude-acp-"));
+  // Mirrors runBrainHarnessTurn's `_meta.claudeCode.options` escape hatch
+  // (brain/brain-session.ts) — the same channel the ACP adapter forwards as
+  // ACP `_meta` on newSession/loadSession (acp-adapter.ts's initialize()).
+  // Only include the keys that were actually provided.
+  const metadata: Record<string, unknown> = {
+    claudeCode: {
+      options: {
+        ...(opts.model ? { model: opts.model } : {}),
+        ...(opts.tools?.length ? { tools: opts.tools } : {}),
+      },
+    },
+  };
   const session = await adapter.createSession({
     cwd,
     permissionMode: "allow-edits",
     signal: opts.signal,
+    metadata,
   });
 
   try {

@@ -1,10 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
 import { useActionMutation, useActionQuery } from "@agent-native/core/client";
+import { cn } from "@/lib/utils";
 import { APP_TITLE } from "@/lib/app-config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -12,47 +12,159 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
+import { MarkdownSourceEditor } from "@/components/skills/MarkdownSourceEditor";
+import { MarkdownPreview } from "@/components/skills/MarkdownPreview";
 import {
+  IconCheck,
   IconDeviceFloppy,
+  IconFileText,
   IconLock,
   IconPlus,
   IconRobot,
+  IconSearch,
+  IconTerminal2,
   IconTrash,
+  IconWorld,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 
+// ── Real engine/model/runtime mapping ────────────────────────────────────────
+//
+// The previous version of this page assumed engine/model were driven by a
+// `list-runtime-configs` runtime→model cascade (Settings). That concept does
+// not exist for DAG agent defs: `runtime_configs` is a separate, singleton
+// "active chat engine" setting unrelated to per-agent-def engine selection.
+//
+// The REAL mechanism (confirmed by tracing v3-dispatcher.ts / agent-loader.ts
+// / server/vllm-engine.ts):
+//   - `engine` selects the execution path: "vllm" (the singleton, env-configured
+//     local vLLM engine — server/vllm-engine.ts) | "claude-code" (routes through
+//     the ACP Claude Code harness) | "ai-sdk:anthropic" (a real built-in AI SDK
+//     engine, packages/core/src/agent/engine/builtin.ts, requires
+//     ANTHROPIC_API_KEY).
+//   - `runtime` is the field v3-dispatcher.ts's `isClaudeCodeRuntime(...)`
+//     actually checks to route a node through the Claude Code harness — NOT
+//     `engine` alone. In practice only two values are ever produced:
+//     "none" (default engine executor) and "acp:claude-code" (Claude Code
+//     harness) — see server/plugins/agent-defs-seed.ts's builtin seed rows and
+//     actions/save-agent-def.ts's engine→runtime derivation. So it is shown
+//     here as a derived, read-only field rather than a fabricated free-choice
+//     select.
+//   - `model`: vLLM is a fixed local engine, so its models come from the real
+//     VLLM_MODELS list in server/vllm-engine.ts (kept in sync manually here —
+//     there is no shared-package export of that template-local constant).
+//     Claude Code / ai-sdk:anthropic model ids are free-form strings, so they
+//     are a plain text field.
+
+/** Mirrors VLLM_MODELS in templates/orchestrator/server/vllm-engine.ts. */
+const VLLM_MODELS = [
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5-20251001",
+  "qwen3.6",
+  "ornith-1.0-35b",
+] as const;
+
+const CLAUDE_CODE_RUNTIME = "acp:claude-code";
+
+/**
+ * `ai-sdk:anthropic` is included because it IS a real, built-in registered
+ * engine (packages/core/src/agent/engine/builtin.ts registers
+ * `ai-sdk:${provider}` for every entry in its `aiSdkProviders` list, which
+ * includes "anthropic" — requiredEnvVars: ["ANTHROPIC_API_KEY"]). Its exact
+ * supported-model list is computed from an internal, env-dependent constant
+ * in packages/core (not exported for template use), so its model field is
+ * free text rather than a hardcoded — and potentially stale — select list.
+ */
 const ENGINE_OPTIONS = [
-  { value: "vllm", label: "vLLM" },
-  { value: "ai-sdk:anthropic", label: "AI SDK: Anthropic" },
-  { value: "acp:claude-code", label: "ACP: Claude Code" },
+  { value: "vllm", label: "本地 vLLM" },
+  { value: "claude-code", label: "Claude Code" },
+  { value: "ai-sdk:anthropic", label: "Claude (AI SDK)" },
+] as const;
+
+const TOOL_GROUPS: Array<{
+  label: string;
+  icon: typeof IconFileText;
+  tools: string[];
+}> = [
+  {
+    label: "文件操作",
+    icon: IconFileText,
+    tools: ["Read", "Write", "Edit", "NotebookEdit"],
+  },
+  { label: "搜索", icon: IconSearch, tools: ["Glob", "Grep"] },
+  { label: "执行", icon: IconTerminal2, tools: ["Bash", "Task"] },
+  { label: "网络", icon: IconWorld, tools: ["WebFetch", "WebSearch"] },
 ];
 
-const MODEL_OPTIONS = [
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-  { value: "qwen3.6", label: "Qwen 3.6" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-];
+/** Derive the real `runtime` value for a given `engine` (see mapping note above). */
+function runtimeForEngine(engine: string): string {
+  return engine === "claude-code" ? CLAUDE_CODE_RUNTIME : "none";
+}
 
-const TOOL_OPTIONS = [
-  "Read",
-  "Bash",
-  "Grep",
-  "Glob",
-  "Edit",
-  "Write",
-];
+function defaultModelForEngine(engine: string): string {
+  if (engine === "vllm") return VLLM_MODELS[0];
+  if (engine === "claude-code") return "claude-sonnet-4-6";
+  return "";
+}
 
-const EMPTY_FORM = {
+/** Matches list-agent-defs.ts's actual return shape 1:1 (id, name, engine,
+ * model, tools (parsed array), description, runtime, builtin, version,
+ * systemPrompt, createdAt, updatedAt). */
+interface AgentDef {
+  id: string;
+  name: string;
+  engine: string;
+  model: string;
+  tools: string[];
+  description: string;
+  runtime: string;
+  builtin: boolean;
+  version: number;
+  systemPrompt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface SaveAgentDefInput {
+  name: string;
+  engine: string;
+  model: string;
+  tools: string[];
+  systemPrompt: string;
+  description?: string;
+  runtime?: string;
+}
+
+interface SaveAgentDefResult {
+  id: string;
+  name: string;
+  ok: boolean;
+}
+
+interface DeleteAgentDefResult {
+  id: string;
+  name: string;
+  ok: boolean;
+}
+
+interface AgentForm {
+  name: string;
+  engine: string;
+  model: string;
+  runtime: string;
+  description: string;
+  tools: string[];
+  systemPrompt: string;
+}
+
+const EMPTY_FORM: AgentForm = {
   name: "",
   engine: "vllm",
-  model: "qwen3.6",
+  model: VLLM_MODELS[0],
+  runtime: "none",
   description: "",
-  tools: [] as string[],
+  tools: [],
   systemPrompt: "",
 };
 
@@ -66,22 +178,19 @@ export default function AgentsRoute() {
     isLoading,
     error,
     refetch,
-  } = useActionQuery(
-    "list-agent-defs" as any,
-    {},
-    undefined,
-  ) as {
-    data?: Array<Record<string, unknown>>;
-    isLoading: boolean;
-    error?: unknown;
-    refetch: () => void;
-  };
+  } = useActionQuery<AgentDef[]>("list-agent-defs" as any, {}, undefined);
 
-  const saveMutation = useActionMutation("save-agent-def" as any, {});
-  const deleteMutation = useActionMutation("delete-agent-def" as any, {});
+  const saveMutation = useActionMutation<SaveAgentDefResult, SaveAgentDefInput>(
+    "save-agent-def" as any,
+    {},
+  );
+  const deleteMutation = useActionMutation<
+    DeleteAgentDefResult,
+    { id: string }
+  >("delete-agent-def" as any, {});
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [form, setForm] = useState<typeof EMPTY_FORM>(EMPTY_FORM);
+  const [form, setForm] = useState<AgentForm>(EMPTY_FORM);
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedId) ?? null,
@@ -91,25 +200,40 @@ export default function AgentsRoute() {
   const isNewMode = selectedId === null;
   const isBuiltin = selectedAgent?.builtin === true;
 
-  // Sync form when a new agent is selected
-  const handleSelect = useCallback(
-    (agent: Record<string, unknown>) => {
-      setSelectedId(agent.id as string);
-      setForm({
-        name: (agent.name as string) ?? "",
-        engine: (agent.engine as string) ?? "vllm",
-        model: (agent.model as string) ?? "qwen3.6",
-        description: (agent.description as string) ?? "",
-        tools: Array.isArray(agent.tools) ? (agent.tools as string[]) : [],
-        systemPrompt: (agent.systemPrompt as string) ?? "",
-      });
-    },
-    [],
-  );
+  const handleSelect = useCallback((agent: AgentDef) => {
+    setSelectedId(agent.id);
+    setForm({
+      name: agent.name,
+      engine: agent.engine,
+      model: agent.model,
+      runtime: agent.runtime || runtimeForEngine(agent.engine),
+      description: agent.description,
+      tools: [...agent.tools],
+      systemPrompt: agent.systemPrompt,
+    });
+  }, []);
 
   const handleNew = useCallback(() => {
     setSelectedId(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM, tools: [] });
+  }, []);
+
+  const handleEngineChange = useCallback((value: string) => {
+    setForm((f) => ({
+      ...f,
+      engine: value,
+      runtime: runtimeForEngine(value),
+      model: defaultModelForEngine(value),
+    }));
+  }, []);
+
+  const toggleTool = useCallback((tool: string) => {
+    setForm((f) => ({
+      ...f,
+      tools: f.tools.includes(tool)
+        ? f.tools.filter((t) => t !== tool)
+        : [...f.tools, tool],
+    }));
   }, []);
 
   const handleSave = useCallback(() => {
@@ -125,6 +249,7 @@ export default function AgentsRoute() {
         tools: form.tools,
         systemPrompt: form.systemPrompt,
         description: form.description || undefined,
+        runtime: form.runtime,
       },
       {
         onSuccess: () => {
@@ -149,7 +274,7 @@ export default function AgentsRoute() {
         onSuccess: () => {
           toast.success("智能体已删除");
           setSelectedId(null);
-          setForm(EMPTY_FORM);
+          setForm({ ...EMPTY_FORM, tools: [] });
           refetch();
         },
         onError: (err) => {
@@ -167,7 +292,7 @@ export default function AgentsRoute() {
             智能体
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            管理工作智能体定义 — 引擎、模型、工具与系统提示。
+            管理工作智能体定义 — 引擎、模型、运行时、工具与系统提示。
           </p>
         </div>
         <Button size="sm" onClick={handleNew}>
@@ -176,9 +301,9 @@ export default function AgentsRoute() {
         </Button>
       </header>
 
-      <div className="flex gap-6">
-        {/* ── Left column: agent list ────────────────────────────────────── */}
-        <div className="w-72 shrink-0">
+      <div className="flex items-start gap-6">
+        {/* ── Left column: agent list (master) ─────────────────────────── */}
+        <div className="w-64 shrink-0 space-y-1">
           {error ? (
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
               加载失败。
@@ -193,31 +318,30 @@ export default function AgentsRoute() {
               ))}
             </div>
           ) : (
-            <div className="space-y-1">
+            <>
               {agents.map((a) => {
-                const isActive = a.id === selectedId;
+                const isActive = !isNewMode && a.id === selectedId;
                 return (
                   <button
                     key={a.id}
                     type="button"
                     onClick={() => handleSelect(a)}
-                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
                       isActive
                         ? "bg-accent font-medium text-accent-foreground"
-                        : "hover:bg-muted"
-                    }`}
+                        : "hover:bg-muted",
+                    )}
                   >
                     <IconRobot className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate flex-1">
-                      {(a as any).name ?? a.id}
-                    </span>
-                    {(a as any).builtin ? (
-                      <IconLock className="size-3.5 shrink-0 text-muted-foreground" />
-                    ) : null}
-                    {(a as any).builtin ? (
-                      <Badge variant="secondary" className="ml-1 text-[10px]">
-                        内置
-                      </Badge>
+                    <span className="flex-1 truncate">{a.name}</span>
+                    {a.builtin ? (
+                      <>
+                        <IconLock className="size-3.5 shrink-0 text-muted-foreground" />
+                        <Badge variant="secondary" className="ml-1 text-[10px]">
+                          内置
+                        </Badge>
+                      </>
                     ) : null}
                   </button>
                 );
@@ -227,11 +351,11 @@ export default function AgentsRoute() {
                   暂无智能体。点击「新建智能体」创建。
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
 
-        {/* ── Right column: edit form ─────────────────────────────────────── */}
+        {/* ── Right column: detail panel ───────────────────────────────── */}
         <div className="min-w-0 flex-1">
           {!selectedAgent && !isNewMode ? (
             <div className="flex h-40 items-center justify-center rounded-lg border text-sm text-muted-foreground">
@@ -267,9 +391,7 @@ export default function AgentsRoute() {
                   <Label>引擎</Label>
                   <Select
                     value={form.engine}
-                    onValueChange={(v) =>
-                      setForm((f) => ({ ...f, engine: v }))
-                    }
+                    onValueChange={handleEngineChange}
                     disabled={isBuiltin}
                   >
                     <SelectTrigger>
@@ -286,25 +408,55 @@ export default function AgentsRoute() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>模型</Label>
-                  <Select
-                    value={form.model}
-                    onValueChange={(v) =>
-                      setForm((f) => ({ ...f, model: v }))
-                    }
-                    disabled={isBuiltin}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择模型" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MODEL_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {form.engine === "vllm" ? (
+                    <Select
+                      value={form.model}
+                      onValueChange={(v) =>
+                        setForm((f) => ({ ...f, model: v }))
+                      }
+                      disabled={isBuiltin}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择模型" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {VLLM_MODELS.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      value={form.model}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, model: e.target.value }))
+                      }
+                      disabled={isBuiltin}
+                      placeholder="claude-sonnet-4-6"
+                      className="font-mono text-xs"
+                    />
+                  )}
                 </div>
+              </div>
+
+              {/* Runtime — derived from engine, not independently editable:
+                  only "none" and "acp:claude-code" are ever produced by this
+                  app (agent-loader.ts's AgentRuntime type, agent-defs-seed.ts's
+                  builtin rows, save-agent-def.ts's engine→runtime derivation).
+                  Shown so the real routing field is no longer hidden from
+                  the form. */}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">运行时</span>
+                <Badge variant="outline" className="font-mono">
+                  {form.runtime}
+                </Badge>
+                <span>
+                  {form.runtime === CLAUDE_CODE_RUNTIME
+                    ? "由引擎自动决定 — 通过 ACP Claude Code 代理运行此节点。"
+                    : "由引擎自动决定 — 通过标准引擎执行器运行此节点。"}
+                </span>
               </div>
 
               {/* Description */}
@@ -321,39 +473,78 @@ export default function AgentsRoute() {
                 />
               </div>
 
-              {/* Tools */}
+              {/* Tools — grouped multi-select chips */}
               <div className="space-y-1.5">
                 <Label>工具</Label>
-                <ToggleGroup
-                  type="multiple"
-                  value={form.tools}
-                  onValueChange={(v: string[]) =>
-                    setForm((f) => ({ ...f, tools: v }))
-                  }
-                  disabled={isBuiltin}
-                >
-                  {TOOL_OPTIONS.map((t) => (
-                    <ToggleGroupItem key={t} value={t}>
-                      {t}
-                    </ToggleGroupItem>
+                <div className="flex flex-col gap-3.5 rounded-md border p-3.5">
+                  {TOOL_GROUPS.map((group) => (
+                    <div key={group.label} className="flex flex-col gap-2">
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                        <group.icon className="size-3.5" />
+                        {group.label}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {group.tools.map((tool) => {
+                          const selected = form.tools.includes(tool);
+                          return (
+                            <button
+                              key={tool}
+                              type="button"
+                              disabled={isBuiltin}
+                              aria-pressed={selected}
+                              onClick={() => toggleTool(tool)}
+                              className={cn(
+                                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                                selected
+                                  ? "border-accent bg-accent text-accent-foreground"
+                                  : "border-border bg-background text-foreground hover:bg-muted",
+                                isBuiltin && "pointer-events-none opacity-60",
+                              )}
+                            >
+                              {tool}
+                              {selected ? (
+                                <IconCheck className="size-3.5" />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   ))}
-                </ToggleGroup>
+                </div>
               </div>
 
-              {/* System Prompt */}
+              {/* System Prompt — split source/preview markdown editor.
+                  Reuses the SAME MarkdownSourceEditor/MarkdownPreview pair the
+                  Skills / Runbook editor uses (SkillEditorPane.tsx), whose
+                  gutter is generated from a single `lineCount` (derived from
+                  one `value.split("\n")`) driving one `Array.from` loop, and
+                  scroll-synced by mirroring the textarea's scrollTop onto the
+                  gutter on every scroll event — see MarkdownSourceEditor.tsx. */}
               <div className="space-y-1.5">
-                <Label htmlFor="agent-prompt">系统提示</Label>
-                <Textarea
-                  id="agent-prompt"
-                  value={form.systemPrompt}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, systemPrompt: e.target.value }))
-                  }
-                  disabled={isBuiltin}
-                  rows={10}
-                  className="font-mono text-xs"
-                  placeholder="输入系统提示（System Prompt）..."
-                />
+                <Label>系统提示</Label>
+                <div className="grid h-[420px] grid-cols-2 overflow-hidden rounded-md border">
+                  <div className="flex min-w-0 flex-col overflow-hidden border-r">
+                    <div className="shrink-0 border-b bg-muted/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Markdown 源码
+                    </div>
+                    <MarkdownSourceEditor
+                      value={form.systemPrompt}
+                      onChange={(v) =>
+                        setForm((f) => ({ ...f, systemPrompt: v }))
+                      }
+                      disabled={isBuiltin}
+                    />
+                  </div>
+                  <div className="flex min-w-0 flex-col overflow-hidden">
+                    <div className="shrink-0 border-b bg-muted/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      预览
+                    </div>
+                    <div className="flex-1 overflow-auto px-6 py-5">
+                      <MarkdownPreview markdown={form.systemPrompt} />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Actions */}
