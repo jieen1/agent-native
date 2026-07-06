@@ -9,6 +9,7 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
+import { safeParseFlows } from "../shared/stage-vocabulary.js";
 
 // Stages that are "before implementation" — dispatch should advance past these.
 const PRE_IMPL_STAGES = new Set(["待办", "分析", "设计"]);
@@ -120,11 +121,31 @@ export default defineAction({
 
     const tags = { source: "tracker", item_id: item.id };
 
+    // Stage Configuration (M2): resolve the dispatch template for the item's
+    // CURRENT stage from its assigned flow's dispatchTemplates, if any. Any
+    // failure to resolve one (no flowId — item predates this feature or its
+    // type had no assignment configured, flow no longer exists, no template
+    // mapped for this stage, malformed JSON) falls straight back to the
+    // literal 'sdlc-dev' exactly as before — this is the backward-
+    // compatibility guarantee, and it's the ONLY path every project takes
+    // until Stage Configuration is explicitly configured.
+    let dispatchTemplate = "sdlc-dev";
+    if (item.flowId) {
+      try {
+        const flows = safeParseFlows(project.stageFlows);
+        const flow = flows.find((f) => f.id === item.flowId);
+        const mapped = flow?.dispatchTemplates?.[item.currentStageName ?? ""];
+        if (mapped && mapped.trim()) dispatchTemplate = mapped.trim();
+      } catch {
+        // Malformed Stage Configuration — fall back to the default template.
+      }
+    }
+
     const requirement = item.description?.trim() || item.title;
     const message =
       `Work item ${item.id} (${project.key}) — "${item.title}".\n\n` +
       `Requirement:\n${requirement}\n\n` +
-      `Work in the checked-out workspace. Follow the orchestrating-v3 skill. Coding/development work DEFAULTS to the configurable development engine: analyze the requirement and the existing code yourself, then after workspaceCreate call workflowRun with template 'sdlc-dev' and inputs { spec, workspaceId, devEngine } to hand the actual coding to the develop node. The dev engine defaults to the local vLLM but is configurable — pass a devEngine when the item or project specifies one. You (the brain) analyze, review the resulting git diff, fix anything wrong, and commit — rather than writing the business code yourself. Monitor by polling, then workspaceCommitPush to open a PR. When done, report the run id and the PR url.`;
+      `Work in the checked-out workspace. Follow the orchestrating-v3 skill. Coding/development work DEFAULTS to the configurable development engine: analyze the requirement and the existing code yourself, then after workspaceCreate call workflowRun with template '${dispatchTemplate}' and inputs { spec, workspaceId, devEngine } to hand the actual coding to the develop node. The dev engine defaults to the local vLLM but is configurable — pass a devEngine when the item or project specifies one. You (the brain) analyze, review the resulting git diff, fix anything wrong, and commit — rather than writing the business code yourself. Monitor by polling, then workspaceCommitPush to open a PR. When done, report the run id and the PR url.`;
 
     // brain-send (additive `tags` param) instructs the brain to attach these
     // tags to every workflowRun/workspaceCreate/spawnOnce so the activity is
@@ -189,6 +210,7 @@ export default defineAction({
       dispatchedAt: now,
       monitorIntervalSec: args.monitorIntervalSec ?? null,
       tags,
+      dispatchTemplate,
     };
   },
 });

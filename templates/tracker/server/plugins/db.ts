@@ -331,6 +331,21 @@ CREATE INDEX IF NOT EXISTS tracker_work_item_documents_work_item_idx ON tracker_
       sql: `ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'planning';
 ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS executor_thread_id TEXT`,
     },
+    {
+      // M2: Stage Configuration — per-project stage vocabulary (name +
+      // description, gate criteria lives in the existing stage_gate_config),
+      // reusable stage flows, and work-item-type → flow assignment. All three
+      // default to their "untouched" empty value ('{}' / '[]' / '{}') so a
+      // project that hasn't opened Stage Configuration behaves identically to
+      // today. work_items.flow_id is nullable — items created before this
+      // migration (or without a type assignment configured) have none and
+      // keep resolving plannedStages via the legacy two-branch default.
+      version: 20,
+      sql: `ALTER TABLE tracker_projects ADD COLUMN IF NOT EXISTS stage_descriptions TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE tracker_projects ADD COLUMN IF NOT EXISTS stage_flows TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE tracker_projects ADD COLUMN IF NOT EXISTS stage_type_assignment TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS flow_id TEXT`,
+    },
   ],
   { table: "tracker_migrations" },
 );

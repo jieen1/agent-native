@@ -28,6 +28,16 @@ export const projects = table("tracker_projects", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   stageGateConfig: text("stage_gate_config").notNull().default("{}"),
+  // --- Stage Configuration (vocabulary / flows / type assignment). Additive,
+  // strictly opt-in: an empty/default value on any of these three columns
+  // means "this project hasn't touched Stage Configuration" and every read
+  // site must fall back to today's hardcoded behavior exactly.
+  // stageDescriptions: JSON {[stageName]: string}.
+  stageDescriptions: text("stage_descriptions").notNull().default("{}"),
+  // stageFlows: JSON array of {id, name, stageNames: string[], dispatchTemplates: {[stageName]: string}}.
+  stageFlows: text("stage_flows").notNull().default("[]"),
+  // stageTypeAssignment: JSON {[workItemType]: flowId}.
+  stageTypeAssignment: text("stage_type_assignment").notNull().default("{}"),
   ...ownableColumns(),
 });
 
@@ -72,6 +82,11 @@ export const workItems = table("tracker_work_items", {
   owner: text("owner").default(null),
   // nature = JSON array of tags from set: 前端 | 后端 | API | 数据
   nature: text("nature").notNull().default("[]"),
+  // --- Stage Configuration: the flow id (tracker_projects.stageFlows entry)
+  // this item's plannedStages was resolved from at creation time. Nullable —
+  // items created before this feature (or when the type had no configured
+  // flow assignment) have none and keep using the legacy default logic.
+  flowId: text("flow_id"),
 });
 
 // ---------------------------------------------------------------------------
