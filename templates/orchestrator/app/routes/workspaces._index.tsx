@@ -3,8 +3,12 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useActionMutation, useActionQuery } from "@agent-native/core/client";
 import {
+  IconDots,
+  IconGitCommit,
   IconPlayerPlay,
   IconPlayerStop,
+  IconPlus,
+  IconUpload,
 } from "@tabler/icons-react";
 import { APP_TITLE } from "@/lib/app-config";
 import { DataTable } from "@/components/board/DataTable";
@@ -26,6 +30,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { NewWorkspaceDialog } from "@/components/v3/NewWorkspaceDialog";
+import {
+  WorkspaceCommitDialog,
+  type WorkspaceCommitTarget,
+} from "@/components/v3/WorkspaceCommitDialog";
 
 export function meta() {
   return [{ title: `${APP_TITLE} — 工作区` }];
@@ -67,10 +83,13 @@ function fmtDurationAgo(iso: string | null): string {
 }
 
 const STATE_COLORS: Record<string, string> = {
-  provisioning: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  ready: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+  provisioning:
+    "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+  ready:
+    "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
   busy: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  destroying: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+  destroying:
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   destroyed: "bg-muted text-muted-foreground",
   error: "bg-destructive/10 text-destructive",
 };
@@ -99,13 +118,35 @@ export default function V3WorkspacesRoute() {
     error,
   } = useActionQuery(
     "workspaceList" as any,
-    { ownerKind: ownerKindFilter === "all" ? undefined : ownerKindFilter, state: stateFilter === "all" ? undefined : stateFilter },
+    {
+      ownerKind: ownerKindFilter === "all" ? undefined : ownerKindFilter,
+      state: stateFilter === "all" ? undefined : stateFilter,
+    },
     undefined,
   );
 
   const destroyAction = useActionMutation("workspaceDestroy" as any, {});
   const [destroyingId, setDestroyingId] = useState<string | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+
+  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+  const [commitTarget, setCommitTarget] =
+    useState<WorkspaceCommitTarget | null>(null);
+  const [commitMode, setCommitMode] = useState<"commit" | "commitPush">(
+    "commit",
+  );
+
+  const openCommitDialog = useCallback(
+    (
+      workspaceId: string,
+      branch: string | null,
+      mode: "commit" | "commitPush",
+    ) => {
+      setCommitMode(mode);
+      setCommitTarget({ workspaceId, branch });
+    },
+    [],
+  );
 
   // Distinct owner kinds for the filter dropdown
   const ownerKinds = useMemo(() => {
@@ -116,13 +157,10 @@ export default function V3WorkspacesRoute() {
     return Array.from(set).sort();
   }, [workspaces]);
 
-  const handleDestroy = useCallback(
-    (workspaceId: string) => {
-      setDestroyingId(workspaceId);
-      setConfirmDialogOpen(true);
-    },
-    [],
-  );
+  const handleDestroy = useCallback((workspaceId: string) => {
+    setDestroyingId(workspaceId);
+    setConfirmDialogOpen(true);
+  }, []);
 
   const confirmDestroy = useCallback(() => {
     if (!destroyingId) return;
@@ -156,36 +194,45 @@ export default function V3WorkspacesRoute() {
             用于工作流派生的计算环境。
           </p>
         </div>
-        {workspaces.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={ownerKindFilter} onValueChange={setOwnerKindFilter}>
-              <SelectTrigger className="h-8 w-[150px]">
-                <SelectValue placeholder="所有者类型" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部所有者类型</SelectItem>
-                {ownerKinds.map((ok) => (
-                  <SelectItem key={ok} value={ok}>
-                    {ok}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={stateFilter} onValueChange={setStateFilter}>
-              <SelectTrigger className="h-8 w-[150px]">
-                <SelectValue placeholder="状态" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部状态</SelectItem>
-                {WORKSPACE_STATES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {t(`v3.workspace.state.${s}`, { defaultValue: s })}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {workspaces.length > 0 ? (
+            <>
+              <Select
+                value={ownerKindFilter}
+                onValueChange={setOwnerKindFilter}
+              >
+                <SelectTrigger className="h-8 w-[150px]">
+                  <SelectValue placeholder="所有者类型" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部所有者类型</SelectItem>
+                  {ownerKinds.map((ok) => (
+                    <SelectItem key={ok} value={ok}>
+                      {ok}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={stateFilter} onValueChange={setStateFilter}>
+                <SelectTrigger className="h-8 w-[150px]">
+                  <SelectValue placeholder="状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部状态</SelectItem>
+                  {WORKSPACE_STATES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {t(`v3.workspace.state.${s}`, { defaultValue: s })}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          ) : null}
+          <Button size="sm" onClick={() => setNewWorkspaceOpen(true)}>
+            <IconPlus className="mr-1 size-4" />
+            新建工作区
+          </Button>
+        </div>
       </header>
 
       {error ? (
@@ -226,7 +273,10 @@ export default function V3WorkspacesRoute() {
               className: "hidden md:table-cell",
               headClassName: "hidden md:table-cell",
               cell: (r) => (
-                <span className="truncate text-xs text-muted-foreground" title={r.repoUrl ?? undefined}>
+                <span
+                  className="truncate text-xs text-muted-foreground"
+                  title={r.repoUrl ?? undefined}
+                >
                   {r.repoUrl ?? "—"}
                 </span>
               ),
@@ -237,9 +287,7 @@ export default function V3WorkspacesRoute() {
               className: "hidden md:table-cell",
               headClassName: "hidden md:table-cell",
               cell: (r) => (
-                <span className="font-mono text-xs">
-                  {r.branch ?? "—"}
-                </span>
+                <span className="font-mono text-xs">{r.branch ?? "—"}</span>
               ),
             },
             {
@@ -282,22 +330,67 @@ export default function V3WorkspacesRoute() {
             {
               id: "actions",
               header: "",
+              className: "text-right",
+              headClassName: "text-right",
               cell: (r) => {
-                if (!hasLiveWorkspace(r.state)) return null;
+                if (!hasLiveWorkspace(r.state)) {
+                  return (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  );
+                }
+                const canCommit = r.state === "ready" || r.state === "busy";
+                const destroyPending =
+                  destroyAction.isPending &&
+                  (
+                    destroyAction.variables as
+                      | { workspaceId?: string }
+                      | undefined
+                  )?.workspaceId === r.id;
                 return (
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    className="h-6 px-2 text-xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDestroy(r.id);
-                    }}
-                    disabled={destroyAction.isPending}
-                  >
-                    <IconPlayerStop className="mr-1 size-3" />
-                    销毁
-                  </Button>
+                  <div className="flex justify-end">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="size-7 p-0"
+                          aria-label="工作区操作"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <IconDots className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          disabled={!canCommit}
+                          onSelect={() =>
+                            openCommitDialog(r.id, r.branch, "commit")
+                          }
+                        >
+                          <IconGitCommit className="size-4" />
+                          提交
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={!canCommit}
+                          onSelect={() =>
+                            openCommitDialog(r.id, r.branch, "commitPush")
+                          }
+                        >
+                          <IconUpload className="size-4" />
+                          提交并推送
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          disabled={destroyPending}
+                          className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+                          onSelect={() => handleDestroy(r.id)}
+                        >
+                          <IconPlayerStop className="size-4" />
+                          销毁
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 );
               },
             },
@@ -305,9 +398,7 @@ export default function V3WorkspacesRoute() {
           empty={
             <EmptyState
               icon={IconPlayerPlay}
-              title={
-                isFiltered ? "没有符合筛选条件的工作区" : "暂无工作区"
-              }
+              title={isFiltered ? "没有符合筛选条件的工作区" : "暂无工作区"}
               description={
                 isFiltered
                   ? "尝试调整所有者类型或状态筛选条件。"
@@ -326,7 +417,12 @@ export default function V3WorkspacesRoute() {
                   >
                     清除筛选
                   </Button>
-                ) : undefined
+                ) : (
+                  <Button size="sm" onClick={() => setNewWorkspaceOpen(true)}>
+                    <IconPlus className="mr-1 size-4" />
+                    新建工作区
+                  </Button>
+                )
               }
             />
           }
@@ -362,6 +458,22 @@ export default function V3WorkspacesRoute() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* "+ New workspace" — a real modal dialog, not inline page content. */}
+      <NewWorkspaceDialog
+        open={newWorkspaceOpen}
+        onOpenChange={setNewWorkspaceOpen}
+      />
+
+      {/* Commit / Commit + push — per-row small dialog for the commit message
+          (plus PR title/body/base branch for the push variant). */}
+      <WorkspaceCommitDialog
+        target={commitTarget}
+        mode={commitMode}
+        onOpenChange={(o) => {
+          if (!o) setCommitTarget(null);
+        }}
+      />
     </div>
   );
 }
