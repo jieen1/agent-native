@@ -49,6 +49,7 @@ const en = {
     // nav namespace, so the Sidebar fell back to its hardcoded English labels.
     brain: "Brain",
     agents: "Agents",
+    skills: "Skills",
     workspaces: "Workspaces",
     spawns: "Spawns",
     pool: "Pool",
@@ -756,6 +757,7 @@ const zh: typeof en = {
     // 共享左侧导航的目的地 —— 与首页卡片标签保持一致的术语。
     brain: "大脑",
     agents: "智能体",
+    skills: "技能",
     workspaces: "工作区",
     spawns: "派生任务",
     pool: "资源池",

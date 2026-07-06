@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   IconActivity,
   IconArchive,
+  IconBook,
   IconBrain,
   IconDatabase,
   IconDots,
@@ -74,6 +75,13 @@ const navItems = [
     label: "智能体",
     href: "/agents",
     view: "agents",
+  },
+  {
+    icon: IconBook,
+    labelKey: "nav.skills",
+    label: "技能",
+    href: "/skills",
+    view: "skills",
   },
   {
     icon: IconFolders,
@@ -189,8 +197,7 @@ function ChatThreadsSection() {
     const refresh = () => refreshThreads();
     const handleRunning = (event: Event) => {
       const detail = (event as CustomEvent).detail as
-        | { isRunning?: unknown }
-        | undefined;
+        { isRunning?: unknown } | undefined;
       if (typeof detail?.isRunning === "boolean") refreshThreads();
     };
 

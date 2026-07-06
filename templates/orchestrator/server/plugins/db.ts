@@ -508,6 +508,25 @@ CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchest
 CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchestrator_agent_def_shares (resource_id, principal_type, principal_id)`,
       },
     },
+    {
+      // Skills / Runbook editor hosted-mode override table (additive,
+      // CREATE-only). One row per overridden skill path
+      // ("skills/<name>/SKILL.md", or the "brain-runbook" sentinel for the
+      // brain's own BRAIN_PROMPT); a row's presence means a hosted override
+      // shadows the file/constant default. `name:` opts this migration into
+      // name-based tracking per the storing-data skill's migration-collision
+      // guidance (parallel branches extending this same list independently).
+      version: 21,
+      name: "orchestrator-skill-overrides-table",
+      sql: `CREATE TABLE IF NOT EXISTS orchestrator_skill_overrides (
+    id TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    content TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT
+  );
+CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_skill_overrides_path_idx ON orchestrator_skill_overrides (path)`,
+    },
   ],
   { table: "orchestrator_migrations" },
 );

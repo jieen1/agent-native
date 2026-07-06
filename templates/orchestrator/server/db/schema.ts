@@ -357,4 +357,30 @@ export const agentDefs = table("orchestrator_agent_defs", {
   ...ownableColumns(),
 });
 
-export const agentDefShares = createSharesTable("orchestrator_agent_def_shares");
+export const agentDefShares = createSharesTable(
+  "orchestrator_agent_def_shares",
+);
+
+// ─── Skills / Runbook editor (hosted-mode override layer) — additive ────────
+
+// The Skills page (app/routes/skills._index.tsx) lets an operator browse and
+// edit the markdown skill docs under `.agents/skills/*/SKILL.md` plus the
+// orchestrator brain's own runbook (BRAIN_PROMPT in server/brain/brain-session.ts).
+// In Local File Mode, save-skill writes the real file directly (the repo file
+// stays the source of truth); in hosted/collaborative mode (the default — see
+// the storing-data skill) app data must live in SQL, so save-skill instead
+// upserts a row here, keyed by a stable `path` ("skills/<name>/SKILL.md", or
+// the "brain-runbook" sentinel for the brain prompt, which has no backing
+// file). A row's presence means "this path has a hosted override that shadows
+// the file/constant default"; reverting just deletes the row. Deliberately
+// workspace-wide (no ownableColumns/shares) — this is shared operator runbook
+// content for the one deployed orchestrator, matching how the other global
+// operator config (brain model/tier/concurrency, in `settings`) is scoped,
+// not a personal per-user shareable resource like tasks/workflows.
+export const skillOverrides = table("orchestrator_skill_overrides", {
+  id: text("id").primaryKey(),
+  path: text("path").notNull(),
+  content: text("content").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  updatedBy: text("updated_by"),
+});
