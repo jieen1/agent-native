@@ -32,6 +32,7 @@
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "kiwi-schema": "^0.5.0",
+    "locale-kit": "workspace:*",
     "monaco-editor": "^0.55.1",
     "nanoid": "^5.1.9",
     "pako": "^3.0.0",
