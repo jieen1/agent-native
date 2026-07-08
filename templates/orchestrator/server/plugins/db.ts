@@ -921,6 +921,40 @@ ALTER TABLE v3_spawns ADD COLUMN IF NOT EXISTS usage_suspect integer NOT NULL DE
 ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS closing_anomaly text`,
     },
   },
+  {
+    // sdlc-run-limits (recovered from dogfood/sdlc-issue-pipeline —
+    // 2026-07-08 orchestrator auto-dev): engine-level run guardrails
+    // (v3-reconciler.ts's checkRunLimits) + per-project repo/CI config
+    // (workspaceCiWatch/workspaceMergePr). NAME-BASED for the same reason as
+    // f7-telemetry above — this array is extended by parallel branches, so
+    // version-only gating risks a silent skip. Originally landed as a
+    // one-off drizzle-kit `v3-migrations/0002_*.sql` file against V3's old
+    // standalone pool; that pool and its migration folder no longer exist
+    // (folded into this framework-DB-backed array by
+    // 1ccf7a027 "migrate V3 off its own pool"), so this entry replaces the
+    // old file rather than recreating it. Both statements are idempotent
+    // (ADD COLUMN IF NOT EXISTS / CREATE TABLE IF NOT EXISTS) and safe to
+    // re-run against a 101 production DB that may already have applied the
+    // original one-off SQL by hand.
+    version: 4,
+    name: "sdlc-run-limits",
+    sql: {
+      postgres: `ALTER TABLE v3_runs ADD COLUMN IF NOT EXISTS limits jsonb;
+CREATE TABLE IF NOT EXISTS project_repos (
+  id text PRIMARY KEY,
+  repo_url text NOT NULL,
+  gate_mode text NOT NULL DEFAULT 'tests-only',
+  stack_up_cmd text,
+  health_check_cmd text,
+  test_cmd_full text,
+  ci_mode text NOT NULL DEFAULT 'none',
+  base_branch text NOT NULL DEFAULT 'main',
+  created_at timestamp with time zone DEFAULT now(),
+  owner_email text NOT NULL DEFAULT 'local@localhost',
+  org_id text
+)`,
+    },
+  },
 ];
 
 const migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" });
