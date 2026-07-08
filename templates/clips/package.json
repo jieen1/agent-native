@@ -12,7 +12,7 @@
     "script": "agent-native script",
     "tauri": "cd desktop && pnpm tauri",
     "tauri:dev": "cd desktop && pnpm tauri dev",
-    "tauri:build": "cd desktop && pnpm tauri build",
+    "tauri:build": "cd desktop && pnpm run build:tauri",
     "chrome:dev": "cd chrome-extension && pnpm dev",
     "chrome:build": "cd chrome-extension && pnpm build",
     "chrome:package": "cd chrome-extension && pnpm package",
@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@agent-native/core": "workspace:*",
+    "@agent-native/toolkit": "workspace:*",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@fontsource-variable/inter": "^5.2.8",

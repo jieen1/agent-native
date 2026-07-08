@@ -63,7 +63,7 @@ export function SideBar({
       <div
         role="tablist"
         aria-label="Code sidebar views" /* i18n-ignore */
-        className="flex h-10 shrink-0 items-center gap-1 border-b border-[var(--workbench-border)] px-2"
+        className="flex h-10 shrink-0 items-center gap-1 px-2"
       >
         {VIEW_TABS.map((item) => {
           const Icon = item.icon;
@@ -80,15 +80,12 @@ export function SideBar({
                     "relative flex size-8 cursor-pointer items-center justify-center rounded-[5px] text-[var(--workbench-muted-fg)] outline-none transition-colors",
                     "hover:bg-[var(--workbench-hover-bg)] hover:text-[var(--workbench-fg)] focus-visible:ring-1 focus-visible:ring-[var(--workbench-accent)]",
                     active &&
-                      "bg-[var(--workbench-list-active-bg,var(--workbench-active-bg))] text-[var(--workbench-accent)]",
+                      "bg-[var(--workbench-list-active-bg,var(--workbench-active-bg))] text-[var(--workbench-fg)]",
                   )}
                   onClick={() => {
                     if (!active) api.setSideView(item.view);
                   }}
                 >
-                  {active ? (
-                    <span className="absolute inset-x-1 bottom-0 h-[2px] rounded-full bg-[var(--workbench-accent)]" />
-                  ) : null}
                   <Icon className="size-[18px]" />
                 </button>
               </TooltipTrigger>

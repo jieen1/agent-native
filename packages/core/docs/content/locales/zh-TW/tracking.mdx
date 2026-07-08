@@ -200,7 +200,7 @@ configureTracking({
   endpoint: "https://analytics.example.com/api/analytics/track",
   sessionReplay: {
     enabled: true,
-    sampleRate: 0.1,
+    sampleRate: 1,
   },
   getDefaultProps: (_event, props) => ({
     ...props,
@@ -218,14 +218,14 @@ Agent Native 範本根目錄已經呼叫了 `configureTracking()`。託管範本
 VITE_AGENT_NATIVE_ANALYTICS_PUBLIC_KEY=anpk_...
 VITE_AGENT_NATIVE_ANALYTICS_ENDPOINT=https://analytics.example.com/api/analytics/track
 VITE_AGENT_NATIVE_SESSION_REPLAY_ENABLED=true
-VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=0.1
+VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=1
 ```
 
 瀏覽器輔助程式也會盡力執行、非阻塞式讀取目前的 Agent Native 驗證工作階段。重播預設僅限已登入使用者：當 `sessionReplay` 啟用時，除非工作階段解析出使用者電子郵件地址，否則不會開始錄製。已登入使用者的重播包含以電子郵件為基礎的 `userId`/`userEmail` 以及 `orgId`。
 
 僅在刻意進行匿名重播部署時，才設定 `sessionReplay.requireSignedInUser: false` 或 `VITE_AGENT_NATIVE_SESSION_REPLAY_REQUIRE_AUTH=false`。停用驗證閘控後，匿名錄製仍可依匿名訪客、工作階段、應用程式/範本、主機名稱與路徑進行查詢。
 
-工作階段重播是依瀏覽器工作階段進行確定性取樣的。`sampleRate` 為 `0.1` 表示大約記錄 10% 符合條件的工作階段；當符合條件的母體刻意較小時（例如僅限已登入使用者的內部試用），可使用 `1`。
+工作階段重播是依瀏覽器工作階段進行確定性取樣的。`sampleRate` 為 `1` 表示記錄所有符合條件的工作階段；當符合條件的母體刻意較大時，可使用較低值，例如 `0.1`。
 
 隱私預設值刻意設計得保守，但仍足以支援播放：
 
@@ -240,6 +240,12 @@ VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=0.1
 Analytics 範本將重播中繼資料儲存在 SQL（`session_recordings`）中，並透過私有 blob 參照（`session_replay_chunks`）儲存區塊。瀏覽器與代理永遠不會收到提供者 URL。播放透過範圍受限的伺服器路由進行，且預設代理工具傳回摘要或範圍受限的重播事件，而非原始區塊資料表存取權。
 
 當您需要將私人錄製內容交給外部代理時，請使用工作階段詳細資料頁面的**複製給代理**控制項。它會產生一個兩小時、僅限該筆錄製的 `agent_access` 連結，在 `/sessions/:recordingId` 上以伺服器端轉譯（SSR）一個小型探索酬載，並僅公開代理內容/事件 JSON API。該筆錄製的可見性不會改變。
+
+Implementation note: the reusable layer is the core agent-access URL contract,
+not a replay-specific UI abstraction. Use `createScopedAgentAccessGrant`,
+`verifyScopedAgentAccessToken`, `buildAgentAccessUrl`, and
+`buildAgentAccessApiUrl` for scoped SSR and JSON API links; keep replay storage,
+diagnostics shaping, and access policy inside the Analytics template.
 
 僅在本機開發時，Analytics 可以在私有 blob 儲存體無法使用時，回退到有上限的 SQL 內嵌區塊。正式環境部署應設定私有或加密的 blob 儲存體，而不是依賴 Postgres 來儲存重播酬載。
 

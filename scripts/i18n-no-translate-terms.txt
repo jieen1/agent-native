@@ -5,27 +5,32 @@
 *.eval.ts
 `window.openai`host APIs ·`agentNative.mcpHost.*` postMessage relay
 + Drizzle query DSL
+Ease
+Ease In
+Ease In/Out
+Ease Out
 ~/.claude/ on a local disk
 302 + signed JWT
 401 · WWW-Authenticate
 A2A
 adapter.sendResponse
 Agent-native
+Agent-Native App
 Agent-Native sidecar
 AgentHarness substrate
 AgentRunHost
-analytics@example.com, ops@example.com
 AGENTS.md · skills
+analytics@example.com, ops@example.com
 AuthSession
 AWS Lambda
 Bearer access token
 Better Auth
-ChatGPT web
 channels:history, search
+ChatGPT web
 claude · codex
+Claude Code
 Claude Code · Codex · Pi — own tools, sandbox, compaction
 Claude Code / Codex
-Claude Code
 Claude web
 CLI
 Cloudflare D1
@@ -50,6 +55,7 @@ JWT
 libSQL / Turso
 list-emails · get-thread · manage-draft · send
 list-events · check-availability · create-event
+Linear
 Local File Mode
 MCP
 MCP gateway
@@ -85,6 +91,7 @@ Sandboxed iframe
 Secret proxy
 Secret vault
 session.orgId
+Shell & Hooks
 Signed app route
 Signed processor
 Slack · Granola · GitHub · Clips · webhooks

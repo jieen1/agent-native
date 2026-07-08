@@ -200,7 +200,7 @@ configureTracking({
   endpoint: "https://analytics.example.com/api/analytics/track",
   sessionReplay: {
     enabled: true,
-    sampleRate: 0.1,
+    sampleRate: 1,
   },
   getDefaultProps: (_event, props) => ({
     ...props,
@@ -218,14 +218,14 @@ Agent Native のテンプレート ルートはすでに `configureTracking()` �
 VITE_AGENT_NATIVE_ANALYTICS_PUBLIC_KEY=anpk_...
 VITE_AGENT_NATIVE_ANALYTICS_ENDPOINT=https://analytics.example.com/api/analytics/track
 VITE_AGENT_NATIVE_SESSION_REPLAY_ENABLED=true
-VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=0.1
+VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=1
 ```
 
 ブラウザー ヘルパーは、現在の Agent Native 認証セッションのベストエフォートかつノンブロッキングな読み取りも行います。リプレイはデフォルトでサインイン済みユーザー限定です。`sessionReplay` が有効な場合、セッションがユーザーのメール アドレスに解決されない限り、記録は開始されません。サインイン済みのリプレイには、メールに紐づく `userId`/`userEmail` と `orgId` が含まれます。
 
 意図的に匿名リプレイをデプロイする場合にのみ、`sessionReplay.requireSignedInUser: false` または `VITE_AGENT_NATIVE_SESSION_REPLAY_REQUIRE_AUTH=false` を設定してください。認証ゲーティングを無効にすると、匿名の記録は匿名訪問者、セッション、アプリ/テンプレート、ホスト名、パスで引き続きクエリ可能です。
 
-セッション リプレイは、ブラウザー セッションごとに決定論的にサンプリングされます。`sampleRate` を `0.1` に設定すると、対象セッションの約 10% が記録されます。ログイン済みユーザーのみの動作確認など、対象母集団が意図的に小さい場合は `1` を使用してください。
+セッション リプレイは、ブラウザー セッションごとに決定論的にサンプリングされます。`sampleRate` を `1` に設定すると、対象セッションがすべて記録されます。対象母集団が意図的に広い場合は、`0.1` などの低い値を使用してください。
 
 プライバシーのデフォルト設定は意図的に控えめですが、再生には十分役立ちます。
 
@@ -240,6 +240,12 @@ VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=0.1
 Analytics テンプレートは、リプレイ メタデータを SQL (`session_recordings`) に保存し、チャンクはプライベートな blob 参照 (`session_replay_chunks`) を通じて保存します。ブラウザーとエージェントはプロバイダーの URL を受け取ることはありません。再生はスコープ付きのサーバー ルートを経由し、デフォルトのエージェント ツールは要約または範囲を限定したリプレイ イベントを返すのみで、生のチャンク テーブルへのアクセスはできません。
 
 プライベートな記録を外部エージェントに渡す必要がある場合は、セッション詳細ページの **Copy for agent** コントロールを使用します。これにより、2 時間有効で記録にスコープされた `agent_access` リンクが発行され、`/sessions/:recordingId` で小さなディスカバリー ペイロードが SSR され、エージェント コンテキスト/イベントの JSON API のみが公開されます。記録の可視性は変更されません。
+
+Implementation note: the reusable layer is the core agent-access URL contract,
+not a replay-specific UI abstraction. Use `createScopedAgentAccessGrant`,
+`verifyScopedAgentAccessToken`, `buildAgentAccessUrl`, and
+`buildAgentAccessApiUrl` for scoped SSR and JSON API links; keep replay storage,
+diagnostics shaping, and access policy inside the Analytics template.
 
 ローカル開発でのみ、Analytics はプライベートな blob ストレージが利用できない場合に、上限付きの SQL インライン チャンクにフォールバックできます。本番デプロイでは、リプレイ ペイロードを Postgres に依存するのではなく、プライベートまたは暗号化された blob ストレージを設定する必要があります。
 

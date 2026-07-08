@@ -234,6 +234,38 @@ export const CLOUDFLARE_WORKER_NODE_BUILTIN_STUB_MODULES: Record<
     "worker",
     "workers",
   ]),
+  console: [
+    "const globalConsole = globalThis.console;",
+    "const bind = (name) => typeof globalConsole?.[name] === 'function' ? globalConsole[name].bind(globalConsole) : () => undefined;",
+    "export class Console {",
+    "  constructor() { return globalConsole; }",
+    "}",
+    "export const assert = bind('assert');",
+    "export const clear = bind('clear');",
+    "export const count = bind('count');",
+    "export const countReset = bind('countReset');",
+    "export const debug = bind('debug');",
+    "export const dir = bind('dir');",
+    "export const dirxml = bind('dirxml');",
+    "export const error = bind('error');",
+    "export const group = bind('group');",
+    "export const groupCollapsed = bind('groupCollapsed');",
+    "export const groupEnd = bind('groupEnd');",
+    "export const info = bind('info');",
+    "export const log = bind('log');",
+    "export const profile = bind('profile');",
+    "export const profileEnd = bind('profileEnd');",
+    "export const table = bind('table');",
+    "export const time = bind('time');",
+    "export const timeEnd = bind('timeEnd');",
+    "export const timeLog = bind('timeLog');",
+    "export const timeStamp = bind('timeStamp');",
+    "export const trace = bind('trace');",
+    "export const warn = bind('warn');",
+    "export { globalConsole as console };",
+    "export default globalConsole;",
+    "",
+  ].join("\n"),
   dgram: cloudflareNodeBuiltinStubSource("dgram", ["createSocket"]),
   dns: cloudflareNodeBuiltinStubSource("dns", [
     "lookup",
@@ -2395,6 +2427,194 @@ export const config = {
   );
 }
 
+/**
+ * Nitro's Netlify preset can emit a harmful fallback rewrite to
+ * `/.netlify/functions/server`. With `config.path: "/*"`, that default URL is
+ * removed, so the rewrite publishes platform 404s. Single-template deploys keep
+ * Nitro's `preferStatic: true` so hashed `/assets/*` files in dist win before
+ * the SSR catch-all runs.
+ */
+const NETLIFY_DEFAULT_FUNCTION_URL_REDIRECT =
+  "/* /.netlify/functions/server 200";
+
+export function assertSingleTemplateNetlifyBuildOutput(
+  projectCwd: string,
+): void {
+  const failures: string[] = [];
+  const publishDir = path.join(projectCwd, "dist");
+  const redirectsPath = path.join(publishDir, "_redirects");
+  const internalDir = path.join(projectCwd, ".netlify", "functions-internal");
+  const serverDir = path.join(internalDir, "server");
+  const serverEntryPath = path.join(serverDir, "server.mjs");
+  const serverMainPath = path.join(serverDir, "main.mjs");
+
+  if (!fs.existsSync(publishDir)) {
+    failures.push("missing publish directory: dist");
+  } else {
+    const assetsDir = path.join(publishDir, "assets");
+    if (
+      !fs.existsSync(assetsDir) ||
+      fs.readdirSync(assetsDir).every((name) => name.startsWith("."))
+    ) {
+      failures.push(
+        "dist/assets is missing hashed client assets — the publish dir would load an infinite spinner",
+      );
+    }
+  }
+
+  if (fs.existsSync(publishDir) && fs.existsSync(redirectsPath)) {
+    const redirects = fs.readFileSync(redirectsPath, "utf-8");
+    if (
+      redirects
+        .split(/\r?\n/)
+        .some(
+          (line) =>
+            line.trim().replace(/\s+/g, " ") ===
+            NETLIFY_DEFAULT_FUNCTION_URL_REDIRECT,
+        )
+    ) {
+      failures.push(
+        'dist/_redirects must not contain "/* /.netlify/functions/server 200" — Nitro\'s custom config.path: "/*" removes that default function URL',
+      );
+    }
+  }
+
+  if (!fs.existsSync(serverDir)) {
+    failures.push(
+      "missing scanned Netlify server function: .netlify/functions-internal/server",
+    );
+  }
+
+  if (!fs.existsSync(serverMainPath)) {
+    failures.push(
+      "missing Netlify server bundle: .netlify/functions-internal/server/main.mjs",
+    );
+  }
+
+  if (!fs.existsSync(serverEntryPath)) {
+    failures.push(
+      "missing Netlify server entry: .netlify/functions-internal/server/server.mjs",
+    );
+  } else {
+    const serverEntry = fs.readFileSync(serverEntryPath, "utf-8");
+    if (!/\bpath\s*:\s*["']\/\*["']/.test(serverEntry)) {
+      failures.push(
+        'Netlify server entry is missing the "/*" catch-all function path',
+      );
+    }
+    if (!serverEntry.includes('"/.netlify/*"')) {
+      failures.push(
+        'Netlify server catch-all is missing the "/.netlify/*" exclusion',
+      );
+    }
+    if (!serverEntry.includes("./main.mjs")) {
+      failures.push(
+        "Netlify server entry does not reference the generated main.mjs bundle",
+      );
+    }
+    if (!/\bpreferStatic:\s*true\b/.test(serverEntry)) {
+      failures.push(
+        "Netlify server entry must keep preferStatic: true so /assets/* is served from dist before the SSR catch-all",
+      );
+    }
+  }
+
+  if (isDurableBackgroundDeployEnabled()) {
+    const backgroundDir = path.join(
+      internalDir,
+      AGENT_BACKGROUND_FUNCTION_NAME,
+    );
+    const backgroundEntryPath = path.join(
+      backgroundDir,
+      `${AGENT_BACKGROUND_FUNCTION_NAME}.mjs`,
+    );
+    if (!fs.existsSync(backgroundEntryPath)) {
+      failures.push(
+        `durable background is enabled but ${path.relative(
+          projectCwd,
+          backgroundEntryPath,
+        )} was not emitted`,
+      );
+    } else {
+      const backgroundEntry = fs.readFileSync(backgroundEntryPath, "utf-8");
+      if (!/\bbackground\s*:\s*true\b/.test(backgroundEntry)) {
+        failures.push(
+          `durable background entry ${path.relative(
+            projectCwd,
+            backgroundEntryPath,
+          )} is missing background: true`,
+        );
+      }
+      if (/^\s*path\s*:/m.test(backgroundEntry)) {
+        failures.push(
+          `durable background entry ${path.relative(
+            projectCwd,
+            backgroundEntryPath,
+          )} must not declare a custom path`,
+        );
+      }
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      "[deploy] Netlify deploy guard failed; refusing to publish an output " +
+        "that would likely serve Netlify 404s:\n" +
+        failures.map((failure) => `- ${failure}`).join("\n"),
+    );
+  }
+
+  console.log(
+    "[deploy] Netlify deploy guard passed: publish dir and catch-all server function are present.",
+  );
+}
+
+/**
+ * Strip the harmful single-template catch-all rewrite that points at
+ * `/.netlify/functions/server`. Nitro declares `config.path: "/*"`, which
+ * removes the default function URL, so rewriting to that URL publishes
+ * Netlify platform 404s. Preserve any real redirects from `public/_redirects`.
+ */
+export function writeSingleTemplateNetlifyRedirects(projectCwd: string): void {
+  const publishDir = path.join(projectCwd, "dist");
+  const redirectsPath = path.join(publishDir, "_redirects");
+  if (!fs.existsSync(redirectsPath)) return;
+
+  const existing = fs.readFileSync(redirectsPath, "utf-8");
+  const kept: string[] = [];
+  let removed = 0;
+
+  for (const line of existing.split(/\r?\n/)) {
+    const normalized = line.trim().replace(/\s+/g, " ");
+    if (
+      normalized === NETLIFY_DEFAULT_FUNCTION_URL_REDIRECT ||
+      normalized ===
+        "# Generated by agent-native build for Netlify single-template deploys" ||
+      normalized ===
+        "# Static files are served first; dynamic routes fall through to the server function."
+    ) {
+      removed += 1;
+      continue;
+    }
+    kept.push(line);
+  }
+
+  while (kept.length > 0 && kept[kept.length - 1].trim() === "") {
+    kept.pop();
+  }
+
+  if (removed === 0) return;
+
+  if (kept.every((line) => line.trim() === "")) {
+    fs.rmSync(redirectsPath, { force: true });
+  } else {
+    fs.writeFileSync(redirectsPath, kept.join("\n").trimEnd() + "\n");
+  }
+  console.log(
+    '[deploy] Removed Netlify fallback rewrite to /.netlify/functions/server (incompatible with Nitro config.path: "/*").',
+  );
+}
+
 function copyInstalledLibsqlNativePackages(serverDir: string | undefined) {
   if (!serverDir || !fs.existsSync(serverDir)) return;
   const nodeModulesRoots = nodeModulesAncestors(cwd);
@@ -2944,6 +3164,11 @@ export default bundle;
     }
   }
 
+  if (preset === "netlify") {
+    writeSingleTemplateNetlifyRedirects(cwd);
+    assertSingleTemplateNetlifyBuildOutput(cwd);
+  }
+
   // Resolve remaining bare npm imports by bundling them into _libs/.
   // Nitro sometimes leaves small packages as externals even with noExternals.
   if (preset.startsWith("cloudflare") || preset.startsWith("deno")) {
@@ -2991,6 +3216,7 @@ export default bundle;
             "util",
             "events",
             "buffer",
+            "console",
             "net",
             "tls",
             "assert",
@@ -3173,6 +3399,7 @@ export default bundle;
           "util",
           "events",
           "buffer",
+          "console",
           "querystring",
           "zlib",
           "net",

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildReplayMarkers,
   fetchSessionReplayPlayback,
   replayPayloadEvents,
   replayViewportDimensions,
@@ -315,6 +316,71 @@ describe("session replay sanitization", () => {
   });
 });
 
+describe("session replay timeline markers", () => {
+  it("keeps network diagnostics out of the event timeline", () => {
+    const markers = buildReplayMarkers([
+      {
+        type: 4,
+        timestamp: 1_000,
+        data: { width: 1280, height: 720, href: "https://app.example.test/" },
+      },
+      {
+        type: 5,
+        timestamp: 1_500,
+        data: {
+          tag: "agent-native.network",
+          payload: {
+            api: "fetch",
+            method: "GET",
+            url: "https://api.example.test/noisy",
+            status: 200,
+            ok: true,
+          },
+        },
+      },
+      {
+        type: 3,
+        timestamp: 2_000,
+        data: { source: 2, type: 2, id: 7, x: 24, y: 32 },
+      },
+    ]);
+
+    expect(markers.map((marker) => marker.kind)).toEqual([
+      "navigation",
+      "click",
+    ]);
+  });
+
+  it("keeps only warning and error console diagnostics in the event timeline", () => {
+    const markers = buildReplayMarkers([
+      { type: 4, timestamp: 1_000, data: { width: 1280, height: 720 } },
+      {
+        type: 5,
+        timestamp: 1_100,
+        data: {
+          tag: "agent-native.console",
+          payload: { level: "log", message: "routine" },
+        },
+      },
+      {
+        type: 5,
+        timestamp: 1_200,
+        data: {
+          tag: "agent-native.console",
+          payload: { level: "error", message: "boom" },
+        },
+      },
+    ]);
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({
+      kind: "console",
+      severity: "error",
+      detail: "boom",
+    });
+  });
+});
+
 describe("session replay chunk loading", () => {
   it("keeps copied agent access tokens on manifest and chunk fetches", async () => {
     vi.stubGlobal("window", {
@@ -323,6 +389,11 @@ describe("session replay chunk loading", () => {
         pathname: "/sessions/sr_1",
         search: "?agent_access=agent-token",
       },
+    });
+    vi.stubGlobal("location", {
+      origin: "https://analytics.example.test",
+      pathname: "/sessions/sr_1",
+      search: "?agent_access=agent-token",
     });
     const seenUrls: string[] = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -345,7 +416,9 @@ describe("session replay chunk loading", () => {
       throw new Error(`Unexpected fetch: ${url}`);
     }) as typeof fetch;
 
-    await fetchSessionReplayPlayback("sr_1");
+    await fetchSessionReplayPlayback("sr_1", {
+      agentAccessToken: "agent-token",
+    });
 
     expect(seenUrls).toHaveLength(2);
     expect(seenUrls[0]).toContain("agent_access=agent-token");

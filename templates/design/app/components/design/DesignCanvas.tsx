@@ -1,8 +1,14 @@
 import { usePinchZoom, useT } from "@agent-native/core/client";
-import { getDraftGeometryFromPoints } from "@shared/canvas-math";
+import {
+  DEFAULT_CANVAS_MAX_ZOOM,
+  DEFAULT_CANVAS_MIN_ZOOM,
+  getDraftGeometryFromPoints,
+} from "@shared/canvas-math";
 import { ensureCodeLayerNodeIdsInHtml } from "@shared/code-layer";
+import { IconPlugConnectedX, IconRefresh } from "@tabler/icons-react";
 import { useRef, useEffect, useCallback, useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 // NOTE: This wires up the NEW shared visual-editor DrawOverlay + comment-pin
 // components from `@/components/visual-editor`. The legacy iframe-only
 // DrawOverlay at `./DrawOverlay.tsx` is intentionally NOT used here — both
@@ -21,6 +27,7 @@ import { hitTestBridgeScript } from "../../../.generated/bridge/hit-test.generat
 import { motionPreviewBridgeScript } from "../../../.generated/bridge/motion-preview.generated";
 import { navBridgeScript } from "../../../.generated/bridge/nav.generated";
 import { shaderFillPreviewBridgeScript } from "../../../.generated/bridge/shader-fill-preview.generated";
+import { shaderRuntimeBridgeScript } from "../../../.generated/bridge/shader-runtime.generated";
 import { tweakBridgeScript } from "../../../.generated/bridge/tweak.generated";
 import { zoomBridgeScript } from "../../../.generated/bridge/zoom.generated";
 import { isTrustedCanvasBridgeMessage } from "./bridge-security";
@@ -78,7 +85,15 @@ function isAllowedFusionOrigin(
 export interface MotionTrackWire {
   targetNodeId: string;
   property: string;
+  /**
+   * Keyframes normalised to the TRACK's own span; `ease` accepts CSS timing
+   * functions plus `spring(bounce[, settle])` tokens and `linear(...)` lists.
+   */
   keyframes: Array<{ t: number; value: string; ease?: string }>;
+  /** Track start offset within the timeline, ms (staggering). */
+  delayMs?: number;
+  /** Per-track animation span, ms. Omitted = whole timeline. */
+  durationMs?: number;
 }
 
 /**
@@ -96,14 +111,28 @@ ${motionPreviewBridgeScript}
 `;
 
 /**
- * Shader-fill preview bridge. ALWAYS injected alongside the other bridge
- * scripts so the parent can apply a CSS gradient approximation of a shader
- * fill to the currently-selected element without persisting anything.
+ * Shader scripts. ALWAYS injected alongside the other bridge scripts:
+ *
+ * 1. The code-backed GLSL shader RUNTIME (window.__anShaders) — renders
+ *    persisted `<script type="application/x-agent-native-shader">` blocks
+ *    onto annotated elements via WebGL, and powers live GLSL previews.
+ *    Persisted screens embed their own copy for standalone export; the
+ *    runtime is idempotent so double-injection is safe. Source of truth:
+ *    app/components/design/bridge/shader-runtime.bridge.ts (also embedded
+ *    into saved HTML by shared/shader-fills.ts ensureShaderRuntime()).
+ *
+ * 2. The shader-fill preview BRIDGE — postMessage protocol handler. Legacy
+ *    messages apply a CSS gradient approximation of a shader fill to the
+ *    selected element; `glsl-shader-*` messages delegate to the runtime for
+ *    live WebGL previews, knob scrubbing, and rescans. Nothing persists.
  *
  * Source: app/components/design/bridge/shader-fill-preview.bridge.ts
- * Compiled: .generated/bridge/shader-fill-preview.generated.ts (run bridge/codegen.ts to update)
+ * Compiled: .generated/bridge/*.generated.ts (run bridge/codegen.ts to update)
  */
 const SHADER_FILL_PREVIEW_BRIDGE_SCRIPT = `
+<script data-agent-native-shader-runtime data-runtime-version="1">
+${shaderRuntimeBridgeScript}
+</script>
 <script data-agent-native-shader-fill-preview-bridge>
 ${shaderFillPreviewBridgeScript}
 </script>
@@ -322,6 +351,7 @@ interface DesignCanvasProps {
    * For `"inline"` and `"localhost"` sources this prop is ignored.
    */
   fusionUrl?: string;
+  bridgeToken?: string;
   zoom: number;
   onZoomChange?: (zoom: number) => void;
   deviceFrame: DeviceFrameType;
@@ -342,6 +372,28 @@ interface DesignCanvasProps {
    */
   runtimeReplacementContent?: string;
   runtimeReplacementKey?: string;
+  styleRevertRequest?: {
+    requestId: number;
+    patches: Array<{
+      selector: string;
+      sourceId?: string | null;
+      styles: Record<string, string>;
+    }>;
+  } | null;
+  styleBaselineResetRequest?: number | null;
+  textRevertRequest?: {
+    requestId: number;
+    patches: Array<{
+      selector: string;
+      sourceId?: string | null;
+      value: string;
+      html?: string;
+    }>;
+  } | null;
+  structureAckRequest?: {
+    requestId: number;
+    acks: Array<{ requestId: string; applied: boolean }>;
+  } | null;
   embeddedFrameBackground?: string;
   transparentBackground?: boolean;
   editorChromeScaleX?: number;
@@ -361,12 +413,17 @@ interface DesignCanvasProps {
     selector: string,
     styles: Record<string, string>,
     info?: ElementInfo,
+    metadata?: { originalStyles?: Record<string, string> },
   ) => void;
   onTextContentChange?: (
     selector: string,
     value: string,
     info?: ElementInfo,
-    details?: { html?: string },
+    details?: {
+      html?: string;
+      originalValue?: string;
+      originalHtml?: string;
+    },
   ) => void;
   onTextEditingStateChange?: (state: {
     active: boolean;
@@ -391,7 +448,7 @@ interface DesignCanvasProps {
       sourceRect?: { x: number; y: number; width: number; height: number };
       anchorRect?: { x: number; y: number; width: number; height: number };
     },
-  ) => boolean | void;
+  ) => boolean | "pending" | void;
   onVisualDuplicateChange?: (
     selector: string,
     cloneHtml: string,
@@ -410,6 +467,13 @@ interface DesignCanvasProps {
   onExitDrawMode?: () => void;
   /** Whether comment-pin drop mode is active. */
   pinMode?: boolean;
+  /**
+   * When true, suppresses rendering of comment pins on this canvas (e.g. the
+   * Figma-style Shift+C "hide comments" toggle in single-screen mode). Only
+   * affects pin *visibility* — pin drop mode (`pinMode`) still behaves
+   * normally underneath so toggling this back off doesn't lose anything.
+   */
+  commentPinsHidden?: boolean;
   selectedSelector?: string | null;
   selectedSelectorCandidates?: string[];
   selectedSelectorGroups?: string[][];
@@ -458,6 +522,14 @@ interface DesignCanvasProps {
    */
   motionDefaultEase?: string;
   /**
+   * Timeline duration in ms, threaded to the motion-preview bridge with the
+   * tracks so per-track `delayMs`/`durationMs` offsets can be mapped before
+   * the first scrub tick arrives (ticks also carry it). Optional — without
+   * it, offset tracks preview correctly from the first `motion-preview`
+   * message onward.
+   */
+  motionDurationMs?: number;
+  /**
    * Explicit iframe width in pixels.  When provided it overrides the width
    * derived from `deviceFrame`, enabling per-breakpoint preview (e.g. Mobile
    * 390 / Tablet 768 / Desktop 1280 side-by-side frames in the overview).
@@ -487,6 +559,52 @@ interface DesignCanvasProps {
     css: string;
   } | null;
   /**
+   * On-canvas gradient-edit handles (Figma parity) for a gradient fill on an
+   * element INSIDE this screen's iframe content (as opposed to a board/draft
+   * primitive or the screen-frame's own background, which MultiScreenCanvas
+   * already draws chrome for directly — see DesignEditor's gradientEditTarget
+   * derivation). When set, posts `{ type: "gradient-edit-target", nodeId,
+   * cssValue }` into the iframe so the editor-chrome bridge renders drag
+   * handles on that element; `null`/`undefined` posts `{ type:
+   * "gradient-edit-clear" }`. `nodeId` must be a `data-agent-native-node-id`
+   * value. See editor-chrome.bridge.ts's gradientEditTarget doc comment for
+   * the full contract this implements.
+   */
+  gradientEditTarget?: {
+    nodeId: string;
+    cssValue: string;
+  } | null;
+  /**
+   * Called with the bridge's `gradient-edit-change` postMessages while a
+   * gradient-edit drag on an in-screen element (gradientEditTarget above) is
+   * live — `phase: "preview"` on every drag tick, `"commit"` once on
+   * pointerup, mirroring GradientEditOverlayTarget's onChange contract in
+   * MultiScreenCanvas.tsx so the parent can route both through the same
+   * style-apply path `visual-style-change` uses.
+   */
+  onGradientEditChange?: (
+    nodeId: string,
+    cssValue: string,
+    phase: "preview" | "commit",
+  ) => void;
+  /**
+   * Interaction-state forced preview (Figma/Webflow parity, phase 2 — see
+   * `shared/interaction-states.ts`'s "Forced-preview mechanism" doc comment).
+   * When set, posts `{ type: "state-preview", nodeId, state }` into the
+   * iframe so the editor-chrome bridge sets `data-an-state-preview="<state>"`
+   * on the matching `[data-agent-native-node-id]` element — the persisted
+   * twin CSS rule (written by `duplicateStatePreviewRules`) does the actual
+   * styling, so the bridge does zero CSS work of its own.
+   * `null`/`undefined` posts `{ type: "state-preview", nodeId: null, state:
+   * null }`, clearing whichever element is currently force-previewing.
+   * Mirrors `gradientEditTarget`'s postMessage-sync-effect pattern exactly —
+   * see that prop's doc comment above.
+   */
+  statePreviewTarget?: {
+    nodeId: string;
+    state: string;
+  } | null;
+  /**
    * Called when the user clicks the component-instance source tag (the
    * "ComponentName →" pill that floats above a selected component root).
    * The parent should invoke `open-component-source` with these params.
@@ -514,6 +632,52 @@ interface DesignCanvasProps {
    * `draftPrimitiveToInsert` on the overview side).
    */
   onCreatePrimitive?: (spec: CreatePrimitiveSpec) => void;
+  /**
+   * OS file drag-and-drop (Figma parity): fired when the user drops native
+   * OS files (e.g. images dragged from Finder/Explorer) onto this single-
+   * screen canvas. `target.screenContentPoint` is the drop point converted to
+   * SCREEN-CONTENT coordinates via `getScreenContentPointFromClient` — the
+   * same space `onCreatePrimitive` geometry and `draftPrimitiveToInsert` use
+   * — NOT viewport pixels. `target.screenId` echoes this canvas's own
+   * `screenId` prop (when set) so a caller wiring both MultiScreenCanvas and
+   * DesignCanvas can use one shared handler keyed on screen id. This
+   * component only resolves WHERE the drop landed — it does NOT read file
+   * contents, upload, or insert anything; that remains the caller's job
+   * (DesignEditor's paste-image pipeline), matching `onCreatePrimitive`'s own
+   * division of responsibility.
+   */
+  onDropFiles?: (
+    files: File[],
+    target: {
+      screenContentPoint: { x: number; y: number };
+      screenId?: string;
+    },
+  ) => void;
+  /**
+   * Contract for DesignEditor: when true, the Figma-style "hand" tool is
+   * armed, so a plain left-button drag anywhere on this canvas (over the
+   * scroll-container background OR over the iframe/creation-overlay area)
+   * pans instead of selecting/drawing. Mirrors MultiScreenCanvas's own
+   * `tool === "hand"` → `beginPan` gating (see `e.button === 0 && tool ===
+   * "hand"` in MultiScreenCanvas). Middle-mouse-button drag always pans
+   * regardless of this prop, matching MultiScreenCanvas's unconditional
+   * `e.button === 1` branch. Defaults to `false` (no behavior change when
+   * omitted) — DesignEditor should pass `activeTool === "hand"` (or its
+   * equivalent tool-state) once wired.
+   */
+  handToolActive?: boolean;
+  /**
+   * Contract for DesignEditor: when true, the spacebar is currently held
+   * down, which — Figma-style — temporarily activates the same pan-on-drag
+   * behavior as `handToolActive` without changing the active tool. This
+   * component does not listen for the spacebar itself (keydown/keyup would
+   * need to be captured at a level that already reaches this component
+   * reliably, e.g. a window-level listener in DesignEditor gated on not
+   * being in a text-editing context); DesignEditor should track pressed
+   * state there and pass it through here. Defaults to `false` (no behavior
+   * change when omitted).
+   */
+  spacePanActive?: boolean;
 }
 
 /** Creation tools supported by the single-screen click-to-place overlay. */
@@ -523,7 +687,11 @@ export type CreationTool =
   | "line"
   | "arrow"
   | "text"
-  | "pen";
+  | "pen"
+  // Figma parity: the frame tool (F/A) used inside a focused screen places a
+  // bare container <div> (a nested "frame") instead of forcing a jump out to
+  // overview to draw a new screen.
+  | "frame";
 
 /**
  * Geometry payload emitted by the single-screen creation overlay. Coordinates
@@ -579,6 +747,71 @@ export function getScreenContentPointFromClient(
   };
 }
 
+/**
+ * Computes the scroll-container delta needed to keep a given viewport
+ * (client) point anchored to the same content underneath it while zooming.
+ *
+ * This is the cursor-anchor math used by the `pinch-zoom-wheel` bridge
+ * handler (forwarded from inside the iframe, since wheel events don't bubble
+ * out of iframes — see `zoom.bridge.ts`) to mirror `usePinchZoom`'s own
+ * zoom-to-cursor behavior for gestures that occur over the iframe itself.
+ *
+ * IMPORTANT — this math is only correct when the scaled layer's
+ * `transform-origin` is `top left` (or equivalent), so that the layer's own
+ * top-left corner is a fixed point in scroll-content space regardless of
+ * zoom. If the scaled layer is instead centered via `transform-origin:
+ * center center` plus flex/grid centering, the *painted* box re-centers
+ * around the container's center on every zoom change — the flex-centering
+ * repositions the *layout* box so its center lands at the container's
+ * center, and `transform-origin: center` then scales around that already-
+ * centered point. That is a well-defined anchor too, but it is NOT the one
+ * this function (or usePinchZoom) computes, so cursor-following would drift.
+ * See the long comment on the "none"-mode zoom layer in the component render
+ * for how DesignCanvas keeps this invariant true while still looking
+ * centered at rest.
+ *
+ * @param anchorClient The viewport point to keep stationary (e.g. cursor
+ *   position converted from iframe-document space to viewport space).
+ * @param containerRect The scroll container's `getBoundingClientRect()`.
+ * @param scrollOffset The scroll container's current `{ scrollLeft,
+ *   scrollTop }`.
+ * @param zoomRatio `nextZoom / currentZoom` — how much the zoom is about to
+ *   change by by (>1 zooming in, <1 zooming out).
+ */
+export function getZoomToCursorScrollDelta(
+  anchorClient: { x: number; y: number },
+  containerRect: { left: number; top: number },
+  scrollOffset: { scrollLeft: number; scrollTop: number },
+  zoomRatio: number,
+): { dx: number; dy: number } {
+  const cx = anchorClient.x - containerRect.left + scrollOffset.scrollLeft;
+  const cy = anchorClient.y - containerRect.top + scrollOffset.scrollTop;
+  return {
+    dx: cx * (zoomRatio - 1),
+    dy: cy * (zoomRatio - 1),
+  };
+}
+
+/**
+ * True when a drag event is carrying native OS files (e.g. dragged in from
+ * Finder/Explorer) rather than an internal HTML5 DOM drag (element reorder,
+ * the extensions-panel native-asset drag, etc). A real OS file drag always
+ * includes the "Files" type in `dataTransfer.types` — reliably present during
+ * dragenter/dragover even before drop, when `dataTransfer.files` itself is
+ * empty for security reasons — so this is the correct check to gate
+ * preventDefault()/overlay logic on, not `files.length`.
+ */
+export function isOsFileDragEvent(event: {
+  dataTransfer: { types: readonly string[] | DOMStringList } | null;
+}): boolean {
+  const types = event.dataTransfer?.types;
+  if (!types) return false;
+  for (let i = 0; i < types.length; i += 1) {
+    if (types[i] === "Files") return true;
+  }
+  return false;
+}
+
 function getExternalPreviewUrl(content: string): string | null {
   const trimmed = content.trim();
   if (!/^https?:\/\//i.test(trimmed)) return null;
@@ -632,6 +865,102 @@ function snapshotEndpointUrl(bridgeUrl: string, previewUrl: string): string {
   return endpoint.toString();
 }
 
+export function liveEditEndpointUrl(
+  bridgeUrl: string,
+  previewUrl: string,
+  options?: { includeEditorBridge?: boolean },
+): string {
+  const endpoint = new URL("/live-edit", bridgeUrl);
+  endpoint.searchParams.set("url", previewUrl);
+  if (options?.includeEditorBridge === false) {
+    endpoint.searchParams.set("bridge", "0");
+  }
+  return endpoint.toString();
+}
+
+function originFromUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function buildEditorChromeBridgeScript(args: {
+  readOnly: boolean;
+  editMode: boolean;
+  editorChromeScaleX: number;
+  editorChromeScaleY: number;
+  screenId: string;
+  boardSurface: boolean;
+}) {
+  return (
+    createEditorBridgeThemeScript(readEditorBridgeThemeVars()) +
+    EDITOR_CHROME_BRIDGE_SCRIPT.replace(
+      "__READ_ONLY__",
+      args.readOnly ? "true" : "false",
+    )
+      .replace("__TEXT_EDITING_ENABLED__", args.editMode ? "true" : "false")
+      .replace("__EDITOR_CHROME_SCALE_X__", String(args.editorChromeScaleX))
+      .replace("__EDITOR_CHROME_SCALE_Y__", String(args.editorChromeScaleY))
+      .replace("__DESIGN_CANVAS_SCREEN_ID__", JSON.stringify(args.screenId))
+      .replace(
+        "__DESIGN_CANVAS_BOARD_SURFACE__",
+        args.boardSurface ? "true" : "false",
+      )
+  );
+}
+
+function contentHash(value: string): string {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return `${value.length}:${hash >>> 0}`;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFiniteRect(value: unknown): value is ElementInfo["boundingRect"] {
+  if (!isPlainRecord(value)) return false;
+  return (
+    Number.isFinite(value.x) &&
+    Number.isFinite(value.y) &&
+    Number.isFinite(value.width) &&
+    Number.isFinite(value.height)
+  );
+}
+
+export function isElementInfoPayload(value: unknown): value is ElementInfo {
+  if (!isPlainRecord(value)) return false;
+  return (
+    typeof value.tagName === "string" &&
+    Array.isArray(value.classes) &&
+    isPlainRecord(value.computedStyles) &&
+    isFiniteRect(value.boundingRect) &&
+    typeof value.isFlexChild === "boolean" &&
+    typeof value.isFlexContainer === "boolean"
+  );
+}
+
+/**
+ * Exponential backoff delay (ms) for the localhost bridge snapshot auto-retry
+ * loop, keyed by the zero-based retry attempt number (0 = first retry after
+ * the initial failed fetch). Doubles each attempt starting at 1.5s, capped at
+ * ~15s so a genuinely-down dev server settles into a slow, low-noise poll
+ * instead of hammering the bridge every 1.5s forever.
+ */
+const SNAPSHOT_RETRY_BASE_DELAY_MS = 1500;
+const SNAPSHOT_RETRY_MAX_DELAY_MS = 15000;
+export function getSnapshotRetryDelayMs(attempt: number): number {
+  const safeAttempt = Number.isFinite(attempt) ? Math.max(0, attempt) : 0;
+  const delay = SNAPSHOT_RETRY_BASE_DELAY_MS * 2 ** safeAttempt;
+  return Math.min(SNAPSHOT_RETRY_MAX_DELAY_MS, delay);
+}
+
 const TRANSPARENT_EMBEDDED_FRAME_STYLE =
   "<style data-agent-native-transparent-frame>html,body{background:transparent!important;}body{background-color:transparent!important;}</style>";
 
@@ -659,9 +988,38 @@ export function getEmbeddedIframeBackgroundColor(args: {
     : (args.embeddedFrameBackground ?? "transparent");
 }
 
+/**
+ * CSS rule that shifts embedded-frame (board) content so board-coordinate
+ * (0,0) lands at the center of the board iframe's oversized surface.
+ *
+ * The selector is deliberately scoped to DIRECT `<body>` children only.
+ * `translate` composes per element, so a blanket
+ * `[data-agent-native-node-id]{translate:…}` rule shifted every NESTED
+ * node-id-bearing descendant by the surface offset AGAIN (+65536px per
+ * nesting level) — any board child nested inside another board primitive
+ * rendered tens of thousands of px outside its parent (i.e. visually
+ * vanished) even when its persisted parent-relative left/top were perfectly
+ * correct, and every rect-based coordinate computation on nested board
+ * content was poisoned by the extra offset.
+ *
+ * Scoping (rather than wrapping content in a single offset container) is the
+ * robust fix here because board elements are DOCUMENTED direct `<body>`
+ * children (see shared/board-file.ts module doc + emptyBoardHtml): every
+ * creation path appends at body level (appendCanvasPrimitiveToHtml,
+ * boardObjectEntryToHtmlFragment, moveNodeBetweenDocuments' body-append),
+ * and several consumers key on that structure with `body > …` selectors
+ * (BOARD_SURFACE_RENDER_STYLE) and depth-1 walks
+ * (backfillBoardPrimitiveMarkers, getBoardContentLayerSignature). A wrapper
+ * element would silently break all of those structural contracts.
+ *
+ * With this rule, the offset applies exactly once — to top-level board
+ * elements — and nested children position purely via parent-relative
+ * left/top inside their (absolutely positioned) parent, like any normal
+ * CSS containing-block hierarchy.
+ */
 function embeddedContentOffsetStyle(x: number, y: number): string {
   if (x === 0 && y === 0) return "";
-  return `<style data-agent-native-content-offset>[data-agent-native-node-id]{translate:${Math.round(x)}px ${Math.round(y)}px;}</style>`;
+  return `<style data-agent-native-content-offset>body > [data-agent-native-node-id]{translate:${Math.round(x)}px ${Math.round(y)}px;}</style>`;
 }
 
 function injectEmbeddedFrameStyle(content: string, style: string): string {
@@ -717,6 +1075,60 @@ export interface IframeContextMenuPayload {
   info?: ElementInfo | null;
 }
 
+/**
+ * Creation-race keystroke routing: after the host calls `beginTextEdit(nodeId)`
+ * for a JUST-created text element, there is a window (persist round-trip +
+ * bridge activation) where the browser focus still sits on the HOST document.
+ * Keystrokes typed in that window used to fall into host keyboard shortcuts —
+ * letters switched tools, digits zoomed, and Delete/Backspace DELETED the
+ * selected layer/screen — while the characters themselves were silently lost.
+ *
+ * While a text edit is pending, every host keydown is routed through this
+ * pure helper:
+ * - printable characters are BUFFERED (replayed into the editable once the
+ *   bridge reports the session active) and swallowed,
+ * - Backspace edits the buffer, Delete/Enter/Tab/arrows are swallowed so they
+ *   can never reach host layer-deletion/navigation,
+ * - Escape clears the pending buffer (user aborted) and is swallowed,
+ * - IME composition and Cmd/Ctrl chords (undo!) pass through untouched.
+ *
+ * Exported for unit tests (DesignCanvas.pending-text-edit.test.ts).
+ */
+export type PendingTextEditKeyAction =
+  | { action: "buffer"; char: string }
+  | { action: "drop-last" }
+  | { action: "swallow" }
+  | { action: "clear-and-swallow" }
+  | { action: "pass" };
+
+export function routePendingTextEditKey(e: {
+  key: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  isComposing?: boolean;
+}): PendingTextEditKeyAction {
+  if (e.isComposing) return { action: "pass" };
+  if (e.metaKey || e.ctrlKey) return { action: "pass" };
+  if (e.key === "Escape") return { action: "clear-and-swallow" };
+  if (e.key === "Backspace") return { action: "drop-last" };
+  if (
+    e.key === "Delete" ||
+    e.key === "Enter" ||
+    e.key === "Tab" ||
+    e.key.startsWith("Arrow")
+  ) {
+    return { action: "swallow" };
+  }
+  if (e.key.length === 1) return { action: "buffer", char: e.key };
+  return { action: "pass" };
+}
+
+/** How long a pending text edit may wait for bridge activation before the
+ * keystroke routing above stands down (matches the bridge's own ~2s
+ * begin-text-edit retry window, plus round-trip slack). */
+export const PENDING_TEXT_EDIT_TIMEOUT_MS = 3000;
+
 export function DesignCanvas({
   content,
   contentKey,
@@ -725,6 +1137,7 @@ export function DesignCanvas({
   externalSnapshotHtml,
   onExternalContentSnapshot,
   fusionUrl,
+  bridgeToken,
   zoom,
   onZoomChange,
   deviceFrame,
@@ -732,6 +1145,10 @@ export function DesignCanvas({
   boardSurface = false,
   runtimeReplacementContent,
   runtimeReplacementKey,
+  styleRevertRequest,
+  styleBaselineResetRequest,
+  textRevertRequest,
+  structureAckRequest,
   embeddedFrameBackground,
   transparentBackground = false,
   editorChromeScaleX = 1,
@@ -759,6 +1176,7 @@ export function DesignCanvas({
   drawMode,
   onExitDrawMode,
   pinMode,
+  commentPinsHidden,
   selectedSelector,
   selectedSelectorCandidates = [],
   selectedSelectorGroups = [],
@@ -776,16 +1194,41 @@ export function DesignCanvas({
   onPrototypeNavigate,
   motionTracks,
   motionDefaultEase,
+  motionDurationMs,
   previewWidthPx,
   onComponentSourceJump,
   shaderFillPreview,
+  gradientEditTarget,
+  onGradientEditChange,
+  statePreviewTarget,
   activeCreationTool = null,
   onCreatePrimitive,
+  onDropFiles,
+  handToolActive = false,
+  spacePanActive = false,
 }: DesignCanvasProps) {
   const t = useT();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const zoomLayerRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef(zoom);
+  // Zoom-invariant chrome: the non-embedded-frame render path below wraps the
+  // iframe in its own CSS `transform: scale(zoom / 100)` (see the
+  // `deviceFrame === "none"` and framed branches further down) — a purely
+  // visual, OUTER scale the bridge running INSIDE the iframe has no way to
+  // observe. `editorChromeScaleX/Y` is the only channel that tells the bridge
+  // what scale its own chrome (selection borders, resize handles, spacing
+  // overlays) must counter-scale by to stay a constant on-screen size, Figma-
+  // style, instead of visually shrinking/growing with content as the user
+  // zooms. The overview caller already folds its own zoom into the
+  // editorChromeScaleX/Y it passes down for exactly this reason; this
+  // component must do the same with its OWN `zoom` prop for single-view,
+  // multiplying in whatever scale the caller passed (default 1) rather than
+  // assuming the caller already accounted for it — single-view's caller
+  // historically didn't pass either prop at all, so the bridge always
+  // computed with scale=1 and chrome scaled with content on every zoom.
+  const effectiveEditorChromeScaleX = (zoom / 100) * editorChromeScaleX;
+  const effectiveEditorChromeScaleY = (zoom / 100) * editorChromeScaleY;
   const previousContentKeyRef = useRef(contentKey);
   const runtimeReplacementContentRef = useRef(runtimeReplacementContent);
   const runtimeReplacementKeyRef = useRef(runtimeReplacementKey);
@@ -836,8 +1279,16 @@ export function DesignCanvas({
     status: "loading" | "error";
     message?: string;
   } | null>(null);
+  const [registeredLiveEditBridgeKey, setRegisteredLiveEditBridgeKey] =
+    useState<string | null>(null);
   const [externalSnapshotRetryNonce, setExternalSnapshotRetryNonce] =
     useState(0);
+  // Exponential backoff for the auto-retry loop below: 1.5s → 3s → 6s →
+  // capped at ~15s, so a genuinely-down dev server doesn't get hammered with
+  // a fixed 1.5s-forever retry loop. Resets to 0 on a successful fetch or a
+  // manual retry click (see handleManualSnapshotRetry) so the next failure
+  // starts the backoff over rather than continuing to climb.
+  const snapshotRetryAttemptRef = useRef(0);
   const onExternalContentSnapshotRef = useRef(onExternalContentSnapshot);
   const isEmbeddedFrame = Boolean(embeddedFrame);
   // Resolve the URL to render in the iframe:
@@ -864,20 +1315,83 @@ export function DesignCanvas({
     (fetchedExternalSnapshot?.url === rawExternalPreviewUrl
       ? fetchedExternalSnapshot.html
       : undefined);
-  const requiresEditableExternalSnapshot =
+  const editorChromeBridgeForCurrentState = useMemo(
+    () =>
+      buildEditorChromeBridgeScript({
+        readOnly,
+        editMode,
+        editorChromeScaleX: effectiveEditorChromeScaleX,
+        editorChromeScaleY: effectiveEditorChromeScaleY,
+        screenId: screenId ?? contentKey ?? "",
+        boardSurface,
+      }),
+    [
+      boardSurface,
+      contentKey,
+      editMode,
+      effectiveEditorChromeScaleX,
+      effectiveEditorChromeScaleY,
+      readOnly,
+      screenId,
+    ],
+  );
+  const embeddedWheelBridgeForCurrentState = useMemo(
+    () =>
+      EMBEDDED_WHEEL_BRIDGE_SCRIPT.replace(
+        "__EMBEDDED_WHEEL_FORWARDING_ENABLED__",
+        isEmbeddedFrame ? "true" : "false",
+      ),
+    [isEmbeddedFrame],
+  );
+  const liveEditBridgeScript = useMemo(
+    () =>
+      MOTION_PREVIEW_BRIDGE_SCRIPT +
+      SHADER_FILL_PREVIEW_BRIDGE_SCRIPT +
+      TWEAK_BRIDGE_SCRIPT +
+      ZOOM_BRIDGE_SCRIPT +
+      LIGHTWEIGHT_HIT_TEST_BRIDGE_SCRIPT +
+      embeddedWheelBridgeForCurrentState +
+      editorChromeBridgeForCurrentState,
+    [editorChromeBridgeForCurrentState, embeddedWheelBridgeForCurrentState],
+  );
+  const liveEditBridgeKey = useMemo(
+    () => contentHash(liveEditBridgeScript),
+    [liveEditBridgeScript],
+  );
+  const hasLiveEditExternalFrame =
+    sourceType === "localhost" && Boolean(bridgeUrl && rawExternalPreviewUrl);
+  const usesLiveEditEditorBridge =
     sourceType === "localhost" &&
     Boolean(bridgeUrl && rawExternalPreviewUrl) &&
     !interactMode &&
     !readOnly;
+  const liveEditBridgeRegistered =
+    usesLiveEditEditorBridge &&
+    registeredLiveEditBridgeKey === liveEditBridgeKey;
+  const requiresEditableExternalSnapshot = false;
+  const liveEditExternalPreviewUrl =
+    hasLiveEditExternalFrame &&
+    bridgeUrl &&
+    rawExternalPreviewUrl &&
+    interactMode
+      ? liveEditEndpointUrl(bridgeUrl, rawExternalPreviewUrl, {
+          includeEditorBridge: false,
+        })
+      : liveEditBridgeRegistered && bridgeUrl && rawExternalPreviewUrl
+        ? liveEditEndpointUrl(bridgeUrl, rawExternalPreviewUrl)
+        : null;
   const iframeRenderContent =
     activeExternalSnapshotHtml ??
     (requiresEditableExternalSnapshot ? "" : renderedContent);
   const externalPreviewUrl =
-    activeExternalSnapshotHtml || requiresEditableExternalSnapshot
+    liveEditExternalPreviewUrl ??
+    (activeExternalSnapshotHtml || requiresEditableExternalSnapshot
       ? null
-      : rawExternalPreviewUrl;
+      : rawExternalPreviewUrl);
   const waitingForEditableExternalSnapshot =
     requiresEditableExternalSnapshot && !activeExternalSnapshotHtml;
+  const waitingForLiveEditBridge =
+    usesLiveEditEditorBridge && !liveEditBridgeRegistered;
   zoomRef.current = zoom;
   runtimeReplacementContentRef.current = runtimeReplacementContent;
   runtimeReplacementKeyRef.current = runtimeReplacementKey;
@@ -887,8 +1401,61 @@ export function DesignCanvas({
   }, [onExternalContentSnapshot]);
 
   useEffect(() => {
+    if (!usesLiveEditEditorBridge || !bridgeUrl) {
+      setRegisteredLiveEditBridgeKey(null);
+      return;
+    }
+    let cancelled = false;
+    setRegisteredLiveEditBridgeKey((current) =>
+      current === liveEditBridgeKey ? current : null,
+    );
+    void (async () => {
+      try {
+        const endpoint = new URL("/live-edit-bridge", bridgeUrl).toString();
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(bridgeToken ? { "x-bridge-token": bridgeToken } : {}),
+          },
+          body: JSON.stringify({ script: liveEditBridgeScript }),
+        });
+        if (!response.ok) {
+          throw new Error(`Bridge registration failed (${response.status})`);
+        }
+        if (!cancelled) {
+          setRegisteredLiveEditBridgeKey(liveEditBridgeKey);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn(
+            "[DesignCanvas] live edit bridge registration failed",
+            error,
+          );
+          setRegisteredLiveEditBridgeKey(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    bridgeUrl,
+    bridgeToken,
+    liveEditBridgeKey,
+    liveEditBridgeScript,
+    usesLiveEditEditorBridge,
+  ]);
+
+  useEffect(() => {
     const previewUrl = rawExternalPreviewUrl;
-    if (sourceType !== "localhost" || !bridgeUrl || !previewUrl) {
+    if (
+      !requiresEditableExternalSnapshot ||
+      sourceType !== "localhost" ||
+      !bridgeUrl ||
+      !previewUrl
+    ) {
+      snapshotRetryAttemptRef.current = 0;
       setFetchedExternalSnapshot((current) =>
         current?.url === previewUrl ? current : null,
       );
@@ -896,6 +1463,7 @@ export function DesignCanvas({
       return;
     }
     if (externalSnapshotHtml) {
+      snapshotRetryAttemptRef.current = 0;
       setExternalSnapshotState(null);
       return;
     }
@@ -905,9 +1473,11 @@ export function DesignCanvas({
     const endpoint = snapshotEndpointUrl(bridgeUrl, previewUrl);
     const scheduleRetry = () => {
       if (!requiresEditableExternalSnapshot || cancelled) return;
+      const delay = getSnapshotRetryDelayMs(snapshotRetryAttemptRef.current);
+      snapshotRetryAttemptRef.current += 1;
       retryTimer = window.setTimeout(() => {
         setExternalSnapshotRetryNonce((nonce) => nonce + 1);
-      }, 1500);
+      }, delay);
     };
     setExternalSnapshotState({ url: previewUrl, status: "loading" });
     void (async () => {
@@ -948,6 +1518,7 @@ export function DesignCanvas({
           },
         }).content;
         if (cancelled) return;
+        snapshotRetryAttemptRef.current = 0;
         setFetchedExternalSnapshot({ url: previewUrl, html: stamped });
         setExternalSnapshotState(null);
         onExternalContentSnapshotRef.current?.({
@@ -981,6 +1552,15 @@ export function DesignCanvas({
     requiresEditableExternalSnapshot,
     sourceType,
   ]);
+
+  // Manual retry (offline-state "Retry" button): reset the backoff so the
+  // user-initiated attempt fires immediately rather than waiting out
+  // whatever delay the auto-retry loop had climbed to, then trigger the
+  // fetch effect above via the nonce dependency.
+  const handleManualSnapshotRetry = useCallback(() => {
+    snapshotRetryAttemptRef.current = 0;
+    setExternalSnapshotRetryNonce((nonce) => nonce + 1);
+  }, []);
 
   const queuedAnnotationPins = useMemo(
     () =>
@@ -1016,11 +1596,67 @@ export function DesignCanvas({
     containerRef: scrollContainerRef,
     zoom,
     setZoom: onZoomChange ?? (() => {}),
-    min: 10,
-    max: 500,
+    // Match the overview's Figma-parity zoom range (2%–25600%) rather than a
+    // narrower single-screen-only clamp. Both the "none" (fills-canvas) and
+    // framed (desktop/tablet/mobile DeviceFrame) render paths share this same
+    // `zoom` prop/state and hook call today — there's no separate framed-mode
+    // clamp to preserve. DeviceFrame chrome (title bars, home indicator) and
+    // the iframe both scale proportionally via the outer `transform: scale()`
+    // wrapper, so extreme zoom just renders very small/very large, it doesn't
+    // break layout or clip content (fixed-px chrome scales with everything
+    // else). Verified 1280px-wide desktop frame at 256x (25600%) renders at
+    // ~327,680px, comfortably under browser max-element-size limits.
+    min: DEFAULT_CANVAS_MIN_ZOOM,
+    max: DEFAULT_CANVAS_MAX_ZOOM,
     zoomToCursor: deviceFrame === "none",
     enabled: Boolean(onZoomChange),
   });
+
+  // T-zoom-anchor: the "none"-mode zoom layer now uses `transform-origin: top
+  // left` (see the render below) so Cmd/Ctrl+wheel and pinch zoom correctly
+  // keep the point under the cursor stationary — usePinchZoom's own
+  // zoomToCursor math and the pinch-zoom-wheel handler above both assume that
+  // invariant. That means the layout is no longer flex-centered, so on first
+  // mount (and whenever the content is re-keyed, e.g. a screen switch) we
+  // imperatively center the scroll position once here — mirroring what the
+  // flex-centering used to give us "for free" at rest — without touching
+  // scroll position during an actual zoom gesture (those already apply their
+  // own precise scroll deltas above).
+  //
+  // BP-DEEP item 2: also re-center when `previewWidthPx` changes (a
+  // breakpoint chip is clicked). Without this, switching to a narrower
+  // breakpoint shrinks the wrapper's rendered width in place — the scroll
+  // container's existing scrollLeft (from whatever it was showing at the
+  // WIDER content's width) is left untouched, so the narrower frame renders
+  // pinned to the left edge of the visible area instead of centered. This is
+  // the single-screen equivalent of the device-preview control's centered
+  // `deviceFrame !== "none"` branch below, without giving up the top-left
+  // transform-origin the zoom-anchor math above depends on.
+  useEffect(() => {
+    if (deviceFrame !== "none") return;
+    const scroll = scrollContainerRef.current;
+    const layer = zoomLayerRef.current;
+    if (!scroll || !layer) return;
+    // Read the SCROLL CONTAINER's own scrollWidth/scrollHeight, not the zoom
+    // layer's: `transform: scale()` never changes an element's own layout
+    // size (scrollWidth/scrollHeight of the transformed element itself stay
+    // at its pre-transform size), but it DOES change how much scrollable
+    // overflow it contributes to its ancestor — which is exactly the
+    // post-transform visual bounds we need here.
+    scroll.scrollLeft = Math.max(
+      0,
+      (scroll.scrollWidth - scroll.clientWidth) / 2,
+    );
+    scroll.scrollTop = Math.max(
+      0,
+      (scroll.scrollHeight - scroll.clientHeight) / 2,
+    );
+    // Only re-center on a genuine content swap (screen switch / remount) or a
+    // breakpoint width change, not on every zoom change — an active zoom
+    // gesture manages its own scroll delta and would otherwise be fought by
+    // this effect on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceFrame, contentKey, previewWidthPx]);
 
   // Build the srcdoc. The tweak bridge ALWAYS goes in so the panel works
   // outside Edit mode. The editor chrome bridge is omitted for Interact mode
@@ -1044,8 +1680,14 @@ export function DesignCanvas({
           readOnly ? "true" : "false",
         )
           .replace("__TEXT_EDITING_ENABLED__", editMode ? "true" : "false")
-          .replace("__EDITOR_CHROME_SCALE_X__", String(editorChromeScaleX))
-          .replace("__EDITOR_CHROME_SCALE_Y__", String(editorChromeScaleY))
+          .replace(
+            "__EDITOR_CHROME_SCALE_X__",
+            String(effectiveEditorChromeScaleX),
+          )
+          .replace(
+            "__EDITOR_CHROME_SCALE_Y__",
+            String(effectiveEditorChromeScaleY),
+          )
           .replace(
             "__DESIGN_CANVAS_SCREEN_ID__",
             JSON.stringify(screenId ?? contentKey ?? ""),
@@ -1140,6 +1782,12 @@ export function DesignCanvas({
               origin: e.origin,
               iframeWindow,
               parentOrigin: window.location.origin,
+              allowedOrigins:
+                sourceType === "localhost" && bridgeUrl
+                  ? [originFromUrl(bridgeUrl)].filter(
+                      (origin): origin is string => Boolean(origin),
+                    )
+                  : [],
             });
       if (!trusted) {
         return;
@@ -1181,8 +1829,28 @@ export function DesignCanvas({
           e.data.styles && typeof e.data.styles === "object"
             ? (e.data.styles as Record<string, string>)
             : {};
+        const originalStyles =
+          e.data.originalStyles && typeof e.data.originalStyles === "object"
+            ? (e.data.originalStyles as Record<string, string>)
+            : undefined;
         if (selector && Object.keys(styles).length > 0) {
-          onVisualStyleChange?.(selector, styles, e.data.payload);
+          onVisualStyleChange?.(
+            selector,
+            styles,
+            isElementInfoPayload(e.data.payload) ? e.data.payload : undefined,
+            {
+              originalStyles,
+            },
+          );
+        }
+        return;
+      }
+      if (e.data.type === "gradient-edit-change") {
+        const nodeId = String(e.data.nodeId || "");
+        const cssValue = String(e.data.cssValue || "");
+        const phase = e.data.phase === "commit" ? "commit" : "preview";
+        if (nodeId && cssValue) {
+          onGradientEditChange?.(nodeId, cssValue, phase);
         }
         return;
       }
@@ -1191,8 +1859,20 @@ export function DesignCanvas({
         const value = String(e.data.value ?? "");
         const html =
           typeof e.data.html === "string" ? String(e.data.html) : undefined;
+        const originalValue =
+          typeof e.data.originalValue === "string"
+            ? String(e.data.originalValue)
+            : undefined;
+        const originalHtml =
+          typeof e.data.originalHtml === "string"
+            ? String(e.data.originalHtml)
+            : undefined;
         if (selector) {
-          onTextContentChange?.(selector, value, e.data.payload, { html });
+          onTextContentChange?.(selector, value, e.data.payload, {
+            html,
+            originalValue,
+            originalHtml,
+          });
         }
         return;
       }
@@ -1262,7 +1942,7 @@ export function DesignCanvas({
               anchorRect,
             },
           );
-          if (requestId) {
+          if (requestId && applied !== "pending") {
             iframeRef.current?.contentWindow?.postMessage(
               {
                 type: "visual-structure-ack",
@@ -1303,7 +1983,44 @@ export function DesignCanvas({
         }
         return;
       }
+      if (e.data.type === "text-edit-pending") {
+        // The bridge is waiting for a just-created node before it can enter
+        // text-edit mode (begin-text-edit arrived first). Arm the host-side
+        // keystroke buffer for the window — repeated pending:true re-posts
+        // for the same node (DesignEditor's T6 retry loop) only extend the
+        // wait, never reset an in-progress buffer.
+        const pendingNodeId =
+          typeof e.data.nodeId === "string" ? e.data.nodeId : "";
+        const currentPending = pendingTextEditRef.current;
+        if (e.data.pending && pendingNodeId) {
+          if (currentPending && currentPending.nodeId === pendingNodeId) {
+            currentPending.startedAt = Date.now();
+          } else {
+            pendingTextEditRef.current = {
+              nodeId: pendingNodeId,
+              buffer: "",
+              startedAt: Date.now(),
+            };
+          }
+        } else if (currentPending?.nodeId === pendingNodeId) {
+          pendingTextEditRef.current = null;
+        }
+        return;
+      }
       if (e.data.type === "text-editing-state") {
+        // Creation-race replay: the bridge just armed the session for the
+        // node we were waiting on — flush any keystrokes the host buffered
+        // during the round-trip window into the now-live editable.
+        if (e.data.active && pendingTextEditRef.current) {
+          const pendingBuffer = pendingTextEditRef.current.buffer;
+          pendingTextEditRef.current = null;
+          if (pendingBuffer) {
+            postOneShotBridgeMessage({
+              type: "text-edit-insert-text",
+              text: pendingBuffer,
+            });
+          }
+        }
         onTextEditingStateChange?.({
           active: Boolean(e.data.active),
           selector:
@@ -1421,11 +2138,15 @@ export function DesignCanvas({
         // a synthetic WheelEvent to trigger the hook's listener — untrusted
         // events are inconsistent across browsers — so just compute the
         // next zoom directly using the same exponential factor + cursor-anchor
-        // math. Clamp range matches the usePinchZoom call above (10–500).
+        // math. Clamp range matches the usePinchZoom call above
+        // (DEFAULT_CANVAS_MIN_ZOOM–DEFAULT_CANVAS_MAX_ZOOM).
         const currentZoom = zoomRef.current;
         const clampedDelta = Math.max(-50, Math.min(50, rawDeltaY));
         const factor = Math.exp(-clampedDelta * 0.01);
-        const nextZoom = Math.max(10, Math.min(500, currentZoom * factor));
+        const nextZoom = Math.max(
+          DEFAULT_CANVAS_MIN_ZOOM,
+          Math.min(DEFAULT_CANVAS_MAX_ZOOM, currentZoom * factor),
+        );
         if (!Number.isFinite(nextZoom) || nextZoom === currentZoom) return;
         if (deviceFrame === "none") {
           const rawClientX = Number(e.data.clientX);
@@ -1436,18 +2157,23 @@ export function DesignCanvas({
           }
           // The iframe lives inside a `transform: scale(zoom/100)` wrapper, so
           // its visual scale relative to viewport is currentZoom / 100. Convert
-          // the iframe-document point under the cursor → viewport point →
-          // scroll-content point, then preserve cursor anchoring while zooming.
+          // the iframe-document point under the cursor → viewport point, then
+          // preserve cursor anchoring while zooming via
+          // getZoomToCursorScrollDelta (requires the zoom layer's
+          // transform-origin to be "top left" — see that function's doc
+          // comment and the "none"-mode zoom layer render comment).
           const iframeRect = iframe.getBoundingClientRect();
           const scrollRect = scroll.getBoundingClientRect();
           const scale = currentZoom / 100;
           const viewportX = iframeRect.left + rawClientX * scale;
           const viewportY = iframeRect.top + rawClientY * scale;
-          const cx = viewportX - scrollRect.left + scroll.scrollLeft;
-          const cy = viewportY - scrollRect.top + scroll.scrollTop;
           const ratio = nextZoom / currentZoom;
-          const dx = cx * (ratio - 1);
-          const dy = cy * (ratio - 1);
+          const { dx, dy } = getZoomToCursorScrollDelta(
+            { x: viewportX, y: viewportY },
+            scrollRect,
+            scroll,
+            ratio,
+          );
           onZoomChange(nextZoom);
           requestAnimationFrame(() => {
             scroll.scrollLeft += dx;
@@ -1466,6 +2192,7 @@ export function DesignCanvas({
     onElementHover,
     onClearSelection,
     onVisualStyleChange,
+    onGradientEditChange,
     onTextContentChange,
     onTextEditingStateChange,
     onElementDblClickText,
@@ -1481,8 +2208,10 @@ export function DesignCanvas({
     onComponentSourceJump,
     isEmbeddedFrame,
     sourceType,
+    bridgeUrl,
     fusionUrl,
     flushPendingOneShotMessages,
+    postOneShotBridgeMessage,
   ]);
 
   const replayIframeEditorState = useCallback(() => {
@@ -1534,6 +2263,7 @@ export function DesignCanvas({
           type: "motion-load-tracks",
           tracks: motionTracks,
           defaultEase: motionDefaultEase,
+          durationMs: motionDurationMs,
         },
         "*",
       );
@@ -1565,6 +2295,7 @@ export function DesignCanvas({
     lockedSelectors,
     motionTracks,
     motionDefaultEase,
+    motionDurationMs,
     scaleMode,
     selectedSelector,
     selectedSelectorCandidates,
@@ -1627,11 +2358,12 @@ export function DesignCanvas({
           type: "motion-load-tracks",
           tracks: motionTracks,
           defaultEase: motionDefaultEase,
+          durationMs: motionDurationMs,
         },
         "*",
       );
     }
-  }, [motionTracks, motionDefaultEase]);
+  }, [motionTracks, motionDefaultEase, motionDurationMs]);
 
   // Sync shader-fill preview to the iframe whenever the prop changes.
   // When cleared (null / undefined) send a clear message so the bridge
@@ -1655,6 +2387,47 @@ export function DesignCanvas({
     }
   }, [shaderFillPreview]);
 
+  // Item 8 — sync the in-screen gradient-edit target to the iframe whenever
+  // the prop changes. Mirrors shaderFillPreview's pattern exactly: cleared
+  // (null/undefined) posts gradient-edit-clear, set posts gradient-edit-target
+  // so the editor-chrome bridge renders drag handles on that node.
+  useEffect(() => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    if (!gradientEditTarget) {
+      win.postMessage({ type: "gradient-edit-clear" }, "*");
+    } else {
+      win.postMessage(
+        {
+          type: "gradient-edit-target",
+          nodeId: gradientEditTarget.nodeId,
+          cssValue: gradientEditTarget.cssValue,
+        },
+        "*",
+      );
+    }
+  }, [gradientEditTarget]);
+
+  // Interaction-state forced preview (phase 2) — sync statePreviewTarget to
+  // the iframe whenever the prop changes, exactly mirroring gradientEditTarget's
+  // sync effect above: cleared (null/undefined) posts a clearing
+  // state-preview message, set posts the node id + state so the bridge sets
+  // `data-an-state-preview` on the matching element (see the
+  // `statePreviewTarget` prop doc comment and shared/interaction-states.ts's
+  // "Forced-preview mechanism" doc comment for the full contract).
+  useEffect(() => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    win.postMessage(
+      {
+        type: "state-preview",
+        nodeId: statePreviewTarget?.nodeId ?? null,
+        state: statePreviewTarget?.state ?? null,
+      },
+      "*",
+    );
+  }, [statePreviewTarget]);
+
   // Push the constant-size chrome scale into the iframe LIVE (CSS vars only) when
   // overview zoom settles. This is intentionally separate from the srcdoc build so
   // a scale change never rebuilds srcdoc / reloads the iframe (which flashes the
@@ -1665,10 +2438,14 @@ export function DesignCanvas({
   useEffect(() => {
     postOneShotBridgeMessage({
       type: "set-editor-chrome-scale",
-      scaleX: editorChromeScaleX,
-      scaleY: editorChromeScaleY,
+      scaleX: effectiveEditorChromeScaleX,
+      scaleY: effectiveEditorChromeScaleY,
     });
-  }, [editorChromeScaleX, editorChromeScaleY, postOneShotBridgeMessage]);
+  }, [
+    effectiveEditorChromeScaleX,
+    effectiveEditorChromeScaleY,
+    postOneShotBridgeMessage,
+  ]);
 
   // Sync readOnly to the bridge IN-PLACE via postMessage so switching the active
   // surface (board ↔ screen) does not rebuild srcdoc / reload the iframe.
@@ -1734,6 +2511,18 @@ export function DesignCanvas({
     (nodeId: string) => {
       const iframe = iframeRef.current;
       if (!iframe?.contentWindow || !nodeId) return;
+      // Arm the creation-race keystroke buffer (see routePendingTextEditKey):
+      // until the bridge reports text-editing-state active for this command,
+      // host keystrokes are buffered/swallowed instead of hitting host
+      // shortcuts, then replayed into the editable. Re-arming for the same
+      // node preserves an in-progress buffer.
+      if (pendingTextEditRef.current?.nodeId !== nodeId) {
+        pendingTextEditRef.current = {
+          nodeId,
+          buffer: "",
+          startedAt: Date.now(),
+        };
+      }
       postOneShotBridgeMessage({
         type: "begin-text-edit",
         nodeId,
@@ -1742,6 +2531,53 @@ export function DesignCanvas({
     },
     [postOneShotBridgeMessage],
   );
+
+  // Creation-race keystroke routing (host side). Active only while a
+  // beginTextEdit() command is pending; see routePendingTextEditKey's doc
+  // comment for the exact policy. Capture-phase on window so it runs before
+  // the editor's own shortcut handlers.
+  const pendingTextEditRef = useRef<{
+    nodeId: string;
+    buffer: string;
+    startedAt: number;
+  } | null>(null);
+  useEffect(() => {
+    function onPendingTextEditKeyDown(e: KeyboardEvent) {
+      const pending = pendingTextEditRef.current;
+      if (!pending) return;
+      if (Date.now() - pending.startedAt > PENDING_TEXT_EDIT_TIMEOUT_MS) {
+        pendingTextEditRef.current = null;
+        return;
+      }
+      const routed = routePendingTextEditKey(e);
+      if (routed.action === "pass") return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      if (routed.action === "buffer") {
+        pending.buffer += routed.char;
+      } else if (routed.action === "drop-last") {
+        pending.buffer = pending.buffer.slice(0, -1);
+      } else if (routed.action === "clear-and-swallow") {
+        pendingTextEditRef.current = null;
+      }
+    }
+    function onPendingTextEditPointerDown() {
+      // The user clicked somewhere else in the host — stand down so buffered
+      // keys are never replayed into an edit they've abandoned.
+      pendingTextEditRef.current = null;
+    }
+    window.addEventListener("keydown", onPendingTextEditKeyDown, true);
+    window.addEventListener("pointerdown", onPendingTextEditPointerDown, true);
+    return () => {
+      window.removeEventListener("keydown", onPendingTextEditKeyDown, true);
+      window.removeEventListener(
+        "pointerdown",
+        onPendingTextEditPointerDown,
+        true,
+      );
+    };
+  }, []);
 
   const sendStyleChange = useCallback(
     (
@@ -1763,6 +2599,89 @@ export function DesignCanvas({
     },
     [postOneShotBridgeMessage],
   );
+
+  const lastStyleRevertRequestIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!styleRevertRequest) return;
+    if (lastStyleRevertRequestIdRef.current === styleRevertRequest.requestId) {
+      return;
+    }
+    lastStyleRevertRequestIdRef.current = styleRevertRequest.requestId;
+    for (const patch of styleRevertRequest.patches) {
+      const selectorCandidates = [
+        patch.selector,
+        patch.sourceId
+          ? `[data-agent-native-node-id="${String(patch.sourceId).replace(/"/g, '\\"')}"]`
+          : "",
+      ].filter(Boolean);
+      for (const [property, value] of Object.entries(patch.styles)) {
+        postOneShotBridgeMessage({
+          type: "style-change",
+          selector: patch.selector,
+          property,
+          value,
+          selectorCandidates,
+          nodeId: patch.sourceId ?? "",
+        });
+      }
+    }
+  }, [postOneShotBridgeMessage, styleRevertRequest]);
+
+  const lastStyleBaselineResetRequestRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (styleBaselineResetRequest == null) return;
+    if (
+      lastStyleBaselineResetRequestRef.current === styleBaselineResetRequest
+    ) {
+      return;
+    }
+    lastStyleBaselineResetRequestRef.current = styleBaselineResetRequest;
+    postOneShotBridgeMessage({
+      type: "agent-native:reset-live-visual-edit-baselines",
+    });
+  }, [postOneShotBridgeMessage, styleBaselineResetRequest]);
+
+  const lastTextRevertRequestIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!textRevertRequest) return;
+    if (lastTextRevertRequestIdRef.current === textRevertRequest.requestId) {
+      return;
+    }
+    lastTextRevertRequestIdRef.current = textRevertRequest.requestId;
+    for (const patch of textRevertRequest.patches) {
+      const selectorCandidates = [
+        patch.selector,
+        patch.sourceId
+          ? `[data-agent-native-node-id="${String(patch.sourceId).replace(/"/g, '\\"')}"]`
+          : "",
+      ].filter(Boolean);
+      postOneShotBridgeMessage({
+        type: "set-text-content",
+        selector: patch.selector,
+        selectorCandidates,
+        value: patch.value,
+        html: patch.html,
+      });
+    }
+  }, [postOneShotBridgeMessage, textRevertRequest]);
+
+  const lastStructureAckRequestIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!structureAckRequest) return;
+    if (
+      lastStructureAckRequestIdRef.current === structureAckRequest.requestId
+    ) {
+      return;
+    }
+    lastStructureAckRequestIdRef.current = structureAckRequest.requestId;
+    for (const ack of structureAckRequest.acks) {
+      postOneShotBridgeMessage({
+        type: "visual-structure-ack",
+        requestId: ack.requestId,
+        applied: ack.applied,
+      });
+    }
+  }, [postOneShotBridgeMessage, structureAckRequest]);
 
   /**
    * Send a motion-preview scrub tick to the iframe.  `t` is the normalised
@@ -2013,6 +2932,144 @@ export function DesignCanvas({
     surface.focus({ preventScroll: true });
   }, []);
 
+  // Single-screen pan (Figma parity §3): middle-mouse-button drag always
+  // pans (mirrors MultiScreenCanvas's unconditional `e.button === 1` branch
+  // in its own beginPan); a plain left-button drag pans too when the hand
+  // tool is armed (`handToolActive`) or the spacebar is held
+  // (`spacePanActive` — see the prop doc comment for why DesignCanvas
+  // doesn't listen for the spacebar itself). Movement is 1:1 and
+  // un-animated (direct scrollLeft/scrollTop deltas each mousemove, no
+  // inertia/momentum), matching MultiScreenCanvas's own beginPan feel —
+  // plain `mousemove`/`mouseup` window listeners for the drag's lifetime,
+  // same pattern as its `installDragListeners(handleMouseMove, handlePanEnd)`.
+  //
+  // These handlers live on the scroll container itself, so they fire for
+  // drags that start over the empty canvas background or the creation
+  // overlay (both real DOM nodes in this document). A drag that starts
+  // *inside* the iframe's own document does not reach these handlers —
+  // mousedown does not cross a same-origin/cross-document boundary any more
+  // than wheel events do (see the pinch-zoom-wheel bridge message above for
+  // the equivalent problem with wheel) — so panning from inside interactive
+  // iframe content is a follow-up that would need its own bridge message,
+  // not a gap introduced by this change.
+  const [isPanningState, setIsPanningState] = useState(false);
+
+  const handleScrollSurfaceMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const isMiddleButton = e.button === 1;
+      const isLeftPanGesture =
+        e.button === 0 && (handToolActive || spacePanActive);
+      if (!isMiddleButton && !isLeftPanGesture) return;
+      e.preventDefault();
+      let lastClientX = e.clientX;
+      let lastClientY = e.clientY;
+      setIsPanningState(true);
+
+      const handleMouseMove = (ev: MouseEvent) => {
+        const scroll = scrollContainerRef.current;
+        if (!scroll) return;
+        const dx = ev.clientX - lastClientX;
+        const dy = ev.clientY - lastClientY;
+        lastClientX = ev.clientX;
+        lastClientY = ev.clientY;
+        // 1:1 drag-scroll, no inertia: dragging right/down moves the
+        // viewport left/up over the content, i.e. subtract the pointer delta
+        // from scroll position.
+        scroll.scrollLeft -= dx;
+        scroll.scrollTop -= dy;
+      };
+      const handleMouseUp = () => {
+        setIsPanningState(false);
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+    },
+    [handToolActive, spacePanActive],
+  );
+
+  const panCursor = isPanningState
+    ? "grabbing"
+    : handToolActive || spacePanActive
+      ? "grab"
+      : null;
+
+  // OS file drag-and-drop (Figma parity §1): the sandboxed iframe sits on top
+  // of the wrapper and is a normal DOM element to the parent document's drag
+  // events (dragenter/dragover/drop still bubble through it to the wrapper —
+  // unlike mouse clicks, an iframe does not need its own listeners to forward
+  // these), but relying on that alone is fragile across browsers/sandbox
+  // combinations. Track a native-file-drag-in-progress flag via a
+  // dragenter/dragleave depth counter (nested elements each fire enter/leave)
+  // so a transparent capture overlay — mirroring the SingleScreenCreationOverlay
+  // mount pattern above — mounts ONLY while an OS file drag is actually over
+  // this wrapper, guaranteeing the drop lands on our own handler instead of
+  // being swallowed by the iframe.
+  const [nativeFileDragActive, setNativeFileDragActive] = useState(false);
+  const nativeFileDragDepthRef = useRef(0);
+
+  const resetNativeFileDragState = useCallback(() => {
+    nativeFileDragDepthRef.current = 0;
+    setNativeFileDragActive(false);
+  }, []);
+
+  const handleWrapperDragEnter = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (!isOsFileDragEvent(e)) return;
+      e.preventDefault();
+      nativeFileDragDepthRef.current += 1;
+      setNativeFileDragActive(true);
+    },
+    [],
+  );
+
+  const handleWrapperDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (!isOsFileDragEvent(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    [],
+  );
+
+  const handleWrapperDragLeave = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (!isOsFileDragEvent(e)) return;
+      nativeFileDragDepthRef.current = Math.max(
+        0,
+        nativeFileDragDepthRef.current - 1,
+      );
+      if (nativeFileDragDepthRef.current === 0) {
+        setNativeFileDragActive(false);
+      }
+    },
+    [],
+  );
+
+  const handleWrapperDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (!isOsFileDragEvent(e)) return;
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer.files ?? []);
+      resetNativeFileDragState();
+      if (files.length === 0 || !onDropFiles) return;
+      const iframe = iframeRef.current;
+      const rect = iframe?.getBoundingClientRect();
+      const screenContentPoint =
+        iframe && rect
+          ? getScreenContentPointFromClient(e.clientX, e.clientY, rect, {
+              width: iframe.clientWidth,
+              height: iframe.clientHeight,
+            })
+          : { x: e.clientX, y: e.clientY };
+      onDropFiles(files, { screenContentPoint, screenId });
+    },
+    [onDropFiles, resetNativeFileDragState, screenId],
+  );
+
+  useEffect(() => resetNativeFileDragState, [resetNativeFileDragState]);
+
   // Wrap the iframe in a positioned container so DrawOverlay /
   // CanvasCommentPins can absolutely-position themselves on top of the
   // iframe. The pin component anchors to `.design-canvas-iframe-wrapper`
@@ -2023,6 +3080,10 @@ export function DesignCanvas({
   const iframeElement = (
     <div
       className="design-canvas-iframe-wrapper relative inline-block ring-1 ring-border/60 shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.45)]"
+      onDragEnter={handleWrapperDragEnter}
+      onDragOver={handleWrapperDragOver}
+      onDragLeave={handleWrapperDragLeave}
+      onDrop={handleWrapperDrop}
       style={{
         width: embeddedFrame
           ? embeddedFrameFluid
@@ -2036,6 +3097,26 @@ export function DesignCanvas({
           : deviceFrame === "none"
             ? "100%"
             : (iframeHeight ?? undefined),
+        // BP-DEEP item 2: when a breakpoint chip constrains the viewport
+        // (previewWidthPx) the wrapper is NARROWER than the canvas, so there
+        // is no horizontal overflow for the scroll-centering effect above to
+        // act on — without a layout-level center the frame pins to the
+        // canvas's left edge, which reads as broken next to the
+        // device-preview control's flex-centered framed modes. Block + auto
+        // margins center it in the zoom layer's LAYOUT space, which is safe
+        // for the T-zoom-anchor invariant: the margin inset is constant in
+        // layer-local coordinates (transform scale never changes layout), so
+        // the cursor-anchored zoom math — which only assumes the zoom
+        // layer's own top-left corner stays a fixed point in scroll-content
+        // space — is untouched. Base editing (previewWidthPx unset) keeps
+        // the original inline-block full-width layout unchanged.
+        ...(previewWidthPx != null && !embeddedFrame
+          ? {
+              display: "block",
+              marginLeft: "auto",
+              marginRight: "auto",
+            }
+          : null),
       }}
     >
       <iframe
@@ -2098,15 +3179,76 @@ export function DesignCanvas({
           onCreatePrimitive={onCreatePrimitive}
         />
       ) : null}
-      {waitingForEditableExternalSnapshot ? (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/85 px-4 text-center text-sm text-muted-foreground">
-          <div className="max-w-[28rem] rounded-md border bg-card px-4 py-3 shadow-sm">
+      {/* OS file drag-over capture overlay — sits over the iframe, NOT
+          inside it, mirroring the SingleScreenCreationOverlay mount pattern
+          just above. Only mounts while a native OS file drag is actually in
+          progress over this wrapper (see handleWrapperDragEnter/Leave), so it
+          never changes existing pointer/click behavior otherwise. Skipped
+          while a creation tool is active — the two capture surfaces would
+          otherwise compete for the same pointer gestures, and an in-app
+          creation-tool drag is never simultaneously an OS file drag. */}
+      {nativeFileDragActive && !activeCreationTool ? (
+        <div
+          data-design-canvas-file-drop-overlay
+          className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-[inherit] border-2 border-dashed border-[var(--design-editor-accent-color)] bg-[var(--design-editor-accent-color)]/5"
+        >
+          <div className="rounded-md border bg-background/95 px-3 py-2 text-xs font-medium text-foreground shadow-sm">
             {
-              externalSnapshotState?.status === "error"
-                ? "Waiting for localhost bridge snapshot..." /* i18n-ignore local dev bridge status */
-                : "Preparing editable preview..." /* i18n-ignore local dev snapshot status */
+              "Drop to add to this screen" /* i18n-ignore transient OS-drag overlay, mirrors other short drop-hint literals in this file */
             }
           </div>
+        </div>
+      ) : null}
+      {waitingForEditableExternalSnapshot || waitingForLiveEditBridge ? (
+        <div className="pointer-events-auto absolute inset-0 z-10 flex items-center justify-center bg-background/85 px-4 text-center text-sm text-muted-foreground">
+          {waitingForLiveEditBridge ? (
+            <div className="max-w-[28rem] rounded-md border bg-card px-4 py-3 shadow-sm">
+              {
+                "Preparing live editor..." /* i18n-ignore transient localhost live-edit bridge loading state */
+              }
+            </div>
+          ) : externalSnapshotState?.status === "error" ? (
+            // A real offline dev server previously looked identical to the
+            // ordinary "still loading" state and retried forever on a fixed
+            // 1.5s timer — see getSnapshotRetryDelayMs for the backoff that
+            // now paces the auto-retry loop. Surface the actual failure here
+            // (network error / non-2xx / bridge error message) plus a manual
+            // retry action so the user isn't staring at an unexplained
+            // eternal spinner.
+            <div className="pointer-events-auto flex max-w-[28rem] flex-col items-center gap-2 rounded-md border bg-card px-4 py-3 shadow-sm">
+              <div className="flex items-center gap-1.5 font-medium text-foreground">
+                <IconPlugConnectedX className="size-4 shrink-0 text-destructive" />
+                {
+                  "Local dev server unreachable" /* i18n-ignore local dev bridge offline title */
+                }
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {
+                  "Is it still running?" /* i18n-ignore local dev bridge offline subtitle */
+                }
+              </div>
+              {externalSnapshotState.message ? (
+                <div className="w-full truncate rounded bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                  {externalSnapshotState.message}
+                </div>
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleManualSnapshotRetry}
+              >
+                <IconRefresh className="size-3.5" />
+                {"Retry" /* i18n-ignore local dev bridge retry button */}
+              </Button>
+            </div>
+          ) : (
+            <div className="max-w-[28rem] rounded-md border bg-card px-4 py-3 shadow-sm">
+              {
+                "Preparing editable preview..." /* i18n-ignore local dev snapshot status */
+              }
+            </div>
+          )}
         </div>
       ) : null}
       {/* Draw-to-prompt overlay — sits over the iframe, NOT inside it. */}
@@ -2225,21 +3367,57 @@ export function DesignCanvas({
       tabIndex={-1}
       onPointerEnter={focusScrollSurface}
       onMouseEnter={focusScrollSurface}
+      onMouseDown={handleScrollSurfaceMouseDown}
       className="relative flex-1 h-full overflow-auto"
+      style={{ cursor: panCursor || undefined }}
     >
       {/* Canvas area. "none" mode fills the canvas (responsive preview);
           framed modes are centered inside the canvas with zoom applied. */}
       {deviceFrame === "none" ? (
-        <div className="relative flex h-full w-full items-center justify-center">
-          <div
-            className="h-full w-full"
-            style={{
-              transform: `scale(${zoom / 100})`,
-              transformOrigin: "center center",
-            }}
-          >
-            {wrappedContent}
-          </div>
+        <div
+          ref={zoomLayerRef}
+          className="relative h-full w-full"
+          style={{
+            // T-zoom-anchor: transform-origin MUST be top-left here (not
+            // center-center) to match usePinchZoom's documented contract
+            // ("Assumes the scaled content uses transform-origin: top left
+            // ... Disable for layouts with transform-origin: center center")
+            // and the pinch-zoom-wheel bridge-forwarded handler above, both of
+            // which compute the cursor-anchored scroll delta assuming the
+            // scaled box's own top-left corner is a fixed point in
+            // scroll-content space. Centering this box via flexbox instead
+            // (the previous approach) re-centers the *painted* box around the
+            // container's center on every zoom change, which moves that
+            // "fixed" point every time the box's rendered size changes —
+            // exactly the invariant the cursor-anchor math depends on, so
+            // Cmd/Ctrl+wheel or pinch zoom would drift away from the cursor.
+            // Initial centering (and re-centering on a content/screen swap)
+            // is instead handled by imperatively setting scrollLeft/scrollTop
+            // once — see the effect keyed on [deviceFrame, contentKey] above
+            // usePinchZoom — so the layout itself stays simple and
+            // top-left-anchored while still looking centered at rest.
+            //
+            // BP-DEEP v2 item 5 — zoom-out must anchor CENTER: below 100%
+            // the painted layer is SMALLER than the container, so there is
+            // no scrollable overflow and the old transform shrank the canvas
+            // toward the container's top-left corner. The translate() below
+            // (only nonzero when zoom < 100) re-centers the painted layer in
+            // both axes. This cannot break the cursor-anchor math above:
+            // translate percentages resolve against the layer's LAYOUT box
+            // (constant, zoom-independent), and in the sub-100% regime where
+            // the offset is nonzero the container has no overflow — the
+            // anchor math's scroll deltas clamp to 0 regardless — while at
+            // >= 100% the offset is exactly 0 and the original top-left
+            // contract holds verbatim. The offset is also continuous at
+            // 100% (0), so crossing the boundary mid-gesture cannot jump.
+            transform:
+              zoom < 100
+                ? `translate(${(100 - zoom) / 2}%, ${(100 - zoom) / 2}%) scale(${zoom / 100})`
+                : `scale(${zoom / 100})`,
+            transformOrigin: "top left",
+          }}
+        >
+          {wrappedContent}
         </div>
       ) : (
         <div className="relative flex items-center justify-center min-h-full">
@@ -2256,20 +3434,25 @@ export function DesignCanvas({
 
       {/* Canvas comment pins — anchored to the iframe wrapper. The pins
           themselves render via fixed positioning, so we mount them outside
-          the zoom-transformed container to keep coordinates stable. */}
-      <CanvasCommentPins
-        active={!!pinMode}
-        submitMode={drawMode ? "queue" : "direct"}
-        onPinsChange={setAnnotationPins}
-        submitQueuedSignal={pinSubmitSignal}
-        clickPlaneUnderToolbar={!!drawMode}
-        onClose={() => onExitPinMode?.()}
-        canvasSelector=".design-canvas-iframe-wrapper"
-        contextId={commentContextId || designId || "design"}
-        contextLabel={
-          commentContextLabel || designTitle || commentContextId || designId
-        }
-      />
+          the zoom-transformed container to keep coordinates stable.
+          Suppressed entirely when commentPinsHidden (Figma-style Shift+C
+          "hide comments" toggle) is set — existing pins disappear and pin
+          drop-mode has nothing to render into until it's toggled back on. */}
+      {!commentPinsHidden && (
+        <CanvasCommentPins
+          active={!!pinMode}
+          submitMode={drawMode ? "queue" : "direct"}
+          onPinsChange={setAnnotationPins}
+          submitQueuedSignal={pinSubmitSignal}
+          clickPlaneUnderToolbar={!!drawMode}
+          onClose={() => onExitPinMode?.()}
+          canvasSelector=".design-canvas-iframe-wrapper"
+          contextId={commentContextId || designId || "design"}
+          contextLabel={
+            commentContextLabel || designTitle || commentContextId || designId
+          }
+        />
+      )}
     </div>
   );
 }
@@ -2293,6 +3476,8 @@ const CREATION_DEFAULT_SIZE: Record<
   rectangle: { width: 160, height: 100 },
   ellipse: { width: 120, height: 120 },
   text: { width: 160, height: 32 },
+  // Figma's frame-tool click default is a 100x100 frame.
+  frame: { width: 100, height: 100 },
 };
 
 /** Default line/arrow length (screen-content px) for a click (no drag). */

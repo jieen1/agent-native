@@ -7,11 +7,19 @@ import {
 } from "@agent-native/core/client";
 import {
   IconCode,
+  IconChevronDown,
   IconExternalLink,
   IconLink,
   IconMail,
 } from "@tabler/icons-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   CopyField,
@@ -27,6 +35,11 @@ import {
 } from "@/components/sharing/share-ui";
 import { SlackShareHint } from "@/components/sharing/slack-share-hint";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -80,7 +93,6 @@ export function ShareRecordingPopover({
   videoUrl,
   animatedThumbnailUrl,
   isLoomRecording = false,
-  hasPassword = false,
   children,
   open,
   onOpenChange,
@@ -88,9 +100,10 @@ export function ShareRecordingPopover({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
+      {/* Keep the layer class in app source so Tailwind emits it for Clips. */}
       <PopoverContent
         align="end"
-        className="w-[440px] max-w-[calc(100vw-1rem)] overflow-hidden border-border p-0"
+        className="z-[260] w-[440px] max-w-[calc(100vw-1rem)] overflow-hidden border-border p-0"
       >
         <ShareRecordingContent
           recordingId={recordingId}
@@ -98,7 +111,6 @@ export function ShareRecordingPopover({
           videoUrl={videoUrl}
           animatedThumbnailUrl={animatedThumbnailUrl}
           isLoomRecording={isLoomRecording}
-          hasPassword={hasPassword}
         />
       </PopoverContent>
     </Popover>
@@ -116,7 +128,6 @@ export function ShareRecordingDialog({
   videoUrl,
   animatedThumbnailUrl,
   isLoomRecording = false,
-  hasPassword = false,
   open,
   onOpenChange,
 }: ShareRecordingDialogProps) {
@@ -135,7 +146,6 @@ export function ShareRecordingDialog({
           videoUrl={videoUrl}
           animatedThumbnailUrl={animatedThumbnailUrl}
           isLoomRecording={isLoomRecording}
-          hasPassword={hasPassword}
           reserveCloseButton
         />
       </DialogContent>
@@ -149,7 +159,6 @@ function ShareRecordingContent({
   videoUrl,
   animatedThumbnailUrl,
   isLoomRecording = false,
-  hasPassword = false,
   reserveCloseButton = false,
 }: {
   recordingId: string;
@@ -157,7 +166,6 @@ function ShareRecordingContent({
   videoUrl?: string | null;
   animatedThumbnailUrl?: string | null;
   isLoomRecording?: boolean;
-  hasPassword?: boolean;
   reserveCloseButton?: boolean;
 }) {
   const t = useT();
@@ -222,7 +230,6 @@ function ShareRecordingContent({
             videoUrl={videoUrl}
             animatedThumbnailUrl={animatedThumbnailUrl}
             isLoomRecording={isLoomRecording}
-            hasPassword={hasPassword}
           />
         </TabsContent>
 
@@ -261,7 +268,6 @@ function LinkTab({
   videoUrl,
   animatedThumbnailUrl,
   isLoomRecording: isLoomRecordingProp,
-  hasPassword,
 }: {
   recordingId: string;
   shareUrl: string;
@@ -270,7 +276,6 @@ function LinkTab({
   videoUrl?: string | null;
   animatedThumbnailUrl?: string | null;
   isLoomRecording?: boolean;
-  hasPassword: boolean;
 }) {
   const t = useT();
   const { setResourceVisibility, isPending } = useResourceVisibilityMutation(
@@ -282,25 +287,65 @@ function LinkTab({
   const visibility: Visibility =
     (data?.visibility as Visibility | null) ?? "private";
   const isPublic = visibility === "public";
+  const sharesLoaded = data !== undefined;
   const isLoomRecording = isLoomRecordingProp || isLoomEmbedUrl(videoUrl);
   const createAgentLink = useActionMutation(
     "create-recording-agent-link" as any,
   );
+  const createAgentLinkAsyncRef = useRef(createAgentLink.mutateAsync);
+  const agentLinkRequestIdRef = useRef(0);
   const [agentContextUrl, setAgentContextUrl] = useState("");
+  const [agentLinkError, setAgentLinkError] = useState(false);
+  const [agentShareOpen, setAgentShareOpen] = useState(false);
+
+  useEffect(() => {
+    createAgentLinkAsyncRef.current = createAgentLink.mutateAsync;
+  });
+
+  const loadAgentContextUrl = useCallback(async () => {
+    const requestId = agentLinkRequestIdRef.current + 1;
+    agentLinkRequestIdRef.current = requestId;
+
+    setAgentContextUrl("");
+    setAgentLinkError(false);
+
+    try {
+      const result = (await createAgentLinkAsyncRef.current({
+        recordingId,
+      })) as { url?: string };
+      if (agentLinkRequestIdRef.current !== requestId) return;
+      if (result?.url) {
+        setAgentContextUrl(result.url);
+      } else {
+        setAgentLinkError(true);
+      }
+    } catch {
+      if (agentLinkRequestIdRef.current === requestId) {
+        setAgentLinkError(true);
+      }
+    }
+  }, [recordingId]);
 
   useEffect(() => {
     setAgentContextUrl("");
-  }, [recordingId, visibility]);
+    setAgentLinkError(false);
+    if (!sharesLoaded) return;
 
-  async function handleCreateAgentLink() {
-    if (createAgentLink.isPending) return;
-    const result = (await createAgentLink.mutateAsync({
-      recordingId,
-    })) as { url?: string };
-    if (!result?.url) return;
-    setAgentContextUrl(result.url);
-    copyToClipboard(result.url);
-  }
+    if (!isPublic && agentShareOpen) {
+      void loadAgentContextUrl();
+    }
+
+    return () => {
+      agentLinkRequestIdRef.current += 1;
+    };
+  }, [
+    agentShareOpen,
+    isPublic,
+    loadAgentContextUrl,
+    recordingId,
+    sharesLoaded,
+    visibility,
+  ]);
 
   const agentShareDisabled =
     isPending || createAgentLink.isPending || !agentContextUrl;
@@ -328,39 +373,62 @@ function LinkTab({
           (and a connect link) instead of leaving it buried in Settings. */}
       {isPublic ? <SlackShareHint canManage={canManage} /> : null}
 
-      <div className="space-y-2">
-        <div className="flex items-end justify-between gap-2">
-          <div className="text-xs font-medium text-muted-foreground">
-            {t("shareDialog.shareWithAgents")}
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7"
-            onClick={() => void handleCreateAgentLink()}
-            disabled={isPending || createAgentLink.isPending}
-          >
-            {t("shareUi.copy")}
-          </Button>
-        </div>
-        <CopyField
-          label=""
-          value={agentContextUrl}
-          disabled={agentShareDisabled}
-        />
-      </div>
-
-      <CopyField
-        label={t("shareDialog.copyAgentPrompt")}
-        value={agentPrompt}
-        disabled={agentShareDisabled}
-      />
-
-      {agentContextUrl || hasPassword || !isPublic ? (
-        <p className="text-xs text-muted-foreground">
-          {t("shareDialog.agentTokenDescription")}
-        </p>
+      {!isPublic ? (
+        <Collapsible open={agentShareOpen} onOpenChange={setAgentShareOpen}>
+          <CollapsibleTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-auto w-full justify-between px-0 py-1 text-left hover:bg-transparent"
+            >
+              <span className="min-w-0">
+                <span className="block text-xs font-medium text-foreground">
+                  {t("shareDialog.shareWithAgents")}
+                </span>
+                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                  {t("shareDialog.agentTokenDescription")}
+                </span>
+              </span>
+              <IconChevronDown
+                className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                  agentShareOpen ? "rotate-180" : ""
+                }`}
+                aria-hidden
+              />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
+            <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
+              <CopyField
+                label={t("shareDialog.shareWithAgents")}
+                value={agentContextUrl}
+                disabled={agentShareDisabled}
+              />
+              {agentLinkError ? (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2">
+                  <p className="text-xs text-muted-foreground">
+                    {t("shareDialog.agentLinkUnavailable")}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => void loadAgentContextUrl()}
+                    disabled={createAgentLink.isPending}
+                  >
+                    {t("shareDialog.retryAgentLink")}
+                  </Button>
+                </div>
+              ) : null}
+              <CopyField
+                label={t("shareDialog.copyAgentPrompt")}
+                value={agentPrompt}
+                disabled={agentShareDisabled}
+              />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       ) : null}
 
       {!isPublic && canManage ? (

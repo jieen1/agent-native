@@ -200,7 +200,7 @@ configureTracking({
   endpoint: "https://analytics.example.com/api/analytics/track",
   sessionReplay: {
     enabled: true,
-    sampleRate: 0.1,
+    sampleRate: 1,
   },
   getDefaultProps: (_event, props) => ({
     ...props,
@@ -218,14 +218,14 @@ Las raíces de las plantillas de Agent Native ya llaman a `configureTracking()`.
 VITE_AGENT_NATIVE_ANALYTICS_PUBLIC_KEY=anpk_...
 VITE_AGENT_NATIVE_ANALYTICS_ENDPOINT=https://analytics.example.com/api/analytics/track
 VITE_AGENT_NATIVE_SESSION_REPLAY_ENABLED=true
-VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=0.1
+VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=1
 ```
 
 El ayudante del navegador también realiza una lectura sin bloqueo y de mejor esfuerzo de la sesión de autenticación actual de Agent Native. La repetición es solo para usuarios con sesión iniciada de forma predeterminada: cuando `sessionReplay` está habilitado, la grabación no se inicia a menos que la sesión se resuelva en una dirección de correo electrónico de usuario. Las repeticiones de usuarios con sesión iniciada incluyen `userId`/`userEmail` respaldados por correo electrónico más `orgId`.
 
 Configure `sessionReplay.requireSignedInUser: false` o `VITE_AGENT_NATIVE_SESSION_REPLAY_REQUIRE_AUTH=false` solo para una implementación de repetición anónima intencional. Cuando la restricción de autenticación está deshabilitada, las grabaciones anónimas siguen siendo consultables por visitante anónimo, sesión, aplicación/plantilla, nombre de host y ruta.
 
-La repetición de sesión se muestrea de forma determinista por sesión de navegador. Un `sampleRate` de `0.1` graba aproximadamente el 10% de las sesiones elegibles; use `1` cuando la población elegible sea intencionalmente pequeña, como en pruebas internas solo para usuarios con sesión iniciada.
+La repetición de sesión se muestrea de forma determinista por sesión de navegador. Un `sampleRate` de `1` graba todas las sesiones elegibles; use valores más bajos, como `0.1`, cuando la población elegible sea intencionalmente amplia.
 
 Los valores predeterminados de privacidad son intencionalmente conservadores pero siguen siendo útiles para la reproducción:
 
@@ -240,6 +240,12 @@ Durante la grabación, la repetición de sesión también captura la salida de l
 La plantilla de Analytics almacena los metadatos de repetición en SQL (`session_recordings`) y almacena los fragmentos mediante referencias de blob privadas (`session_replay_chunks`). Los navegadores y los agentes nunca reciben las URL del proveedor. La reproducción pasa por rutas del servidor con alcance limitado y las herramientas del agente predeterminadas devuelven resúmenes o eventos de repetición acotados, no acceso sin procesar a la tabla de fragmentos.
 
 Cuando necesite entregar una grabación privada a un agente externo, use el control **Copiar para el agente** de la página de detalle de la sesión. Este genera un enlace `agent_access` de dos horas con alcance limitado a la grabación, renderiza en el servidor (SSR) una pequeña carga útil de descubrimiento en `/sessions/:recordingId`, y expone únicamente las API JSON de contexto/eventos del agente. La visibilidad de la grabación no cambia.
+
+Implementation note: the reusable layer is the core agent-access URL contract,
+not a replay-specific UI abstraction. Use `createScopedAgentAccessGrant`,
+`verifyScopedAgentAccessToken`, `buildAgentAccessUrl`, and
+`buildAgentAccessApiUrl` for scoped SSR and JSON API links; keep replay storage,
+diagnostics shaping, and access policy inside the Analytics template.
 
 Solo para desarrollo local, Analytics puede recurrir a fragmentos en línea de SQL limitados cuando el almacenamiento de blob privado no está disponible. Las implementaciones de producción deberían configurar almacenamiento de blob privado o cifrado en lugar de depender de Postgres para las cargas útiles de repetición.
 

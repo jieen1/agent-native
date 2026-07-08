@@ -122,6 +122,10 @@ const messages = {
     restoreFailed: "復元に失敗しました",
     permanentlyDeleted: "完全に削除しました",
     deleteFailed: "削除に失敗しました",
+    clipsRestored: "{{count}} 件のクリップを復元しました",
+    clipsRestoreFailed: "{{count}} 件のクリップを復元できませんでした",
+    clipsPermanentlyDeleted: "{{count}} 件のクリップを完全に削除しました",
+    clipsDeleteFailed: "{{count}} 件のクリップを削除できませんでした",
   },
   recordingRoute: {
     pageTitle: "クリップ録画 · Clips",
@@ -201,6 +205,11 @@ const messages = {
     edit: "編集",
     aiTools: "AIツール",
     enhanceRecording: "この録音を強化する",
+    includeFullVideo: "動画全体を含める",
+    includeFullVideoDescription:
+      "オンにすると、AIツールは画面の文脈のために録画を視聴します（Geminiのみ）— 音声の文字起こしだけではありません。デフォルトのタイトルと説明の生成にも適用されます。Builder または GEMINI_API_KEY 経由の Gemini モデルが必要です。",
+    includeFullVideoOn: "AIツールは動画全体を使います（Gemini）",
+    includeFullVideoOff: "AIツールは文字起こしのみを使います",
     regenerateTitle: "タイトルを再生成する",
     regenerateDescription: "説明を再生成する",
     autoChapters: "自動チャプター",
@@ -327,7 +336,7 @@ const messages = {
     removing: "削除中...",
     remove: "取り除く",
     desktopHint:
-      "Clips デスクトップ アプリからこの会議のライブ メモを記録します。トランスクリプトと AI メモがここに自動的に表示されます。",
+      "メモを開始するには、メニューバーから Clips Desktop を開いて Start Meeting Notes を選ぶか、リマインダーが表示されたら Start notes をクリックします。Clips はマイクとシステム音声を取り込み、ここに文字起こしを書き込みます。",
     getDesktopApp: "デスクトップアプリを入手",
     generateNotesFailed:
       "メモを生成できませんでした。もう一度やり直してください。",
@@ -344,6 +353,13 @@ const messages = {
     segments: "{{count}} セグメント",
     copyTranscript: "トランスクリプトをコピーする",
     copyFullTranscript: "完全なトランスクリプトをコピーする",
+    timeRemaining_one: "残り {{count}} 分",
+    timeRemaining_other: "残り {{count}} 分",
+    endMeeting: "会議を終了",
+    endThisMeeting: "この会議を終了しますか？",
+    endMeetingDescription:
+      "この会議の録音と文字起こしを停止します。ここまでに記録された内容からノートを生成できます。",
+    couldNotEndMeeting: "会議を終了できませんでした",
   },
   transcriptPanel: {
     transcribing: "文字起こし中…",
@@ -429,6 +445,8 @@ const messages = {
       "この Clips エージェントコンテキスト URL を取得してください: {{agentContextUrl}}。音声の文脈には transcript.segments を使い、画面を見るために recommendedFrames またはフレーム API URL を取得し、browserDiagnostics がある場合は、編集済みのコンソールログと fetch/XHR リクエストのメタデータを確認してください。",
     agentTokenDescription:
       "この一時的なエージェント URL により、クリップを公開せずにエージェントが読み取れます。2 時間後に期限切れになります。",
+    agentLinkUnavailable: "エージェント用リンクを作成できませんでした。",
+    retryAgentLink: "再試行",
     gifPreview: "GIF プレビュー",
     openPlayer: "プレーヤーを開く",
     downloadMp4: "ダウンロード",
@@ -488,6 +506,12 @@ const messages = {
     quickPrompts: "クイックプロンプト",
     whatDidIMiss: "何を見逃したのでしょうか？",
     whatDidIMissPrompt: "何を見逃したのでしょうか？",
+    suggestQuestions: "質問を提案してもらう",
+    suggestQuestionsPrompt:
+      "これまでの議論に基づいて、この会議で次に聞くとよい質問をいくつか提案してください。",
+    makeMeSoundSmart: "賢く聞こえるようにする",
+    makeMeSoundSmartPrompt:
+      "この会議のここまでの内容に基づいて、今すぐ使える鋭く洞察に富んだコメントや質問をください。",
     summarizeLastFive: "最後の 5 分間を要約する",
     summarizeLastFivePrompt:
       "この会議の最後の 5 分間を 3 ～ 5 つの箇条書きで要約します。",
@@ -766,6 +790,9 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
     anonymous: "匿名",
     anon: "匿名",
     moreViewers: "+{{count}} 件",
+    viewedBy: "視聴者",
+    someone: "誰か",
+    noViewsYet: "まだ再生されていません。",
   },
   libraryGrid: {
     spaceRoot: "スペースのルート",
@@ -784,6 +811,10 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
     clipsArchiveFailed: "{{count}} 件のクリップをアーカイブできませんでした",
     clipsMovedToTrash: "{{count}} 件のクリップをゴミ箱に移動しました",
     clipsTrashFailed: "{{count}} 件のクリップをゴミ箱に移動できませんでした",
+    loadFailedTitle: "録画を読み込めませんでした",
+    loadFailedBody:
+      "このリストの読み込み中に問題が発生しました。録画は安全に保存されています — もう一度お試しください。",
+    retry: "再試行",
   },
   notificationsRoute: {
     pageTitle: "通知 · Clips",
@@ -921,6 +952,8 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
     noVideo: "利用できる動画がありません",
     thanks: "ご視聴ありがとうございました",
     playClip: "クリップを再生",
+    unsupportedFormat:
+      "このブラウザではこの動画を再生できません。Chrome、Edge、Firefoxでリンクを開いてみてください。",
   },
   searchBar: {
     placeholder: "録画を検索…",
@@ -976,7 +1009,11 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
     inHours: "{{count}}時間後",
     join: "参加",
     openNotes: "ノートを開く",
-    open: "開く",
+    open: "ノートを開く",
+    startFromDesktopNow:
+      "デスクトップのリマインダーまたはメニューバーからライブメモを開始します。",
+    startFromDesktopLater:
+      "時間になると Clips Desktop に Start notes が表示されます。",
   },
   transcriptBubbles: {
     listening: "聞き取り中…",
@@ -985,6 +1022,13 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
       "ノートが始まるとライブ文字起こしがここに表示されます。",
     me: "自分",
     them: "相手",
+    searchTranscript: "文字起こしを検索",
+    searchPlaceholder: "文字起こしを検索…",
+    searchMatchCount: "{{total}} 件中 {{current}} 件目",
+    searchNoMatches: "一致なし",
+    searchPrevMatch: "前の一致",
+    searchNextMatch: "次の一致",
+    searchClose: "検索を閉じる",
   },
   editorLayout: {
     trimmed: "トリミングしました",
@@ -1260,6 +1304,11 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
     browserDictation: "Browser dictation (ローカライズ済み)",
     browserDictationDescription:
       "Use the button on this page, or press the shortcut while this tab is focused. Browser dictation saves here for copy and cleanup. (ローカライズ済み)",
+    browserDictationDescriptionDesktop:
+      "Use the button below to capture a note right here on this page. It does not paste into other apps — for that, use the desktop shortcut on the right. (ローカライズ済み)",
+    quickNoteTitle: "Quick dictation note (ローカライズ済み)",
+    quickNoteHint:
+      "Captures here without leaving this page — it does not paste into other apps. Use the button to start and stop. (ローカライズ済み)",
     desktopShortcuts: "Desktop shortcuts (ローカライズ済み)",
     desktopShortcutsDescriptionSuffix:
       ", in the desktop app. (ローカライズ済み)",
@@ -1294,6 +1343,19 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
       "Voice-to-text dictation with AI cleanup. Get the desktop app to dictate from anywhere with a global shortcut. (ローカライズ済み)",
     loadFailed: "Couldn't load dictations. (ローカライズ済み)",
     noFilterMatches: "No dictations matching this filter. (ローカライズ済み)",
+    dictionaryTitle: "Dictionary (ローカライズ済み)",
+    dictionaryDescription:
+      "Terms here bias speech recognition toward your preferred spellings — auto-learned from corrections, or add your own. (ローカライズ済み)",
+    dictionaryTermPlaceholder: "Term (ローカライズ済み)",
+    dictionaryReplacementPlaceholder:
+      "Replacement (optional) (ローカライズ済み)",
+    dictionaryAdd: "Add (ローカライズ済み)",
+    dictionaryLoading: "Loading dictionary... (ローカライズ済み)",
+    dictionaryEmpty: "No learned terms yet. (ローカライズ済み)",
+    dictionaryUsesCount: "Used {{count}}x (ローカライズ済み)",
+    dictionaryRemove: "Remove (ローカライズ済み)",
+    vocabularyAddFailed: "Couldn't add term (ローカライズ済み)",
+    vocabularyRemoveFailed: "Couldn't remove term (ローカライズ済み)",
   },
   clipsFinalRaw: {
     splitAtPlayhead: "再生位置で分割 (S)",
@@ -1388,10 +1450,10 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
       "Google Calendar needs to be reconnected to keep showing your upcoming meetings. (ローカライズ済み)",
     connectGoogleCalendar: "Connect Google Calendar (ローカライズ済み)",
     desktopReminder:
-      "Get a desktop reminder when meetings start so recorded notes land in this history automatically. (ローカライズ済み)",
+      "Connect Google Calendar, keep Clips Desktop open, then click Start notes from the reminder or the menu bar when your meeting begins. (ローカライズ済み)",
     getDesktopApp: "Get desktop app (ローカライズ済み)",
     requiredForReminders:
-      "Required for meeting reminders and transcription. (ローカライズ済み)",
+      "Desktop captures mic + system audio for meeting transcription. (ローカライズ済み)",
     calendarConnected: "Calendar connected (ローカライズ済み)",
     calendarDisconnected: "Calendar disconnected (ローカライズ済み)",
     calendarSettings: "Calendar settings (ローカライズ済み)",
@@ -1401,14 +1463,26 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
       "Disconnect Google Calendar? (ローカライズ済み)",
     title: "Meetings (ローカライズ済み)",
     intro:
-      "Upcoming calendar meetings and your recorded notes. (ローカライズ済み)",
+      "Upcoming calendar meetings and your recorded notes. Start live notes from Clips Desktop at meeting time. (ローカライズ済み)",
     searchPlaceholder: "Search meetings... (ローカライズ済み)",
     clearSearch: "Clear search (ローカライズ済み)",
     noMeetingsYet: "No meetings yet (ローカライズ済み)",
     noMeetingsDescription:
-      "Upcoming calendar meetings show up here, and finished recordings land here once you take notes. (ローカライズ済み)",
+      "Connect your calendar and keep Clips Desktop open. When a meeting starts, use Start notes from the reminder or menu bar. (ローカライズ済み)",
     noMeetingsMatch: 'No meetings match "{{query}}" (ローカライズ済み)',
     refreshing: "Refreshing… (ローカライズ済み)",
+    howToTriggerTitle: "How to trigger meeting notes (ローカライズ済み)",
+    howToTriggerDescription:
+      "Meeting notes are the Granola-style flow in Clips: calendar events appear here, the desktop app captures mic and system audio, and the transcript plus AI notes land back in this history. (ローカライズ済み)",
+    guideCalendarTitle: "Connect Google Calendar (ローカライズ済み)",
+    guideCalendarDescription:
+      "Meetings are pulled from your calendar so Clips knows when to remind you. (ローカライズ済み)",
+    guideDesktopTitle: "Keep Clips Desktop open (ローカライズ済み)",
+    guideDesktopDescription:
+      "Desktop capture is required for mic plus system-audio transcription. (ローカライズ済み)",
+    guideStartTitle: "Click Start notes (ローカライズ済み)",
+    guideStartDescription:
+      "Use the desktop reminder or the menu-bar Start Meeting Notes item when the call begins. (ローカライズ済み)",
   },
 };
 

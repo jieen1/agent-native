@@ -200,7 +200,7 @@ configureTracking({
   endpoint: "https://analytics.example.com/api/analytics/track",
   sessionReplay: {
     enabled: true,
-    sampleRate: 0.1,
+    sampleRate: 1,
   },
   getDefaultProps: (_event, props) => ({
     ...props,
@@ -218,14 +218,14 @@ Les racines des modèles Agent Native appellent déjà `configureTracking()`. Le
 VITE_AGENT_NATIVE_ANALYTICS_PUBLIC_KEY=anpk_...
 VITE_AGENT_NATIVE_ANALYTICS_ENDPOINT=https://analytics.example.com/api/analytics/track
 VITE_AGENT_NATIVE_SESSION_REPLAY_ENABLED=true
-VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=0.1
+VITE_AGENT_NATIVE_SESSION_REPLAY_SAMPLE_RATE=1
 ```
 
 L'assistant navigateur effectue également une lecture non bloquante et au mieux de la session d'authentification Agent Native actuelle. La relecture est réservée aux utilisateurs connectés par défaut : lorsque `sessionReplay` est activé, l'enregistrement ne démarre pas tant que la session ne se résout pas en une adresse e-mail utilisateur. Les relectures des utilisateurs connectés incluent un `userId`/`userEmail` basé sur l'e-mail ainsi que `orgId`.
 
 Définissez `sessionReplay.requireSignedInUser: false` ou `VITE_AGENT_NATIVE_SESSION_REPLAY_REQUIRE_AUTH=false` uniquement pour un déploiement de relecture anonyme intentionnel. Lorsque le contrôle d'authentification est désactivé, les enregistrements anonymes restent interrogeables par visiteur anonyme, session, application/modèle, nom d'hôte et chemin.
 
-La relecture de session est échantillonnée de manière déterministe par session de navigateur. Un `sampleRate` de `0.1` enregistre environ 10 % des sessions éligibles ; utilisez `1` lorsque la population éligible est intentionnellement restreinte, par exemple pour du dogfooding réservé aux utilisateurs connectés.
+La relecture de session est échantillonnée de manière déterministe par session de navigateur. Un `sampleRate` de `1` enregistre toutes les sessions éligibles ; utilisez des valeurs plus faibles, comme `0.1`, lorsque la population éligible est intentionnellement large.
 
 Les paramètres de confidentialité par défaut sont volontairement prudents tout en restant utiles pour la relecture :
 
@@ -240,6 +240,12 @@ Pendant l'enregistrement, la relecture de session capture également la sortie d
 Le modèle Analytics stocke les métadonnées de relecture en SQL (`session_recordings`) et stocke les blocs via des références blob privées (`session_replay_chunks`). Les navigateurs et les agents ne reçoivent jamais les URL du fournisseur. La lecture passe par des routes serveur à portée limitée, et les outils d'agent par défaut renvoient des résumés ou des événements de relecture bornés, et non un accès brut à la table des blocs.
 
 Lorsque vous devez transmettre un enregistrement privé à un agent externe, utilisez le contrôle **Copy for agent** de la page de détail de session. Il génère un lien `agent_access` limité à l'enregistrement, valide deux heures, effectue le rendu SSR d'une petite charge utile de découverte sur `/sessions/:recordingId`, et n'expose que les API JSON de contexte/événements de l'agent. La visibilité de l'enregistrement ne change pas.
+
+Implementation note: the reusable layer is the core agent-access URL contract,
+not a replay-specific UI abstraction. Use `createScopedAgentAccessGrant`,
+`verifyScopedAgentAccessToken`, `buildAgentAccessUrl`, and
+`buildAgentAccessApiUrl` for scoped SSR and JSON API links; keep replay storage,
+diagnostics shaping, and access policy inside the Analytics template.
 
 Pour le développement local uniquement, Analytics peut se replier sur des blocs SQL en ligne plafonnés lorsque le stockage blob privé n'est pas disponible. Les déploiements en production doivent configurer un stockage blob privé ou chiffré plutôt que de s'appuyer sur Postgres pour les charges utiles de relecture.
 

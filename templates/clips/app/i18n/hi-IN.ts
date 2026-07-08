@@ -121,6 +121,10 @@ const messages = {
     restoreFailed: "पुनर्स्थापना विफल",
     permanentlyDeleted: "स्थायी रूप से हटाया गया",
     deleteFailed: "हटाना विफल",
+    clipsRestored: "{{count}} क्लिप पुनर्स्थापित की गईं",
+    clipsRestoreFailed: "{{count}} क्लिप पुनर्स्थापित नहीं की जा सकीं",
+    clipsPermanentlyDeleted: "{{count}} क्लिप स्थायी रूप से हटा दी गईं",
+    clipsDeleteFailed: "{{count}} क्लिप हटाई नहीं जा सकीं",
   },
   recordingRoute: {
     pageTitle: "क्लिप रिकॉर्डिंग · Clips",
@@ -193,6 +197,11 @@ const messages = {
     edit: "संपादित करें",
     aiTools: "एआई उपकरण",
     enhanceRecording: "इस रिकॉर्डिंग को बेहतर बनाएं",
+    includeFullVideo: "पूरी वीडियो शामिल करें",
+    includeFullVideoDescription:
+      "चालू होने पर, AI टूल रिकॉर्डिंग देखते हैं (केवल Gemini) ऑन-स्क्रीन संदर्भ के लिए — केवल ऑडियो ट्रांसक्रिप्ट नहीं। यह डिफ़ॉल्ट शीर्षक और विवरण जनरेशन पर भी लागू होता है। Builder या GEMINI_API_KEY के ज़रिए Gemini मॉडल आवश्यक है।",
+    includeFullVideoOn: "AI टूल पूरी वीडियो का उपयोग करेंगे (Gemini)",
+    includeFullVideoOff: "AI टूल केवल ट्रांसक्रिप्ट का उपयोग करेंगे",
     regenerateTitle: "शीर्षक पुन: उत्पन्न करें",
     regenerateDescription: "विवरण पुनर्जीवित करें",
     autoChapters: "ऑटो अध्याय",
@@ -318,7 +327,7 @@ const messages = {
     removing: "हटाया जा रहा है...",
     remove: "निकालना",
     desktopHint:
-      "Clips डेस्कटॉप ऐप से इस मीटिंग के लिए लाइव नोट्स रिकॉर्ड करें - ट्रांसक्रिप्ट और एआई नोट्स स्वचालित रूप से यहां दिखाई देंगे।",
+      "नोट्स शुरू करने के लिए, मेनू बार से Clips Desktop खोलें और Start Meeting Notes चुनें, या रिमाइंडर आने पर Start notes पर क्लिक करें। Clips माइक्रोफ़ोन और सिस्टम ऑडियो कैप्चर करके यहां ट्रांसक्रिप्ट लिखता है।",
     getDesktopApp: "डेस्कटॉप ऐप प्राप्त करें",
     generateNotesFailed: "नोट जनरेट नहीं किए जा सके. पुनः प्रयास करें।",
     attendee_one: "{{count}} सहभागी",
@@ -334,6 +343,13 @@ const messages = {
     segments: "{{count}} खंड",
     copyTranscript: "प्रतिलेख कॉपी करें",
     copyFullTranscript: "पूर्ण प्रतिलेख कॉपी करें",
+    timeRemaining_one: "{{count}} मिनट शेष",
+    timeRemaining_other: "{{count}} मिनट शेष",
+    endMeeting: "मीटिंग समाप्त करें",
+    endThisMeeting: "इस मीटिंग को समाप्त करें?",
+    endMeetingDescription:
+      "इससे इस मीटिंग की रिकॉर्डिंग और ट्रांसक्रिप्शन रुक जाएगी। अभी तक कैप्चर किए गए हिस्से से आप फिर भी नोट्स बना सकते हैं।",
+    couldNotEndMeeting: "मीटिंग समाप्त नहीं हो सकी",
   },
   transcriptPanel: {
     transcribing: "प्रतिलेखन...",
@@ -417,6 +433,8 @@ const messages = {
       "यह Clips एजेंट संदर्भ URL प्राप्त करें: {{agentContextUrl}}। बोले गए संदर्भ के लिए transcript.segments का उपयोग करें, स्क्रीन देखने के लिए recommendedFrames या फ्रेम API URL प्राप्त करें, और यदि browserDiagnostics मौजूद हो तो संशोधित कंसोल लॉग और fetch/XHR अनुरोध मेटाडेटा जांचें।",
     agentTokenDescription:
       "यह अस्थायी एजेंट URL क्लिप को सार्वजनिक किए बिना एजेंटों को इसे पढ़ने देता है। यह दो घंटे बाद समाप्त हो जाता है।",
+    agentLinkUnavailable: "एजेंट लिंक नहीं बन सका।",
+    retryAgentLink: "फिर से प्रयास करें",
     gifPreview: "GIF पूर्वावलोकन",
     openPlayer: "खुला खिलाड़ी",
     downloadMp4: "MP4 डाउनलोड करें",
@@ -476,6 +494,12 @@ const messages = {
     quickPrompts: "त्वरित संकेत",
     whatDidIMiss: "मैंने क्या मिस किया?",
     whatDidIMissPrompt: "मैंने क्या मिस किया?",
+    suggestQuestions: "मेरे पूछने के लिए प्रश्न सुझाएँ",
+    suggestQuestionsPrompt:
+      "अब तक की चर्चा के आधार पर, इस मीटिंग में आगे पूछने के लिए कुछ अच्छे प्रश्न सुझाएँ।",
+    makeMeSoundSmart: "मुझे स्मार्ट दिखाएँ",
+    makeMeSoundSmartPrompt:
+      "इस मीटिंग के अब तक के आधार पर, मुझे एक तीक्ष्ण और सूझ-बूझ भरी टिप्पणी या प्रश्न दें जिसे मैं अभी जोड़ सकूँ।",
     summarizeLastFive: "पिछले 5 मिनट का सारांश दें",
     summarizeLastFivePrompt: "इस मीटिंग के पिछले 5 मिनट को 3-5 बिंदुओं में संक्षेपित करें।",
     actionItemsForMe: "मेरे लिए कार्य आइटम",
@@ -750,6 +774,9 @@ Clips में उपयोगकर्ताओं को दिखने व�
     anonymous: "अनाम",
     anon: "अनाम",
     moreViewers: "+{{count}} और",
+    viewedBy: "देखा गया",
+    someone: "किसी ने",
+    noViewsYet: "अभी तक कोई दृश्य नहीं।",
   },
   libraryGrid: {
     spaceRoot: "स्पेस रूट",
@@ -768,6 +795,10 @@ Clips में उपयोगकर्ताओं को दिखने व�
     clipsArchiveFailed: "{{count}} क्लिप आर्काइव नहीं किए जा सके",
     clipsMovedToTrash: "{{count}} क्लिप ट्रैश में ले जाए गए",
     clipsTrashFailed: "{{count}} क्लिप ट्रैश में नहीं ले जाए जा सके",
+    loadFailedTitle: "आपकी रिकॉर्डिंग लोड नहीं हो सकीं",
+    loadFailedBody:
+      "यह सूची लोड करते समय कुछ गड़बड़ हो गई। आपकी रिकॉर्डिंग सुरक्षित हैं — फिर से प्रयास करें।",
+    retry: "फिर से प्रयास करें",
   },
   notificationsRoute: {
     pageTitle: "सूचनाएं · Clips",
@@ -903,6 +934,8 @@ Clips में उपयोगकर्ताओं को दिखने व�
     noVideo: "कोई वीडियो उपलब्ध नहीं",
     thanks: "देखने के लिए धन्यवाद",
     playClip: "क्लिप चलाएं",
+    unsupportedFormat:
+      "यह ब्राउज़र यह वीडियो नहीं चला सकता। कृपया लिंक को Chrome, Edge या Firefox में खोलकर देखें।",
   },
   searchBar: {
     placeholder: "रिकॉर्डिंग खोजें…",
@@ -957,7 +990,9 @@ Clips में उपयोगकर्ताओं को दिखने व�
     inHours: "{{count}} घंटे में",
     join: "जुड़ें",
     openNotes: "नोट्स खोलें",
-    open: "खोलें",
+    open: "नोट्स खोलें",
+    startFromDesktopNow: "डेस्कटॉप रिमाइंडर या मेनू बार से लाइव नोट्स शुरू करें।",
+    startFromDesktopLater: "समय होने पर Clips Desktop Start notes दिखाएगा।",
   },
   transcriptBubbles: {
     listening: "सुन रहा है…",
@@ -965,6 +1000,13 @@ Clips में उपयोगकर्ताओं को दिखने व�
     liveTranscriptDescription: "नोट्स शुरू होने पर लाइव ट्रांसक्रिप्ट यहां दिखाई देगी।",
     me: "मैं",
     them: "वे",
+    searchTranscript: "प्रतिलेख में खोजें",
+    searchPlaceholder: "प्रतिलेख में खोजें…",
+    searchMatchCount: "{{total}} में से {{current}}",
+    searchNoMatches: "कोई मिलान नहीं",
+    searchPrevMatch: "पिछला मिलान",
+    searchNextMatch: "अगला मिलान",
+    searchClose: "खोज बंद करें",
   },
   editorLayout: {
     trimmed: "ट्रिम किया गया",
@@ -1239,6 +1281,11 @@ Clips में उपयोगकर्ताओं को दिखने व�
     browserDictation: "Browser dictation (स्थानीयकृत)",
     browserDictationDescription:
       "Use the button on this page, or press the shortcut while this tab is focused. Browser dictation saves here for copy and cleanup. (स्थानीयकृत)",
+    browserDictationDescriptionDesktop:
+      "Use the button below to capture a note right here on this page. It does not paste into other apps — for that, use the desktop shortcut on the right. (स्थानीयकृत)",
+    quickNoteTitle: "Quick dictation note (स्थानीयकृत)",
+    quickNoteHint:
+      "Captures here without leaving this page — it does not paste into other apps. Use the button to start and stop. (स्थानीयकृत)",
     desktopShortcuts: "Desktop shortcuts (स्थानीयकृत)",
     desktopShortcutsDescriptionSuffix: ", in the desktop app. (स्थानीयकृत)",
     holdFn: "Hold Fn (स्थानीयकृत)",
@@ -1271,6 +1318,18 @@ Clips में उपयोगकर्ताओं को दिखने व�
       "Voice-to-text dictation with AI cleanup. Get the desktop app to dictate from anywhere with a global shortcut. (स्थानीयकृत)",
     loadFailed: "Couldn't load dictations. (स्थानीयकृत)",
     noFilterMatches: "No dictations matching this filter. (स्थानीयकृत)",
+    dictionaryTitle: "Dictionary (स्थानीयकृत)",
+    dictionaryDescription:
+      "Terms here bias speech recognition toward your preferred spellings — auto-learned from corrections, or add your own. (स्थानीयकृत)",
+    dictionaryTermPlaceholder: "Term (स्थानीयकृत)",
+    dictionaryReplacementPlaceholder: "Replacement (optional) (स्थानीयकृत)",
+    dictionaryAdd: "Add (स्थानीयकृत)",
+    dictionaryLoading: "Loading dictionary... (स्थानीयकृत)",
+    dictionaryEmpty: "No learned terms yet. (स्थानीयकृत)",
+    dictionaryUsesCount: "Used {{count}}x (स्थानीयकृत)",
+    dictionaryRemove: "Remove (स्थानीयकृत)",
+    vocabularyAddFailed: "Couldn't add term (स्थानीयकृत)",
+    vocabularyRemoveFailed: "Couldn't remove term (स्थानीयकृत)",
   },
   clipsFinalRaw: {
     splitAtPlayhead: "प्लेहेड पर विभाजित करें (S)",
@@ -1366,10 +1425,10 @@ Clips में उपयोगकर्ताओं को दिखने व�
       "Google Calendar needs to be reconnected to keep showing your upcoming meetings. (स्थानीयकृत)",
     connectGoogleCalendar: "Connect Google Calendar (स्थानीयकृत)",
     desktopReminder:
-      "Get a desktop reminder when meetings start so recorded notes land in this history automatically. (स्थानीयकृत)",
+      "Connect Google Calendar, keep Clips Desktop open, then click Start notes from the reminder or the menu bar when your meeting begins. (स्थानीयकृत)",
     getDesktopApp: "Get desktop app (स्थानीयकृत)",
     requiredForReminders:
-      "Required for meeting reminders and transcription. (स्थानीयकृत)",
+      "Desktop captures mic + system audio for meeting transcription. (स्थानीयकृत)",
     calendarConnected: "Calendar connected (स्थानीयकृत)",
     calendarDisconnected: "Calendar disconnected (स्थानीयकृत)",
     calendarSettings: "Calendar settings (स्थानीयकृत)",
@@ -1377,14 +1436,27 @@ Clips में उपयोगकर्ताओं को दिखने व�
       "Connect Google Calendar for meeting reminders. (स्थानीयकृत)",
     disconnectGoogleCalendarTitle: "Disconnect Google Calendar? (स्थानीयकृत)",
     title: "Meetings (स्थानीयकृत)",
-    intro: "Upcoming calendar meetings and your recorded notes. (स्थानीयकृत)",
+    intro:
+      "Upcoming calendar meetings and your recorded notes. Start live notes from Clips Desktop at meeting time. (स्थानीयकृत)",
     searchPlaceholder: "Search meetings... (स्थानीयकृत)",
     clearSearch: "Clear search (स्थानीयकृत)",
     noMeetingsYet: "No meetings yet (स्थानीयकृत)",
     noMeetingsDescription:
-      "Upcoming calendar meetings show up here, and finished recordings land here once you take notes. (स्थानीयकृत)",
+      "Connect your calendar and keep Clips Desktop open. When a meeting starts, use Start notes from the reminder or menu bar. (स्थानीयकृत)",
     noMeetingsMatch: 'No meetings match "{{query}}" (स्थानीयकृत)',
     refreshing: "Refreshing… (स्थानीयकृत)",
+    howToTriggerTitle: "How to trigger meeting notes (स्थानीयकृत)",
+    howToTriggerDescription:
+      "Meeting notes are the Granola-style flow in Clips: calendar events appear here, the desktop app captures mic and system audio, and the transcript plus AI notes land back in this history. (स्थानीयकृत)",
+    guideCalendarTitle: "Connect Google Calendar (स्थानीयकृत)",
+    guideCalendarDescription:
+      "Meetings are pulled from your calendar so Clips knows when to remind you. (स्थानीयकृत)",
+    guideDesktopTitle: "Keep Clips Desktop open (स्थानीयकृत)",
+    guideDesktopDescription:
+      "Desktop capture is required for mic plus system-audio transcription. (स्थानीयकृत)",
+    guideStartTitle: "Click Start notes (स्थानीयकृत)",
+    guideStartDescription:
+      "Use the desktop reminder or the menu-bar Start Meeting Notes item when the call begins. (स्थानीयकृत)",
   },
 };
 

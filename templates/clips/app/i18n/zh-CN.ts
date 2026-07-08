@@ -117,6 +117,10 @@ const messages = {
     restoreFailed: "恢复失败",
     permanentlyDeleted: "已永久删除",
     deleteFailed: "删除失败",
+    clipsRestored: "已恢复 {{count}} 个剪辑",
+    clipsRestoreFailed: "{{count}} 个剪辑无法恢复",
+    clipsPermanentlyDeleted: "已永久删除 {{count}} 个剪辑",
+    clipsDeleteFailed: "{{count}} 个剪辑无法删除",
   },
   recordingRoute: {
     pageTitle: "剪辑录制 · Clips",
@@ -187,6 +191,11 @@ const messages = {
     edit: "编辑",
     aiTools: "人工智能工具",
     enhanceRecording: "增强此录音",
+    includeFullVideo: "包含完整视频",
+    includeFullVideoDescription:
+      "开启后，AI 工具会观看录制内容（仅限 Gemini）以获取屏幕上下文，而不仅仅是音频文字记录。也适用于默认标题和描述生成。需要通过 Builder 或 GEMINI_API_KEY 使用 Gemini 模型。",
+    includeFullVideoOn: "AI 工具将使用完整视频（Gemini）",
+    includeFullVideoOff: "AI 工具将只使用文字记录",
     regenerateTitle: "重新生成标题",
     regenerateDescription: "重新生成描述",
     autoChapters: "汽车章节",
@@ -310,7 +319,7 @@ const messages = {
     removing: "正在删除...",
     remove: "消除",
     desktopHint:
-      "从 Clips 桌面应用程序记录本次会议的实时笔记 — 文字记录和 AI 笔记将自动出现在此处。",
+      "要开始记录，请从菜单栏打开 Clips Desktop 并选择 Start Meeting Notes，或在提醒出现时点击 Start notes。Clips 会捕获麦克风和系统音频，并在这里写入文字记录。",
     getDesktopApp: "获取桌面应用程序",
     generateNotesFailed: "无法生成笔记。再试一次。",
     attendee_one: "{{count}} 与会者",
@@ -325,6 +334,13 @@ const messages = {
     segments: "{{count}} 段",
     copyTranscript: "复制成绩单",
     copyFullTranscript: "复制完整成绩单",
+    timeRemaining_one: "还剩 {{count}} 分钟",
+    timeRemaining_other: "还剩 {{count}} 分钟",
+    endMeeting: "结束会议",
+    endThisMeeting: "结束这次会议吗？",
+    endMeetingDescription:
+      "这将停止本次会议的录制和转录。您仍然可以根据目前捕获的内容生成笔记。",
+    couldNotEndMeeting: "无法结束会议",
   },
   transcriptPanel: {
     transcribing: "正在抄写…",
@@ -404,6 +420,8 @@ const messages = {
       "获取这个 Clips 代理上下文 URL：{{agentContextUrl}}。使用 transcript.segments 读取语音上下文，获取 recommendedFrames 或帧 API URL 来查看屏幕，并在 browserDiagnostics 存在时检查经过脱敏的控制台日志和 fetch/XHR 请求元数据。",
     agentTokenDescription:
       "这个临时代理 URL 可让代理读取剪辑，而无需将其设为公开。它会在两小时后过期。",
+    agentLinkUnavailable: "无法创建代理链接。",
+    retryAgentLink: "重试",
     gifPreview: "GIF 预览",
     openPlayer: "开放玩家",
     downloadMp4: "下载MP4",
@@ -472,6 +490,12 @@ const messages = {
     placeholder: "询问任何事情...",
     send: "发送",
     sentToChat: "已发送至聊天 - 请参阅代理侧边栏以获取回复。",
+    suggestQuestions: "为我推荐可以提出的问题",
+    suggestQuestionsPrompt:
+      "根据本次会议目前为止讨论的内容，建议我接下来可以提出的几个好问题。",
+    makeMeSoundSmart: "让我听起来更聪明",
+    makeMeSoundSmartPrompt:
+      "根据本次会议目前为止的内容，给我一个现在就可以补充的犀利、有见地的评论或问题。",
   },
   brandingEditor: {
     title: "品牌推广",
@@ -724,6 +748,9 @@ Clips 中所有面向用户的重要更改都会记录在这里。你可以随�
     anonymous: "匿名",
     anon: "匿名",
     moreViewers: "+{{count}} 更多",
+    viewedBy: "观看者",
+    someone: "有人",
+    noViewsYet: "暂无观看记录。",
   },
   libraryGrid: {
     spaceRoot: "空间根目录",
@@ -742,6 +769,9 @@ Clips 中所有面向用户的重要更改都会记录在这里。你可以随�
     clipsArchiveFailed: "{{count}} 个剪辑无法归档",
     clipsMovedToTrash: "已将 {{count}} 个剪辑移至废纸篓",
     clipsTrashFailed: "{{count}} 个剪辑无法移至废纸篓",
+    loadFailedTitle: "无法加载你的录制",
+    loadFailedBody: "加载此列表时出了点问题。你的录制是安全的 —— 请重试。",
+    retry: "重试",
   },
   notificationsRoute: {
     pageTitle: "通知 · Clips",
@@ -875,6 +905,8 @@ Clips 中所有面向用户的重要更改都会记录在这里。你可以随�
     noVideo: "没有可用视频",
     thanks: "感谢观看",
     playClip: "播放剪辑",
+    unsupportedFormat:
+      "此浏览器无法播放该视频。请尝试在 Chrome、Edge 或 Firefox 中打开链接。",
   },
   searchBar: {
     placeholder: "搜索录制…",
@@ -929,7 +961,9 @@ Clips 中所有面向用户的重要更改都会记录在这里。你可以随�
     inHours: "{{count}} 小时后",
     join: "加入",
     openNotes: "打开笔记",
-    open: "打开",
+    open: "打开笔记",
+    startFromDesktopNow: "从桌面提醒或菜单栏开始实时笔记。",
+    startFromDesktopLater: "到时间时，Clips Desktop 会显示 Start notes。",
   },
   transcriptBubbles: {
     listening: "正在聆听…",
@@ -937,6 +971,13 @@ Clips 中所有面向用户的重要更改都会记录在这里。你可以随�
     liveTranscriptDescription: "开始记录后，实时转录会显示在这里。",
     me: "我",
     them: "对方",
+    searchTranscript: "搜索转录",
+    searchPlaceholder: "搜索转录…",
+    searchMatchCount: "第 {{current}} 项，共 {{total}} 项",
+    searchNoMatches: "没有匹配项",
+    searchPrevMatch: "上一个匹配项",
+    searchNextMatch: "下一个匹配项",
+    searchClose: "关闭搜索",
   },
   editorLayout: {
     trimmed: "已修剪",
@@ -1210,6 +1251,11 @@ Clips 中所有面向用户的重要更改都会记录在这里。你可以随�
     browserDictation: "Browser dictation (已本地化)",
     browserDictationDescription:
       "Use the button on this page, or press the shortcut while this tab is focused. Browser dictation saves here for copy and cleanup. (已本地化)",
+    browserDictationDescriptionDesktop:
+      "Use the button below to capture a note right here on this page. It does not paste into other apps — for that, use the desktop shortcut on the right. (已本地化)",
+    quickNoteTitle: "Quick dictation note (已本地化)",
+    quickNoteHint:
+      "Captures here without leaving this page — it does not paste into other apps. Use the button to start and stop. (已本地化)",
     desktopShortcuts: "Desktop shortcuts (已本地化)",
     desktopShortcutsDescriptionSuffix: ", in the desktop app. (已本地化)",
     holdFn: "Hold Fn (已本地化)",
@@ -1242,6 +1288,18 @@ Clips 中所有面向用户的重要更改都会记录在这里。你可以随�
       "Voice-to-text dictation with AI cleanup. Get the desktop app to dictate from anywhere with a global shortcut. (已本地化)",
     loadFailed: "Couldn't load dictations. (已本地化)",
     noFilterMatches: "No dictations matching this filter. (已本地化)",
+    dictionaryTitle: "Dictionary (已本地化)",
+    dictionaryDescription:
+      "Terms here bias speech recognition toward your preferred spellings — auto-learned from corrections, or add your own. (已本地化)",
+    dictionaryTermPlaceholder: "Term (已本地化)",
+    dictionaryReplacementPlaceholder: "Replacement (optional) (已本地化)",
+    dictionaryAdd: "Add (已本地化)",
+    dictionaryLoading: "Loading dictionary... (已本地化)",
+    dictionaryEmpty: "No learned terms yet. (已本地化)",
+    dictionaryUsesCount: "Used {{count}}x (已本地化)",
+    dictionaryRemove: "Remove (已本地化)",
+    vocabularyAddFailed: "Couldn't add term (已本地化)",
+    vocabularyRemoveFailed: "Couldn't remove term (已本地化)",
   },
   clipsFinalRaw: {
     splitAtPlayhead: "在播放头处分割 (S)",
@@ -1333,10 +1391,10 @@ Clips 中所有面向用户的重要更改都会记录在这里。你可以随�
       "Google Calendar needs to be reconnected to keep showing your upcoming meetings. (已本地化)",
     connectGoogleCalendar: "Connect Google Calendar (已本地化)",
     desktopReminder:
-      "Get a desktop reminder when meetings start so recorded notes land in this history automatically. (已本地化)",
+      "Connect Google Calendar, keep Clips Desktop open, then click Start notes from the reminder or the menu bar when your meeting begins. (已本地化)",
     getDesktopApp: "Get desktop app (已本地化)",
     requiredForReminders:
-      "Required for meeting reminders and transcription. (已本地化)",
+      "Desktop captures mic + system audio for meeting transcription. (已本地化)",
     calendarConnected: "Calendar connected (已本地化)",
     calendarDisconnected: "Calendar disconnected (已本地化)",
     calendarSettings: "Calendar settings (已本地化)",
@@ -1344,14 +1402,27 @@ Clips 中所有面向用户的重要更改都会记录在这里。你可以随�
       "Connect Google Calendar for meeting reminders. (已本地化)",
     disconnectGoogleCalendarTitle: "Disconnect Google Calendar? (已本地化)",
     title: "Meetings (已本地化)",
-    intro: "Upcoming calendar meetings and your recorded notes. (已本地化)",
+    intro:
+      "Upcoming calendar meetings and your recorded notes. Start live notes from Clips Desktop at meeting time. (已本地化)",
     searchPlaceholder: "Search meetings... (已本地化)",
     clearSearch: "Clear search (已本地化)",
     noMeetingsYet: "No meetings yet (已本地化)",
     noMeetingsDescription:
-      "Upcoming calendar meetings show up here, and finished recordings land here once you take notes. (已本地化)",
+      "Connect your calendar and keep Clips Desktop open. When a meeting starts, use Start notes from the reminder or menu bar. (已本地化)",
     noMeetingsMatch: 'No meetings match "{{query}}" (已本地化)',
     refreshing: "Refreshing… (已本地化)",
+    howToTriggerTitle: "How to trigger meeting notes (已本地化)",
+    howToTriggerDescription:
+      "Meeting notes are the Granola-style flow in Clips: calendar events appear here, the desktop app captures mic and system audio, and the transcript plus AI notes land back in this history. (已本地化)",
+    guideCalendarTitle: "Connect Google Calendar (已本地化)",
+    guideCalendarDescription:
+      "Meetings are pulled from your calendar so Clips knows when to remind you. (已本地化)",
+    guideDesktopTitle: "Keep Clips Desktop open (已本地化)",
+    guideDesktopDescription:
+      "Desktop capture is required for mic plus system-audio transcription. (已本地化)",
+    guideStartTitle: "Click Start notes (已本地化)",
+    guideStartDescription:
+      "Use the desktop reminder or the menu-bar Start Meeting Notes item when the call begins. (已本地化)",
   },
 };
 
