@@ -1498,6 +1498,9 @@ importers:
       isbot:
         specifier: ^5
         version: 5.1.44
+      locale-kit:
+        specifier: workspace:*
+        version: link:../../packages/locale-kit
       playwright-core:
         specifier: ^1.61.1
         version: 1.61.1
