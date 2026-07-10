@@ -713,6 +713,7 @@ export function App() {
   const [meetingStartMessage, setMeetingStartMessage] = useState<string | null>(
     null,
   );
+  const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
   const [readinessOpen, setReadinessOpen] = useState<boolean>(
     () => !loadBool(READINESS_REVIEWED_KEY, false),
   );
@@ -1140,6 +1141,7 @@ export function App() {
   }, [authStatus, callClipsAction]);
 
   const startMeetingNotes = useCallback((meeting: PopoverMeeting) => {
+    setActiveMeetingId(meeting.id);
     setMeetingStartMessage(`Starting notes for ${meeting.title}…`);
     emit("meetings:start-transcription", {
       meetingId: meeting.id,
@@ -1147,9 +1149,97 @@ export function App() {
       reason: "user",
     }).catch((err) => {
       console.error("[clips-popover] start meeting notes failed:", err);
+      setActiveMeetingId(null);
       setMeetingStartMessage("Could not start notes. Try again from Meetings.");
     });
   }, []);
+
+  const startMeetingNotesAndJoin = useCallback(
+    (meeting: PopoverMeeting) => {
+      if (meeting.joinUrl) {
+        openExternal(meeting.joinUrl).catch((err) => {
+          console.error("[clips-popover] open meeting join url failed:", err);
+        });
+      }
+      startMeetingNotes(meeting);
+    },
+    [startMeetingNotes],
+  );
+
+  const showActiveMeetingPill = useCallback((meetingId: string) => {
+    invoke("recording_pill_show", { meetingId, mode: "meeting" }).catch(
+      (err) => {
+        console.error("[clips-popover] show meeting pill failed:", err);
+      },
+    );
+    emit("clips:pill-context", { meetingId, mode: "meeting" }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    invoke<string | null>("get_active_meeting_id")
+      .then((meetingId) => {
+        if (meetingId) setActiveMeetingId(meetingId);
+      })
+      .catch(() => {});
+
+    let stopped = false;
+    const unlistens: Array<() => void> = [];
+    const track = (promise: Promise<() => void>) => {
+      promise
+        .then((unlisten) => {
+          if (stopped) {
+            unlisten();
+            return;
+          }
+          unlistens.push(unlisten);
+        })
+        .catch(() => {});
+    };
+    track(
+      listen<{ meetingId?: string | null }>(
+        "meetings:transcription-started",
+        (event) => {
+          if (event.payload?.meetingId) {
+            setActiveMeetingId(event.payload.meetingId);
+          }
+        },
+      ),
+    );
+    track(
+      listen<{ meetingId?: string | null }>(
+        "meetings:transcription-stopped",
+        (event) => {
+          setActiveMeetingId((current) =>
+            !event.payload?.meetingId || event.payload.meetingId === current
+              ? null
+              : current,
+          );
+        },
+      ),
+    );
+    track(
+      listen<{ meetingId?: string | null }>(
+        "meetings:transcription-error",
+        (event) => {
+          setActiveMeetingId((current) =>
+            !event.payload?.meetingId || event.payload.meetingId === current
+              ? null
+              : current,
+          );
+        },
+      ),
+    );
+    return () => {
+      stopped = true;
+      unlistens.forEach((unlisten) => unlisten());
+      unlistens.length = 0;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!popoverVisible || !activeMeetingId) return;
+    showActiveMeetingPill(activeMeetingId);
+  }, [activeMeetingId, popoverVisible, showActiveMeetingPill]);
 
   useMeetingTranscription({
     callClipsAction,
@@ -1286,6 +1376,9 @@ export function App() {
       if (e.key === "Escape") {
         // Don't close mid-recording — user would lose the recorder handle.
         if (isRecording) return;
+        // Reset nested views before hide so the next tray open lands on the
+        // main recorder UI instead of resuming scrolled settings/meetings.
+        setPopoverView("recorder");
         hidePopover();
       }
     }
@@ -1328,7 +1421,11 @@ export function App() {
     track(
       listen<boolean>("clips:popover-visible", (ev) => {
         console.log("[clips-popover] popover-visible =", ev.payload);
-        setPopoverVisible(!!ev.payload);
+        const visible = !!ev.payload;
+        setPopoverVisible(visible);
+        // Leaving settings/meetings/dictation mid-scroll should not resume on
+        // the next open — always return to the main recorder surface.
+        if (!visible) setPopoverView("recorder");
       }),
     );
     // The bubble window emits `clips:bubble-closed` when the user clicks
@@ -1415,6 +1512,10 @@ export function App() {
   // tracks (which causes the laggy / black / silently-failing recording
   // symptoms). Reset to false once the recording is fully torn down.
   const bubbleStreamTransferredToRecorder = useRef(false);
+  // Bumped when the native stop path releases the camera mid-session so the
+  // bubble effect re-acquires even if bubbleActive/cameraId are unchanged
+  // (post-stop reopen with a blank "Default Camera" preview).
+  const [bubbleSessionEpoch, setBubbleSessionEpoch] = useState(0);
   const wantsCamera = mode !== "screen" && cameraOn;
   const nativeFullscreenRecordingActive =
     mode !== "camera" && shouldUseNativeFullscreenRecording(source);
@@ -1426,6 +1527,10 @@ export function App() {
   // from THAT render and stops the camera stream even though recording is
   // still in flight.
   const recordingFlowGateRef = useRef(false);
+  // Stop detaches the recorder state before optimization/upload finishes so a
+  // fresh camera session can recover immediately. Keep that post-stop phase
+  // separate so React cleanup does not close the finalizing progress window.
+  const recordingStopFinalizingRef = useRef(false);
   useEffect(() => {
     recordingFlowGateRef.current = isRecording || recordingFlowActive;
   }, [isRecording, recordingFlowActive]);
@@ -1464,7 +1569,9 @@ export function App() {
       // Hide them from here instead. Guard on !recordingInFlight so
       // we don't rip the toolbar out from under an active recording.
       if (!recordingFlowGateRef.current) {
-        invoke("hide_overlays").catch(() => {});
+        invoke("hide_overlays", {
+          preserveFinalizing: recordingStopFinalizingRef.current,
+        }).catch(() => {});
       }
     };
   }, [toolbarActive]);
@@ -1620,17 +1727,26 @@ export function App() {
       // source changed (e.g. cameraId flip re-runs this effect): hiding
       // would race the re-run's show_bubble and close the window out from under it.
       if (!recordingInFlight && !bubbleActiveRef.current) {
-        invoke("hide_overlays").catch(() => {});
+        invoke("hide_overlays", {
+          preserveFinalizing: recordingStopFinalizingRef.current,
+        }).catch(() => {});
       }
     };
-  }, [bubbleActive, cameraId]);
+  }, [bubbleActive, cameraId, bubbleSessionEpoch]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     listen("clips:release-camera", () => {
       console.log(`[popover] releasing camera`);
+      // Native stop closes the bubble and kills tracks while React may still
+      // hold a live RecorderHandle during finalize/upload. Clear ownership so
+      // the bubble session can re-acquire a fresh preview, and so Start is not
+      // stuck on an ended stream.
+      bubbleStreamTransferredToRecorder.current = false;
       bubbleStreamRef.current?.getTracks().forEach((t) => t.stop());
+      bubbleStreamRef.current = null;
+      setBubbleSessionEpoch((epoch) => epoch + 1);
     })
       .then((u) => {
         if (cancelled) u();
@@ -1642,6 +1758,24 @@ export function App() {
       unlisten?.();
     };
   }, []);
+
+  // If the popover reopens while camera is still wanted, and the previous
+  // bubble stream is gone or all tracks have ended (common after native stop
+  // + mid-upload reopen), bump the session epoch so the bubble effect
+  // re-acquires getUserMedia + WebRTC instead of showing a blank "Default
+  // Camera" label with a silent Start.
+  useEffect(() => {
+    if (!popoverVisible || !wantsCamera) return;
+    if (recordingFlowGateRef.current || recordingFlowActive) return;
+    const tracks = bubbleStreamRef.current?.getTracks() ?? [];
+    const needsFreshBubble =
+      tracks.length === 0 ||
+      tracks.every((track) => track.readyState === "ended");
+    if (!needsFreshBubble) return;
+    bubbleStreamTransferredToRecorder.current = false;
+    bubbleStreamRef.current = null;
+    setBubbleSessionEpoch((epoch) => epoch + 1);
+  }, [popoverVisible, wantsCamera, recordingFlowActive]);
 
   // ---- auto-size popover to content --------------------------------------
   // The Tauri window is fixed-size via tauri.conf.json, but our content
@@ -1859,7 +1993,25 @@ export function App() {
   async function handleStartRecording(options?: {
     ignoreActiveRecorder?: boolean;
   }) {
-    if (recorder && !options?.ignoreActiveRecorder) return;
+    if (recorder && !options?.ignoreActiveRecorder) {
+      console.warn(
+        "[clips-popover] handleStartRecording ignored — recorder already active",
+      );
+      setRecError(
+        "Still finishing the last recording. Wait a moment, then try again.",
+      );
+      return;
+    }
+    const bubbleTracks = bubbleStreamRef.current?.getTracks() ?? [];
+    const bubbleStreamDead =
+      bubbleTracks.length > 0 &&
+      bubbleTracks.every((track) => track.readyState === "ended");
+    if (bubbleStreamDead) {
+      console.warn("[clips-popover] clearing ended bubble stream before start");
+      bubbleStreamTransferredToRecorder.current = false;
+      bubbleStreamRef.current = null;
+      setBubbleSessionEpoch((epoch) => epoch + 1);
+    }
     if (localRecordingMode === "off") {
       if (videoStorageStatus === "checking") {
         setRecError("Checking video storage. Try again in a moment.");
@@ -2202,11 +2354,29 @@ export function App() {
     };
     track(
       listen("clips:recorder-stop", async () => {
+        // Detach the React Start/bubble gate immediately. Native stop already
+        // released the camera and cleared Rust `is_recording_active` mid-
+        // finalize; keeping `recorder` set through the whole upload made
+        // reopen show a blank preview and made Start a silent no-op.
+        const handle = recorder;
+        recordingStopFinalizingRef.current = true;
+        bubbleStreamTransferredToRecorder.current = false;
+        bubbleStreamRef.current = null;
+        recordingFlowGateRef.current = false;
+        (window as unknown as { clipsForceAlive?: boolean }).clipsForceAlive =
+          false;
+        setRecordingFlowActive(false);
+        setRecorder(null);
+        // Force a fresh bubble session even when bubbleActive stays true
+        // (popover still open / camera still on). Without this epoch bump the
+        // effect does not re-run and reopen shows ended tracks until Start
+        // discovers them.
+        setBubbleSessionEpoch((epoch) => epoch + 1);
+
         let stopFailed = false;
         let stopResult: RecorderStopResult | null = null;
         try {
-          stopResult = await recorder.stop();
-          if (cancelled) return;
+          stopResult = await handle.stop();
           if (stopResult.localOnly) {
             setLocalRecordingNotice({
               folderPath: stopResult.localFolder,
@@ -2217,36 +2387,21 @@ export function App() {
           }
         } catch (err) {
           stopFailed = true;
-          if (!cancelled) {
-            setRecError(err instanceof Error ? err.message : String(err));
-            await loadPendingUploads();
-          }
+          setRecError(err instanceof Error ? err.message : String(err));
+          await loadPendingUploads();
         } finally {
-          if (!cancelled) {
-            // Clear the force-alive flag — recording is done, the pump
-            // can honor document.hidden normally again.
-            (
-              window as unknown as { clipsForceAlive?: boolean }
-            ).clipsForceAlive = false;
-            // Recorder has stopped its tracks; next popover session can
-            // acquire the camera cleanly again.
-            bubbleStreamTransferredToRecorder.current = false;
-            bubbleStreamRef.current = null;
-            recordingFlowGateRef.current = false;
-            setRecorder(null);
-            setRecordingFlowActive(false);
-            invoke("set_recording_state", { active: false }).catch(() => {});
-            if (stopFailed || stopResult?.localOnly) {
-              invoke("show_popover").catch(() => {});
-            } else {
-              // Close the popover — recorder.stop() already opened the
-              // recording's page in the default browser. The popover doesn't
-              // need to hang around.
-              getCurrentWindow()
-                .hide()
-                .catch(() => {});
-              emit("clips:popover-visible", false).catch(() => {});
-            }
+          recordingStopFinalizingRef.current = false;
+          invoke("set_recording_state", { active: false }).catch(() => {});
+          if (stopFailed || stopResult?.localOnly) {
+            invoke("show_popover").catch(() => {});
+          } else {
+            // Close the popover — recorder.stop() already opened the
+            // recording's page in the default browser. The popover doesn't
+            // need to hang around.
+            getCurrentWindow()
+              .hide()
+              .catch(() => {});
+            emit("clips:popover-visible", false).catch(() => {});
           }
         }
       }),
@@ -2265,6 +2420,7 @@ export function App() {
             recordingFlowGateRef.current = false;
             setRecorder(null);
             setRecordingFlowActive(false);
+            setBubbleSessionEpoch((epoch) => epoch + 1);
             invoke("set_recording_state", { active: false }).catch(() => {});
             invoke("show_popover").catch(() => {});
           }
@@ -2285,6 +2441,7 @@ export function App() {
             recordingFlowGateRef.current = false;
             setRecorder(null);
             setRecordingFlowActive(false);
+            setBubbleSessionEpoch((epoch) => epoch + 1);
             invoke("set_recording_state", { active: false }).catch(() => {});
             // Starting a new browser capture must come from a fresh click in
             // this webview. The toolbar click arrives here through async Tauri
@@ -2362,6 +2519,7 @@ export function App() {
           loading={meetingsLoading}
           error={meetingsError}
           startMessage={meetingStartMessage}
+          activeMeetingId={activeMeetingId}
           meetingsEnabled={featureConfig?.meetingsEnabled !== false}
           onBack={() => setPopoverView("recorder")}
           onRefresh={fetchUpcomingMeetings}
@@ -2371,6 +2529,8 @@ export function App() {
           }
           onOpenSettings={() => setPopoverView("settings")}
           onStartNotes={startMeetingNotes}
+          onStartNotesAndJoin={startMeetingNotesAndJoin}
+          onShowActiveMeeting={showActiveMeetingPill}
         />
       </div>
     );
@@ -3269,6 +3429,7 @@ function MeetingsPopoverView({
   loading,
   error,
   startMessage,
+  activeMeetingId,
   meetingsEnabled,
   onBack,
   onRefresh,
@@ -3276,11 +3437,14 @@ function MeetingsPopoverView({
   onOpenMeeting,
   onOpenSettings,
   onStartNotes,
+  onStartNotesAndJoin,
+  onShowActiveMeeting,
 }: {
   meetings: PopoverMeeting[];
   loading: boolean;
   error: string | null;
   startMessage: string | null;
+  activeMeetingId: string | null;
   meetingsEnabled: boolean;
   onBack: () => void;
   onRefresh: () => void;
@@ -3288,6 +3452,8 @@ function MeetingsPopoverView({
   onOpenMeeting: (meetingId: string) => void;
   onOpenSettings: () => void;
   onStartNotes: (meeting: PopoverMeeting) => void;
+  onStartNotesAndJoin: (meeting: PopoverMeeting) => void;
+  onShowActiveMeeting: (meetingId: string) => void;
 }) {
   return (
     <div className="setup popover-view">
@@ -3345,6 +3511,8 @@ function MeetingsPopoverView({
         <div className="popover-list">
           {meetings.map((meeting) => {
             const canStart = meetingCanStartNotes(meeting);
+            const hasJoin = Boolean(meeting.joinUrl);
+            const isActive = activeMeetingId === meeting.id;
             return (
               <div className="popover-list-item" key={meeting.id}>
                 <div className="popover-list-icon">
@@ -3357,13 +3525,32 @@ function MeetingsPopoverView({
                     {meeting.platform ? ` · ${meeting.platform}` : ""}
                   </div>
                 </div>
-                {canStart ? (
+                {isActive ? (
+                  <button
+                    type="button"
+                    className="popover-list-action popover-list-action-active"
+                    onClick={() => onShowActiveMeeting(meeting.id)}
+                    title="Meeting notes are recording"
+                  >
+                    <span className="popover-list-action-dot" aria-hidden />
+                    Recording
+                  </button>
+                ) : canStart ? (
                   <button
                     type="button"
                     className="popover-list-action popover-list-action-primary"
-                    onClick={() => onStartNotes(meeting)}
+                    onClick={() =>
+                      hasJoin
+                        ? onStartNotesAndJoin(meeting)
+                        : onStartNotes(meeting)
+                    }
+                    title={
+                      hasJoin
+                        ? "Start notes and join the meeting"
+                        : "Start meeting notes"
+                    }
                   >
-                    Start notes
+                    {hasJoin ? "Start + join" : "Start notes"}
                   </button>
                 ) : (
                   <button

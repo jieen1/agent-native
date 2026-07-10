@@ -6,6 +6,7 @@ import type {
   BuilderCmsModelsResponse,
   ChangeContentDatabaseSourceRoleRequest,
   ContentDatabaseResponse,
+  ContentDatabasePersonalViewResponse,
   ContentDatabaseSourceFieldMapping,
   CreateInlineDatabaseRequest,
   CreateInlineDatabaseResponse,
@@ -17,6 +18,7 @@ import type {
   CreateDatabaseRequest,
   DatabaseItemsBatchRequest,
   DisconnectContentDatabaseSourceRequest,
+  DocumentPropertiesResponse,
   ExecuteBuilderSourceBatchRequest,
   ExecuteBuilderSourceBatchResponse,
   DuplicateDatabaseItemRequest,
@@ -34,6 +36,7 @@ import type {
   StageBuilderSourceBulkUpdateResponse,
   StageBuilderRevisionRequest,
   SuggestSourceJoinKeyResponse,
+  UpdateContentDatabasePersonalViewRequest,
   UpdateContentDatabaseViewRequest,
   ValidateBuilderSourceExecutionRequest,
 } from "@shared/api";
@@ -127,6 +130,57 @@ export function applyDocumentPropertyValueToDatabaseResponse(
   });
 
   return changed ? { ...current, items } : current;
+}
+
+export function applyDocumentPropertiesToDatabaseResponse(
+  current: ContentDatabaseResponse | undefined,
+  response: Pick<DocumentPropertiesResponse, "databaseId" | "properties">,
+): ContentDatabaseResponse | undefined {
+  if (!current) return current;
+  if (response.databaseId && current.database.id !== response.databaseId) {
+    return current;
+  }
+
+  const sortedProperties = [...response.properties].sort(
+    (a, b) => a.definition.position - b.definition.position,
+  );
+  const propertyById = new Map(
+    sortedProperties.map((property) => [property.definition.id, property]),
+  );
+
+  return {
+    ...current,
+    properties: sortedProperties,
+    items: current.items.map((item) => ({
+      ...item,
+      properties: item.properties
+        .filter((property) => propertyById.has(property.definition.id))
+        .map((property) => ({
+          ...propertyById.get(property.definition.id)!,
+          value: property.value,
+        })),
+    })),
+  };
+}
+
+export function removeDocumentPropertyFromDatabaseResponse(
+  current: ContentDatabaseResponse | undefined,
+  propertyId: string,
+): ContentDatabaseResponse | undefined {
+  if (!current) return current;
+
+  return {
+    ...current,
+    properties: current.properties.filter(
+      (property) => property.definition.id !== propertyId,
+    ),
+    items: current.items.map((item) => ({
+      ...item,
+      properties: item.properties.filter(
+        (property) => property.definition.id !== propertyId,
+      ),
+    })),
+  };
 }
 
 // `get-content-database` returns a union at runtime: the full response, or an
@@ -610,6 +664,36 @@ export function useUpdateContentDatabaseView(documentId: string) {
       queryClient.invalidateQueries({
         queryKey: ["action", "get-content-database-source", { documentId }],
       });
+    },
+  });
+}
+
+export function useContentDatabasePersonalView(databaseId: string | null) {
+  return useActionQuery<ContentDatabasePersonalViewResponse>(
+    "get-content-database-personal-view",
+    databaseId ? { databaseId } : undefined,
+    {
+      enabled: !!databaseId,
+      retry: false,
+      placeholderData: (previous) => previous,
+    },
+  );
+}
+
+export function useUpdateContentDatabasePersonalView(
+  databaseId: string | null,
+) {
+  const queryClient = useQueryClient();
+  return useActionMutation<
+    ContentDatabasePersonalViewResponse,
+    UpdateContentDatabasePersonalViewRequest
+  >("update-content-database-personal-view", {
+    onSuccess: (data) => {
+      if (!databaseId) return;
+      queryClient.setQueryData(
+        ["action", "get-content-database-personal-view", { databaseId }],
+        data,
+      );
     },
   });
 }

@@ -99,6 +99,21 @@ export const CLAIMED_BACKGROUND_WORKER_FAILED_ERROR_EVENT = {
  */
 export const UNCLAIMED_BACKGROUND_RUN_GRACE_MS = 25_000;
 
+/**
+ * Backstop ceiling — measured from the row's ORIGINAL `started_at`, which never
+ * changes — after which the unclaimed-background-run sweep stops attempting to
+ * redispatch a lost handoff and instead reaps it via `reapUnclaimedBackgroundRun`
+ * (loud, attributable `errored`). This is what keeps redispatch recoverable
+ * WITHOUT becoming a silent hang: a handoff that cannot be delivered within this
+ * window (a genuinely dead platform, not a transient blip) still fails loudly,
+ * it just gets a few sweep-cycle chances first. 5 minutes comfortably allows
+ * multiple 2-minute sweep ticks (see `agent-chat-plugin.ts`'s
+ * "Unclaimed background-run sweep") while staying well inside both the 40s
+ * foreground chunk clamp and the ~13min background soft-timeout ceiling that
+ * bound how long a real user turn is worth waiting on before failing loud.
+ */
+export const UNCLAIMED_BACKGROUND_RUN_REDISPATCH_BOUND_MS = 5 * 60_000;
+
 async function ensureRunTables(): Promise<void> {
   if (!_initPromise) {
     _initPromise = (async () => {
@@ -648,6 +663,71 @@ export async function listUnclaimedBackgroundRunIds(): Promise<string[]> {
   return ids;
 }
 
+/** A row returned by `listUnclaimedBackgroundRunRows`. */
+export interface UnclaimedBackgroundRunRow {
+  id: string;
+  /** The row's ORIGINAL `started_at` (never bumped by heartbeats), so a
+   *  caller can measure total elapsed time since the handoff was first
+   *  pre-inserted — independent of any liveness bump a redispatch attempt
+   *  makes along the way. */
+  startedAt: number;
+}
+
+/**
+ * Same eligibility as `listUnclaimedBackgroundRunIds`, but also returns each
+ * row's original `started_at` so a caller can bound total redispatch time
+ * (see `UNCLAIMED_BACKGROUND_RUN_REDISPATCH_BOUND_MS`) independent of the
+ * liveness bumps a redispatch attempt makes along the way. Used by the
+ * unclaimed-background-run sweep's redispatch pass; `listUnclaimedBackgroundRunIds`
+ * is kept as the simpler, pre-existing surface for callers that only need ids.
+ */
+export async function listUnclaimedBackgroundRunRows(): Promise<
+  UnclaimedBackgroundRunRow[]
+> {
+  await ensureRunTables();
+  const client = getDbExec();
+  const { rows } = await client.execute({
+    // CAST keeps the ms-epoch param 64-bit on Postgres (see
+    // backgroundAwareStaleCutoffSql for the int4-inference failure mode).
+    sql: `SELECT id, started_at FROM agent_runs
+          WHERE status = 'running'
+            AND dispatch_mode = 'background'
+            AND COALESCE(heartbeat_at, started_at) < (CAST(? AS BIGINT) - ${UNCLAIMED_BACKGROUND_RUN_GRACE_MS})`,
+    args: [Date.now()],
+  });
+  const result: UnclaimedBackgroundRunRow[] = [];
+  for (const row of rows ?? []) {
+    const id = (row as { id?: unknown }).id;
+    const startedAt = (row as { started_at?: unknown }).started_at;
+    if (typeof id === "string" && id) {
+      result.push({
+        id,
+        startedAt:
+          typeof startedAt === "number" ? startedAt : Number(startedAt) || 0,
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * Pure decision for the unclaimed-background-run sweep: should THIS row get
+ * another redispatch attempt, or has it exceeded
+ * `UNCLAIMED_BACKGROUND_RUN_REDISPATCH_BOUND_MS` and must fall back to the
+ * loud reap (`reapUnclaimedBackgroundRun`)? Measured from the row's ORIGINAL
+ * `started_at` (never bumped by a redispatch's heartbeat write), so this is
+ * the total-elapsed-time backstop that keeps recovery bounded — a handoff
+ * that cannot be delivered within the window is not spinning forever, it
+ * fails loud. Exported as a pure function (no DB access) so the bound is unit
+ * -testable independent of the sweep's setInterval wiring.
+ */
+export function shouldRedispatchUnclaimedBackgroundRun(
+  row: { startedAt: number },
+  now: number = Date.now(),
+): boolean {
+  return now - row.startedAt < UNCLAIMED_BACKGROUND_RUN_REDISPATCH_BOUND_MS;
+}
+
 /**
  * Count how many runs (chunks) a logical turn has consumed so far. This is the
  * durable per-turn recovery ledger: unlike the in-marker `continuationCount`
@@ -719,7 +799,7 @@ export async function tryClaimRunSlot(
             WHERE thread_id = ?
               AND status = 'running'
               AND ${terminalRunEventExclusionSql()}
-              AND COALESCE(heartbeat_at, started_at) >= ?
+              AND ${livenessBasisSql()} >= ?
             ORDER BY started_at DESC LIMIT 1`,
       args: [threadId, heartbeatCutoff],
     });
@@ -733,7 +813,7 @@ export async function tryClaimRunSlot(
           WHERE thread_id = ?
             AND status = 'running'
             AND ${terminalRunEventExclusionSql()}
-            AND COALESCE(heartbeat_at, started_at) >= ${backgroundAwareStaleCutoffSql()}
+            AND ${livenessBasisSql()} >= ${backgroundAwareStaleCutoffSql()}
           ORDER BY started_at DESC LIMIT 1`,
     args: [threadId, now],
   });
@@ -994,8 +1074,13 @@ export async function recordRunDiagnostic(
 export async function updateRunHeartbeat(runId: string): Promise<void> {
   await ensureRunTables();
   const client = getDbExec();
+  // Only bump liveness while the row is still running. Zombie producers that
+  // keep their setInterval after status flips to errored/completed used to
+  // rewrite heartbeat_at for minutes after the turn died (seen on slides
+  // prod: heartbeat continued ~400s past completed_at), which confuses
+  // triage and can keep /runs/active looking "fresh" after failure.
   await client.execute({
-    sql: `UPDATE agent_runs SET heartbeat_at = ? WHERE id = ?`,
+    sql: `UPDATE agent_runs SET heartbeat_at = ? WHERE id = ? AND status = 'running'`,
     args: [Date.now(), runId],
   });
 }
@@ -1259,11 +1344,13 @@ export async function getRunById(runId: string): Promise<{
   threadId: string;
   status: string;
   startedAt: number;
+  errorCode: string | null;
+  errorDetail: string | null;
 } | null> {
   await ensureRunTables();
   const client = getDbExec();
   const { rows } = await client.execute({
-    sql: `SELECT id, thread_id, status, started_at FROM agent_runs WHERE id = ?`,
+    sql: `SELECT id, thread_id, status, started_at, error_code, error_detail FROM agent_runs WHERE id = ?`,
     args: [runId],
   });
   if (rows.length === 0) return null;
@@ -1272,13 +1359,85 @@ export async function getRunById(runId: string): Promise<{
     thread_id: string;
     status: string;
     started_at: number | string;
+    error_code?: string | null;
+    error_detail?: string | null;
   };
   return {
     id: r.id,
     threadId: r.thread_id,
     status: r.status,
     startedAt: Number(r.started_at),
+    errorCode: r.error_code ?? null,
+    errorDetail: r.error_detail ?? null,
   };
+}
+
+/**
+ * Read the latest terminal event already persisted for a run, if any.
+ * Used by SSE reconnect when the client cursor is already past that event
+ * (so `getRunEventsSince` returns empty) but the row is terminal — we must
+ * replay the REAL error instead of inventing a stale_run card.
+ */
+export async function getLastTerminalRunEvent(
+  runId: string,
+): Promise<{ seq: number; event: Record<string, unknown> } | null> {
+  await ensureRunTables();
+  const client = getDbExec();
+  const { rows } = await client.execute({
+    sql: `SELECT seq, event_data FROM agent_run_events WHERE run_id = ? ORDER BY seq DESC LIMIT 1`,
+    args: [runId],
+  });
+  const last = rows[0] as
+    | { seq?: number | string; event_data?: string }
+    | undefined;
+  if (!last?.event_data) return null;
+  try {
+    const parsed = JSON.parse(last.event_data) as Record<string, unknown>;
+    if (
+      parsed?.type === "done" ||
+      parsed?.type === "error" ||
+      parsed?.type === "missing_api_key" ||
+      parsed?.type === "loop_limit" ||
+      parsed?.type === "auto_continue"
+    ) {
+      return { seq: Number(last.seq ?? 0), event: parsed };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Build the terminal error payload to stream when an `errored` run has no
+ * in-cursor terminal event. Prefer the real last terminal event, then the
+ * row's error_code/error_detail, and only then the generic stale_run card.
+ */
+export function resolveErroredRunTerminalEvent(run: {
+  errorCode?: string | null;
+  errorDetail?: string | null;
+}): {
+  event: Record<string, unknown>;
+  shouldPersist: boolean;
+} {
+  const code = typeof run.errorCode === "string" ? run.errorCode.trim() : "";
+  const detail =
+    typeof run.errorDetail === "string" ? run.errorDetail.trim() : "";
+  if (code === STALE_RUN_ERROR_EVENT.errorCode) {
+    return { event: { ...STALE_RUN_ERROR_EVENT }, shouldPersist: true };
+  }
+  if (detail || (code && code !== "unknown")) {
+    return {
+      event: {
+        type: "error",
+        error: detail || "The agent run failed.",
+        ...(code && code !== "unknown" ? { errorCode: code } : {}),
+        recoverable: true,
+      },
+      shouldPersist: true,
+    };
+  }
+  return { event: { ...STALE_RUN_ERROR_EVENT }, shouldPersist: true };
 }
 
 export async function getRunByThread(

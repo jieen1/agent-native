@@ -279,13 +279,14 @@ function findTsxBin(): string {
 }
 
 function findTypeScriptCompilerBin(): string {
-  const localTsgo = path.resolve("node_modules/.bin/tsgo");
-  if (fs.existsSync(localTsgo)) return localTsgo;
-
   const localTsc = path.resolve("node_modules/.bin/tsc");
   if (fs.existsSync(localTsc)) return localTsc;
 
-  return "tsgo";
+  // Prefer TypeScript 7's tsc; fall back to legacy tsgo if present.
+  const localTsgo = path.resolve("node_modules/.bin/tsgo");
+  if (fs.existsSync(localTsgo)) return localTsgo;
+
+  return "tsc";
 }
 
 function findReactRouterBin(): string {
@@ -735,6 +736,21 @@ switch (command) {
     break;
   }
 
+  case "upgrade": {
+    // Bring an existing app/workspace to current @agent-native/* packages,
+    // refresh scaffold skills, and verify — without framework patches.
+    import("./upgrade.js")
+      .then(async (m) => {
+        const code = await m.runUpgrade(args);
+        process.exit(code);
+      })
+      .catch((err) => {
+        console.error(err?.message ?? err);
+        process.exit(1);
+      });
+    break;
+  }
+
   case "code": {
     import("./code.js")
       .then((m) => m.runCode(args))
@@ -1043,6 +1059,11 @@ Usage:
                                 local serve | local verify | local preview
   agent-native migrate <source> Create an Agent-Native Code /migrate session, or use
                                 --emit for a portable own-agent dossier.
+  agent-native upgrade          Bring an existing app/workspace to current
+                                @agent-native/* packages, refresh scaffold
+                                skills, and typecheck. Prefer this over
+                                patching core/dispatch. 'upgrade check' is
+                                doctor-only.
   agent-native add-app [name]   Add one or more apps to the current workspace
   agent-native workspace-dev    Start the multi-app workspace gateway
   agent-native deploy           Build & deploy every app in the workspace to

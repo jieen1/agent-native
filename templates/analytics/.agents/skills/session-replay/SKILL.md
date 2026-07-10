@@ -89,8 +89,26 @@ agent answers about browser recordings in the Analytics template.
 - The `/sessions/:recordingId` replay player has a Dev Tools toggle that opens
   a panel with Console and Network tabs: filter chips, search, an error-count
   badge, and playback-time highlighting.
-- Rows are Jump-to-seek: clicking one seeks the player to that moment. Extend
-  this panel instead of adding a separate debugging surface.
+- Rows expand inline under the selected line (Chrome-style). Expanding a row
+  does not seek; use Jump to to move the playhead. Extend this panel instead of
+  adding a separate debugging surface.
+
+## Playback Viewer
+
+- Wait for all replay chunks (`isComplete`) before constructing the rrweb
+  `Replayer`. Progressive chunk publishes should only update the loading bar;
+  rebuilding the player mid-load desyncs the scrubber and playhead.
+- Pass events to `Replayer` untouched (aside from stylesheet/script sanitization
+  that prevents blank frames from live CSS loads). Let rrweb own iframe sizing
+  via Meta / ViewportResize; use those dimensions only for CSS fit-to-stage of
+  the outer wrapper. Never rewrite Meta widths or force iframe dimensions —
+  that desyncs the FullSnapshot DOM and blanks the stage.
+- The event timeline soft-highlights the active marker, auto-scrolls it into
+  view (pausing briefly after manual scroll), and supports search. It appears
+  beside the player from ~880px content width upward.
+- Dev Tools height is capped so the replay stage never collapses into a ribbon
+  on short viewports; the scrubber playhead stays visually distinct from red
+  error marker dots.
 
 ## Debugging A User-Reported Bug
 
