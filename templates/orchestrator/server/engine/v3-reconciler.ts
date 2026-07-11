@@ -35,6 +35,13 @@ import { getDbExec } from "../db/index.js";
 import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import { evaluateExpression } from "./expression-parser.js";
 import type { ExpressionContext } from "./expression-parser.js";
+import {
+  onRunTerminal,
+  parseRunTags,
+  extractDeliveryFromArtifactTexts,
+  attemptWithBackoff,
+  type WritebackOutcome,
+} from "../tracker-client.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -119,15 +126,21 @@ export class V3Reconciler {
   private readonly dispatcher: V3Dispatcher;
   /** G18: global spawn pool capacity */
   private readonly poolCapacity: number;
+  /** F9: backoff schedule (ms) between writeback retry attempts — see
+   * `writebackOnTerminal`. Overridable (tests use a fast schedule; production
+   * keeps the default in `attemptWithBackoff`). */
+  private readonly writebackBackoffMs: number[] | undefined;
 
   constructor(
     db: PostgresJsDatabase,
     dispatcher: V3Dispatcher,
     poolCapacity: number = DEFAULT_POOL_CAPACITY,
+    writebackBackoffMs?: number[],
   ) {
     this.db = db;
     this.dispatcher = dispatcher;
     this.poolCapacity = poolCapacity;
+    this.writebackBackoffMs = writebackBackoffMs;
   }
 
   // ─── tick ───────────────────────────────────────────────────────────────
@@ -1587,6 +1600,119 @@ export class V3Reconciler {
       await this.maybeWakeOrchestrator(runId, status, current[0]!.tags);
     } catch {
       // Advisory only — never block run finalization.
+    }
+
+    // F9 (docs/sdlc-impl-f5-f10.md §5A "server/engine/v3-reconciler.ts" row):
+    // the terminal-hook for the deterministic tracker writeback channel.
+    // Fire-and-forget — NOT awaited — so a slow/unreachable tracker (retried
+    // with backoff inside `writebackOnTerminal`) never blocks this tick or
+    // any later tick. `writebackOnTerminal` itself never throws (all
+    // failures are caught internally and recorded as a `writeback.failed`
+    // event); the `.catch` below is belt-and-suspenders only.
+    void this.writebackOnTerminal(runId, status, current[0]!.tags, nodes).catch(
+      () => {},
+    );
+  }
+
+  /**
+   * F9 terminal-hook: report a tracker-dispatched run's outcome back to the
+   * tracker over the deterministic writeback channel (`tracker-client.ts`).
+   *
+   * Skips entirely (no event, no call) when the run's tags carry no
+   * `item_id` — i.e. this run was never dispatched by the tracker, so there
+   * is nothing to write back.
+   *
+   * Outcome classification:
+   *  - status="done" AND a delivery branch is detectable from the run's node
+   *    output artifacts → "delivered" (full writeback: run-meta backfill +
+   *    execState=returned + advance-stage ×2).
+   *  - status="done" with NO detectable delivery, OR status is
+   *    "failed"/"cancelled" → "zero-delivery" (execState=queued only —
+   *    T-F3-06's async half; the tracker's own writeback-exec-state derives
+   *    the `dispatch.failed` activity from target="queued").
+   *
+   * Retries the whole `onRunTerminal` attempt up to `writebackBackoffMs`
+   * (default 3 backoff delays ⇒ 4 attempts) via `attemptWithBackoff`. On
+   * exhaustion, records `v3_events kind="writeback.failed"` (P13: a writeback
+   * failure must never be silent) — this shows up in the S10 health page's
+   * "调度器" card via `computeWritebackTelemetry` (`writeback-telemetry.ts`).
+   *
+   * Best-effort branch detection: there is currently no durable "a delivery
+   * happened" record written by `workspaceCommit`/`workspaceCommitPush`
+   * (pure git-mechanics calls, no v3_events/artifact of their own) — see
+   * `extractDeliveryFromArtifactTexts`'s doc comment in `tracker-client.ts`.
+   * This reads each node's output artifact text/object content (best-effort;
+   * a query failure degrades to "no artifacts found", never throws) and scans
+   * it with the same regex approach the tracker's own `get-activity.ts`
+   * `extractDelivery` uses over the brain transcript.
+   */
+  private async writebackOnTerminal(
+    runId: string,
+    status: "done" | "failed" | "cancelled",
+    tags: unknown,
+    nodes: NodeRow[],
+  ): Promise<void> {
+    const { workItemId, orgId } = parseRunTags(tags);
+    if (!workItemId) return; // not a tracker-dispatched run — nothing to write back
+
+    let outcome: WritebackOutcome;
+    if (status === "done") {
+      const artifactIds = nodes
+        .map((n) => n.outputArtifactId)
+        .filter((id): id is string => !!id);
+
+      let texts: Array<string | null> = [];
+      if (artifactIds.length > 0) {
+        try {
+          const rows = await this.db
+            .select({
+              textContent: v3Artifacts.textContent,
+              objectContent: v3Artifacts.objectContent,
+            })
+            .from(v3Artifacts)
+            .where(inArray(v3Artifacts.id, artifactIds));
+          texts = rows.map(
+            (r) => r.textContent ?? (r.objectContent ? JSON.stringify(r.objectContent) : null),
+          );
+        } catch {
+          texts = []; // best-effort — never blocks writeback classification
+        }
+      }
+
+      const { branch } = extractDeliveryFromArtifactTexts(texts);
+      outcome = branch
+        ? { kind: "delivered", workItemId, orgId, runId, branch }
+        : {
+            kind: "zero-delivery",
+            workItemId,
+            orgId,
+            runId,
+            reason: "run-done-no-delivery",
+          };
+    } else {
+      outcome = {
+        kind: "zero-delivery",
+        workItemId,
+        orgId,
+        runId,
+        reason: status === "failed" ? "run-failed" : "run-cancelled",
+      };
+    }
+
+    const result = await attemptWithBackoff(
+      () => onRunTerminal(outcome),
+      this.writebackBackoffMs,
+    );
+
+    if (!result.ok) {
+      await this.writeEvent(runId, "writeback.failed", {
+        workItemId,
+        runStatus: status,
+        outcome: outcome.kind,
+        reason: outcome.kind === "zero-delivery" ? outcome.reason : "delivered",
+        attempts: result.attempts,
+        error: result.error instanceof Error ? result.error.message : String(result.error),
+      });
     }
   }
 

@@ -16,6 +16,18 @@ vi.mock("./expression-parser.js", () => ({
   evaluateExpression: vi.fn(() => false),
 }));
 
+// ── Mock tracker-client's HIGH-LEVEL entry point only (F9) ──────────────────
+// `onRunTerminal`'s own call sequence / JWT / tool-name contract is covered in
+// isolation by tracker-client.spec.ts's "mock A2A client" tests. Here we keep
+// `attemptWithBackoff` / `parseRunTags` / `extractDeliveryFromArtifactTexts`
+// REAL so the "F9 — writeback terminal hook" tests below also exercise the
+// reconciler's own outcome-classification + retry-and-give-up wiring, not just
+// a stub.
+vi.mock("../tracker-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../tracker-client.js")>();
+  return { ...actual, onRunTerminal: vi.fn() };
+});
+
 // ── Mock getDbExec (advisory xact-lock transaction + atomic UPDATE) ─────────
 // tick() wraps the (non-blocking) advisory-lock acquisition in
 // getDbExec().transaction(fn), calling fn({execute: mockExecute}); dispatchNode
@@ -54,6 +66,7 @@ vi.mock("../db/index.js", () => ({
 }));
 
 import { evaluateExpression } from "./expression-parser.js";
+import { onRunTerminal } from "../tracker-client.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1462,6 +1475,149 @@ describe("V3Reconciler", () => {
       // deploy should NOT be cascade-skipped because lint has on_failure:continue
       const deployNode = nodes.find((n) => n.nodeIdInDag === "deploy");
       expect(deployNode?.status).not.toBe("skipped");
+    });
+  });
+
+  // F9 (docs/sdlc-impl-f5-f10.md §5A) — the terminal-hook wiring in
+  // `finalizeRun`/`writebackOnTerminal`. `onRunTerminal` itself (JWT minting,
+  // tool-call sequence/args) is exercised against a mock A2A/MCP transport in
+  // `tracker-client.spec.ts` — real end-to-end against a live tracker
+  // deployment is deferred (see the delivery report).
+  describe("F9 — writeback terminal hook", () => {
+    beforeEach(() => {
+      vi.mocked(onRunTerminal).mockReset();
+    });
+
+    it("T-F9-01 (tracker half upgraded to e2e via mock A2A client): run done with a delivered branch → onRunTerminal called with a 'delivered' outcome derived from tags + artifact text", async () => {
+      vi.mocked(onRunTerminal).mockResolvedValue(undefined);
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db } = createMockDb(
+        makeRun({ tags: { source: "tracker", item_id: "wi-1", org_id: "org-1" } }),
+        [makeNode({ status: "done", outputArtifactId: "artifact-1" })],
+        [
+          makeArtifact({
+            id: "artifact-1",
+            textContent:
+              "Committed. Opened https://github.com/acme/repo/pull/7 from orchestrator/run-1.",
+          }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      await reconciler.tick("run-1");
+
+      await vi.waitFor(() => {
+        expect(onRunTerminal).toHaveBeenCalledWith({
+          kind: "delivered",
+          workItemId: "wi-1",
+          orgId: "org-1",
+          runId: "run-1",
+          branch: "orchestrator/run-1",
+        });
+      });
+    });
+
+    it("T-F9-03: run done with NO discoverable delivery → onRunTerminal called with a 'zero-delivery' outcome (execState→queued path)", async () => {
+      vi.mocked(onRunTerminal).mockResolvedValue(undefined);
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db } = createMockDb(
+        makeRun({ tags: { item_id: "wi-2", org_id: "org-2" } }),
+        [makeNode({ status: "done", outputArtifactId: null })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      await reconciler.tick("run-1");
+
+      await vi.waitFor(() => {
+        expect(onRunTerminal).toHaveBeenCalledWith({
+          kind: "zero-delivery",
+          workItemId: "wi-2",
+          orgId: "org-2",
+          runId: "run-1",
+          reason: "run-done-no-delivery",
+        });
+      });
+    });
+
+    it("T-F9-03: run failed (dispatched item) → onRunTerminal called with a zero-delivery/run-failed outcome; business stage untouched (asserted separately by advance-stage not being called)", async () => {
+      vi.mocked(onRunTerminal).mockResolvedValue(undefined);
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db } = createMockDb(
+        makeRun({
+          tags: { item_id: "wi-3", org_id: "org-3" },
+          dag: { nodes: [{ id: "a", type: "agent", deps: [] }] },
+        }),
+        [makeNode({ nodeIdInDag: "a", id: "n-a", status: "failed", error: "boom" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      await reconciler.tick("run-1");
+
+      await vi.waitFor(() => {
+        expect(onRunTerminal).toHaveBeenCalledWith(
+          expect.objectContaining({
+            kind: "zero-delivery",
+            workItemId: "wi-3",
+            reason: "run-failed",
+          }),
+        );
+      });
+    });
+
+    it("skips entirely (no onRunTerminal call, no writeback event) when the run carries no tracker item_id tag", async () => {
+      vi.mocked(onRunTerminal).mockResolvedValue(undefined);
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, events } = createMockDb(
+        makeRun({ tags: { source: "some-other-caller" } }),
+        [makeNode({ status: "done" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      await reconciler.tick("run-1");
+
+      // Give any stray microtask a turn, then assert nothing fired.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(onRunTerminal).not.toHaveBeenCalled();
+      expect(events.some((e) => e.kind === "writeback.failed")).toBe(false);
+    });
+
+    it("T-F9-06: tracker unreachable (503-style failure) → 3 backoff retries exhausted → v3_events kind=writeback.failed recorded (P13: not silent)", async () => {
+      const persistentError = new Error(
+        "Tracker MCP writeback-exec-state failed (HTTP 503): down",
+      );
+      vi.mocked(onRunTerminal).mockRejectedValue(persistentError);
+
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, events } = createMockDb(
+        makeRun({
+          tags: { item_id: "wi-4", org_id: "org-4" },
+          dag: { nodes: [{ id: "a", type: "agent", deps: [] }] },
+        }),
+        [makeNode({ nodeIdInDag: "a", id: "n-a", status: "failed", error: "boom" })],
+      );
+
+      // Fast (1ms) backoff schedule for the test — still genuinely 3 delays /
+      // 4 attempts, matching `attemptWithBackoff`'s real contract.
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      await reconciler.tick("run-1");
+
+      await vi.waitFor(() => {
+        expect(onRunTerminal).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+      });
+
+      await vi.waitFor(() => {
+        const failedEvent = events.find((e) => e.kind === "writeback.failed");
+        expect(failedEvent).toBeDefined();
+        expect(failedEvent?.payload).toMatchObject({
+          workItemId: "wi-4",
+          attempts: 4,
+        });
+      });
     });
   });
 });
