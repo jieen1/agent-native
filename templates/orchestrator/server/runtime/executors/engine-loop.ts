@@ -466,6 +466,15 @@ export async function runEngineLoopInVm(args: {
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
 
+  // F7 telemetry (04 §7/§13, SDLC-051): read the input/output split from THIS
+  // SAME terminal `usage` object — accumulated by the F2 resume loop above
+  // across every attempt, never per streamed chunk/event. `tokensSpent` keeps
+  // its historical all-in-one meaning (cache counted as spend); the two new
+  // fields below are the real components the dispatcher persists to
+  // `v3_spawns.tokens_input`/`tokens_output` instead of hardcoding
+  // `tokensInput: 0`.
+  const tokensInput = usage.inputTokens ?? 0;
+  const tokensOutput = usage.outputTokens ?? 0;
   const tokensSpent =
     usage.inputTokens +
     usage.outputTokens +
@@ -479,6 +488,8 @@ export async function runEngineLoopInVm(args: {
       model: usage.model || model,
     },
     tokensSpent,
+    tokensInput,
+    tokensOutput,
     toolCallCount,
     model: usage.model || model,
     steps,

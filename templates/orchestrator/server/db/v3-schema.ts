@@ -158,6 +158,18 @@ export const v3Spawns = pgTable(
     latencyMs: integer("latency_ms"),
     error: text("error"),
     errorClass: text("error_class"),
+    // F7 telemetry (04 §7/§10, additive, f7-telemetry migration): the model's
+    // REAL weight identity, reverse-looked-up from `model_ref` (the alias)
+    // against `v3_model_registry` at spawn-completion time. NULL when the
+    // registry has no matching alias (an unregistered model_ref is written back
+    // as-is by the dispatcher, not left NULL — NULL only means "never resolved,
+    // e.g. a pre-migration row").
+    modelRealName: text("model_real_name"),
+    // Set when this spawn's usage is not trustworthy for metrics aggregation
+    // (input_tokens===0, an output rate exceeding ORCH_MAX_TPS, or an
+    // unregistered model_ref) — SDLC-051/054. Readers (health-telemetry,
+    // insights) must exclude usage_suspect=1 rows from aggregates.
+    usageSuspect: integer("usage_suspect").notNull().default(0),
     tags: jsonb("tags"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -174,6 +186,31 @@ export const v3Spawns = pgTable(
     ...ownableColumns(),
   },
   (t) => [index("idx_v3_spawns_node_id").on(t.nodeId)],
+);
+
+// ─── v3_model_registry ──────────────────────────────────────────────────────
+// Model identity single source of truth (04 §7, SDLC-054). Maps a spawn/thread
+// `model_ref`/`model` ALIAS to the REAL underlying weight name + tier +
+// endpoint. Registration REJECTS a `claude-*` alias unless `is_claude_weight`
+// is true (server/model-registry.ts assertAliasAllowed) — a non-Claude model
+// masquerading as Claude in telemetry was SDLC-054's root cause. Additive,
+// f7-telemetry migration.
+
+export const v3ModelRegistry = pgTable(
+  "v3_model_registry",
+  {
+    id: text("id").primaryKey(),
+    realName: text("real_name").notNull(),
+    alias: text("alias").notNull(),
+    tier: text("tier"),
+    endpoint: text("endpoint"),
+    // 0/1 boolean (matches the integer-flag convention already used for
+    // v3_artifacts.truncated / v3_runs.archived in this file).
+    isClaudeWeight: integer("is_claude_weight").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    ...ownableColumns(),
+  },
+  (t) => [unique("unique_v3_model_registry_alias").on(t.alias)],
 );
 
 // ─── spawn_events ────────────────────────────────────────────────────────────
@@ -363,6 +400,15 @@ export const brainThreads = pgTable(
     // archivedAt records when it was archived. Both additive.
     archived: boolean("archived").notNull().default(false),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    // F7 turn-terminal-state contract (04 §6, SDLC-060, additive,
+    // f7-telemetry migration): when a turn already produced a final assistant
+    // delivery summary and a same-turn closing race then reports
+    // `result.subtype==='error_during_execution'`, the thread stays `done`
+    // instead of being overwritten to `error` — the raw error text/subtype
+    // lands here instead, so it stays inspectable without misclassifying a
+    // successful turn as failed (see finalizeThreadStatus in brain-session.ts).
+    // NULL on every turn that did not hit this race.
+    closingAnomaly: text("closing_anomaly"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
     ...ownableColumns(),

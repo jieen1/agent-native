@@ -42,16 +42,26 @@ vi.mock("../v3-workspace-local.js", () => ({
   getLocalWorkspaceDir: vi.fn(async () => null),
 }));
 
+// F7 (04 §7/§13): v3-dispatcher.ts now reverse-looks-up the model's real
+// weight name via server/model-registry.ts, which itself calls the REAL
+// getV3Db(). Mock it so these unit tests never touch a real DB — individual
+// T-F7-06 cases override the resolved value per-test.
+vi.mock("../model-registry.js", () => ({
+  resolveRealName: vi.fn().mockResolvedValue({ realName: null, suspect: false }),
+}));
+
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { loadAgent } from "../agent-loader.js";
 import { renderTemplate } from "./interpolation.js";
 import { getWorkspace } from "./v3-workspace.js";
 import { v3Runs, v3Events } from "../db/v3-schema.js";
+import { resolveRealName } from "../model-registry.js";
 
 import {
   classifyNodeError,
   errorClassToOnFailurePolicy,
+  computeUsageSuspect,
 } from "./v3-dispatcher.js";
 
 import type { RuntimeExecutor } from "../runtime/executors/types.js";
@@ -61,6 +71,55 @@ import type { RuntimeExecutor } from "../runtime/executors/types.js";
 function createMockDb() {
   const artifacts: Array<Record<string, unknown>> = [];
   const spawns: Array<Record<string, unknown>> = [];
+
+  // A real drizzle `.insert(t).values(row)` returns a query builder that is
+  // BOTH thenable (bare `await` works, as the pre-F7 version of this mock
+  // assumed) AND chainable (`.onConflictDoNothing()` / `.onConflictDoUpdate()`
+  // — used by openRunningSpawn/writeSpawnRecord's live-then-terminal UPSERT,
+  // DESIGN §8.5). The prior plain-`async function` mock had no chain methods
+  // at all, so those two call sites silently threw (openRunningSpawn's own
+  // try/catch swallowed it; writeSpawnRecord's did not — it just never got
+  // exercised because no existing test read `mockDb.spawns`). Fixed here so
+  // `.onConflictDoUpdate({set})` actually MERGES into the row already written
+  // by the earlier `.onConflictDoNothing()` insert, matching real Postgres
+  // UPSERT semantics (same `id` = same spawn row, updated in place).
+  function commitRow(row: Record<string, unknown>): void {
+    if (row.kind && row.textContent !== undefined) {
+      artifacts.push(row);
+      return;
+    }
+    if (row.renderedPrompt !== undefined) {
+      const idx = spawns.findIndex((s) => s.id === row.id);
+      if (idx >= 0) spawns[idx] = { ...spawns[idx], ...row };
+      else spawns.push(row);
+    }
+  }
+
+  // A plain THENABLE (has `.then`, not a real eagerly-scheduled Promise) so
+  // a bare `await insert(t).values(row)` (v3_artifacts / spawn_events /
+  // v3_events — no conflict clause anywhere in this codebase) commits via
+  // `.then()`, while `.onConflictDoNothing()` / `.onConflictDoUpdate()`
+  // (v3_spawns' live-then-terminal UPSERT) commit via their OWN method
+  // instead — never both, since `.then()` is only invoked by an external
+  // `await` of the base object, not by calling a chained method on it.
+  function insertResult(row: Record<string, unknown>) {
+    return {
+      then(resolve: (v: Record<string, never>) => void) {
+        commitRow(row);
+        resolve({});
+      },
+      onConflictDoNothing: async (_opts?: unknown) => {
+        commitRow(row);
+        return {};
+      },
+      onConflictDoUpdate: async (opts: { set: Record<string, unknown> }) => {
+        const idx = spawns.findIndex((s) => s.id === row.id);
+        if (idx >= 0) spawns[idx] = { ...spawns[idx], ...opts.set };
+        else commitRow(row);
+        return {};
+      },
+    };
+  }
 
   const db = {
     select: () => ({
@@ -74,14 +133,7 @@ function createMockDb() {
       }),
     }),
     insert: () => ({
-      values: async (row: Record<string, unknown>) => {
-        if (row.kind && row.textContent !== undefined) {
-          artifacts.push(row);
-        } else if (row.renderedPrompt !== undefined) {
-          spawns.push(row);
-        }
-        return {};
-      },
+      values: (row: Record<string, unknown>) => insertResult(row),
     }),
   } as unknown as PostgresJsDatabase;
 
@@ -423,12 +475,6 @@ describe("Interpolation context", () => {
   });
 });
 
-// ── Tests: Workspace readiness gate (F1, T-F1-09) ───────────────────────────
-//
-// The dispatcher must reject dispatch (zero spawn row, no node advance) on a
-// workspace whose `ready_at` is null, and record a `workspace.not_ready`
-// event (kind=infra) — see 02-workflows.md §7 and v3-dispatcher.ts Step 6.
-
 describe("Workspace readiness gate", () => {
   /** Mock db that returns a REAL v3_runs row (with a DAG carrying a
    * `workspace` field) so the dispatcher's Step 6 workspace-resolution path
@@ -647,5 +693,242 @@ describe("Workspace readiness gate", () => {
     expect(mockDb.events.some((e) => e.kind === "workspace.not_ready")).toBe(
       false,
     );
+  });
+});
+
+describe("F7 usage capture + suspect flagging", () => {
+  function makeMockNodeRunnerResult(result: Record<string, unknown>) {
+    vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(
+      async () => result as any,
+    );
+  }
+
+  function makeNodeRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: "node-1",
+      runId: "run-1",
+      nodeIdInDag: "a",
+      type: "agent",
+      status: "running",
+      iteration: 0,
+      fanoutIndex: 0,
+      currentSpawnId: null,
+      outputArtifactId: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      ownerEmail: "local@localhost",
+      orgId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(loadAgent).mockResolvedValue({
+      name: "dev",
+      description: "",
+      runtime: "none" as const,
+      engine: "",
+      model: "qwen3.6",
+      tools: [],
+      systemPrompt: "Dev agent",
+    });
+    vi.mocked(renderTemplate).mockReturnValue("Do the work");
+    vi.mocked(resolveRealName).mockResolvedValue({ realName: null, suspect: false });
+  });
+
+  it("T-F7-03: tokensInput/tokensOutput persist from the return value (fixes the tokens_input-always-0 bug)", async () => {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      // Advance the frozen clock ~10s inside the mock so `latencyMs` reflects a
+      // REALISTIC model call — otherwise an instant mock leaves latencyMs≈0 and
+      // the (correct) physically-impossible-rate guard flags ANY positive
+      // output as suspect. 10s * 60 tps = 600-token ceiling; 567 < 600, so this
+      // healthy row is NOT suspect.
+      vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(async () => {
+        vi.advanceTimersByTime(10_000);
+        return {
+          output: "done",
+          tokensSpent: 1234 + 567,
+          tokensInput: 1234,
+          tokensOutput: 567,
+          toolCallCount: 1,
+          model: "qwen3.6",
+          vmName: null,
+          durationMs: 50,
+          attempts: 1,
+        } as any;
+      });
+
+      const mockDb = createMockDb();
+      const executor: RuntimeExecutor = { kind: "test", run: vi.fn() };
+      const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+      await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+      expect(mockDb.spawns).toHaveLength(1);
+      expect(mockDb.spawns[0].tokensInput).toBe(1234);
+      expect(mockDb.spawns[0].tokensOutput).toBe(567);
+      expect(mockDb.spawns[0].usageSuspect).toBeFalsy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("T-F7-04: tokensInput=0 marks usageSuspect (bad data must not silently pass as trusted)", async () => {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+    makeMockNodeRunnerResult({
+      output: "done",
+      tokensSpent: 500,
+      tokensInput: 0,
+      tokensOutput: 500,
+      toolCallCount: 1,
+      model: "qwen3.6",
+      vmName: null,
+      durationMs: 50,
+      attempts: 1,
+    });
+
+    const mockDb = createMockDb();
+    const executor: RuntimeExecutor = { kind: "test", run: vi.fn() };
+    const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+    await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+    expect(mockDb.spawns[0].tokensInput).toBe(0);
+    expect(mockDb.spawns[0].usageSuspect).toBe(1);
+  });
+
+  it("T-F7-05: an output rate exceeding ORCH_MAX_TPS marks usageSuspect (SDLC-051 10M/90s-class guard)", async () => {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      // Real startedAt/completedAt drive latencyMs — advance the frozen clock
+      // by ~10s INSIDE the mocked return so `Date.now() - startedAt` reflects
+      // it, with no real waiting and no fake-timer/async-scheduling races.
+      vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(async () => {
+        vi.advanceTimersByTime(10_000);
+        return {
+          output: "done",
+          tokensSpent: 1_000_000,
+          tokensInput: 1000, // non-zero: isolates the RATE condition, not the zero-input one
+          tokensOutput: 1_000_000,
+          toolCallCount: 1,
+          model: "qwen3.6",
+          vmName: null,
+          durationMs: 50,
+          attempts: 1,
+        } as any;
+      });
+
+      const mockDb = createMockDb();
+      const executor: RuntimeExecutor = { kind: "test", run: vi.fn() };
+      const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+      await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+      expect(mockDb.spawns[0].tokensInput).toBe(1000);
+      expect(mockDb.spawns[0].usageSuspect).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("T-F7-06: registered alias resolves to its real weight name (attribution)", async () => {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+    vi.mocked(resolveRealName).mockResolvedValueOnce({
+      realName: "ThinkingCap-Qwen3.6-27B",
+      suspect: false,
+    });
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      // Realistic latency (see T-F7-03) so the healthy 60-token output row is
+      // NOT flagged suspect and the assertion isolates the name-attribution.
+      vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(async () => {
+        vi.advanceTimersByTime(10_000);
+        return {
+          output: "done",
+          tokensSpent: 100,
+          tokensInput: 40,
+          tokensOutput: 60,
+          toolCallCount: 1,
+          model: "qwen3.6",
+          vmName: null,
+          durationMs: 50,
+          attempts: 1,
+        } as any;
+      });
+
+      const mockDb = createMockDb();
+      const executor: RuntimeExecutor = { kind: "test", run: vi.fn() };
+      const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+      await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+      expect(resolveRealName).toHaveBeenCalledWith("qwen3.6", "local@localhost");
+      expect(mockDb.spawns[0].modelRealName).toBe("ThinkingCap-Qwen3.6-27B");
+      expect(mockDb.spawns[0].usageSuspect).toBeFalsy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("T-F7-06: an UNREGISTERED model_ref attributes to itself and is marked suspect", async () => {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+    vi.mocked(resolveRealName).mockResolvedValueOnce({
+      realName: "qwen3.6",
+      suspect: true,
+    });
+    makeMockNodeRunnerResult({
+      output: "done",
+      tokensSpent: 100,
+      tokensInput: 40,
+      tokensOutput: 60,
+      toolCallCount: 1,
+      model: "qwen3.6",
+      vmName: null,
+      durationMs: 50,
+      attempts: 1,
+    });
+
+    const mockDb = createMockDb();
+    const executor: RuntimeExecutor = { kind: "test", run: vi.fn() };
+    const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+    await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+    expect(mockDb.spawns[0].modelRealName).toBe("qwen3.6");
+    // Unregistered-name attribution taints the whole row, same as a bad
+    // usage-rate reading — both mean "don't trust this row in aggregates".
+    expect(mockDb.spawns[0].usageSuspect).toBe(1);
+  });
+});
+
+describe("computeUsageSuspect (pure function boundary cases)", () => {
+  it("tokensInput===0 is always suspect regardless of rate", () => {
+    expect(
+      computeUsageSuspect({ tokensInput: 0, tokensOutput: 1, latencyMs: 100_000 }),
+    ).toBe(true);
+  });
+
+  it("a normal rate is not suspect", () => {
+    expect(
+      computeUsageSuspect({ tokensInput: 100, tokensOutput: 500, latencyMs: 10_000 }),
+    ).toBe(false);
+  });
+
+  it("output tokens exceeding elapsedSec * ORCH_MAX_TPS(default 60) is suspect", () => {
+    // 10s elapsed * 60 tps = 600 token ceiling; 601 trips it, 600 does not.
+    expect(
+      computeUsageSuspect({ tokensInput: 10, tokensOutput: 601, latencyMs: 10_000 }),
+    ).toBe(true);
+    expect(
+      computeUsageSuspect({ tokensInput: 10, tokensOutput: 600, latencyMs: 10_000 }),
+    ).toBe(false);
   });
 });

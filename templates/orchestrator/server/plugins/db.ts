@@ -876,6 +876,51 @@ ALTER TYPE v3_workspace_state ADD VALUE IF NOT EXISTS 'failed'`,
       postgres: `ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS phase text`,
     },
   },
+  {
+    // f7-telemetry (04 §7/§10/§13 — model-identity + usage-telemetry single
+    // source of truth). NAME-BASED tracking (`name:` below).
+    //
+    // core `runMigrations` (packages/core/src/db/migrations.ts, imported
+    // above) DOES support name-based tracking: `MigrationEntry` has an
+    // optional `name?`, and a named entry is recorded in the companion
+    // `<table>_named` table (here `v3_migrations_named`) and applies IFF its
+    // name is absent there — completely independent of the legacy
+    // `MAX(version)` gate. This same file already uses it (see version 21
+    // `orchestrator-skill-overrides-table` in the migrateV2 array above).
+    //
+    // Why NAME here instead of version-only like the rest of THIS array:
+    // every F0 sibling branch (F1/F2/F4/F10, …) extends this SAME
+    // `V3_MIGRATIONS` array. Under pure version-only gating, if a sibling
+    // lands a `version <= 3` entry first, `MAX(version)` would already be ≥ 3
+    // when this app boots and this entry's DDL would be SILENTLY SKIPPED —
+    // `v3_model_registry` + the telemetry columns would never be created.
+    // Keying on the stable slug `"f7-telemetry"` instead makes application
+    // collision-proof across branches regardless of which version numbers
+    // siblings pick (the framework's own guidance: "New migrations should
+    // always set a name"). The `version: 3` is retained only as list-order
+    // sequence position; the NAME is the real gate. All statements here are
+    // idempotent (CREATE TABLE IF NOT EXISTS + ADD COLUMN IF NOT EXISTS, no
+    // CREATE TYPE), so name-based re-application is safe.
+    version: 3,
+    name: "f7-telemetry",
+    sql: {
+      postgres: `CREATE TABLE IF NOT EXISTS v3_model_registry (
+  id text PRIMARY KEY,
+  real_name text NOT NULL,
+  alias text NOT NULL,
+  tier text,
+  endpoint text,
+  is_claude_weight integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  owner_email text NOT NULL DEFAULT 'local@localhost',
+  org_id text,
+  CONSTRAINT unique_v3_model_registry_alias UNIQUE (alias)
+);
+ALTER TABLE v3_spawns ADD COLUMN IF NOT EXISTS model_real_name text;
+ALTER TABLE v3_spawns ADD COLUMN IF NOT EXISTS usage_suspect integer NOT NULL DEFAULT 0;
+ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS closing_anomaly text`,
+    },
+  },
 ];
 
 const migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" });

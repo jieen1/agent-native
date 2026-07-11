@@ -51,6 +51,7 @@ import type { RuntimeExecutor } from "../runtime/executors/types.js";
 import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
 import type { NodeRunnerResult } from "../runtime/node-runner.js";
 import { getWorkspace } from "./v3-workspace.js";
+import { resolveRealName } from "../model-registry.js";
 
 /**
  * Route a CC-worker DAG-node turn. Tries the framework `acp:claude-code`
@@ -393,6 +394,29 @@ function truncateToMaxTokens(
   };
 }
 
+/**
+ * F7 telemetry (04 §7/§10, SDLC-051): the physically-impossible-rate guard.
+ * `ORCH_MAX_TPS` (default 60) bounds output tokens/second; a spawn reporting
+ * more than `elapsedSec * maxTps` output tokens, OR zero input tokens, is
+ * flagged `usage_suspect` so aggregate metrics (health-telemetry, insights)
+ * can exclude it instead of silently inflating on bad data (the SDLC-051
+ * "10M tokens / 90s" class of bug). Pure — no I/O, unit-tested directly.
+ */
+function maxTps(): number {
+  const raw = Number(process.env.ORCH_MAX_TPS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 60;
+}
+
+export function computeUsageSuspect(opts: {
+  tokensInput: number;
+  tokensOutput: number;
+  latencyMs: number;
+}): boolean {
+  if (opts.tokensInput === 0) return true;
+  const elapsedSec = Math.max(opts.latencyMs, 0) / 1000;
+  return opts.tokensOutput > elapsedSec * maxTps();
+}
+
 // ── V3Dispatcher ─────────────────────────────────────────────────────────────
 
 export class V3Dispatcher {
@@ -728,6 +752,7 @@ export class V3Dispatcher {
 
       // If still a violation after the correction attempt, fail the node.
       if (classifiedOutput.path === "schema-violation") {
+        const usage = await this.resolveSpawnUsage(runnerResult, latencyMs, agentConfig, nodeRow);
         await this.writeSpawnRecord({
           spawnId,
           nodeRow,
@@ -739,11 +764,13 @@ export class V3Dispatcher {
           outputKind: "schema-violation",
           outputArtifactId: null,
           workspaceId: resolvedWorkspaceId,
-          tokensInput: 0,
-          tokensOutput: runnerResult.tokensSpent,
+          tokensInput: usage.tokensInput,
+          tokensOutput: usage.tokensOutput,
           latencyMs,
           error: classifiedOutput.error,
           errorClass: "schema-violation",
+          modelRealName: usage.modelRealName,
+          usageSuspect: usage.usageSuspect,
           vmName: runnerResult.vmName,
           spawnEventCount,
         });
@@ -837,6 +864,7 @@ export class V3Dispatcher {
       orgId: nodeRow.orgId,
     });
 
+    const usage = await this.resolveSpawnUsage(runnerResult, latencyMs, agentConfig, nodeRow);
     await this.writeSpawnRecord({
       spawnId,
       nodeRow,
@@ -848,11 +876,13 @@ export class V3Dispatcher {
       outputKind: classifiedOutput.path,
       outputArtifactId: artifactId,
       workspaceId: resolvedWorkspaceId,
-      tokensInput: 0,
-      tokensOutput: runnerResult.tokensSpent,
+      tokensInput: usage.tokensInput,
+      tokensOutput: usage.tokensOutput,
       latencyMs,
       error: null,
       errorClass: null,
+      modelRealName: usage.modelRealName,
+      usageSuspect: usage.usageSuspect,
       vmName: runnerResult.vmName,
       spawnEventCount,
     });
@@ -1278,6 +1308,55 @@ export class V3Dispatcher {
     }
   }
 
+  /**
+   * F7 telemetry (04 §7/§10/§13, SDLC-051/054): derive the real tokens_input/
+   * tokens_output + model_real_name + usage_suspect values for a completed
+   * spawn from the raw `runnerResult`. `runnerResult.tokensInput`/
+   * `tokensOutput` are OPTIONAL (see `RuntimeExecResult`/`NodeRunnerResult`) —
+   * an executor that has not been migrated to report the split (e.g. the
+   * claude-code-worker path) simply omits them, and a missing tokensInput
+   * defaults to 0, which the physically-impossible-rate guard below already
+   * treats as suspect — so an un-migrated executor's rows are correctly
+   * flagged rather than silently trusted.
+   */
+  private async resolveSpawnUsage(
+    runnerResult: NodeRunnerResult,
+    latencyMs: number,
+    agentConfig: AgentConfig,
+    nodeRow: NodeRow,
+  ): Promise<{
+    tokensInput: number;
+    tokensOutput: number;
+    modelRealName: string | null;
+    usageSuspect: boolean;
+  }> {
+    const tokensInput = runnerResult.tokensInput ?? 0;
+    // Fall back to the historical all-in-one total when the executor hasn't
+    // reported the split, so a reader of tokens_output sees no regression —
+    // the row is still marked suspect below via tokensInput===0.
+    const tokensOutput = runnerResult.tokensOutput ?? runnerResult.tokensSpent;
+    const rateSuspect = computeUsageSuspect({ tokensInput, tokensOutput, latencyMs });
+
+    let modelRealName: string | null = null;
+    let nameSuspect = false;
+    try {
+      const resolved = await resolveRealName(agentConfig.model, nodeRow.ownerEmail);
+      modelRealName = resolved.realName;
+      nameSuspect = resolved.suspect;
+    } catch (err) {
+      // Registry lookup must never fail a spawn write (best-effort telemetry).
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[v3-dispatcher] model-registry lookup failed: ${msg}`);
+    }
+
+    return {
+      tokensInput,
+      tokensOutput,
+      modelRealName,
+      usageSuspect: rateSuspect || nameSuspect,
+    };
+  }
+
   private async writeSpawnRecord(opts: {
     spawnId: string;
     nodeRow: NodeRow;
@@ -1295,6 +1374,10 @@ export class V3Dispatcher {
     error: string | null;
     errorClass: ErrorClass | null;
     vmName: string | null;
+    /** F7 telemetry (04 §7): the model's real weight name, reverse-looked-up from `agentConfig.model` against the registry. Null when never resolved. */
+    modelRealName: string | null;
+    /** F7 telemetry (04 §7/§10): 1 when this row's usage/attribution should be excluded from aggregated metrics. */
+    usageSuspect: boolean;
     /**
      * Count of `spawn_events` rows persisted for this spawn. When > 0 we point
      * `log_ref` at the spawn_events transcript (`spawn-events://<spawnId>`) so
@@ -1328,6 +1411,8 @@ export class V3Dispatcher {
       latencyMs: opts.latencyMs,
       error: opts.error,
       errorClass: opts.errorClass,
+      modelRealName: opts.modelRealName,
+      usageSuspect: opts.usageSuspect ? 1 : 0,
       tags: null,
       startedAt: opts.startedAt,
       completedAt: opts.completedAt,
@@ -1353,6 +1438,8 @@ export class V3Dispatcher {
           latencyMs: opts.latencyMs,
           error: opts.error,
           errorClass: opts.errorClass,
+          modelRealName: opts.modelRealName,
+          usageSuspect: opts.usageSuspect ? 1 : 0,
           completedAt: opts.completedAt,
         },
       });
