@@ -38,12 +38,31 @@
 //    considered "stuck" rather than merely "between events".
 //  - Modeled on server/brain/brain-monitor.ts (durable, unref'd setInterval,
 //    best-effort per-item error swallowing, idempotent start/stop).
+//  - F10/R9 (docs/sdlc-product-design/02-workflows.md §4, SDLC-050): this
+//    sweep used to unconditionally bail whenever ANY node was 'running',
+//    which is right for a genuinely mid-flight node but wrong for the
+//    conduction gap — a 'running' node whose bound spawn already reached a
+//    terminal status (settled by queue/v3-spawn-reconcile.ts's stall/orphan
+//    detection) with nobody left in-process to drive the node onward. Widened
+//    to detect that shape too and re-tick immediately (see the loop body);
+//    the reconciler's own conduction rule still owns the retry-vs-fail
+//    decision, this sweep only decides WHEN to ask it to look again.
 
-import { and, eq, inArray } from "drizzle-orm";
-import { getV3Db } from "../db/index.js";
 import { isPostgres } from "@agent-native/core/db";
-import { v3Runs, v3Nodes } from "../db/v3-schema.js";
+import { and, eq, inArray } from "drizzle-orm";
+
+import { getV3Db } from "../db/index.js";
+import { v3Runs, v3Nodes, v3Spawns } from "../db/v3-schema.js";
 import { triggerTickSafe } from "../plugins/v3-reconciler.js";
+
+/**
+ * Terminal spawn statuses — mirrors the private SPAWN_TERMINAL_STATUSES set
+ * in server/engine/v3-reconciler.ts. Used only to widen the "bail on running
+ * node" check below to also catch the R9 conduction gap (SDLC-050): a
+ * 'running' node whose bound spawn already reached a terminal status, with
+ * nobody left to drive the node onward.
+ */
+const SPAWN_TERMINAL_STATUSES = ["done", "failed", "cancelled"] as const;
 
 /**
  * Terminal node statuses — mirrors engine/v3-reconciler.ts's TERMINAL_STATUSES.
@@ -114,24 +133,68 @@ export async function reconcileStrandedV3RunsOnce(): Promise<string[]> {
 
   for (const run of candidateRuns) {
     try {
-      // Bail early only if a node is actively RUNNING — that run is genuinely
-      // being processed (an agent is mid-flight), so re-ticking would be
-      // pointless. A run whose remaining non-terminal nodes are all `pending`
-      // (or `awaiting-approval`) with NOTHING running is either fully terminal
-      // (all nodes resolved) OR stalled: the event-driven tick after the last
-      // node finished did not dispatch the next ready node (multi-stage brain
-      // orchestration and directly-launched multi-node DAGs both hit this — a
-      // node completes but the chained tick is lost, so develop:done leaves
-      // review:pending forever). In BOTH cases a re-tick is the right, safe,
-      // idempotent action: tick() dispatches any ready pending node (advancing
-      // a stalled run) or finalizes an all-terminal run.
-      const [running] = await db
-        .select({ id: v3Nodes.id })
+      // Bail early only if a node is GENUINELY active — that run is being
+      // processed (an agent is mid-flight), so re-ticking would be pointless.
+      // "Genuinely active" excludes the R9 conduction gap (02-workflows.md
+      // §4, SDLC-050): a 'running' node whose bound spawn has ALREADY reached
+      // a terminal status (failed/cancelled/done) is NOT active — it's the
+      // exact stuck shape this sweep exists to catch (the process that would
+      // have driven the node onward is gone). Previously this sweep only
+      // caught the "all nodes terminal but run not finalized" / "ready-node
+      // dispatch lost" shapes below and unconditionally skipped any run with
+      // a running node — widened here so the conduction gap doesn't require a
+      // FULL restart (reconcileV3OnStartup) to self-heal; a live process that
+      // never restarts can still get stuck this way (spawn settled failed by
+      // queue/v3-spawn-reconcile.ts's stall/orphan detection while the
+      // process itself stays up). server/engine/v3-reconciler.ts's tick()
+      // conduction rule owns the actual retry-vs-fail decision — this sweep
+      // only decides WHEN to ask it to look again.
+      const runningNodes = await db
+        .select({ id: v3Nodes.id, currentSpawnId: v3Nodes.currentSpawnId })
         .from(v3Nodes)
-        .where(and(eq(v3Nodes.runId, run.id), eq(v3Nodes.status, "running")))
-        .limit(1);
+        .where(and(eq(v3Nodes.runId, run.id), eq(v3Nodes.status, "running")));
 
-      if (running) continue;
+      if (runningNodes.length > 0) {
+        const spawnIds = runningNodes
+          .map((n) => n.currentSpawnId)
+          .filter((id): id is string => !!id);
+
+        const terminalSpawnIds = new Set<string>();
+        if (spawnIds.length > 0) {
+          const terminalSpawns = await db
+            .select({ id: v3Spawns.id })
+            .from(v3Spawns)
+            .where(
+              and(
+                inArray(v3Spawns.id, spawnIds),
+                inArray(v3Spawns.status, [...SPAWN_TERMINAL_STATUSES]),
+              ),
+            );
+          for (const s of terminalSpawns) terminalSpawnIds.add(s.id);
+        }
+
+        // Genuinely active = at least one running node either has no spawn
+        // bound yet (just dispatched, still opening its spawn row) or a
+        // spawn that is NOT yet terminal.
+        const anyGenuinelyActive = runningNodes.some(
+          (n) => !n.currentSpawnId || !terminalSpawnIds.has(n.currentSpawnId),
+        );
+        if (anyGenuinelyActive) continue;
+
+        // Every running node's bound spawn is already terminal — the R9 gap.
+        // Re-tick immediately; the spawn being terminal already IS the
+        // signal, there is nothing to wait out via the silence threshold
+        // below (that threshold exists to avoid racing a node that is still
+        // genuinely executing, which this is not).
+        console.log(
+          `[v3-run-reconcile-sweep] R9 conduction gap detected: run ${run.id} ` +
+            `has ${runningNodes.length} running node(s) whose bound spawn is ` +
+            `already terminal — re-ticking`,
+        );
+        await triggerTickSafe(run.id);
+        reconciled.push(run.id);
+        continue;
+      }
 
       // Fetch all nodes once to (a) confirm at least one exists and (b) find
       // the most recent activity timestamp for the silence check.

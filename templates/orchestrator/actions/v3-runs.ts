@@ -1,6 +1,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 /** List V3 runs with optional status/tag filters and pagination. */
@@ -170,23 +171,47 @@ export const runCancel = defineAction({
       .set({ status: "cancelled" as any, completedAt: new Date() })
       .where(runFilter);
 
-    // Cancel all running spawns for this run. Use the `sql` tagged template
-    // (NOT sql.raw): sql.raw interpolates the runId as a bare, unquoted token,
-    // so Postgres reads it as a column identifier and the query fails with
-    // "Failed query" every time (a run could never actually be cancelled, and
-    // it was an injection shape). The tagged template parameterizes ${args.runId}.
-    await db.execute(sql`
-      UPDATE v3_spawns SET status = 'cancelled', completed_at = NOW()
-      WHERE run_id = ${args.runId} AND status = 'running'
-    `);
+    // The run cancellation above already committed and IS the authoritative
+    // outcome — R9 (docs/sdlc-product-design/02-workflows.md §4, SDLC-050)
+    // requires runCancel be idempotent AND report success once it has taken
+    // effect. Cancel all running spawns for this run as a best-effort
+    // follow-up: a failure here (transient DB error, etc.) must never be
+    // reported back as "cancel failed", which would mislead a caller into
+    // re-cancelling an already-cancelled run or treating a real success as a
+    // no-op. Uses the `sql` tagged template (NOT sql.raw): sql.raw
+    // interpolates the runId as a bare, unquoted token, so Postgres reads it
+    // as a column identifier and the query fails with "Failed query" every
+    // time (a run could never actually be cancelled, and it was an injection
+    // shape). The tagged template parameterizes ${args.runId}.
+    let warning: string | undefined;
+    try {
+      await db.execute(sql`
+        UPDATE v3_spawns SET status = 'cancelled', completed_at = NOW()
+        WHERE run_id = ${args.runId} AND status = 'running'
+      `);
+    } catch (err) {
+      warning = `Run cancelled, but clearing its running spawns failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      console.warn(
+        `[v3-runs] runCancel: spawn cleanup failed for run ${args.runId}:`,
+        err,
+      );
+    }
 
-    return { runId: args.runId, previousStatus: prev, status: "cancelled" };
+    return {
+      runId: args.runId,
+      previousStatus: prev,
+      status: "cancelled",
+      ...(warning ? { warning } : {}),
+    };
   },
 });
 
 /** Pause a V3 run. */
 export const runPause = defineAction({
-  description: "Pause a V3 run. Stops scheduling new nodes; running nodes wait.",
+  description:
+    "Pause a V3 run. Stops scheduling new nodes; running nodes wait.",
   schema: z.object({
     runId: z.string(),
   }),

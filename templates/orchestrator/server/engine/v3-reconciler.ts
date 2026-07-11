@@ -23,16 +23,18 @@
 //   G20 — honor on_failure:"continue" before declaring run failed.
 
 import { eq, and, inArray, sql } from "drizzle-orm";
+import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+
+import { getDbExec } from "../db/index.js";
 import {
   v3Runs,
   v3Nodes,
   v3Events,
   v3Artifacts,
+  v3Spawns,
   brainThreads,
 } from "../db/v3-schema.js";
-import { getDbExec } from "../db/index.js";
-import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import { evaluateExpression } from "./expression-parser.js";
 import type { ExpressionContext } from "./expression-parser.js";
 
@@ -83,6 +85,11 @@ export interface V3Dispatcher {
 const TERMINAL_STATUSES = new Set(["done", "failed", "skipped"]);
 const RESOLVED_STATUSES = new Set(["done", "skipped"]);
 
+// Terminal spawn statuses — mirrors v3_spawn_status's terminal values
+// (pending/running are the only non-terminal spawn statuses). Used by the R9
+// spawn→node conduction rule (see reconcileSpawnConduction below).
+const SPAWN_TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
+
 // G18: default pool capacity; overridable via constructor option.
 const DEFAULT_POOL_CAPACITY = 8;
 
@@ -94,10 +101,7 @@ function uid(): string {
 }
 
 /** Compute exponential backoff delay in ms. */
-function computeBackoffMs(
-  attempt: number,
-  policy: V3RetryPolicy,
-): number {
+function computeBackoffMs(attempt: number, policy: V3RetryPolicy): number {
   const initial = policy.initial_ms ?? 1000;
   const maxMs = policy.max_ms ?? 30_000;
   const backoff = policy.backoff ?? "exponential";
@@ -223,10 +227,33 @@ export class V3Reconciler {
     // Build adjacency helpers (in-memory from DAG stored on run/nodes)
     const dag = this.loadDag(run, nodes);
 
+    // ── R9 (docs/sdlc-product-design/02-workflows.md §4): spawn→node
+    // conduction invariant (SDLC-050) ──────────────────────────────────────
+    // fireAndTrackSpawn already drives the node the instant ITS OWN spawn call
+    // settles in-process (success or in-loop G19 retry exhaustion). This step
+    // exists for every OTHER way a spawn can reach a terminal status with
+    // nobody left in-process to advance the node: a process restart / killed
+    // VM settled by queue/v3-spawn-reconcile.ts, an event-stream stall
+    // timeout, or a run-level cancel. Both queue/v3-spawn-reconcile.ts and
+    // queue/v3-run-reconcile-sweep.ts funnel back here via triggerTickSafe
+    // after they observe a stuck case — this ONE rule is the sole place that
+    // decides retry-vs-fail for an orphaned node; it is never re-implemented
+    // at the sweep call sites.
+    await this.reconcileSpawnConduction(runId, nodes, dag);
+
+    // Re-read nodes in case the conduction step migrated any — every
+    // downstream step below (guard eval, ready-candidate scan, dispatch,
+    // completion check) must see the migrated status, not the stale snapshot
+    // taken before conduction ran.
+    const nodesAfterConduction = await this.db
+      .select()
+      .from(v3Nodes)
+      .where(eq(v3Nodes.runId, runId));
+
     // ── G10: Evaluate guard expressions + cascade-skip ────────────────────
     // Build interpolation context from run inputs (dep artifacts require DB — use
     // artifact cache from the event store here, populated lazily per dep).
-    await this.evaluateGuardsAndSkip(runId, run, nodes, dag);
+    await this.evaluateGuardsAndSkip(runId, run, nodesAfterConduction, dag);
 
     // Re-read nodes after guard skip mutations
     const nodesAfterGuards = await this.db
@@ -251,7 +278,12 @@ export class V3Reconciler {
       const toSkip = nodesAfterGuards.filter(
         (n) =>
           n.status === "pending" &&
-          this.hasFailedAncestor(n.nodeIdInDag, dag, failedCascadeIds, new Set()),
+          this.hasFailedAncestor(
+            n.nodeIdInDag,
+            dag,
+            failedCascadeIds,
+            new Set(),
+          ),
       );
 
       if (toSkip.length > 0) {
@@ -260,13 +292,12 @@ export class V3Reconciler {
           .update(v3Nodes)
           .set({ status: "skipped", error: "Upstream node failed" })
           .where(
-            and(
-              eq(v3Nodes.runId, runId),
-              inArray(v3Nodes.id, skipNodeIds),
-            ),
+            and(eq(v3Nodes.runId, runId), inArray(v3Nodes.id, skipNodeIds)),
           );
 
-        for (const fn of failedNodes.filter((n) => failedCascadeIds.has(n.nodeIdInDag))) {
+        for (const fn of failedNodes.filter((n) =>
+          failedCascadeIds.has(n.nodeIdInDag),
+        )) {
           await this.writeEvent(runId, "node.failed", {
             nodeId: fn.nodeIdInDag,
             error: fn.error,
@@ -327,7 +358,8 @@ export class V3Reconciler {
     });
 
     // 5. Dispatch ready nodes (G16, G17, G18)
-    const events: Array<{ kind: string; payload: Record<string, unknown> }> = [];
+    const events: Array<{ kind: string; payload: Record<string, unknown> }> =
+      [];
 
     // Per-parallel_over concurrency tracking
     const concurrencyCounters = new Map<string, number>();
@@ -343,7 +375,8 @@ export class V3Reconciler {
         // Fanout child — identify parent
         const parentId = node.nodeIdInDag.split(":[")[0];
         const parentDagNode = dagNodeMap.get(parentId);
-        const maxConc = (parentDagNode as V3NodeDag | undefined)?.max_concurrency;
+        const maxConc = (parentDagNode as V3NodeDag | undefined)
+          ?.max_concurrency;
         if (maxConc !== undefined) {
           const currentConc = concurrencyCounters.get(parentId) ?? 0;
           // Count already-running children of this parent
@@ -359,7 +392,14 @@ export class V3Reconciler {
         }
       }
 
-      const result = await this.dispatchNode(runId, run, node, nodesAfterGuards, nodeMap, dag);
+      const result = await this.dispatchNode(
+        runId,
+        run,
+        node,
+        nodesAfterGuards,
+        nodeMap,
+        dag,
+      );
       events.push(...result.events);
       if (result.slotConsumed) {
         availableSlots--;
@@ -385,12 +425,18 @@ export class V3Reconciler {
     const allDoneOrSkipped = updatedNodes.every((n) =>
       RESOLVED_STATUSES.has(n.status),
     );
-    const allTerminalOrWaiting = updatedNodes.every((n) =>
-      TERMINAL_STATUSES.has(n.status) || n.status === "awaiting-approval",
+    const allTerminalOrWaiting = updatedNodes.every(
+      (n) =>
+        TERMINAL_STATUSES.has(n.status) || n.status === "awaiting-approval",
     );
-    const anyWaiting = updatedNodes.some((n) => n.status === "awaiting-approval");
+    const anyWaiting = updatedNodes.some(
+      (n) => n.status === "awaiting-approval",
+    );
 
-    const runGoingTerminal = hasCascadeFail || allDoneOrSkipped || (allTerminalOrWaiting && !anyWaiting);
+    const runGoingTerminal =
+      hasCascadeFail ||
+      allDoneOrSkipped ||
+      (allTerminalOrWaiting && !anyWaiting);
 
     if (hasCascadeFail) {
       await this.finalizeRun(runId, "failed", updatedNodes);
@@ -435,7 +481,9 @@ export class V3Reconciler {
     dag: V3NodeDag[],
   ): Promise<void> {
     // Work on a mutable copy of statuses so we can fixpoint in-memory
-    const statusMap = new Map<string, string>(nodes.map((n) => [n.id, n.status]));
+    const statusMap = new Map<string, string>(
+      nodes.map((n) => [n.id, n.status]),
+    );
     // nodeIdInDag → latest status
     const dagStatusMap = this.buildDagStatusMap(nodes, statusMap);
 
@@ -527,7 +575,10 @@ export class V3Reconciler {
           changed = true;
           await this.db
             .update(v3Nodes)
-            .set({ status: "skipped", error: "Guard expression evaluated to false" })
+            .set({
+              status: "skipped",
+              error: "Guard expression evaluated to false",
+            })
             .where(eq(v3Nodes.id, node.id));
           await this.writeEvent(runId, "node.skipped", {
             nodeId: node.nodeIdInDag,
@@ -549,7 +600,10 @@ export class V3Reconciler {
       const status = statusMap.get(node.id) ?? node.status;
       // Use highest iteration to represent the latest status per dag id
       const existing = dagStatusMap.get(node.nodeIdInDag);
-      if (existing === undefined || this.statusPriority(status) > this.statusPriority(existing)) {
+      if (
+        existing === undefined ||
+        this.statusPriority(status) > this.statusPriority(existing)
+      ) {
         dagStatusMap.set(node.nodeIdInDag, status);
       }
     }
@@ -559,8 +613,13 @@ export class V3Reconciler {
   private statusPriority(status: string): number {
     // Higher = "more done"
     const p: Record<string, number> = {
-      pending: 0, ready: 1, running: 2, "awaiting-approval": 2,
-      done: 3, skipped: 3, failed: 3,
+      pending: 0,
+      ready: 1,
+      running: 2,
+      "awaiting-approval": 2,
+      done: 3,
+      skipped: 3,
+      failed: 3,
     };
     return p[status] ?? 0;
   }
@@ -610,8 +669,12 @@ export class V3Reconciler {
     allNodes: NodeRow[],
     nodeMap: Map<string, NodeRow[]>,
     dag: V3NodeDag[],
-  ): Promise<{ events: Array<{ kind: string; payload: Record<string, unknown> }>; slotConsumed: boolean }> {
-    const events: Array<{ kind: string; payload: Record<string, unknown> }> = [];
+  ): Promise<{
+    events: Array<{ kind: string; payload: Record<string, unknown> }>;
+    slotConsumed: boolean;
+  }> {
+    const events: Array<{ kind: string; payload: Record<string, unknown> }> =
+      [];
 
     switch (node.type) {
       case "agent": {
@@ -651,29 +714,59 @@ export class V3Reconciler {
       }
 
       case "parallel_over": {
-        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as V3NodeDag | undefined;
+        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as
+          | V3NodeDag
+          | undefined;
 
         // G12: Resolve or retrieve frozen items from event store
-        const items = await this.getFrozenFanoutItems(runId, node, allNodes, nodeMap, dagNode, dag, run);
+        const items = await this.getFrozenFanoutItems(
+          runId,
+          node,
+          allNodes,
+          nodeMap,
+          dagNode,
+          dag,
+          run,
+        );
 
         if (items === null) {
           // items_from expression failed — fail the node
           await this.db
             .update(v3Nodes)
-            .set({ status: "failed", error: "items_from expression failed to resolve an array", completedAt: new Date() })
+            .set({
+              status: "failed",
+              error: "items_from expression failed to resolve an array",
+              completedAt: new Date(),
+            })
             .where(eq(v3Nodes.id, node.id));
-          events.push({ kind: "node.failed", payload: { nodeId: node.nodeIdInDag, error: "items_from expression error" } });
+          events.push({
+            kind: "node.failed",
+            payload: {
+              nodeId: node.nodeIdInDag,
+              error: "items_from expression error",
+            },
+          });
           return { events, slotConsumed: false };
         }
 
         // G12: Copy inline or referenced body spec onto each child
         const bodySpec = dagNode?.body;
-        const bodyPrompt = typeof bodySpec === "object" && bodySpec !== null && !Array.isArray(bodySpec)
-          ? (bodySpec as Record<string, unknown>).prompt as string | undefined
-          : undefined;
-        const bodyAgent = typeof bodySpec === "object" && bodySpec !== null && !Array.isArray(bodySpec)
-          ? (bodySpec as Record<string, unknown>).agent as string | undefined
-          : undefined;
+        const bodyPrompt =
+          typeof bodySpec === "object" &&
+          bodySpec !== null &&
+          !Array.isArray(bodySpec)
+            ? ((bodySpec as Record<string, unknown>).prompt as
+                | string
+                | undefined)
+            : undefined;
+        const bodyAgent =
+          typeof bodySpec === "object" &&
+          bodySpec !== null &&
+          !Array.isArray(bodySpec)
+            ? ((bodySpec as Record<string, unknown>).agent as
+                | string
+                | undefined)
+            : undefined;
         const bodyId = typeof bodySpec === "string" ? bodySpec : undefined;
 
         for (let i = 0; i < items.length; i++) {
@@ -742,11 +835,14 @@ export class V3Reconciler {
       }
 
       case "loop": {
-        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as V3NodeDag | undefined;
+        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as
+          | V3NodeDag
+          | undefined;
         const untilExpr = (dagNode?.until as string | undefined) ?? "false";
-        const maxIter = (dagNode?.max_iterations as number | undefined)
-          ?? (dagNode?.maxIterations as number | undefined)
-          ?? 100;
+        const maxIter =
+          (dagNode?.max_iterations as number | undefined) ??
+          (dagNode?.maxIterations as number | undefined) ??
+          100;
 
         // G12: body[] is an array of node-ids run sequentially per iteration
         const bodyRaw = dagNode?.body;
@@ -757,7 +853,8 @@ export class V3Reconciler {
             : [];
 
         // Count completed body iterations (based on body[last] nodes with status done)
-        const lastBodyId = bodyIds.length > 0 ? bodyIds[bodyIds.length - 1] : null;
+        const lastBodyId =
+          bodyIds.length > 0 ? bodyIds[bodyIds.length - 1] : null;
         const completedIterations = lastBodyId
           ? allNodes.filter(
               (n) =>
@@ -765,7 +862,9 @@ export class V3Reconciler {
                 n.status === "done",
             ).length
           : allNodes.filter(
-              (n) => n.nodeIdInDag === `${node.nodeIdInDag}/body` && n.status === "done",
+              (n) =>
+                n.nodeIdInDag === `${node.nodeIdInDag}/body` &&
+                n.status === "done",
             ).length;
 
         // G12: build REAL expression context for loop until/history/previous_iteration
@@ -917,6 +1016,118 @@ export class V3Reconciler {
     }
   }
 
+  // ─── R9: Spawn→Node Conduction Invariant (SDLC-050) ────────────────────
+
+  /**
+   * Migrate any node stranded in a non-terminal status whose bound spawn
+   * (`node.currentSpawnId`) has ALREADY reached a terminal status
+   * (failed/cancelled/done) — the R9 invariant (02-workflows.md §4): "不存在
+   * spawn 已终态而其 node 仍 running 超过一个 tick". See the call site in
+   * `_tickLocked` for why this only ever fires on the out-of-band gap (the
+   * happy path is already handled by `fireAndTrackSpawn` in-process).
+   *
+   * Retry policy mirrors G19 (`fireAndTrackSpawn`):
+   * `maxAttempts = (retry.max ?? 0) + 1`. The durable attempt counter is the
+   * COUNT of `v3_spawns` rows bound to this node (`node_id`), NOT
+   * `v3_spawns.attempt` — that column is hardcoded to 1 on every insert
+   * (never incremented across retries — see docs/sdlc-impl-f5-f10.md §6C
+   * option A) and cannot survive a process restart as a counter. Counting
+   * spawn rows is durable for free (every attempt, in-process or
+   * conduction-triggered, inserts exactly one new `v3_spawns` row) and needs
+   * zero schema change.
+   *
+   * Protected by `tick()`'s own per-run advisory lock (only one tick for this
+   * runId is ever in flight), so a plain conditioned `UPDATE ... WHERE
+   * id = $1 AND status = $2` — mirroring the rest of this file's node writes
+   * — is enough; no cross-tick CAS race is possible here.
+   */
+  private async reconcileSpawnConduction(
+    runId: string,
+    nodes: NodeRow[],
+    dag: V3NodeDag[],
+  ): Promise<void> {
+    const dagNodeMap = new Map(dag.map((d) => [d.id, d]));
+
+    for (const node of nodes) {
+      // Only "agent" nodes ever bind a currentSpawnId (parallel_over/loop/
+      // human_gate resolve themselves without a spawn).
+      if (node.type !== "agent") continue;
+      if (TERMINAL_STATUSES.has(node.status)) continue;
+      if (!node.currentSpawnId) continue;
+
+      const [spawn] = await this.db
+        .select({
+          id: v3Spawns.id,
+          status: v3Spawns.status,
+          error: v3Spawns.error,
+        })
+        .from(v3Spawns)
+        .where(eq(v3Spawns.id, node.currentSpawnId));
+
+      if (!spawn || !SPAWN_TERMINAL_STATUSES.has(spawn.status)) continue;
+
+      // The node's own spawn is terminal but the node itself never followed —
+      // exactly the SDLC-050 gap. Decide retry-vs-fail.
+      const dagNode = dagNodeMap.get(node.nodeIdInDag) as V3NodeDag | undefined;
+      const retryPolicy = dagNode?.retry as V3RetryPolicy | undefined;
+      const maxAttempts = (retryPolicy?.max ?? 0) + 1;
+
+      const priorSpawns = await this.db
+        .select({ id: v3Spawns.id })
+        .from(v3Spawns)
+        .where(eq(v3Spawns.nodeId, node.id));
+      const attemptsMade = priorSpawns.length > 0 ? priorSpawns.length : 1;
+
+      const spawnSummary =
+        `spawn ${spawn.id} ${spawn.status}` +
+        (spawn.error ? `: ${spawn.error.slice(0, 200)}` : "");
+
+      if (attemptsMade < maxAttempts) {
+        // Retry within policy — re-arm for redispatch on this same tick's
+        // ready-candidate scan (deps are already resolved, that's why this
+        // node was running in the first place).
+        await this.db
+          .update(v3Nodes)
+          .set({
+            status: "ready",
+            currentSpawnId: null,
+            error: `conduction retry ${attemptsMade}/${maxAttempts}: ${spawnSummary}`,
+          })
+          .where(eq(v3Nodes.id, node.id));
+
+        await this.writeEvent(runId, "conduction.fixed", {
+          nodeId: node.nodeIdInDag,
+          spawnId: spawn.id,
+          spawnStatus: spawn.status,
+          disposition: "retry",
+          attempt: attemptsMade,
+          maxAttempts,
+        });
+      } else {
+        // Retries exhausted — permanently fail the node (fail cascade below
+        // picks this up in the SAME tick).
+        await this.db
+          .update(v3Nodes)
+          .set({
+            status: "failed",
+            currentSpawnId: null,
+            error: `Retries exhausted (${attemptsMade}/${maxAttempts}) — ${spawnSummary}`,
+            completedAt: new Date(),
+          })
+          .where(eq(v3Nodes.id, node.id));
+
+        await this.writeEvent(runId, "conduction.fixed", {
+          nodeId: node.nodeIdInDag,
+          spawnId: spawn.id,
+          spawnStatus: spawn.status,
+          disposition: "failed",
+          attempt: attemptsMade,
+          maxAttempts,
+        });
+      }
+    }
+  }
+
   // ─── G17: Fire-and-Track Spawn ──────────────────────────────────────────
 
   /**
@@ -928,7 +1139,9 @@ export class V3Reconciler {
     node: NodeRow,
     dag: V3NodeDag[],
   ): Promise<void> {
-    const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as V3NodeDag | undefined;
+    const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as
+      | V3NodeDag
+      | undefined;
     const retryPolicy = dagNode?.retry as V3RetryPolicy | undefined;
 
     const maxAttempts = (retryPolicy?.max ?? 0) + 1; // max = additional retries
@@ -970,7 +1183,10 @@ export class V3Reconciler {
 
         // spawn() in V3Dispatcher already sets node.status = "done" on success
         // and "failed" on schema-violation.  Re-trigger tick.
-        await this.writeEvent(runId, "spawn.done", { nodeId: node.nodeIdInDag, spawnId });
+        await this.writeEvent(runId, "spawn.done", {
+          nodeId: node.nodeIdInDag,
+          spawnId,
+        });
         await this.tick(runId);
         return;
       } catch (err) {
@@ -985,9 +1201,7 @@ export class V3Reconciler {
         });
 
         // G19: Should we retry?
-        const shouldRetry =
-          attempt < maxAttempts &&
-          retryOn.includes(errClass);
+        const shouldRetry = attempt < maxAttempts && retryOn.includes(errClass);
 
         if (!shouldRetry) {
           // Permanently fail the node
@@ -995,7 +1209,10 @@ export class V3Reconciler {
             .update(v3Nodes)
             .set({
               status: "failed",
-              error: (err instanceof Error ? err.message : String(err)).slice(0, 1000),
+              error: (err instanceof Error ? err.message : String(err)).slice(
+                0,
+                1000,
+              ),
               completedAt: new Date(),
             })
             .where(eq(v3Nodes.id, node.id));
@@ -1016,7 +1233,10 @@ export class V3Reconciler {
           .update(v3Nodes)
           .set({
             status: "failed",
-            error: (err instanceof Error ? err.message : String(err)).slice(0, 1000),
+            error: (err instanceof Error ? err.message : String(err)).slice(
+              0,
+              1000,
+            ),
           })
           .where(eq(v3Nodes.id, node.id));
       }
@@ -1027,7 +1247,10 @@ export class V3Reconciler {
       .update(v3Nodes)
       .set({
         status: "failed",
-        error: (lastError instanceof Error ? lastError.message : String(lastError)).slice(0, 1000),
+        error: (lastError instanceof Error
+          ? lastError.message
+          : String(lastError)
+        ).slice(0, 1000),
         completedAt: new Date(),
       })
       .where(eq(v3Nodes.id, node.id));
@@ -1071,7 +1294,10 @@ export class V3Reconciler {
 
     // G12: Build previous_iteration and history from completed body nodes
     // history[i] = { bodyNodeId: { output } } for iteration i
-    const historyByIteration = new Map<number, Record<string, { output?: unknown }>>();
+    const historyByIteration = new Map<
+      number,
+      Record<string, { output?: unknown }>
+    >();
 
     for (const bodyId of bodyIds) {
       const iterNodeId = `${loopNode.nodeIdInDag}/${bodyId}`;
@@ -1084,7 +1310,10 @@ export class V3Reconciler {
         iterEntry[bodyId] = { output };
         historyByIteration.set(bodyRow.iteration, iterEntry);
         // deps[bodyId].output = latest iteration output
-        if (!deps[bodyId] || bodyRow.iteration > ((deps[bodyId] as any)._iter ?? -1)) {
+        if (
+          !deps[bodyId] ||
+          bodyRow.iteration > ((deps[bodyId] as any)._iter ?? -1)
+        ) {
           deps[bodyId] = {
             output,
             previous_iteration: deps[bodyId]
@@ -1105,7 +1334,9 @@ export class V3Reconciler {
 
       if (bodyNodes.length > 0) {
         const latestBody = bodyNodes[0]!;
-        const latestOutput = await this.readArtifactContent(latestBody.outputArtifactId);
+        const latestOutput = await this.readArtifactContent(
+          latestBody.outputArtifactId,
+        );
         const prevBody = bodyNodes[1];
         const prevOutput = prevBody
           ? await this.readArtifactContent(prevBody.outputArtifactId)
@@ -1113,7 +1344,8 @@ export class V3Reconciler {
 
         deps["body"] = {
           output: latestOutput,
-          previous_iteration: prevOutput !== undefined ? { output: prevOutput } : undefined,
+          previous_iteration:
+            prevOutput !== undefined ? { output: prevOutput } : undefined,
         };
       }
     }
@@ -1165,15 +1397,15 @@ export class V3Reconciler {
       .select()
       .from(v3Events)
       .where(
-        and(
-          eq(v3Events.runId, runId),
-          eq(v3Events.kind, "fanout.frozen"),
-        ),
+        and(eq(v3Events.runId, runId), eq(v3Events.kind, "fanout.frozen")),
       );
 
     for (const ev of existingFreezeEvent) {
       const payload = ev.payload as Record<string, unknown> | null;
-      if (payload?.nodeId === node.nodeIdInDag && Array.isArray(payload?.items)) {
+      if (
+        payload?.nodeId === node.nodeIdInDag &&
+        Array.isArray(payload?.items)
+      ) {
         return payload.items as unknown[];
       }
     }
@@ -1279,9 +1511,8 @@ export class V3Reconciler {
 
   /** G19: Classify an error into a retryable category. */
   private classifyError(err: unknown): string {
-    const message = err instanceof Error
-      ? `${err.name}: ${err.message}`
-      : String(err);
+    const message =
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     const lower = message.toLowerCase();
 
     // Schema violation — retryable with corrective prompt per design §12
@@ -1306,11 +1537,27 @@ export class V3Reconciler {
 
     // Transient — API/network/OOM/rate-limit
     const transientIndicators = [
-      "etimedout", "econnreset", "econnrefused", "enetunreach",
-      "eai_fail", "eai_again", "network", "timeout", "rate.limit",
-      "rate limit", "too many requests", "429", "502", "503", "504",
-      "oom", "out of memory", "context deadline exceeded",
-      "canceled", "aborted", "transient",
+      "etimedout",
+      "econnreset",
+      "econnrefused",
+      "enetunreach",
+      "eai_fail",
+      "eai_again",
+      "network",
+      "timeout",
+      "rate.limit",
+      "rate limit",
+      "too many requests",
+      "429",
+      "502",
+      "503",
+      "504",
+      "oom",
+      "out of memory",
+      "context deadline exceeded",
+      "canceled",
+      "aborted",
+      "transient",
     ];
     for (const ind of transientIndicators) {
       if (lower.includes(ind)) return "transient";
@@ -1362,7 +1609,8 @@ export class V3Reconciler {
 
     // Add loop body previous iteration output
     const bodyNodes = allNodes.filter(
-      (n) => n.nodeIdInDag === `${loopNode.nodeIdInDag}/body` && n.status === "done",
+      (n) =>
+        n.nodeIdInDag === `${loopNode.nodeIdInDag}/body` && n.status === "done",
     );
     const latestBody = bodyNodes.sort((a, b) => b.iteration - a.iteration)[0];
 
@@ -1615,9 +1863,7 @@ export class V3Reconciler {
     tags: unknown,
   ): Promise<void> {
     const t =
-      tags && typeof tags === "object"
-        ? (tags as Record<string, unknown>)
-        : {};
+      tags && typeof tags === "object" ? (tags as Record<string, unknown>) : {};
     const sessionId = t["orchestrationSessionId"];
     const brainThreadId = t["brainThreadId"];
     const haveSession = typeof sessionId === "string" && sessionId;
@@ -1664,9 +1910,8 @@ export class V3Reconciler {
     // Best-effort + dynamically imported so the engine keeps no static brain dep.
     if (haveThread) {
       try {
-        const { releaseBrainTaskForThread } = await import(
-          "../queue/brain-admit.js"
-        );
+        const { releaseBrainTaskForThread } =
+          await import("../queue/brain-admit.js");
         await releaseBrainTaskForThread(brainThreadId as string, status);
       } catch {
         // Advisory — the brain reaper releases the slot as a backstop.
@@ -1729,9 +1974,7 @@ export class V3Reconciler {
     nodes: NodeRow[],
   ): Promise<void> {
     const t =
-      tags && typeof tags === "object"
-        ? (tags as Record<string, unknown>)
-        : {};
+      tags && typeof tags === "object" ? (tags as Record<string, unknown>) : {};
     const brainThreadId = t["brainThreadId"];
     if (typeof brainThreadId !== "string" || !brainThreadId) return;
 
