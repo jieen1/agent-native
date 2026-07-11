@@ -161,6 +161,16 @@ export const v3Spawns = pgTable(
     tags: jsonb("tags"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /**
+     * F2 executor context management (SDLC docs §2A/§2C, migration
+     * "f2-spawn-context" in server/plugins/db.ts). Best-effort JSONB
+     * checkpoint — { writtenFiles, remainingTasksSummary, updatedAt } — the
+     * executor (engine-loop.ts) persists at spawn termination via
+     * context-checkpoint.ts. Only grows across attempts (union of written
+     * files), never destructively overwritten. Null until the first
+     * dev-loop node run after this column exists.
+     */
+    contextCheckpoint: jsonb("context_checkpoint"),
     ...ownableColumns(),
   },
   (t) => [index("idx_v3_spawns_node_id").on(t.nodeId)],

@@ -823,6 +823,24 @@ ALTER TABLE v3_workspaces ADD COLUMN IF NOT EXISTS ready_report jsonb;
 ALTER TYPE v3_workspace_state ADD VALUE IF NOT EXISTS 'failed'`,
     },
   },
+  {
+    // F2 executor context management (SDLC docs §2C / 02-workflows.md §4.1
+    // C3). Additive JSONB column on v3_spawns — the executor (engine-loop.ts
+    // + context-checkpoint.ts) persists a { writtenFiles,
+    // remainingTasksSummary, updatedAt } checkpoint at spawn termination so a
+    // future retry can carry forward completed work instead of re-running
+    // from zero. `name:` opts this into name-based tracking (storing-data
+    // skill's migration-collision guidance) since v3_migrations is a shared
+    // list multiple parallel F-stream branches extend concurrently. Same
+    // `version: 3` as f1-workspace-contract above is intentional and safe —
+    // named migrations gate purely on the unique `name`, not on version
+    // number (see runMigrations' "Name-based tracking" doc comment).
+    version: 3,
+    name: "f2-spawn-context",
+    sql: {
+      postgres: `ALTER TABLE v3_spawns ADD COLUMN IF NOT EXISTS context_checkpoint jsonb`,
+    },
+  },
 ];
 
 const migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" });
