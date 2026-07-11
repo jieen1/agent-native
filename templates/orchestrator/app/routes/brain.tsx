@@ -69,21 +69,17 @@ const POLL_MS = 1500;
 // usage is owned solely by the global sidebar indicator.
 const CONTEXT_POLL_MS = 30000;
 
-// Accepted model ids/aliases for the switch Select (kept in sync with
+// Accepted model ids for the switch Select (kept in sync with
 // server/brain/brain-model.ts). Radix Select forbids an empty-string item value,
-// so "CLI default" uses a sentinel mapped back to "" at the action boundary.
+// so the unset state uses a sentinel mapped back to "" at the action boundary —
+// unset now resolves to DEFAULT_BRAIN_MODEL (Sonnet 5 1M), not the CLI default.
 const DEFAULT_MODEL_VALUE = "__default__";
 const MODEL_OPTIONS: { value: string; label: string }[] = [
-  { value: DEFAULT_MODEL_VALUE, label: "CLI 默认" },
+  { value: DEFAULT_MODEL_VALUE, label: "默认 · Sonnet 5 (1M)" },
+  { value: "claude-sonnet-5[1m]", label: "Sonnet 5 (1M)" },
   { value: "claude-opus-4-8", label: "Opus 4.8" },
   { value: "claude-opus-4-8[1m]", label: "Opus 4.8 (1M)" },
-  { value: "claude-opus-4-7[1m]", label: "Opus 4.7 (1M)" },
-  { value: "claude-opus-4-6[1m]", label: "Opus 4.6 (1M)" },
-  { value: "claude-opus-4-5", label: "Opus 4.5" },
-  { value: "claude-sonnet-5", label: "Sonnet 5" },
-  { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { value: "claude-sonnet-4-5[1m]", label: "Sonnet 4.5 (1M)" },
-  { value: "claude-haiku-4-5", label: "Haiku 4.5" },
+  { value: "claude-fable-5", label: "Fable 5" },
 ];
 
 // Session-list status filter options. Values match the brain-threads action's

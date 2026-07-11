@@ -174,8 +174,23 @@ export function resolveMaxOutputTokensForEngine(
   explicit?: unknown,
   modelId?: string,
 ): number {
-  return (
-    normalizeMaxOutputTokens(explicit, modelId) ??
-    defaultMaxOutputTokensForEngine(engineName, modelId)
-  );
+  const normalized = normalizeMaxOutputTokens(explicit, modelId);
+  if (normalized != null) {
+    // The clamp above applies to EXPLICIT per-call values and env overrides
+    // too (normalizeMaxOutputTokens is what both funnel through) — a caller
+    // passing more than the model's ceiling silently got the smaller value
+    // even before this warning existed (an earlier comment here claimed
+    // explicit values bypassed the clamp; they never did, which is exactly
+    // how a 200k request silently turned into 64k — SDLC-060). Warn instead
+    // of staying silent so a future clamp mismatch is visible in logs.
+    const requested = parsePositiveInteger(explicit);
+    if (requested != null && requested > normalized) {
+      console.warn(
+        `[agent-native] maxOutputTokens ${requested} clamped to ${normalized} ` +
+          `for engine "${engineName}"${modelId ? ` (model "${modelId}")` : ""}.`,
+      );
+    }
+    return normalized;
+  }
+  return defaultMaxOutputTokensForEngine(engineName, modelId);
 }

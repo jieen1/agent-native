@@ -1,12 +1,13 @@
 // Brain model override (the model the orchestrator brain's `claude -p` child
 // runs as). It is a saved global setting, so the model is switched from the UI
-// without code. When set, startBrainTurn threads `--model <id>` into the claude
-// argv (right after `-p <message>`); when unset, the CLI uses its default model.
+// without code. startBrainTurn threads `--model <id>` into the claude argv
+// (right after `-p <message>`); when no override is saved, DEFAULT_BRAIN_MODEL
+// (Sonnet 5 1M) is used — the brain never silently rides the CLI default.
 //
-// The accepted-id list is the set of model ids + aliases the local `claude` CLI
-// accepts (proven against the an-orchestrator container). `set-brain-model`
-// validates against it so a typo can't wedge every brain turn with an "unknown
-// model" failure. Mirrors server/queue/brain-concurrency.ts in shape.
+// The accepted-id list is the set of model ids the local `claude` CLI accepts
+// (proven against the an-orchestrator container). `set-brain-model` validates
+// against it so a typo can't wedge every brain turn with an "unknown model"
+// failure. Mirrors server/queue/brain-concurrency.ts in shape.
 
 import { getSetting, putSetting } from "@agent-native/core/settings";
 
@@ -14,29 +15,19 @@ import { getSetting, putSetting } from "@agent-native/core/settings";
 export const BRAIN_MODEL_KEY = "brain-model";
 
 /**
- * The default brain model used when no override is saved. Changing this
- * upgrades all new sessions to the specified model without requiring users to
- * explicitly pick one.
- */
-export const DEFAULT_BRAIN_MODEL = "claude-sonnet-5";
-
-/**
  * Settings key controlling which model tier is permitted for the CC subscription
- * brain. Defaults to "sonnet" (Opus blocked); can be relaxed to "all".
+ * brain. Defaults to "sonnet" (Opus/Fable blocked); can be relaxed to "all".
  */
 export const BRAIN_MODEL_TIER_KEY = "brain-model-tier";
 
-/** Tier values: "sonnet" = Sonnet + Haiku only; "all" = full model list. */
+/** Tier values: "sonnet" = Sonnet 5 only; "all" = full model list. */
 export type BrainModelTier = "sonnet" | "all";
 
-const OPUS_MODELS = new Set([
+/** Premium models blocked under the default "sonnet" tier (Opus + Fable). */
+const RESTRICTED_MODELS = new Set([
   "claude-opus-4-8",
   "claude-opus-4-8[1m]",
-  "claude-opus-4-7[1m]",
-  "claude-opus-4-6[1m]",
-  "claude-opus-4-5",
-  "opus",
-  "opus[1m]",
+  "claude-fable-5",
 ]);
 
 /** Return the subset of ACCEPTED_BRAIN_MODELS allowed for the given tier. */
@@ -44,7 +35,7 @@ export function getAllowedBrainModels(
   tier: BrainModelTier,
 ): readonly string[] {
   if (tier === "all") return ACCEPTED_BRAIN_MODELS;
-  return ACCEPTED_BRAIN_MODELS.filter((m) => !OPUS_MODELS.has(m));
+  return ACCEPTED_BRAIN_MODELS.filter((m) => !RESTRICTED_MODELS.has(m));
 }
 
 /** True if `model` is allowed under `tier`. */
@@ -53,7 +44,7 @@ export function isModelAllowedInTier(
   tier: BrainModelTier,
 ): boolean {
   if (tier === "all") return true;
-  return !OPUS_MODELS.has(model);
+  return !RESTRICTED_MODELS.has(model);
 }
 
 /**
@@ -81,49 +72,36 @@ export async function setBrainModelTier(
 }
 
 /**
- * The model ids + aliases the local `claude` CLI accepts (verified against the
- * an-orchestrator container). Concrete ids carry the `[1m]` context-window
- * suffix where the CLI exposes the 1M window; the bare aliases (`opus`,
- * `sonnet`, `haiku`, `default`) resolve to the CLI's current mapping. The
- * stream-json init `model` echoes the resolved id (e.g. `claude-opus-4-8[1m]`).
+ * The default brain model when no override is saved: Sonnet 5 with the 1M
+ * context window (`claude-sonnet-5[1m]` verified accepted by the container's
+ * `claude` CLI on 2026-07-11).
+ */
+export const DEFAULT_BRAIN_MODEL = "claude-sonnet-5[1m]";
+
+/**
+ * The model ids the local `claude` CLI accepts (verified against the
+ * an-orchestrator container). Deliberately short: Sonnet 5 (1M) is the
+ * default; Opus 4.8 and Fable 5 are the premium options gated behind the
+ * "all" tier. Concrete ids carry the `[1m]` context-window suffix where the
+ * CLI exposes the 1M window. The stream-json init `model` echoes the resolved
+ * id (e.g. `claude-sonnet-5[1m]`).
  */
 export const ACCEPTED_BRAIN_MODELS = [
+  "claude-sonnet-5[1m]",
   "claude-opus-4-8",
   "claude-opus-4-8[1m]",
-  "claude-opus-4-7[1m]",
-  "claude-opus-4-6[1m]",
-  "claude-opus-4-5",
-  "claude-sonnet-5",
-  "claude-sonnet-4-6",
-  "claude-sonnet-4-5[1m]",
-  "claude-haiku-4-5",
-  // Aliases the CLI resolves to a concrete id.
-  "opus",
-  "sonnet",
-  "haiku",
-  "opus[1m]",
-  "default",
+  "claude-fable-5",
 ] as const;
 
 export type BrainModelId = (typeof ACCEPTED_BRAIN_MODELS)[number];
 
 /** A user-facing label for each accepted id (for the Select). */
 export const BRAIN_MODEL_LABELS: Record<string, string> = {
-  "": "CLI default",
-  default: "CLI default (alias)",
+  "": "Sonnet 5 (1M) — default",
+  "claude-sonnet-5[1m]": "Sonnet 5 (1M)",
   "claude-opus-4-8": "Opus 4.8",
   "claude-opus-4-8[1m]": "Opus 4.8 (1M)",
-  "claude-opus-4-7[1m]": "Opus 4.7 (1M)",
-  "claude-opus-4-6[1m]": "Opus 4.6 (1M)",
-  "claude-opus-4-5": "Opus 4.5",
-  "claude-sonnet-5": "Sonnet 5",
-  "claude-sonnet-4-6": "Sonnet 4.6",
-  "claude-sonnet-4-5[1m]": "Sonnet 4.5 (1M)",
-  "claude-haiku-4-5": "Haiku 4.5",
-  opus: "Opus (alias)",
-  sonnet: "Sonnet (alias)",
-  haiku: "Haiku (alias)",
-  "opus[1m]": "Opus 1M (alias)",
+  "claude-fable-5": "Fable 5",
 };
 
 /** True if `id` is an accepted brain model id/alias. */
@@ -132,12 +110,12 @@ export function isAcceptedBrainModel(id: string): id is BrainModelId {
 }
 
 /**
- * Read the saved brain model override, falling back to DEFAULT_BRAIN_MODEL
- * when none is explicitly set. Returns null only when the stored value is the
- * sentinel "default" (meaning: use CLI default without pinning a model id).
- * A throwing getSetting degrades to the built-in default rather than failing.
+ * Read the saved brain model override. When nothing (or a no-longer-accepted
+ * id) is saved, fall back to DEFAULT_BRAIN_MODEL — the brain always runs a
+ * known model rather than whatever the CLI defaults to. A throwing getSetting
+ * degrades to the default rather than failing the turn.
  */
-export async function getBrainModel(): Promise<string | null> {
+export async function getBrainModel(): Promise<string> {
   let raw: unknown = null;
   try {
     raw = await getSetting(BRAIN_MODEL_KEY);
@@ -148,9 +126,7 @@ export async function getBrainModel(): Promise<string | null> {
     raw && typeof raw === "object" ? (raw as { model?: unknown }).model : raw;
   if (typeof value !== "string") return DEFAULT_BRAIN_MODEL;
   const trimmed = value.trim();
-  // Explicit "clear" — user wants bare CLI default, no model flag.
-  if (trimmed === "" || trimmed === "default") return null;
-  if (!isAcceptedBrainModel(trimmed)) return DEFAULT_BRAIN_MODEL;
+  if (!trimmed || !isAcceptedBrainModel(trimmed)) return DEFAULT_BRAIN_MODEL;
   return trimmed;
 }
 

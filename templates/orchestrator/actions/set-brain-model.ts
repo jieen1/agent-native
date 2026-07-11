@@ -3,7 +3,8 @@
 // `claude` argv on the NEXT turn (the init `system` event then echoes the
 // resolved id back into the panel). Validated against the accepted-id list so a
 // typo can't wedge every brain turn with an "unknown model" failure. Pass an
-// empty string to clear the override (fall back to the CLI default).
+// empty string to clear the override (fall back to DEFAULT_BRAIN_MODEL,
+// Sonnet 5 1M).
 
 import { defineAction } from "@agent-native/core";
 import { z } from "zod";
@@ -23,8 +24,8 @@ export default defineAction({
     "Set the model the orchestrator BRAIN's headless `claude -p` child runs as " +
     "(threaded as `--model <id>` on the next brain turn). Persisted as a global " +
     "setting; the init `system` event echoes the resolved id back to the usage " +
-    "panel. Validated against the accepted ids/aliases. Pass an empty model to " +
-    "clear the override (use the CLI default).",
+    "panel. Validated against the accepted ids. Pass an empty model to clear " +
+    "the override (fall back to the default, Sonnet 5 1M).",
   schema: z.object({
     model: z
       .string()
@@ -35,7 +36,7 @@ export default defineAction({
   http: { method: "POST" },
   run: async (args) => {
     const trimmed = args.model.trim();
-    // Empty / "default" → clear the override (CLI default model).
+    // Empty / "default" → clear the override (falls back to Sonnet 5 1M).
     if (trimmed === "" || trimmed === "default") {
       await putSetting(BRAIN_MODEL_KEY, { model: "" });
       return { brainModel: null, cleared: true };
@@ -49,8 +50,8 @@ export default defineAction({
     if (!isModelAllowedInTier(trimmed, tier)) {
       throw new Error(
         `Model '${trimmed}' is blocked by the current subscription tier (${tier}). ` +
-          "Opus models are not permitted when the tier is 'sonnet'. " +
-          "Update the brain model tier in Settings → Claude Code to allow Opus.",
+          "Premium models (Opus/Fable) are not permitted when the tier is 'sonnet'. " +
+          "Update the brain model tier in Settings → Claude Code to allow them.",
       );
     }
     const stored = await setBrainModel(trimmed);
