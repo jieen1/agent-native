@@ -28,7 +28,12 @@ import {
 } from "../db/v3-schema.js";
 import type { RuntimeExecStep } from "../runtime/executors/types.js";
 import type { InferSelectModel } from "drizzle-orm";
-import { loadAgent, type AgentConfig } from "../agent-loader.js";
+import {
+  loadAgent,
+  dispatchWorkerConfig,
+  minimalAgentConfig,
+  type AgentConfig,
+} from "../agent-loader.js";
 import { renderTemplate, type ExpressionContext } from "./interpolation.js";
 import type { V3Node, V3AgentNode } from "./dag-validator.js";
 import { NodeRunner } from "../runtime/node-runner.js";
@@ -172,9 +177,8 @@ function uid(): string {
 
 /** Classify an error into a V3 error class to drive retry policy (DESIGN §12). */
 function classifyErrorClass(error: unknown): ErrorClass {
-  const message = error instanceof Error
-    ? `${error.name}: ${error.message}`
-    : String(error);
+  const message =
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   const lower = message.toLowerCase();
 
   // Cancelled first — abort signals are terminal, not retryable
@@ -197,7 +201,9 @@ function classifyErrorClass(error: unknown): ErrorClass {
 }
 
 /** Map error class to NodeRunner onFailure policy (DESIGN §12). */
-function errorClassToOnFailure(errorClass: ErrorClass): NodeRuntimeSpec["onFailure"] {
+function errorClassToOnFailure(
+  errorClass: ErrorClass,
+): NodeRuntimeSpec["onFailure"] {
   switch (errorClass) {
     case "transient":
       return "recreate"; // boot a fresh VM on retry
@@ -266,7 +272,11 @@ function classifyOutput(
   }
 
   // Schema present — must be a plain object (not array, not null)
-  if (coerced !== null && typeof coerced === "object" && !Array.isArray(coerced)) {
+  if (
+    coerced !== null &&
+    typeof coerced === "object" &&
+    !Array.isArray(coerced)
+  ) {
     // Validate with ajv
     try {
       const ajv = createAjv();
@@ -286,9 +296,11 @@ function classifyOutput(
         path: "schema-violation",
         schema: outputSchema,
         raw: coerced,
-        error: `Output does not match schema: ${validate.errors
-          ?.map((e) => `${e.instancePath} ${e.message}`)
-          .join("; ") ?? "validation failed"}`,
+        error: `Output does not match schema: ${
+          validate.errors
+            ?.map((e) => `${e.instancePath} ${e.message}`)
+            .join("; ") ?? "validation failed"
+        }`,
       };
     } catch (err: unknown) {
       // ajv compile failure (should not happen after dag validation, but be safe)
@@ -424,15 +436,17 @@ export class V3Dispatcher {
     // Cast to agent node for field access; fall back to safe defaults.
     // V3AgentNode already has workspace?, engine_override?, model_override?,
     // retry?, timeout_seconds?, max_summary_tokens? per dag-validator.ts.
-    const agentDagNode = dagNode?.type === "agent"
-      ? (dagNode as V3AgentNode)
-      : undefined;
+    const agentDagNode =
+      dagNode?.type === "agent" ? (dagNode as V3AgentNode) : undefined;
     const dagNodeAgentName = agentDagNode?.agent;
     const dagNodePrompt = agentDagNode?.prompt;
     const outputSchema = agentDagNode?.output_schema;
 
     // ── Step 2: Resolve agent config — use dagNode.agent field (G8) ───────
-    const agentConfig = await this.resolveAgentConfig(nodeRow, dagNodeAgentName);
+    const agentConfig = await this.resolveAgentConfig(
+      nodeRow,
+      dagNodeAgentName,
+    );
 
     // ── Step 3: Build interpolation context ───────────────────────────────
     const context = await this.buildInterpolationContext(runId, nodeRow);
@@ -714,7 +728,11 @@ export class V3Dispatcher {
           spawnEventCount,
         });
 
-        await this.failNode(nodeRow, classifiedOutput.error, "schema-violation");
+        await this.failNode(
+          nodeRow,
+          classifiedOutput.error,
+          "schema-violation",
+        );
 
         return spawnId;
       }
@@ -733,7 +751,10 @@ export class V3Dispatcher {
 
     switch (classifiedOutput.path) {
       case "string": {
-        const result = truncateToMaxTokens(classifiedOutput.value, maxSummaryTokens);
+        const result = truncateToMaxTokens(
+          classifiedOutput.value,
+          maxSummaryTokens,
+        );
         textContent = result.text;
         truncated = result.truncated;
         if (truncated) {
@@ -778,7 +799,9 @@ export class V3Dispatcher {
 
     // ── Step 12: Write v3_spawns + v3_artifacts (G33) ────────────────────
     const artifactId = uid();
-    const byteSize = textContent ? new TextEncoder().encode(textContent).length : 0;
+    const byteSize = textContent
+      ? new TextEncoder().encode(textContent).length
+      : 0;
 
     await this.db.insert(v3Artifacts).values({
       id: artifactId,
@@ -839,33 +862,24 @@ export class V3Dispatcher {
     const agentName = dagNodeAgentName ?? nodeRow.nodeIdInDag;
     try {
       const config = await loadAgent(agentName);
-      // F4 (design 02 §5.4): the `kind: "brain"` agent-def row exists ONLY
-      // to carry the orchestrator brain's per-phase capability profile — it
-      // is not a worker and must never execute as a DAG node.
-      // list-agent-defs already hides it from the WorkflowEditor picker;
-      // this is the mechanism-level backstop for hand-authored DAGs. The
-      // deliberate fall-through to the minimal config (below) mirrors the
-      // agent-not-found path: the spawn proceeds prompt-only, WITHOUT the
-      // brain row's identity.
-      if (config.kind !== "brain") {
-        return config;
+      // F4 (design 02 §5.4): the `kind: "brain"` agent-def row exists ONLY to
+      // carry the orchestrator brain's per-phase capability profile — it is
+      // not a worker and must never execute as a DAG node. list-agent-defs
+      // already hides it from the WorkflowEditor picker; this is the
+      // mechanism-level backstop for hand-authored DAGs. dispatchWorkerConfig
+      // collapses a brain row to the same minimal prompt-only config as the
+      // agent-not-found path (below); the warn is observability only.
+      if (config.kind === "brain") {
+        console.warn(
+          `[v3-dispatcher] agent '${agentName}' is the brain capability-profile row (kind="brain"), not a DAG worker — using minimal config instead`,
+        );
       }
-      console.warn(
-        `[v3-dispatcher] agent '${agentName}' is the brain capability-profile row (kind="brain"), not a DAG worker — using minimal config instead`,
-      );
+      return dispatchWorkerConfig(config, agentName);
     } catch {
-      // Agent file not found — fall through to the minimal config below so
-      // the spawn can still proceed with the rendered prompt alone.
+      // Agent file not found — fall through to the minimal config so the spawn
+      // can still proceed with the rendered prompt alone.
     }
-    return {
-      name: agentName,
-      description: "",
-      runtime: "none" as const,
-      engine: "",
-      model: "",
-      tools: [],
-      systemPrompt: "",
-    };
+    return minimalAgentConfig(agentName);
   }
 
   /**
@@ -887,14 +901,21 @@ export class V3Dispatcher {
       if (runSignal.aborted) {
         abort(runSignal.reason);
       } else {
-        runSignal.addEventListener("abort", () => abort(runSignal.reason), { once: true });
+        runSignal.addEventListener("abort", () => abort(runSignal.reason), {
+          once: true,
+        });
       }
     }
 
     if (typeof timeoutMs === "number" && timeoutMs > 0) {
-      const timer = setTimeout(() => abort(new Error(`node timeout after ${timeoutMs}ms`)), timeoutMs);
+      const timer = setTimeout(
+        () => abort(new Error(`node timeout after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
       // Clean up the timer if the signal fires first.
-      combined.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+      combined.signal.addEventListener("abort", () => clearTimeout(timer), {
+        once: true,
+      });
     }
 
     return combined.signal;
@@ -1075,7 +1096,9 @@ export class V3Dispatcher {
       // Find the latest resolved node for this dep id
       const depNode = allNodes
         .filter(
-          (n) => n.nodeIdInDag === depId && (n.status === "done" || n.status === "skipped"),
+          (n) =>
+            n.nodeIdInDag === depId &&
+            (n.status === "done" || n.status === "skipped"),
         )
         .sort((a, b) => b.iteration - a.iteration)[0];
 
@@ -1352,18 +1375,12 @@ export class V3Dispatcher {
   }
 
   /** Find a DAG node by id. */
-  private findDagNode(
-    dag: V3Node[],
-    nodeId: string,
-  ): V3Node | undefined {
+  private findDagNode(dag: V3Node[], nodeId: string): V3Node | undefined {
     return dag.find((n) => n.id === nodeId);
   }
 
   /** Get dependency ids for a node from the DAG. */
-  private getNodeDeps(
-    nodeRow: NodeRow,
-    dag: V3Node[],
-  ): string[] {
+  private getNodeDeps(nodeRow: NodeRow, dag: V3Node[]): string[] {
     const dagNode = this.findDagNode(dag, nodeRow.nodeIdInDag);
     if (!dagNode) return [];
 
@@ -1385,6 +1402,8 @@ export function classifyNodeError(error: unknown): ErrorClass {
 /**
  * Get the NodeRunner onFailure policy for a V3 error class.
  */
-export function errorClassToOnFailurePolicy(errorClass: ErrorClass): NodeRuntimeSpec["onFailure"] {
+export function errorClassToOnFailurePolicy(
+  errorClass: ErrorClass,
+): NodeRuntimeSpec["onFailure"] {
   return errorClassToOnFailure(errorClass);
 }

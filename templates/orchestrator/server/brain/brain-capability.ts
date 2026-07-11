@@ -139,6 +139,12 @@ export interface BuildBrainArgvOpts {
  * / resumeSessionId first. Kept as a pure function so the exact tool face for
  * a phase is directly assertable in a unit test (T-F4-01 / T-F4-09) without
  * spawning a child process.
+ *
+ * NOTE: no `--permission-mode acceptEdits`. That flag pre-approves Edit/Write
+ * so the CLI never prompts for them — meaningful only when those tools are in
+ * the allow-list. F4's tool face removes Bash/Edit/Write from EVERY phase, so
+ * the flag is dead: there is no edit to auto-accept. The read-only tools that
+ * remain (Read/Grep/Glob + the mcp__orchestrator channel) never prompt.
  */
 export function buildBrainArgv(opts: BuildBrainArgvOpts): string[] {
   const argv = [
@@ -150,8 +156,6 @@ export function buildBrainArgv(opts: BuildBrainArgvOpts): string[] {
     "--strict-mcp-config",
     "--allowedTools",
     ...opts.allowedTools,
-    "--permission-mode",
-    "acceptEdits",
     "--append-system-prompt",
     opts.systemPrompt,
     "--output-format",

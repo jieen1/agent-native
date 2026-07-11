@@ -54,8 +54,11 @@ describe("T-F4-01 — dispatch-phase tool face (brain argv 构造纯函数)", ()
     // Core invocation shape retained.
     expect(argv.slice(0, 2)).toEqual(["-p", "dispatch task"]);
     expect(argv).toContain("--strict-mcp-config");
-    expect(argv).toContain("--permission-mode");
     expect(argv).toContain("stream-json");
+    // F4: no --permission-mode acceptEdits — the flag pre-approves Edit/Write,
+    // which the phase tool face no longer grants, so it must be gone.
+    expect(argv).not.toContain("--permission-mode");
+    expect(argv).not.toContain("acceptEdits");
   });
 
   it("threads model + resume through unchanged", () => {

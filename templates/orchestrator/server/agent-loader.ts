@@ -95,6 +95,40 @@ function parseCapabilityProfile(
   }
 }
 
+/**
+ * The minimal, prompt-only agent config the dispatcher spawns with when no real
+ * worker def resolves (agent not found, or the resolved row is the brain
+ * capability-profile row). Single source so the two fallback paths in
+ * resolveAgentConfig cannot drift. F4.
+ */
+export function minimalAgentConfig(name: string): AgentConfig {
+  return {
+    name,
+    description: "",
+    runtime: "none",
+    engine: "",
+    model: "",
+    tools: [],
+    systemPrompt: "",
+  };
+}
+
+/**
+ * F4 (design 02 §5.4): reduce a LOADED agent def to the config the dispatcher
+ * should actually spawn a DAG node with. Real worker rows pass through
+ * unchanged; the brain capability-profile row (`kind === "brain"`) is NEVER a
+ * DAG worker, so it collapses to {@link minimalAgentConfig} — mirroring the
+ * agent-not-found fallback (spawn proceeds prompt-only, WITHOUT the brain
+ * row's identity). Pure — this is the unit-tested decision behind
+ * V3Dispatcher.resolveAgentConfig's brain gate.
+ */
+export function dispatchWorkerConfig(
+  loaded: AgentConfig,
+  agentName: string,
+): AgentConfig {
+  return loaded.kind === "brain" ? minimalAgentConfig(agentName) : loaded;
+}
+
 function parseFrontmatter(content: string): {
   meta: Record<string, string>;
   body: string;

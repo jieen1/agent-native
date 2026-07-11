@@ -117,9 +117,9 @@ export function buildReviewWakeMessage(opts: ReviewWakeMessageOpts): string {
     `mcp__orchestrator__runVerdict({ runId: "${opts.runId}", verdict, ` +
     `findings, reviewThreadId: <your own thread id> }) with verdict PASSED ` +
     `or CHANGES_REQUESTED. If PASSED and there are changes to ship, DELIVER ` +
-    `by calling mcp__orchestrator__workspaceCommit (host-native; NOT ` +
-    `workspaceCommitPush, which needs a VM this deployment lacks) with ` +
-    `createMr:true, then report the run id and the PR url. If ` +
+    `by calling mcp__orchestrator__workspaceCommit (host-native — commits the ` +
+    `feature branch and opens the PR) with createMr:true, then report the run ` +
+    `id and the PR url. If ` +
     `CHANGES_REQUESTED, the ONLY remediation is a NEW ` +
     `mcp__orchestrator__workflowRun (fix mode) carrying your findings — do ` +
     `not attempt to fix anything yourself. Do not start unrelated new runs.`
