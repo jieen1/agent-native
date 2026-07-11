@@ -556,20 +556,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_skill_overrides_path_idx ON orche
 // `DO $$ ... $$` guard was deliberately NOT used instead: migrations.ts's
 // `splitSqlStatements()` has no `$$`-awareness and would shred a dollar-quoted
 // block on its own `;`-splitting.
-const migrateV3 = runMigrations(
-  [
-    {
-      // Version-only tracking (no `name:`) — matches every other migration table
-      // in this repo. A `name:` here would make runMigrations gate on the
-      // companion `v3_migrations_names` table instead of `v3_migrations`; the
-      // CREATE TYPE 42710-swallow on the first folded boot (existing DB) leaves
-      // that named-row insert unpersisted, so the named gate never sees it and
-      // re-applies all 32 statements every boot. The version gate (v3_migrations)
-      // records cleanly, so version-only is tracked-once on both fresh and
-      // existing databases.
-      version: 1,
-      sql: {
-        postgres: `CREATE TYPE "public"."v3_node_status" AS ENUM('pending', 'ready', 'running', 'done', 'failed', 'skipped', 'awaiting-approval');
+// The v3 migration list is a named export so the migration smoke test
+// (T-F1-13, ../db-migration-smoke.spec.ts) can apply every entry IN ORDER to
+// a disposable REAL Postgres and assert the schema actually materialized —
+// the B5 lesson: an in-memory DB with a self-built schema is NOT evidence
+// that the migrations create the tables/columns.
+export const V3_MIGRATIONS = [
+  {
+    // Version-only tracking (no `name:`) — matches every other migration table
+    // in this repo. A `name:` here would make runMigrations gate on the
+    // companion `v3_migrations_names` table instead of `v3_migrations`; the
+    // CREATE TYPE 42710-swallow on the first folded boot (existing DB) leaves
+    // that named-row insert unpersisted, so the named gate never sees it and
+    // re-applies all 32 statements every boot. The version gate (v3_migrations)
+    // records cleanly, so version-only is tracked-once on both fresh and
+    // existing databases.
+    version: 1,
+    sql: {
+      postgres: `CREATE TYPE "public"."v3_node_status" AS ENUM('pending', 'ready', 'running', 'done', 'failed', 'skipped', 'awaiting-approval');
 CREATE TYPE "public"."v3_run_status" AS ENUM('pending', 'running', 'paused', 'done', 'failed', 'cancelled');
 CREATE TYPE "public"."v3_spawn_status" AS ENUM('pending', 'running', 'done', 'failed', 'cancelled');
 CREATE TYPE "public"."v3_workspace_state" AS ENUM('provisioning', 'ready', 'busy', 'destroying', 'destroyed', 'error');
@@ -782,23 +786,46 @@ CREATE INDEX IF NOT EXISTS "idx_v3_nodes_run_id" ON "v3_nodes" USING btree ("run
 CREATE INDEX IF NOT EXISTS "idx_v3_patches_run_id" ON "v3_patches" USING btree ("run_id");
 CREATE INDEX IF NOT EXISTS "idx_v3_spawns_node_id" ON "v3_spawns" USING btree ("node_id");
 CREATE INDEX IF NOT EXISTS "idx_v3_workspaces_owner" ON "v3_workspaces" USING btree ("owner_kind","owner_id")`,
-      },
     },
-    {
-      // P4-A data lifecycle + reaper additive columns (formerly
-      // v3-schema-p4.ts's ensureP4Columns + brain-schema.ts's reap_reason
-      // ALTER). Postgres supports `ADD COLUMN IF NOT EXISTS` natively (unlike
-      // `CREATE TYPE`), so no catalog-race handling is needed for these.
-      version: 2,
-      sql: {
-        postgres: `ALTER TABLE v3_artifacts ADD COLUMN IF NOT EXISTS expires_at timestamp with time zone;
+  },
+  {
+    // P4-A data lifecycle + reaper additive columns (formerly
+    // v3-schema-p4.ts's ensureP4Columns + brain-schema.ts's reap_reason
+    // ALTER). Postgres supports `ADD COLUMN IF NOT EXISTS` natively (unlike
+    // `CREATE TYPE`), so no catalog-race handling is needed for these.
+    version: 2,
+    sql: {
+      postgres: `ALTER TABLE v3_artifacts ADD COLUMN IF NOT EXISTS expires_at timestamp with time zone;
 ALTER TABLE v3_artifacts ADD COLUMN IF NOT EXISTS keep_after_run integer NOT NULL DEFAULT 0;
 ALTER TABLE brain_tasks ADD COLUMN IF NOT EXISTS reap_reason text`,
-      },
     },
-  ],
-  { table: "v3_migrations" },
-);
+  },
+  {
+    // F1 workspace contract (02-workflows.md §7; SDLC-056/057/059/061) —
+    // additive readiness bookkeeping on v3_workspaces (`base_sha`/`ready_at`/
+    // `ready_report`, see v3-schema.ts) + the new `failed` workspace state
+    // (a readiness-assertion miss, distinct from a provisioning `error`).
+    // `name:` opts into the storing-data skill's migration-collision
+    // convention (parallel F-track branches may extend this same array
+    // independently — see the v21 "orchestrator-skill-overrides-table"
+    // precedent in migrateV2 above); this array is version-only tracked
+    // (v3_migrations, no companion names table — see the version:1 comment
+    // above), so `name` here is purely a merge-collision breadcrumb, not a
+    // second tracking gate. `ADD COLUMN IF NOT EXISTS` / `ADD VALUE IF NOT
+    // EXISTS` are both natively idempotent on Postgres — no catalog-race
+    // handling needed (unlike the version:1 `CREATE TYPE` entries).
+    version: 3,
+    name: "f1-workspace-contract",
+    sql: {
+      postgres: `ALTER TABLE v3_workspaces ADD COLUMN IF NOT EXISTS base_sha text;
+ALTER TABLE v3_workspaces ADD COLUMN IF NOT EXISTS ready_at timestamp with time zone;
+ALTER TABLE v3_workspaces ADD COLUMN IF NOT EXISTS ready_report jsonb;
+ALTER TYPE v3_workspace_state ADD VALUE IF NOT EXISTS 'failed'`,
+    },
+  },
+];
+
+const migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" });
 
 export default async function orchestratorDbPlugin(
   nitroApp: unknown,

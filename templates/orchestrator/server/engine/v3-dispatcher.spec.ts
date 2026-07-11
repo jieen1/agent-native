@@ -27,10 +27,27 @@ vi.mock("../runtime/node-runner.js", () => ({
   NodeRunner: hoisted.MockNodeRunner,
 }));
 
+// getWorkspace (the workspace-readiness gate's lookup, T-F1-09) — mocked so
+// the "Workspace readiness gate" tests below can control readyAt without a
+// real DB. Unused by every other test in this file (they never set a
+// DAG-node `workspace` field via the generic all-empty mock db).
+vi.mock("./v3-workspace.js", () => ({
+  getWorkspace: vi.fn(),
+}));
+
+// getLocalWorkspaceDir reaches the REAL db/index.js connection when CALLED —
+// mock it so the ready-workspace dispatch test never opens a real DB. (The
+// readiness gate itself reads getWorkspace above, not this.)
+vi.mock("../v3-workspace-local.js", () => ({
+  getLocalWorkspaceDir: vi.fn(async () => null),
+}));
+
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { loadAgent } from "../agent-loader.js";
 import { renderTemplate } from "./interpolation.js";
+import { getWorkspace } from "./v3-workspace.js";
+import { v3Runs, v3Events } from "../db/v3-schema.js";
 
 import {
   classifyNodeError,
@@ -76,8 +93,12 @@ function createMockDb() {
 describe("classifyNodeError", () => {
   it("transient: timeout error", () => {
     expect(classifyNodeError(new Error("ETIMEDOUT"))).toBe("transient");
-    expect(classifyNodeError(new Error("connection timeout"))).toBe("transient");
-    expect(classifyNodeError(new Error("429 too many requests"))).toBe("transient");
+    expect(classifyNodeError(new Error("connection timeout"))).toBe(
+      "transient",
+    );
+    expect(classifyNodeError(new Error("429 too many requests"))).toBe(
+      "transient",
+    );
   });
 
   it("transient: network errors", () => {
@@ -115,7 +136,9 @@ describe("classifyNodeError", () => {
     // workspace_error was removed in the §12 realignment — mount/microsandbox/
     // provision/permission failures are now retryable transient errors.
     expect(classifyNodeError(new Error("mount failed"))).toBe("transient");
-    expect(classifyNodeError(new Error("microsandbox error"))).toBe("transient");
+    expect(classifyNodeError(new Error("microsandbox error"))).toBe(
+      "transient",
+    );
     expect(classifyNodeError(new Error("provision failed"))).toBe("transient");
     expect(classifyNodeError(new Error("permission denied"))).toBe("transient");
   });
@@ -188,15 +211,18 @@ describe("Output classification", () => {
 
   function makeMockNodeRunner(runResult: unknown) {
     // Spy on the prototype's run method to control return value
-    vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(async () => ({
-      output: runResult,
-      tokensSpent: 100,
-      toolCallCount: 0,
-      model: "test-model",
-      vmName: null,
-      durationMs: 50,
-      attempts: 1,
-    }) as any);
+    vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(
+      async () =>
+        ({
+          output: runResult,
+          tokensSpent: 100,
+          toolCallCount: 0,
+          model: "test-model",
+          vmName: null,
+          durationMs: 50,
+          attempts: 1,
+        }) as any,
+    );
   }
 
   function makeNodeRow(overrides: Partial<Record<string, unknown>> = {}) {
@@ -384,14 +410,242 @@ describe("Interpolation context", () => {
       orgId: null,
     };
 
-    const context = await (
-      dispatcher as any
-    ).buildInterpolationContext("run-1", nodeRow);
+    const context = await (dispatcher as any).buildInterpolationContext(
+      "run-1",
+      nodeRow,
+    );
 
     // Context should have the expected ExpressionContext shape
     expect(context).toHaveProperty("inputs");
     expect(context).toHaveProperty("deps");
     expect(typeof context.inputs).toBe("object");
     expect(typeof context.deps).toBe("object");
+  });
+});
+
+// ── Tests: Workspace readiness gate (F1, T-F1-09) ───────────────────────────
+//
+// The dispatcher must reject dispatch (zero spawn row, no node advance) on a
+// workspace whose `ready_at` is null, and record a `workspace.not_ready`
+// event (kind=infra) — see 02-workflows.md §7 and v3-dispatcher.ts Step 6.
+
+describe("Workspace readiness gate", () => {
+  /** Mock db that returns a REAL v3_runs row (with a DAG carrying a
+   * `workspace` field) so the dispatcher's Step 6 workspace-resolution path
+   * actually runs — the shared `createMockDb()` above always returns `[]`,
+   * which means every other test in this file never exercises this branch. */
+  function createRunMockDb(dag: unknown) {
+    const artifacts: Array<Record<string, unknown>> = [];
+    // Keyed by spawn id — the dispatcher UPSERTS the terminal record onto the
+    // open-row insert (onConflictDoUpdate on the same id), which must read as
+    // ONE spawn row, exactly like the real unique-PK table.
+    const spawnsById = new Map<string, Record<string, unknown>>();
+    const events: Array<Record<string, unknown>> = [];
+    const runRow = { id: "run-1", dag };
+
+    const db = {
+      select: () => ({
+        from: (table: unknown) => ({
+          where: async () => (table === v3Runs ? [runRow] : []),
+        }),
+      }),
+      update: () => ({ set: () => ({ where: async () => ({}) }) }),
+      insert: (table: unknown) => ({
+        // Awaitable directly (plain `await ...values({...})`, e.g. v3_events)
+        // AND chainable with .onConflictDoNothing()/.onConflictDoUpdate()
+        // (the v3_spawns open-row insert + terminal upsert). Records exactly
+        // once whichever way it's consumed.
+        values: (row: Record<string, unknown>) => {
+          let recorded = false;
+          const commit = async () => {
+            if (!recorded) {
+              recorded = true;
+              if (table === v3Events) events.push(row);
+              else if (row.kind && row.textContent !== undefined)
+                artifacts.push(row);
+              else if (row.renderedPrompt !== undefined) {
+                spawnsById.set(String(row.id), {
+                  ...(spawnsById.get(String(row.id)) ?? {}),
+                  ...row,
+                });
+              }
+            }
+            return {};
+          };
+          return {
+            onConflictDoNothing: () => commit(),
+            onConflictDoUpdate: () => commit(),
+            then: (
+              resolve: (v: unknown) => void,
+              reject: (e: unknown) => void,
+            ) => commit().then(resolve, reject),
+          };
+        },
+      }),
+    } as unknown as PostgresJsDatabase;
+
+    return { db, artifacts, spawnsById, events };
+  }
+
+  function makeNodeRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: "node-dev",
+      runId: "run-1",
+      nodeIdInDag: "dev",
+      type: "agent",
+      status: "running",
+      iteration: 0,
+      fanoutIndex: 0,
+      currentSpawnId: null,
+      outputArtifactId: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      ownerEmail: "local@localhost",
+      orgId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(renderTemplate).mockImplementation(
+      (template: string) => template,
+    );
+    vi.mocked(loadAgent).mockResolvedValue({
+      name: "dev-agent",
+      description: "",
+      runtime: "none" as const,
+      engine: "",
+      model: "",
+      tools: [],
+      systemPrompt: "Implement the spec",
+    });
+  });
+
+  it("rejects dispatch with WorkspaceNotReadyError when ready_at is null — zero spawn rows, workspace.not_ready event written", async () => {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+
+    vi.mocked(getWorkspace).mockResolvedValue({
+      id: "ws-1",
+      ownerKind: "run",
+      ownerId: "run-1",
+      tags: null,
+      vmName: null,
+      repoUrl: "https://example.com/repo.git",
+      branch: "orchestrator/run-1",
+      state: "provisioning",
+      createdAt: new Date(),
+      destroyedAt: null,
+      createdBy: "run:run-1",
+      ownerEmail: "local@localhost",
+      orgId: null,
+      readyAt: null, // ← T-F1-09 injection: not-ready workspace
+      baseSha: null,
+      readyReport: null,
+    } as any);
+
+    const dag = {
+      nodes: [
+        {
+          id: "dev",
+          type: "agent",
+          agent: "dev-agent",
+          prompt: "do work",
+          workspace: "ws-1",
+        },
+      ],
+    };
+    const mockDb = createRunMockDb(dag);
+    const executor: RuntimeExecutor = {
+      kind: "test",
+      run: vi.fn().mockResolvedValue({} as any),
+    };
+    const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+    await expect(
+      dispatcher.spawn(makeNodeRow() as any, "run-1"),
+    ).rejects.toMatchObject({
+      name: "WorkspaceNotReadyError",
+      stage: "W1",
+      errorClass: "infra",
+    });
+
+    // Zero spawn rows opened — Step 8a (openRunningSpawn) never ran.
+    expect(mockDb.spawnsById.size).toBe(0);
+    // The event stream shows WHY, classified infra, and names the workspace.
+    expect(mockDb.events.length).toBe(1);
+    expect(mockDb.events[0]).toMatchObject({
+      kind: "workspace.not_ready",
+      payload: expect.objectContaining({
+        workspaceId: "ws-1",
+        errorClass: "infra",
+      }),
+    });
+  });
+
+  it("dispatches normally when ready_at is set", async () => {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+
+    vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(
+      async () =>
+        ({
+          output: "done",
+          tokensSpent: 10,
+          toolCallCount: 0,
+          model: "test-model",
+          vmName: null,
+          durationMs: 5,
+          attempts: 1,
+        }) as any,
+    );
+
+    vi.mocked(getWorkspace).mockResolvedValue({
+      id: "ws-2",
+      ownerKind: "run",
+      ownerId: "run-1",
+      tags: null,
+      vmName: null,
+      repoUrl: "https://example.com/repo.git",
+      branch: "orchestrator/run-1",
+      state: "ready",
+      createdAt: new Date(),
+      destroyedAt: null,
+      createdBy: "run:run-1",
+      ownerEmail: "local@localhost",
+      orgId: null,
+      readyAt: new Date(),
+      baseSha: "abc123",
+      readyReport: null,
+    } as any);
+
+    const dag = {
+      nodes: [
+        {
+          id: "dev",
+          type: "agent",
+          agent: "dev-agent",
+          prompt: "do work",
+          workspace: "ws-2",
+        },
+      ],
+    };
+    const mockDb = createRunMockDb(dag);
+    const executor: RuntimeExecutor = {
+      kind: "test",
+      run: vi.fn().mockResolvedValue({} as any),
+    };
+    const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+    const spawnId = await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+    expect(spawnId).toBeDefined();
+    // Exactly one spawn row, carrying the resolved workspace id.
+    expect(mockDb.spawnsById.size).toBe(1);
+    expect(mockDb.spawnsById.get(spawnId)).toMatchObject({
+      workspaceId: "ws-2",
+    });
+    expect(mockDb.events.some((e) => e.kind === "workspace.not_ready")).toBe(
+      false,
+    );
   });
 });
