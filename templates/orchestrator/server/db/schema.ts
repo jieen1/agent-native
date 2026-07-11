@@ -354,6 +354,22 @@ export const agentDefs = table("orchestrator_agent_defs", {
   version: integer("version").notNull().default(1),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  // F4 (docs/sdlc-impl-f1-f4.md §4A / design 02 §5.4 capability matrix, "S0" =
+  // this table). "worker" (default) = a DAG-node-selectable agent (vllm,
+  // claude-code) — unchanged behavior. "brain" = the orchestrator brain's own
+  // capability-profile row (seeded by agent-defs-seed.ts), read by
+  // server/brain/brain-capability.ts and NEVER a selectable DAG-node worker:
+  // list-agent-defs's default output filters kind="worker" so the
+  // WorkflowEditor agent picker (which calls list-agent-defs with no filter)
+  // never offers "brain".
+  kind: text("kind").notNull().default("worker"),
+  // Per-phase/node-type tool face: JSON `{ [phase]: { tools: string[],
+  // workspaceAccess } }`. brain-session.ts reads the "brain" row's dispatch/
+  // review entries (via agent-loader.loadAgent) to assemble the CLI's
+  // --allowedTools per phase instead of hardcoding them. Other rows carry it
+  // as descriptive data for the deferred S9 read-only matrix; the DAG
+  // dispatcher does not enforce it (out of F4's scope).
+  capabilityProfile: text("capability_profile").notNull().default("{}"),
   ...ownableColumns(),
 });
 

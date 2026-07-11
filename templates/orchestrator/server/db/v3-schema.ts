@@ -324,6 +324,14 @@ export const brainThreads = pgTable(
     contextWindow: integer("context_window"),
     contextUsed: integer("context_used"),
     lastUsage: jsonb("last_usage"),
+    // F4 capability matrix (design 02 §5.4): which tool-face phase this
+    // thread's turns run under — "dispatch" (default when NULL) or "review"
+    // (set once by the reconciler's run-terminal review fork, see
+    // server/brain/review-thread.ts). Persisted on the thread so EVERY
+    // subsequent resume of a review thread inherits the review face — the
+    // phase is a property of the thread's role, not of one wake message.
+    // Additive, nullable.
+    phase: text("phase"),
     // Session-management archive flag: archived threads are hidden from the brain
     // page's default session list (the "Archived" filter reveals them).
     // archivedAt records when it was archived. Both additive.

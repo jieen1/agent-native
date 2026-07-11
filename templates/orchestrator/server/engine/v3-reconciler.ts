@@ -1673,11 +1673,21 @@ export class V3Reconciler {
       }
     }
 
-    // Channel 1: directly resume the brain thread (auto-wake). Dynamically
-    // imported so the engine module has no static dependency on the brain layer.
+    // Channel 1 (F4 — design 02 §3 evaluation independence): the terminal wake
+    // no longer resumes the SPEC/dispatch thread. Grading its own spec's diff
+    // is exactly the self-review blind spot the bootstrap research measured
+    // (zero findings on own-spec runs vs 5 real bugs when grading another
+    // session's work), so the review runs on a STRUCTURALLY SEPARATE, freshly
+    // minted brain thread (`bt_…`): deriveReviewWake() computes the fork +
+    // idempotent tags patch (specThreadId / reviewThreadId persisted on
+    // v3_runs.tags — `!=` is the T-F4-04 structural acceptance), and
+    // startBrainTurn runs it under the REVIEW tool face (phase='review': no
+    // Bash/Edit/Write; verdict lands via runVerdict; the only fix exit is a
+    // new workflowRun). Dynamically imported so the engine module keeps no
+    // static dependency on the brain layer.
     if (haveThread) {
       try {
-        const [thread] = await this.db
+        const [specThread] = await this.db
           .select({
             id: brainThreads.id,
             ownerEmail: brainThreads.ownerEmail,
@@ -1687,16 +1697,47 @@ export class V3Reconciler {
           .from(brainThreads)
           .where(eq(brainThreads.id, brainThreadId as string))
           .limit(1);
-        // Only resume a thread that is NOT already mid-turn (avoid stacking
-        // turns on a brain that is still actively polling this run).
-        if (thread && thread.status !== "running") {
-          const { startBrainTurn } = await import("../brain/brain-session.js");
-          await startBrainTurn({
-            threadId: thread.id,
-            ownerEmail: thread.ownerEmail,
-            orgId: thread.orgId ?? null,
-            message,
-          });
+        if (specThread) {
+          const { deriveReviewWake, buildReviewWakeMessage } =
+            await import("../brain/review-thread.js");
+          const decision = deriveReviewWake(t);
+          if (decision) {
+            // Persist the fork onto the run's tags (idempotent merge) BEFORE
+            // waking, so the review turn — and any observer — can already see
+            // specThreadId/reviewThreadId on the run.
+            await this.db
+              .update(v3Runs)
+              .set({ tags: { ...t, ...decision.tagsPatch } })
+              .where(eq(v3Runs.id, runId));
+            if (decision.isNewReviewThread) {
+              await this.writeEvent(runId, "review.thread-forked", {
+                specThreadId: decision.specThreadId,
+                reviewThreadId: decision.reviewThreadId,
+                status,
+              });
+            }
+
+            // Overlap guard on the REVIEW thread (a fresh bt_ id has no row —
+            // startBrainTurn creates it; a reused one must not be mid-turn).
+            const [reviewThread] = await this.db
+              .select({ status: brainThreads.status })
+              .from(brainThreads)
+              .where(eq(brainThreads.id, decision.reviewThreadId))
+              .limit(1);
+            if (!reviewThread || reviewThread.status !== "running") {
+              const { startBrainTurn } =
+                await import("../brain/brain-session.js");
+              await startBrainTurn({
+                threadId: decision.reviewThreadId,
+                ownerEmail: specThread.ownerEmail,
+                orgId: specThread.orgId ?? null,
+                message: buildReviewWakeMessage({ runId, status }),
+                title: `Review · ${runId}`,
+                phase: "review",
+                reviewOfRunId: runId,
+              });
+            }
+          }
         }
       } catch {
         // Best-effort: the durable event above still lets a manual/poll resume.

@@ -838,20 +838,34 @@ export class V3Dispatcher {
     // G8: use dagNode.agent (the node field), not nodeRow.nodeIdInDag.
     const agentName = dagNodeAgentName ?? nodeRow.nodeIdInDag;
     try {
-      return await loadAgent(agentName);
+      const config = await loadAgent(agentName);
+      // F4 (design 02 §5.4): the `kind: "brain"` agent-def row exists ONLY
+      // to carry the orchestrator brain's per-phase capability profile — it
+      // is not a worker and must never execute as a DAG node.
+      // list-agent-defs already hides it from the WorkflowEditor picker;
+      // this is the mechanism-level backstop for hand-authored DAGs. The
+      // deliberate fall-through to the minimal config (below) mirrors the
+      // agent-not-found path: the spawn proceeds prompt-only, WITHOUT the
+      // brain row's identity.
+      if (config.kind !== "brain") {
+        return config;
+      }
+      console.warn(
+        `[v3-dispatcher] agent '${agentName}' is the brain capability-profile row (kind="brain"), not a DAG worker — using minimal config instead`,
+      );
     } catch {
-      // Agent file not found — return a minimal config so the spawn can still
-      // proceed with the rendered prompt alone.
-      return {
-        name: agentName,
-        description: "",
-        runtime: "none" as const,
-        engine: "",
-        model: "",
-        tools: [],
-        systemPrompt: "",
-      };
+      // Agent file not found — fall through to the minimal config below so
+      // the spawn can still proceed with the rendered prompt alone.
     }
+    return {
+      name: agentName,
+      description: "",
+      runtime: "none" as const,
+      engine: "",
+      model: "",
+      tools: [],
+      systemPrompt: "",
+    };
   }
 
   /**

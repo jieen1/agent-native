@@ -4,10 +4,25 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 
+function parseCapabilityProfile(
+  raw: string | null | undefined,
+): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 // Get a single agent definition by id or name.
 export default defineAction({
   description:
-    "Get a single agent definition by id or name (DESIGN §7). Returns { id, name, engine, model, tools, description, runtime, builtin, version, systemPrompt, createdAt, updatedAt }.",
+    "Get a single agent definition by id or name (DESIGN §7). Returns { id, name, engine, model, tools, description, runtime, builtin, version, systemPrompt, createdAt, updatedAt, kind, capabilityProfile }. " +
+    'Unlike list-agent-defs, this always returns the row regardless of `kind` — fetching the "brain" row (design 02 §5.4 F4 capability matrix) by explicit name is intentional here.',
   schema: z
     .object({
       id: z.string().optional(),
@@ -57,6 +72,8 @@ export default defineAction({
       systemPrompt: r.systemPrompt,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
+      kind: r.kind || "worker",
+      capabilityProfile: parseCapabilityProfile(r.capabilityProfile),
     };
   },
 });

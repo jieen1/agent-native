@@ -81,12 +81,25 @@ import {
   getManagedClaudeStatus,
 } from "../claude-managed-auth.js";
 import { refreshManagedTokenIfNeeded } from "../claude-login.js";
-import { writeBrainMcpConfig, buildBrainMcpServers } from "./brain-mcp-config.js";
+import {
+  writeBrainMcpConfig,
+  buildBrainMcpServers,
+} from "./brain-mcp-config.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import { getBrainModel } from "./brain-model.js";
 import { deriveContextWindow } from "../../actions/brain-usage.js";
 import { runSdkBrainTurn } from "./sdk-brain-session.js";
 import { registerOrchestratorRuntime } from "../register-runtime.js";
+import {
+  type BrainPhase,
+  buildBrainArgv,
+  harnessBuiltinTools,
+  loadBrainCapabilityProfile,
+  resolveBrainAllowedTools,
+  NO_DIRECT_WRITE_PROMPT_CLAUSE,
+  REVIEW_PHASE_PROMPT_ADDENDUM,
+} from "./brain-capability.js";
+import { maybeLogToolDenied } from "./tool-denied.js";
 import {
   ensureAgentHarnessSessionTables,
   getAgentHarnessEntry,
@@ -138,11 +151,13 @@ const ACP_CLAUDE_CODE_HARNESS = "acp:claude-code";
  * if anything about that resolution is unexpected — never hard-fails a turn
  * over this optimization.
  */
-function resolveClaudeAgentAcpEntry(): { command: string; args: string[] } | null {
+function resolveClaudeAgentAcpEntry(): {
+  command: string;
+  args: string[];
+} | null {
   try {
-    const pkgJsonPath = require.resolve(
-      "@agentclientprotocol/claude-agent-acp/package.json",
-    );
+    const pkgJsonPath =
+      require.resolve("@agentclientprotocol/claude-agent-acp/package.json");
     const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8")) as {
       bin?: Record<string, string> | string;
     };
@@ -198,6 +213,7 @@ Your tools include:
 - One-shot work: mcp__orchestrator__spawnOnce
 - MONITOR (poll these — there is NO push; the engine never tells you it is done): mcp__orchestrator__runState, mcp__orchestrator__v3RunNodes, mcp__orchestrator__v3RunEvents, mcp__orchestrator__runSummary, mcp__orchestrator__nodeSummary
 - LIST/INSPECT: mcp__orchestrator__runsList, mcp__orchestrator__workspaceList, mcp__orchestrator__workspaceDiff
+- REVIEW VERDICT: mcp__orchestrator__runVerdict (PASSED | CHANGES_REQUESTED + findings — the run-level evidence trail)
 - DELIVER: mcp__orchestrator__workspaceCreate, mcp__orchestrator__workspaceCommitPush
 - ITERATE: mcp__orchestrator__runFork
 
@@ -208,6 +224,8 @@ CRITICAL — DO NOT BUSY-POLL. The orchestrator auto-re-invokes you (a fresh, re
 When you ARE woken: poll the read actions (runState / v3RunNodes / v3RunEvents) ONCE to see where the run stands. If it is still progressing normally → a short confirmation and END the turn (keep waiting). If a node failed or the run drifted → intervene with workflowPatch / nodeRetry / runCancel or replan. If the run is terminal (done/failed/cancelled) → REVIEW with runSummary + nodeSummary and, when there are changes to ship, COMMIT. Never loop in-place; check, act, end.
 
 Worker agents available inside DAGs: \`claude-code\` (analyze + review) and \`vllm\` (development).
+
+${NO_DIRECT_WRITE_PROMPT_CLAUSE}
 
 OUTPUT SCHEMAS — use sparingly. Do NOT attach \`output_schema\` to analysis, design, or review nodes whose worker replies with a natural-language plan or prose verdict. A prose node returns a plain string; reference its WHOLE text downstream as \`{{deps.<id>.output}}\` (never a sub-field). Only set \`output_schema\` (an object schema) on a node that genuinely emits structured JSON, and only then read sub-fields as \`{{deps.<id>.output.field}}\`. Attaching \`output_schema:{type:"object"}\` to a prose node makes the node fail validation ("expected object, got string") for no benefit.
 
@@ -234,6 +252,24 @@ interface StartBrainTurnArgs {
    * wakes (event/timer/terminal) omit it and leave the stored value intact.
    */
   monitorIntervalSec?: number;
+  /**
+   * F4 capability matrix (design 02 §5.4 / docs/sdlc-impl-f1-f4.md §4A): which
+   * tool-face phase this turn runs under. Omitted/undefined → "dispatch" (the
+   * default for a fresh dispatch, a resume, a node-level wake, or a periodic
+   * drift-check — see brain-capability.ts). Only the run-TERMINAL wake
+   * (server/engine/v3-reconciler.ts maybeWakeOrchestrator, via a freshly
+   * forked review thread — see review-thread.ts) passes "review".
+   */
+  phase?: BrainPhase;
+  /**
+   * The v3_runs id this turn is independently reviewing — only meaningful
+   * when `phase === "review"`. Threaded down to streamBrainChild /
+   * runBrainHarnessTurn so a tool_use OUTSIDE the review phase's allowed set
+   * (which the engine's own permission gate must have refused) can be logged
+   * as a run-scoped `tool.denied` v3_events row the run-detail page (S7) can
+   * surface (T-F4-06) — not just the brain_events transcript.
+   */
+  reviewOfRunId?: string;
 }
 
 interface StartBrainTurnResult {
@@ -277,6 +313,7 @@ export async function startBrainTurn(
   // `error_during_execution: No conversation found with session ID`.
   let storedCwd: string | null = null;
   let storedWorkspaceId: string | null = null;
+  let storedPhase: string | null = null;
   if (threadId) {
     const [row] = await db
       .select({
@@ -284,6 +321,7 @@ export async function startBrainTurn(
         sessionId: v3Schema.brainThreads.sessionId,
         cwd: v3Schema.brainThreads.cwd,
         workspaceId: v3Schema.brainThreads.workspaceId,
+        phase: v3Schema.brainThreads.phase,
       })
       .from(v3Schema.brainThreads)
       .where(eq(v3Schema.brainThreads.id, threadId))
@@ -292,6 +330,7 @@ export async function startBrainTurn(
       sessionId = row.sessionId ?? null;
       storedCwd = row.cwd ?? null;
       storedWorkspaceId = row.workspaceId ?? null;
+      storedPhase = row.phase ?? null;
     } else {
       // Pre-generated id for a brand-new thread — create the row.
       const title =
@@ -301,6 +340,7 @@ export async function startBrainTurn(
         title,
         status: "idle",
         workspaceId: args.workspaceId ?? null,
+        phase: args.phase ?? null,
         ownerEmail: args.ownerEmail,
         orgId: args.orgId ?? null,
       });
@@ -314,10 +354,18 @@ export async function startBrainTurn(
       title,
       status: "idle",
       workspaceId: args.workspaceId ?? null,
+      phase: args.phase ?? null,
       ownerEmail: args.ownerEmail,
       orgId: args.orgId ?? null,
     });
   }
+
+  // F4 capability matrix: resolve the phase this turn's tool face is built
+  // for. Explicit caller phase wins (the reconciler's review fork passes
+  // "review"); otherwise the thread's PERSISTED phase (so every later resume
+  // of a review thread inherits the review face); otherwise "dispatch".
+  const effectivePhase: BrainPhase =
+    args.phase ?? (storedPhase === "review" ? "review" : "dispatch");
 
   // 1b) Harness session-store lookup (additive — see the file banner above).
   // Prefers the framework store's resumeState when a row already exists;
@@ -332,9 +380,8 @@ export async function startBrainTurn(
       threadId,
       BRAIN_HARNESS_NAME,
     );
-    const resumeState = (harnessSession?.resumeState ?? null) as
-      | BrainResumeState
-      | null;
+    const resumeState = (harnessSession?.resumeState ??
+      null) as BrainResumeState | null;
     if (resumeState?.sessionId) sessionId = resumeState.sessionId;
     if (resumeState?.cwd && !storedCwd) storedCwd = resumeState.cwd;
   } catch {
@@ -395,6 +442,11 @@ export async function startBrainTurn(
   if (typeof args.monitorIntervalSec === "number") {
     runningUpdate.monitorIntervalSec = args.monitorIntervalSec;
   }
+  // Persist an explicitly-supplied phase (the review fork's first wake) so
+  // later resumes inherit it; omitted → the stored value is kept (F4).
+  if (args.phase) {
+    runningUpdate.phase = args.phase;
+  }
   await db
     .update(v3Schema.brainThreads)
     .set(runningUpdate)
@@ -419,7 +471,7 @@ export async function startBrainTurn(
   // three paths are mutually exclusive and chosen above from the managed-CC
   // login state (SDK/vLLM when logged out) and the harness opt-in gate.
   console.log(
-    `[brain] engine=${useSdkBrain ? "vllm-sdk" : useHarnessBrain ? "harness-acp" : "raw-spawn-cc"} thread=${threadId} ccLoggedIn=${!useSdkBrain} harnessEnabled=${isBrainHarnessEnabled()}`,
+    `[brain] engine=${useSdkBrain ? "vllm-sdk" : useHarnessBrain ? "harness-acp" : "raw-spawn-cc"} thread=${threadId} phase=${effectivePhase} ccLoggedIn=${!useSdkBrain} harnessEnabled=${isBrainHarnessEnabled()}`,
   );
 
   // 4) Run the brain in the background (do not await).
@@ -435,7 +487,11 @@ export async function startBrainTurn(
         if (!outcome.ok) {
           await db2
             .update(v3Schema.brainThreads)
-            .set({ status: "error", error: outcome.error ?? "SDK brain failed", updatedAt: new Date() })
+            .set({
+              status: "error",
+              error: outcome.error ?? "SDK brain failed",
+              updatedAt: new Date(),
+            })
             .where(eq(v3Schema.brainThreads.id, threadId!));
         } else {
           await db2
@@ -452,6 +508,8 @@ export async function startBrainTurn(
           message: args.message,
           cwd,
           resumeSessionId: sessionId,
+          phase: effectivePhase,
+          reviewOfRunId: args.reviewOfRunId,
         })
       : runBrainChild({
           threadId: threadId!,
@@ -460,6 +518,8 @@ export async function startBrainTurn(
           message: args.message,
           cwd,
           resumeSessionId: sessionId,
+          phase: effectivePhase,
+          reviewOfRunId: args.reviewOfRunId,
         });
 
   void bgTask.catch(async (err) => {
@@ -508,6 +568,8 @@ async function runBrainChild(opts: {
   message: string;
   cwd: string;
   resumeSessionId: string | null;
+  phase?: BrainPhase;
+  reviewOfRunId?: string;
 }): Promise<void> {
   const db = getV3Db();
   const outcome = await streamBrainChild(opts);
@@ -568,10 +630,18 @@ async function runBrainHarnessTurn(opts: {
   message: string;
   cwd: string;
   resumeSessionId: string | null;
+  phase?: BrainPhase;
+  reviewOfRunId?: string;
 }): Promise<void> {
   const db = getV3Db();
   let brainModel: string | null = null;
   let session: AgentHarnessSession;
+  const phase: BrainPhase = opts.phase ?? "dispatch";
+  // F4 capability matrix (design 02 §5.4): resolve the phase's tool face from
+  // the `brain` agent-def row (capability_profile), falling back to the
+  // hard-coded default — see brain-capability.ts. Never throws.
+  const capabilityProfile = await loadBrainCapabilityProfile();
+  const allowedTools = resolveBrainAllowedTools(phase, capabilityProfile);
 
   try {
     registerOrchestratorRuntime();
@@ -585,13 +655,13 @@ async function runBrainHarnessTurn(opts: {
       ...(entryOverride ?? {}),
     });
     brainModel = await getBrainModel();
-    // Mirrors the raw-spawn path's `--allowedTools "mcp__orchestrator" Bash
-    // Read Edit Write`: restrict the built-in tool surface to this set so the
-    // harness path does not silently grant the brain a WIDER tool surface
-    // (Grep/Glob/WebFetch/Task/…) than the raw path has today.
-    // `mcp__orchestrator__*` tools are a separate channel (mcpServers below)
-    // and are unaffected by this list. `model`, when a non-default override is
-    // saved, threads through the SAME `_meta.claudeCode.options` escape hatch.
+    // F4: restrict the built-in tool surface to the PHASE's resolved allowed
+    // tools (mcp__orchestrator stripped — that channel is `mcpServers` below,
+    // not a built-in `claude_code` tool name) instead of a hardcoded
+    // Bash/Read/Edit/Write — so the harness path enforces the SAME dispatch/
+    // review tool face as the raw-spawn path (T-F4-01/09), not a wider one.
+    // `model`, when a non-default override is saved, threads through the SAME
+    // `_meta.claudeCode.options` escape hatch.
     //
     // `systemPrompt` is a SIBLING top-level `_meta` key, NOT nested under
     // `claudeCode.options` — confirmed from the vendored
@@ -609,15 +679,19 @@ async function runBrainHarnessTurn(opts: {
     // `createSession(params)` that reads `params._meta.systemPrompt` — so a
     // resumed turn gets the brain prompt as a real system prompt too, not
     // just a fresh one.
+    const systemPromptAppend =
+      phase === "review"
+        ? `${BRAIN_PROMPT}\n\n${REVIEW_PHASE_PROMPT_ADDENDUM}`
+        : BRAIN_PROMPT;
     const metadata: Record<string, unknown> = {
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        append: BRAIN_PROMPT,
+        append: systemPromptAppend,
       },
       claudeCode: {
         options: {
-          tools: ["Bash", "Read", "Edit", "Write"],
+          tools: harnessBuiltinTools(allowedTools),
           ...(brainModel ? { model: brainModel } : {}),
         },
       },
@@ -701,7 +775,7 @@ async function runBrainHarnessTurn(opts: {
         case "text-delta":
           textBuffer += event.text;
           break;
-        case "tool-start":
+        case "tool-start": {
           await flushText();
           await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
             type: "tool_use",
@@ -709,7 +783,29 @@ async function runBrainHarnessTurn(opts: {
             toolUseId: event.id ?? null,
             toolInput: event.input ?? null,
           });
+          // F4 (T-F4-06): a tool_use OUTSIDE the phase's allowed face — which
+          // the engine's own permission gate must have refused — lands in the
+          // persistent spawn_events sink (+ run-scoped v3_events when this is
+          // a review turn), not just the transcript.
+          const denied = await maybeLogToolDenied(db, {
+            threadId: opts.threadId,
+            ownerEmail: opts.ownerEmail,
+            orgId: opts.orgId,
+            phase,
+            allowedTools,
+            toolName: event.name,
+            toolUseId: event.id ?? null,
+            toolInput: event.input ?? null,
+            reviewOfRunId: opts.reviewOfRunId ?? null,
+          });
+          if (denied) {
+            await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+              type: "error",
+              text: `[tool.denied] "${event.name}" attempted outside the ${phase}-phase tool face (allowed: ${allowedTools.join(", ")}) — recorded to spawn_events.`,
+            });
+          }
           break;
+        }
         case "tool-done":
           await flushText();
           await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
@@ -754,7 +850,9 @@ async function runBrainHarnessTurn(opts: {
             update.lastUsage = {
               used: event.contextUsedTokens,
               size: event.contextWindowTokens,
-              ...(event.costCents != null ? { costCents: event.costCents } : {}),
+              ...(event.costCents != null
+                ? { costCents: event.costCents }
+                : {}),
             };
             await db
               .update(v3Schema.brainThreads)
@@ -873,8 +971,11 @@ async function streamBrainChild(opts: {
   message: string;
   cwd: string;
   resumeSessionId: string | null;
+  phase?: BrainPhase;
+  reviewOfRunId?: string;
 }): Promise<BrainRunOutcome> {
   const db = getV3Db();
+  const phase: BrainPhase = opts.phase ?? "dispatch";
 
   // Write the .mcp.json the CC session loads (fresh bearer per turn — 24h TTL).
   // SECURITY: the config carries a live A2A bearer, so it is written to a
@@ -891,30 +992,25 @@ async function streamBrainChild(opts: {
   // <message>` so the brain child runs as that model; unset → the CLI default.
   const brainModel = await getBrainModel();
 
-  const argv = [
-    "-p",
-    opts.message,
-    ...(brainModel ? ["--model", brainModel] : []),
-    "--mcp-config",
+  // F4 capability matrix (design 02 §5.4 / docs/sdlc-impl-f1-f4.md §4A):
+  // resolve the phase's tool face from the `brain` agent-def row
+  // (capability_profile), falling back to the hard-coded default — see
+  // brain-capability.ts. Both phases default to mcp__orchestrator +
+  // Read/Grep/Glob — NO Bash/Write/Edit in either phase (T-F4-01 / T-F4-09).
+  const capabilityProfile = await loadBrainCapabilityProfile();
+  const allowedTools = resolveBrainAllowedTools(phase, capabilityProfile);
+
+  const argv = buildBrainArgv({
+    message: opts.message,
+    brainModel,
     mcpConfigPath,
-    "--strict-mcp-config",
-    "--allowedTools",
-    "mcp__orchestrator",
-    "Bash",
-    "Read",
-    "Edit",
-    "Write",
-    "--permission-mode",
-    "acceptEdits",
-    "--append-system-prompt",
-    BRAIN_PROMPT,
-    "--output-format",
-    "stream-json",
-    "--verbose",
-  ];
-  if (opts.resumeSessionId) {
-    argv.push("--resume", opts.resumeSessionId);
-  }
+    allowedTools,
+    systemPrompt:
+      phase === "review"
+        ? `${BRAIN_PROMPT}\n\n${REVIEW_PHASE_PROMPT_ADDENDUM}`
+        : BRAIN_PROMPT,
+    resumeSessionId: opts.resumeSessionId,
+  });
 
   // Proactively refresh the managed OAuth access token before spawning the CC
   // child. The managed access token lives only ~8h; each brain turn is a fresh
@@ -989,7 +1085,10 @@ async function streamBrainChild(opts: {
         await updateAgentHarnessSession(brainHarnessSessionId(opts.threadId), {
           status: "running",
           providerSessionId: sid,
-          resumeState: { sessionId: sid, cwd: opts.cwd } satisfies BrainResumeState,
+          resumeState: {
+            sessionId: sid,
+            cwd: opts.cwd,
+          } satisfies BrainResumeState,
         }).catch(() => {});
       }
       // system/init also carries the resolved model id (e.g.
@@ -1079,6 +1178,27 @@ async function streamBrainChild(opts: {
               toolUseId: typeof b.id === "string" ? b.id : null,
               toolInput: b.input ?? null,
             });
+            // F4 (T-F4-06): a tool_use OUTSIDE the phase's allowed face —
+            // which the CLI's own --allowedTools gate must have refused —
+            // lands in the persistent spawn_events sink (+ run-scoped
+            // v3_events when reviewing), not just the transcript.
+            const denied = await maybeLogToolDenied(db, {
+              threadId: opts.threadId,
+              ownerEmail: opts.ownerEmail,
+              orgId: opts.orgId,
+              phase,
+              allowedTools,
+              toolName: typeof b.name === "string" ? b.name : null,
+              toolUseId: typeof b.id === "string" ? b.id : null,
+              toolInput: b.input ?? null,
+              reviewOfRunId: opts.reviewOfRunId ?? null,
+            });
+            if (denied) {
+              await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
+                type: "error",
+                text: `[tool.denied] "${typeof b.name === "string" ? b.name : "?"}" attempted outside the ${phase}-phase tool face (allowed: ${allowedTools.join(", ")}) — recorded to spawn_events.`,
+              });
+            }
           }
         }
       }
