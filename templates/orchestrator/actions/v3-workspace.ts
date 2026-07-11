@@ -18,6 +18,7 @@ import {
   localWorkspaceRead,
   commitAndPush as commitAndPushLocal,
 } from "../server/v3-workspace-local.js";
+import { DiffBaseUnresolvableError } from "../server/v3-workspace-provision.js";
 
 /** Build a minimal VmHandle for msb exec calls against a named running sandbox. */
 function vmHandleFor(vmName: string) {
@@ -374,25 +375,41 @@ export const workspaceDiff = defineAction({
 
     // Host-native path: diff over the checkout dir (vm_name NULL, host_path set).
     if (!ws.vmName) {
-      const local = await localWorkspaceDiff(args.workspaceId, args.against);
-      if (!local) {
-        throw new Error(
-          `Workspace ${args.workspaceId} has neither a VM nor a host path`,
-        );
+      try {
+        const local = await localWorkspaceDiff(args.workspaceId, args.against);
+        if (!local) {
+          throw new Error(
+            `Workspace ${args.workspaceId} has neither a VM nor a host path`,
+          );
+        }
+        return {
+          workspaceId: args.workspaceId,
+          vmName: null as string | null,
+          base: local.base,
+          baseSource: local.baseSource,
+          diff: scrubSecretsFromLog(local.diff),
+          files: local.files.map((f) => ({
+            path: f.path,
+            additions: f.additions,
+            deletions: f.deletions,
+            status: f.status,
+            patch: scrubSecretsFromLog(f.patch),
+          })),
+        };
+      } catch (err) {
+        // W4 (SDLC-059) — the diff base could not be resolved (target branch
+        // missing upstream, no common ancestor, or a mirror-refresh failure).
+        // Return the error explicitly; NEVER fall through to a diff computed
+        // against a guessed/stale base (the B4 false-diff root cause).
+        if (err instanceof DiffBaseUnresolvableError) {
+          return {
+            workspaceId: args.workspaceId,
+            error: "diff-base-unresolvable" as const,
+            detail: err.message,
+          };
+        }
+        throw err;
       }
-      return {
-        workspaceId: args.workspaceId,
-        vmName: null as string | null,
-        base: local.base,
-        diff: scrubSecretsFromLog(local.diff),
-        files: local.files.map((f) => ({
-          path: f.path,
-          additions: f.additions,
-          deletions: f.deletions,
-          status: f.status,
-          patch: scrubSecretsFromLog(f.patch),
-        })),
-      };
     }
 
     // VM path (legacy microsandbox).
@@ -409,6 +426,7 @@ export const workspaceDiff = defineAction({
       workspaceId: args.workspaceId,
       vmName: ws.vmName,
       base: args.against ?? "HEAD",
+      baseSource: args.against ? "explicit" : "HEAD",
       diff: scrubSecretsFromLog(
         res.stdout + (res.stderr ? `\n[stderr]\n${res.stderr}` : ""),
       ),
@@ -548,7 +566,8 @@ export const workspaceCommitPush = defineAction({
     // / Vault scoping works), excludes .mcp.json, retargets off the base branch,
     // and opens a real PR.
     if (!ws.vmName) {
-      const baseBranch = ws.branch && ws.branch.trim() !== "" ? ws.branch : "main";
+      const baseBranch =
+        ws.branch && ws.branch.trim() !== "" ? ws.branch : "main";
       const result = await commitAndPushLocal({
         id: args.workspaceId,
         message: args.message,

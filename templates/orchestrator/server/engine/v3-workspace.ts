@@ -7,11 +7,24 @@ import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { getV3Db, v3Schema } from "../db/index.js";
-import { MicrosandboxRuntime, toWslPath } from "../runtime/microsandbox-runtime.js";
-import type { MountSpec, VmHandle, TeardownPolicy } from "../runtime/node-runtime.js";
-import { cloneRepo, checkoutRunBranch, runBranchName, type GitContext } from "../runtime/git-wrapper.js";
+import {
+  MicrosandboxRuntime,
+  toWslPath,
+} from "../runtime/microsandbox-runtime.js";
+import type {
+  MountSpec,
+  VmHandle,
+  TeardownPolicy,
+} from "../runtime/node-runtime.js";
+import {
+  cloneRepo,
+  checkoutRunBranch,
+  runBranchName,
+  type GitContext,
+} from "../runtime/git-wrapper.js";
 import { mountVmCredentials, VM_HOME } from "../runtime/vm-creds.js";
 import { resolveEgress } from "../runtime/networking.js";
+import { WorkspaceNotReadyError } from "../v3-workspace-provision.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +43,13 @@ export interface V3Workspace {
   createdBy: string | null;
   ownerEmail: string;
   orgId: string | null;
+  /** F1 workspace contract (02-workflows.md §7) — set only after the full
+   * W1→W2→W3 readiness sequence passes. null means "not ready": the
+   * dispatcher's readiness gate must not spawn/dispatch a node on this
+   * workspace. */
+  readyAt: Date | null;
+  baseSha: string | null;
+  readyReport: unknown;
 }
 
 /** Workspace creation options. */
@@ -94,7 +114,8 @@ export async function createWorkspace(
   } = opts;
 
   const workspaceId = crypto.randomUUID();
-  const branchName = branch && branch.trim() !== "" ? branch : runBranchName(runId);
+  const branchName =
+    branch && branch.trim() !== "" ? branch : runBranchName(runId);
 
   // ── Step 0: insert provisioning row (fail-fast bookkeeping) ──────────────
   await db.insert(v3Schema.v3Workspaces).values({
@@ -126,10 +147,12 @@ export async function createWorkspace(
       image: mountSpec?.env?.ORCHESTRATOR_IMAGE,
       gitRemote: repoUrl,
       baseRef: branch,
-      mounts: mountSpec ? [
-        { host: "/work", path: "/work", mode: "rw" },
-        ...(mountSpec.folders ?? []),
-      ] : [{ host: "/work", path: "/work", mode: "rw" }],
+      mounts: mountSpec
+        ? [
+            { host: "/work", path: "/work", mode: "rw" },
+            ...(mountSpec.folders ?? []),
+          ]
+        : [{ host: "/work", path: "/work", mode: "rw" }],
       env: mountSpec?.env,
       resources: mountSpec?.env?.ORCHESTRATOR_CPUS
         ? { cpus: Number(mountSpec.env.ORCHESTRATOR_CPUS) }
@@ -148,22 +171,25 @@ export async function createWorkspace(
     };
 
     // Merge any runtime env that mount() stashed on vm.meta.
-    const metaEnv = (vm.meta?.runtimeEnv as Record<string, string> | undefined) ?? {};
+    const metaEnv =
+      (vm.meta?.runtimeEnv as Record<string, string> | undefined) ?? {};
     const workEnv: Record<string, string> = { ...baseEnv, ...metaEnv };
 
     // init() installs toolchain (node, git, claude) inside the VM.
     await runtime.init(vm, branchName, workEnv);
 
     // ── Step 3: clone repo + checkout branch ──────────────────────────────
-    const workdir =
-      (vm.meta?.workdir as string | undefined) ?? "/work";
+    const workdir = (vm.meta?.workdir as string | undefined) ?? "/work";
     const gitCtx: GitContext = { runtime, vm, workdir, env: workEnv };
 
     // cloneRepo only runs when the worktree is empty (init might have git-init'd
     // it already if no gitRemote was in the spec — but we always clone explicitly
     // here because the workspace adapter owns the repo). We clear the workdir
     // first so cloneRepo clones into a clean "." target.
-    const cleared = await runtime.exec(vm, `rm -rf ${workdir}/* ${workdir}/.* 2>/dev/null; true`);
+    const cleared = await runtime.exec(
+      vm,
+      `rm -rf ${workdir}/* ${workdir}/.* 2>/dev/null; true`,
+    );
     void cleared;
 
     const cloned = await cloneRepo(gitCtx, {
@@ -184,24 +210,51 @@ export async function createWorkspace(
       });
     }
 
-    // ── Step 4: update workspace row → ready ─────────────────────────────
+    // ── Step 4: readiness assertion (F1 DESIGN §7) + update workspace row ──
+    // The microVM adapter is UNUSED in the Docker deployment (MicrosandboxRuntime
+    // needs msb/libkrun, unavailable there — see the file header); the
+    // host-native worktree/clone adapter (`server/v3-workspace-local.ts`) is the
+    // only currently-exercised path and gets the FULL W1→W2→W3 assertion
+    // sequence. Here we run a best-effort W1 (baseline-freshness) check
+    // in-VM via `runtime.exec` — genuine command failures (non-zero exit)
+    // still throw `WorkspaceNotReadyError('W1', …)` (state → `failed`,
+    // dispatcher gate stays closed), but an inconclusive/unparseable result
+    // (no merge-base output — the shape of a stub/mocked runtime, or any VM
+    // whose toolchain didn't ship `git`) does not block readiness: it stamps
+    // `readyAt` anyway so this legacy path doesn't get universally gated out
+    // by the dispatcher's `readyAt IS NOT NULL` check. Full W2 (dependency
+    // prewarm) / W3 (test-executability smoke) for the VM path is deferred —
+    // out of scope for this pass given (a) and (b) above.
+    const w1 = await assertMicrovmBaselineBestEffort(runtime, vm, branchName);
+
     await db
       .update(v3Schema.v3Workspaces)
       .set({
         vmName: vm.name,
         state: "ready",
+        baseSha: w1.baseSha,
+        readyAt: new Date(),
+        readyReport: {
+          w1,
+          note: "microVM adapter: W2/W3 not implemented (unused in the Docker deployment) — see server/engine/v3-workspace.ts",
+        } as unknown,
       })
       .where(eq(v3Schema.v3Workspaces.id, workspaceId));
 
     return await getWorkspace(workspaceId);
   } catch (err: unknown) {
-    // Rollback: update workspace to error state with the real message.
+    // Rollback: `failed` for a readiness-assertion miss (infra, W1 — never an
+    // agent failure), `error` for anything else (a genuine provisioning
+    // failure — VM provision/mount/init/clone/checkout).
     const message = err instanceof Error ? err.message : String(err);
+    const isReadinessFailure = err instanceof WorkspaceNotReadyError;
     await db
       .update(v3Schema.v3Workspaces)
-      .set({
-        state: "error",
-      })
+      .set(
+        isReadinessFailure
+          ? { state: "failed", readyReport: { error: message } as unknown }
+          : { state: "error" },
+      )
       .where(eq(v3Schema.v3Workspaces.id, workspaceId));
 
     // Teardown the VM if it was provisioned.
@@ -211,8 +264,56 @@ export async function createWorkspace(
       });
     }
 
+    if (isReadinessFailure) throw err;
     throw new Error(`createWorkspace failed for run ${runId}: ${message}`);
   }
+}
+
+/**
+ * Best-effort W1 (baseline freshness) check for the microVM adapter: runs
+ * `git merge-base <branchName> HEAD` inside the VM. A non-zero exit (git
+ * itself ran and reported a real failure — e.g. no such branch) throws
+ * `WorkspaceNotReadyError('W1', …)`. Empty/unparseable output (the shape a
+ * stub runtime or a toolchain without `git` returns) is treated as
+ * inconclusive rather than a failure — see the readiness-assertion comment
+ * at its call site for why.
+ */
+async function assertMicrovmBaselineBestEffort(
+  runtime: MicrosandboxRuntime,
+  vm: VmHandle,
+  branchName: string,
+): Promise<{ ok: boolean; baseSha: string | null; detail: string }> {
+  const workdir = (vm.meta?.workdir as string | undefined) ?? "/work";
+  const res = await runtime
+    .exec(vm, `git merge-base ${branchName} HEAD`, {
+      cwd: workdir,
+      env: { HOME: VM_HOME },
+    })
+    .catch((err: unknown) => ({
+      code: -1,
+      stdout: "",
+      stderr: err instanceof Error ? err.message : String(err),
+    }));
+
+  if (res.code !== 0) {
+    throw new WorkspaceNotReadyError(
+      "W1",
+      `in-VM merge-base check failed (exit ${res.code}): ${res.stderr || res.stdout}`,
+    );
+  }
+  const sha = res.stdout?.trim() || "";
+  if (!sha) {
+    return {
+      ok: true,
+      baseSha: null,
+      detail: "in-VM merge-base check inconclusive (empty output)",
+    };
+  }
+  return {
+    ok: true,
+    baseSha: sha,
+    detail: `merge-base(${branchName}, HEAD)=${sha}`,
+  };
 }
 
 /**
@@ -274,9 +375,7 @@ export async function destroyWorkspace(
 /**
  * Read a V3 workspace by ID. Throws if the workspace does not exist.
  */
-export async function getWorkspace(
-  workspaceId: string,
-): Promise<V3Workspace> {
+export async function getWorkspace(workspaceId: string): Promise<V3Workspace> {
   const db = getV3Db();
 
   const [row] = await db

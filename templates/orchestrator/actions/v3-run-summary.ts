@@ -9,9 +9,11 @@
  */
 
 import { defineAction } from "@agent-native/core";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql, inArray, isNotNull, desc } from "drizzle-orm";
 import { z } from "zod";
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
+import { localWorkspaceDiffStats } from "../server/v3-workspace-local.js";
+import { DiffBaseUnresolvableError } from "../server/v3-workspace-provision.js";
 
 export const runSummary = defineAction({
   description:
@@ -107,7 +109,9 @@ export const runSummary = defineAction({
       for (const art of artRows) {
         const content =
           art.textContent ??
-          (art.objectContent != null ? JSON.stringify(art.objectContent) : null);
+          (art.objectContent != null
+            ? JSON.stringify(art.objectContent)
+            : null);
         artifactMap.set(art.id, content);
       }
     }
@@ -115,8 +119,14 @@ export const runSummary = defineAction({
     // Aggregate token usage from spawns associated with this run's nodes
     const tokenRows = await db
       .select({
-        totalInput: sql<number>`coalesce(sum(${v3Schema.v3Spawns.tokensInput}), 0)`.mapWith(Number),
-        totalOutput: sql<number>`coalesce(sum(${v3Schema.v3Spawns.tokensOutput}), 0)`.mapWith(Number),
+        totalInput:
+          sql<number>`coalesce(sum(${v3Schema.v3Spawns.tokensInput}), 0)`.mapWith(
+            Number,
+          ),
+        totalOutput:
+          sql<number>`coalesce(sum(${v3Schema.v3Spawns.tokensOutput}), 0)`.mapWith(
+            Number,
+          ),
         spawnCount: sql<number>`count(${v3Schema.v3Spawns.id})`.mapWith(Number),
       })
       .from(v3Schema.v3Nodes)
@@ -126,7 +136,65 @@ export const runSummary = defineAction({
       )
       .where(eq(v3Schema.v3Nodes.runId, args.runId));
 
-    const tokens = tokenRows[0] ?? { totalInput: 0, totalOutput: 0, spawnCount: 0 };
+    const tokens = tokenRows[0] ?? {
+      totalInput: 0,
+      totalOutput: 0,
+      spawnCount: 0,
+    };
+
+    // W4 (SDLC-059) — diff stats, the SECOND call site resolveDiffBase must
+    // cover (workspaceDiff is the first). Resolve the most recently-started
+    // spawn on this run that carries a workspaceId, and compute aggregate
+    // diff counts (not full patch text — this is a roll-up, not a diff view).
+    // Never auto-runs anything else; a resolution failure returns an explicit
+    // error shape, NEVER a diff computed against a guessed/stale base.
+    const wsRows = await db
+      .select({ workspaceId: v3Schema.v3Spawns.workspaceId })
+      .from(v3Schema.v3Spawns)
+      .innerJoin(
+        v3Schema.v3Nodes,
+        eq(v3Schema.v3Spawns.nodeId, v3Schema.v3Nodes.id),
+      )
+      .where(
+        and(
+          eq(v3Schema.v3Nodes.runId, args.runId),
+          isNotNull(v3Schema.v3Spawns.workspaceId),
+        ),
+      )
+      .orderBy(desc(v3Schema.v3Spawns.startedAt))
+      .limit(1);
+
+    const workspaceId = wsRows[0]?.workspaceId ?? null;
+    let diff:
+      | {
+          base: string;
+          baseSource: string;
+          filesChanged: number;
+          additions: number;
+          deletions: number;
+        }
+      | { error: "diff-base-unresolvable"; detail: string }
+      | null = null;
+    if (workspaceId) {
+      try {
+        const stats = await localWorkspaceDiffStats(workspaceId);
+        diff = stats
+          ? {
+              base: stats.base,
+              baseSource: stats.baseSource,
+              filesChanged: stats.filesChanged,
+              additions: stats.additions,
+              deletions: stats.deletions,
+            }
+          : null;
+      } catch (err) {
+        if (err instanceof DiffBaseUnresolvableError) {
+          diff = { error: "diff-base-unresolvable", detail: err.message };
+        } else {
+          throw err;
+        }
+      }
+    }
 
     const nodeOutputs = terminalNodes.map((n) => ({
       nodeId: n.id,
@@ -137,7 +205,9 @@ export const runSummary = defineAction({
       fanoutIndex: n.fanoutIndex,
       error: n.error ?? null,
       completedAt: n.completedAt?.toISOString() ?? null,
-      output: n.outputArtifactId ? (artifactMap.get(n.outputArtifactId) ?? null) : null,
+      output: n.outputArtifactId
+        ? (artifactMap.get(n.outputArtifactId) ?? null)
+        : null,
     }));
 
     const doneCount = nodeCounts["done"] ?? 0;
@@ -174,6 +244,13 @@ export const runSummary = defineAction({
       },
       /** Terminal node outputs, one entry per done/failed/skipped node. */
       nodeOutputs,
+      /**
+       * Diff stats for the run's workspace (W4) — null when no spawn on this
+       * run carries a workspaceId; `{error:"diff-base-unresolvable",detail}`
+       * when the base couldn't be resolved (never a stat computed against a
+       * guessed/stale base).
+       */
+      diff,
     };
   },
 });

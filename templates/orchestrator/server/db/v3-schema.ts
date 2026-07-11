@@ -59,6 +59,12 @@ export const v3WorkspaceStateEnum = pgEnum("v3_workspace_state", [
   "destroying",
   "destroyed",
   "error",
+  // F1 workspace contract (02-workflows.md §7): a workspace that finished
+  // provisioning (clone/worktree-add succeeded) but failed the W1/W2/W3
+  // readiness assertion sequence — distinct from `error` (a provisioning
+  // failure). Never counted as an agent failure (errorClass=infra). Additive
+  // Postgres enum value — see the `f1-workspace-contract` migration.
+  "failed",
 ]);
 
 // ─── v3_workflow_templates ──────────────────────────────────────────────────
@@ -237,6 +243,16 @@ export const v3Workspaces = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     destroyedAt: timestamp("destroyed_at", { withTimezone: true }),
     createdBy: text("created_by"),
+    // F1 workspace contract (02-workflows.md §7, `f1-workspace-contract`
+    // migration) — additive readiness bookkeeping. `baseSha`: the target
+    // branch's tip at the moment W1 last confirmed merge-base distance 0.
+    // `readyAt`: set only after the FULL W1→W2→W3 sequence passes — null
+    // means "not ready", which the dispatcher's readiness gate checks
+    // directly (never spawn/dispatch on a workspace with readyAt IS NULL).
+    // `readyReport`: per-stage assertion output summaries (EvidenceCard).
+    baseSha: text("base_sha"),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    readyReport: jsonb("ready_report"),
     ...ownableColumns(),
   },
   (t) => [

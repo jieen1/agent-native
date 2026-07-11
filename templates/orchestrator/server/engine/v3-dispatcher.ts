@@ -41,6 +41,7 @@ import {
   isAcpClaudeCodeWorkerEnabled,
 } from "./v3-acp-adapter.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
+import { WorkspaceNotReadyError } from "../v3-workspace-provision.js";
 import type { RuntimeExecutor } from "../runtime/executors/types.js";
 import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
 import type { NodeRunnerResult } from "../runtime/node-runner.js";
@@ -481,15 +482,34 @@ export class V3Dispatcher {
     // to obtain the workspace's vmName. Do NOT boot a disposable VM here.
     let resolvedWorkspaceId: string | null = null;
     if (resolvedWorkspaceRef) {
-      try {
-        const ws = await getWorkspace(resolvedWorkspaceRef);
+      const ws = await getWorkspace(resolvedWorkspaceRef).catch(() => null);
+      if (ws) {
+        // F1 readiness gate (02-workflows.md §7, T-F1-09): never spawn/dispatch
+        // a node on a workspace that has not passed the full W1→W2→W3 readiness
+        // sequence. `readyAt` is set only once that sequence passes; a null
+        // value means provisioning/failed/reset-unready — reject BEFORE any
+        // spawn row is opened (Step 8a never runs) and emit `workspace.not_ready`
+        // (kind=infra) so the run's event stream records WHY the node didn't
+        // advance, without counting it as an agent failure.
+        if (!ws.readyAt) {
+          await this.writeEvent(runId, "workspace.not_ready", {
+            nodeId: nodeRow.nodeIdInDag,
+            workspaceId: ws.id,
+            state: ws.state,
+            errorClass: "infra",
+          });
+          throw new WorkspaceNotReadyError(
+            "W1",
+            `workspace '${ws.id}' has no ready_at (state=${ws.state}) — dispatch rejected`,
+          );
+        }
         resolvedWorkspaceId = ws.id;
         // Override the workspace path — the long-lived VM is already at /work.
         v3Input.workspace = "/work";
-      } catch {
-        // Workspace lookup failed — proceed without workspace mount.
-        // The node will still run but without the workspace context.
       }
+      // else: workspace lookup failed — proceed without workspace mount (the
+      // node still runs but without the workspace context), unchanged legacy
+      // behaviour for a dangling/unresolvable workspace ref.
     }
 
     // ── Step 7: Build NodeRunner node with retry / timeout from dag (G27) ─

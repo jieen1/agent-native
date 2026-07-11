@@ -25,12 +25,29 @@
 // repo URLs are supported token-less (for cloning a local path with no token).
 
 import { spawn } from "node:child_process";
-import { readFile, readdir, rm, stat, writeFile, mkdir } from "node:fs/promises";
+import {
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+  mkdir,
+} from "node:fs/promises";
 import { join, normalize, relative, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 
 import { getV3Db, v3Schema, LOCAL_DEFAULT_OWNER } from "./db/index.js";
+import {
+  WorkspaceNotReadyError,
+  DiffBaseUnresolvableError,
+  assertDependenciesWarm,
+  runTestCmdSmoke,
+  type DepWarmReport,
+  type SmokeReport,
+} from "./v3-workspace-provision.js";
+
+export { WorkspaceNotReadyError, DiffBaseUnresolvableError };
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
@@ -67,6 +84,18 @@ export function bareMirrorDir(repoUrl: string): string {
 
 /** Generous git timeout — a clone over slow egress can take a while. */
 const GIT_TIMEOUT_MS = 180_000;
+
+/**
+ * Bound for freshness-critical git calls (`refreshMirror`), configurable via
+ * `GIT_TIMEOUT_MS` so a network-unreachable remote fails fast and bounded
+ * (T-F1-16: a tiny value here means a test doesn't have to wait out the OS's
+ * own TCP connect timeout to prove the bound is enforced). Falls back to the
+ * generous clone/push {@link GIT_TIMEOUT_MS} when unset.
+ */
+export function resolveGitTimeoutMs(): number {
+  const raw = Number(process.env.GIT_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : GIT_TIMEOUT_MS;
+}
 
 /** Deterministic non-secret bot identity so commits succeed (mirrors §7.1a). */
 const BOT_EMAIL = "orchestrator@an.local";
@@ -165,8 +194,9 @@ interface GitResult {
  */
 function git(
   args: string[],
-  opts: { cwd?: string; env?: Record<string, string> } = {},
+  opts: { cwd?: string; env?: Record<string, string>; timeoutMs?: number } = {},
 ): Promise<GitResult> {
+  const timeoutMs = opts.timeoutMs ?? GIT_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd: opts.cwd,
@@ -180,10 +210,8 @@ function git(
       if (settled) return;
       settled = true;
       child.kill("SIGKILL");
-      reject(
-        new Error(`git ${args[0] ?? ""} timed out after ${GIT_TIMEOUT_MS}ms`),
-      );
-    }, GIT_TIMEOUT_MS);
+      reject(new Error(`git ${args[0] ?? ""} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
 
     child.stdout.on("data", (d) => {
       stdout += d.toString();
@@ -373,8 +401,9 @@ export async function createLocalWorkspace(
   });
 
   try {
+    let resolvedBaseRef: string;
     if (getWorkspaceIsolation() === "worktree") {
-      await provisionWorktree({
+      resolvedBaseRef = await provisionWorktree({
         repoUrl,
         dir,
         branch,
@@ -382,23 +411,52 @@ export async function createLocalWorkspace(
         baseRef: opts.baseRef?.trim() || undefined,
       });
     } else {
-      await provisionClone({ repoUrl, dir, branch, token });
+      resolvedBaseRef = await provisionClone({
+        repoUrl,
+        dir,
+        branch,
+        token,
+        baseRef: opts.baseRef?.trim() || undefined,
+      });
     }
 
-    // Mark the row ready.
+    // ── Readiness assertion (W1→W2→W3, DESIGN §7) ─────────────────────────
+    // Only after ALL three invariants pass does the row become ready — a
+    // WorkspaceNotReadyError thrown here is caught below and marks the row
+    // `failed` (infra condition, not a provisioning error) instead of `ready`.
+    const mirrorDir =
+      getWorkspaceIsolation() === "worktree" ? bareMirrorDir(repoUrl) : null;
+    const ready = await assertWorkspaceReady(dir, mirrorDir, {
+      targetBranch: resolvedBaseRef,
+    });
+
     await db
       .update(v3Schema.v3Workspaces)
-      .set({ state: "ready" })
+      .set({
+        state: "ready",
+        baseSha: ready.baseSha,
+        readyAt: new Date(ready.readyAt),
+        readyReport: ready.report as unknown,
+        tags: { base_ref: resolvedBaseRef } as Record<string, string>,
+      })
       .where(eq(v3Schema.v3Workspaces.id, id));
 
     return { id, dir, branch };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    // Mark the row error and clean up the partial checkout (best-effort). In
-    // worktree mode also detach the half-added worktree from the mirror.
+    const isReadinessFailure = err instanceof WorkspaceNotReadyError;
+    // Mark the row `failed` for a readiness-assertion miss (infra, W1-W3 —
+    // never counted as an agent failure) or `error` for anything else (a
+    // genuine provisioning failure — clone/worktree-add/config). Clean up the
+    // partial checkout either way (best-effort). In worktree mode also detach
+    // the half-added worktree from the mirror.
     await db
       .update(v3Schema.v3Workspaces)
-      .set({ state: "error" })
+      .set(
+        isReadinessFailure
+          ? { state: "failed", readyReport: { error: message } as unknown }
+          : { state: "error" },
+      )
       .where(eq(v3Schema.v3Workspaces.id, id))
       .catch(() => {});
     if (getWorkspaceIsolation() === "worktree") {
@@ -408,6 +466,12 @@ export async function createLocalWorkspace(
       );
     }
     await rm(dir, { recursive: true, force: true }).catch(() => {});
+    if (isReadinessFailure) {
+      // Preserve the WorkspaceNotReadyError identity (stage/detail/errorClass
+      // ='infra') — callers (createWorkspace's caller, the dispatcher) must be
+      // able to `instanceof` this, not just read a generic wrapped message.
+      throw err;
+    }
     throw new Error(`createLocalWorkspace failed for ${repoUrl}: ${message}`);
   }
 }
@@ -415,14 +479,17 @@ export async function createLocalWorkspace(
 /**
  * Full `git clone` per workspace (the original "clone" strategy). Clones into
  * `dir`, resets `origin` to the clean URL (token never persisted), sets the bot
- * identity, and cuts + checks out `branch`.
+ * identity, and cuts + checks out `branch`. Returns the resolved target-branch
+ * name (the branch W1/W4 track going forward) — `opts.baseRef` when explicit,
+ * else whatever the clone's default checkout resolved to.
  */
 async function provisionClone(opts: {
   repoUrl: string;
   dir: string;
   branch: string;
   token: string | null;
-}): Promise<void> {
+  baseRef?: string;
+}): Promise<string> {
   const { repoUrl, dir, branch, token } = opts;
   const cloneUrl = withToken(repoUrl, token);
   const cloned = await git(["clone", "--no-single-branch", cloneUrl, dir]);
@@ -435,6 +502,29 @@ async function provisionClone(opts: {
   await git(["remote", "set-url", "origin", repoUrl.trim()], { cwd: dir });
   await git(["config", "user.email", BOT_EMAIL], { cwd: dir });
   await git(["config", "user.name", BOT_NAME], { cwd: dir });
+
+  // Resolve + capture the target branch BEFORE cutting the run branch off it
+  // (checkout -B below moves HEAD to a NEW branch).
+  let resolvedBranchName: string;
+  if (opts.baseRef && opts.baseRef.trim()) {
+    resolvedBranchName = opts.baseRef.trim();
+    const co = await git(["checkout", resolvedBranchName], { cwd: dir });
+    if (co.code !== 0) {
+      throw new Error(
+        `git checkout ${resolvedBranchName} (base) failed (exit ${co.code}): ` +
+          redact(`${co.stdout}\n${co.stderr}`.trim(), token),
+      );
+    }
+  } else {
+    const head = await git(["symbolic-ref", "--short", "HEAD"], {
+      cwd: dir,
+    }).catch(() => null);
+    resolvedBranchName =
+      head && head.code === 0 && head.stdout.trim()
+        ? head.stdout.trim()
+        : "HEAD";
+  }
+
   const checkout = await git(["checkout", "-B", branch], { cwd: dir });
   if (checkout.code !== 0) {
     throw new Error(
@@ -442,6 +532,7 @@ async function provisionClone(opts: {
         redact(`${checkout.stdout}\n${checkout.stderr}`.trim(), token),
     );
   }
+  return resolvedBranchName;
 }
 
 /**
@@ -454,6 +545,13 @@ async function provisionClone(opts: {
  * The bare mirror's `origin` is reset to the clean URL after the auth fetch, so
  * the token never lands in `.git/config`. The worktree's checkout reuses the
  * mirror's config (bot identity set on the worktree itself for commits).
+ *
+ * Returns the resolved target-branch NAME (never `FETCH_HEAD` — that's only
+ * valid as a `worktree add` ref, not a stable name to re-resolve later): the
+ * caller's explicit `baseRef` when given, else whatever
+ * {@link resolveBareBaseRef} found (e.g. `main`/`master`, or the literal
+ * `HEAD` sentinel when nothing is resolvable — W1/W4 then fail loud rather
+ * than silently tracking nothing).
  */
 async function provisionWorktree(opts: {
   repoUrl: string;
@@ -462,7 +560,7 @@ async function provisionWorktree(opts: {
   token: string | null;
   /** Explicit base ref to cut the run branch from (e.g. the project branch). */
   baseRef?: string;
-}): Promise<void> {
+}): Promise<string> {
   const { repoUrl, dir, branch, token } = opts;
   const bare = bareMirrorDir(repoUrl);
 
@@ -476,6 +574,7 @@ async function provisionWorktree(opts: {
   //    so we cut from the real upstream commit (not a stale local ref), then use
   //    FETCH_HEAD. Otherwise fall back to the mirror's default-branch tip.
   let baseRef: string;
+  let resolvedBranchName: string;
   if (opts.baseRef && opts.baseRef.trim()) {
     const wanted = opts.baseRef.trim();
     const fetchUrl = withToken(repoUrl, token);
@@ -500,8 +599,14 @@ async function provisionWorktree(opts: {
         ? "FETCH_HEAD"
         : // Fetch failed (e.g. branch not on remote) — fall back gracefully.
           await resolveBareBaseRef(bare);
+    // The caller explicitly asked to track `wanted` — track it regardless of
+    // which ref `worktree add` actually cut from, so a genuinely-missing
+    // upstream branch surfaces as an explicit W1/W4 failure later rather than
+    // silently tracking a different branch.
+    resolvedBranchName = wanted;
   } else {
     baseRef = await resolveBareBaseRef(bare);
+    resolvedBranchName = baseRef;
   }
 
   // 3) Add the worktree on a fresh branch from the base ref. -B is idempotent on
@@ -524,6 +629,8 @@ async function provisionWorktree(opts: {
   //    token via a one-shot auth URL exactly like the clone path.
   await git(["config", "user.email", BOT_EMAIL], { cwd: dir });
   await git(["config", "user.name", BOT_NAME], { cwd: dir });
+
+  return resolvedBranchName;
 }
 
 /**
@@ -543,11 +650,15 @@ async function ensureBareMirror(opts: {
 
   // Probe whether the bare mirror already exists (and is a real bare repo).
   const isRepo =
-    (await git(["-C", bare, "rev-parse", "--is-bare-repository"]).catch(() => ({
-      code: 1,
-      stdout: "",
-      stderr: "",
-    }))).stdout.trim() === "true";
+    (
+      await git(["-C", bare, "rev-parse", "--is-bare-repository"]).catch(
+        () => ({
+          code: 1,
+          stdout: "",
+          stderr: "",
+        }),
+      )
+    ).stdout.trim() === "true";
 
   if (!isRepo) {
     const cloneUrl = withToken(repoUrl, token);
@@ -571,9 +682,14 @@ async function ensureBareMirror(opts: {
 
   // Existing mirror — refresh from upstream (one-shot auth URL, never persisted).
   const fetchUrl = withToken(repoUrl, token);
-  await git(["-C", bare, "fetch", "--prune", fetchUrl, "+refs/heads/*:refs/heads/*"]).catch(
-    () => {},
-  );
+  await git([
+    "-C",
+    bare,
+    "fetch",
+    "--prune",
+    fetchUrl,
+    "+refs/heads/*:refs/heads/*",
+  ]).catch(() => {});
   await git(["-C", bare, "remote", "set-head", "origin", "-a"]).catch(() => {});
 }
 
@@ -595,6 +711,321 @@ async function resolveBareBaseRef(bare: string): Promise<string> {
   }
   // Last resort — current HEAD of the bare repo.
   return "HEAD";
+}
+
+// ── W1/W4: readiness + dynamic diff-base resolution ─────────────────────────
+
+/**
+ * Refresh the shared bare mirror from its real upstream (`git fetch --prune`,
+ * mapping `refs/heads/*` directly — matches {@link ensureBareMirror}'s
+ * mirroring convention). Bounded by {@link resolveGitTimeoutMs} (default
+ * 180s, overridable via `GIT_TIMEOUT_MS` for a fast-fail test/injection —
+ * T-F1-16). Called AT CALL TIME by both {@link assertWorkspaceReady} (W1) and
+ * {@link resolveDiffBase} (W4) — never a cached/static freshness check.
+ * Throws a plain `Error` on failure (timeout or non-zero exit); callers
+ * reclassify it (`WorkspaceNotReadyError` for W1, `DiffBaseUnresolvableError`
+ * for W4) in their own context.
+ */
+export async function refreshMirror(mirrorDir: string): Promise<void> {
+  const timeoutMs = resolveGitTimeoutMs();
+  let res: GitResult;
+  try {
+    res = await git(
+      ["fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*"],
+      {
+        cwd: mirrorDir,
+        timeoutMs,
+      },
+    );
+  } catch (err: unknown) {
+    throw new Error(
+      `refreshMirror: git fetch failed for '${mirrorDir}': ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  if (res.code !== 0) {
+    throw new Error(
+      `refreshMirror: git fetch --prune failed (exit ${res.code}) for '${mirrorDir}': ` +
+        (res.stderr.trim() || res.stdout.trim()),
+    );
+  }
+}
+
+/**
+ * Fetch `targetBranch` from `source` (a bare-mirror path, in worktree
+ * isolation, or the literal remote name `"origin"` in clone isolation) INTO
+ * `dir`'s own `refs/remotes/origin/<targetBranch>` — a uniform ref location
+ * regardless of isolation mode, so {@link resolveDiffBase} /
+ * {@link assertWorkspaceReady} don't need mode-specific merge-base logic.
+ * Throws `DiffBaseUnresolvableError` when the branch isn't fetchable (the
+ * W4/T-F1-02 "target branch doesn't exist" case).
+ */
+async function fetchTargetIntoOriginRef(
+  dir: string,
+  source: string,
+  targetBranch: string,
+): Promise<void> {
+  let res: GitResult;
+  try {
+    // `+` (force) — this ref mirrors the target branch TIP; a rewritten
+    // upstream (force push) must update it rather than fail the local
+    // fast-forward check and misreport "branch unfetchable".
+    res = await git(
+      ["fetch", source, `+${targetBranch}:refs/remotes/origin/${targetBranch}`],
+      { cwd: dir },
+    );
+  } catch (err: unknown) {
+    throw new DiffBaseUnresolvableError(
+      dir,
+      targetBranch,
+      `fetch from '${source}' failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (res.code !== 0) {
+    throw new DiffBaseUnresolvableError(
+      dir,
+      targetBranch,
+      `git fetch ${source} ${targetBranch} failed (exit ${res.code}): ` +
+        (res.stderr.trim() || res.stdout.trim()),
+    );
+  }
+}
+
+/**
+ * W4 rewrite (SDLC-059, v3-workspace-local.ts:716 in the original bug
+ * report) — dynamically resolve the divergence base AT CALL TIME. Refreshes
+ * the shared bare mirror (`mirrorDir`, worktree isolation) or fetches
+ * directly from `origin` (`mirrorDir === null`, clone isolation), then
+ * computes `git merge-base` against HEAD. ANY failure (branch missing
+ * upstream, no common ancestor, network/timeout) throws
+ * `DiffBaseUnresolvableError` — this NEVER degrades through
+ * `origin/main` → `origin/master` → `HEAD~1` → the empty tree (the B4
+ * false-diff root cause).
+ */
+export async function resolveDiffBase(
+  dir: string,
+  mirrorDir: string | null,
+  targetBranch: string,
+): Promise<{ base: string; baseSource: string }> {
+  if (mirrorDir) {
+    try {
+      await refreshMirror(mirrorDir);
+    } catch (err: unknown) {
+      throw new DiffBaseUnresolvableError(
+        dir,
+        targetBranch,
+        `refreshMirror failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  const source = mirrorDir ?? "origin";
+  await fetchTargetIntoOriginRef(dir, source, targetBranch);
+
+  let mb: GitResult;
+  try {
+    mb = await git(
+      ["merge-base", `refs/remotes/origin/${targetBranch}`, "HEAD"],
+      {
+        cwd: dir,
+      },
+    );
+  } catch (err: unknown) {
+    throw new DiffBaseUnresolvableError(
+      dir,
+      targetBranch,
+      `merge-base failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (mb.code !== 0 || !mb.stdout.trim()) {
+    throw new DiffBaseUnresolvableError(
+      dir,
+      targetBranch,
+      mb.stderr.trim() || "no common ancestor with the target branch",
+    );
+  }
+
+  return {
+    base: mb.stdout.trim(),
+    baseSource: `merge-base(origin/${targetBranch}, HEAD)`,
+  };
+}
+
+/**
+ * Resolve the branch this workspace tracks for W1 (freshness) and W4 (diff
+ * base) purposes. Prefers the `base_ref` tag persisted by
+ * {@link createLocalWorkspace} at creation time (via
+ * {@link provisionWorktree}/{@link provisionClone}'s resolved branch name);
+ * falls back to a fresh {@link resolveBareBaseRef} lookup for legacy rows
+ * created before that tag existed. Throws `DiffBaseUnresolvableError` when
+ * neither source resolves a real branch name.
+ */
+async function resolveWorkspaceTargetBranch(row: {
+  repoUrl: string | null;
+  tags: unknown;
+}): Promise<string> {
+  const tags =
+    row.tags && typeof row.tags === "object"
+      ? (row.tags as Record<string, unknown>)
+      : {};
+  const tagged = typeof tags.base_ref === "string" ? tags.base_ref.trim() : "";
+  if (tagged) return tagged;
+
+  if (!row.repoUrl) {
+    throw new DiffBaseUnresolvableError(
+      "(workspace)",
+      "(untracked)",
+      "workspace has no repo_url and no tracked base_ref tag",
+    );
+  }
+  const bare = bareMirrorDir(row.repoUrl);
+  const resolved = await resolveBareBaseRef(bare).catch(() => "HEAD");
+  if (!resolved || resolved === "HEAD") {
+    throw new DiffBaseUnresolvableError(
+      bare,
+      "(unresolved)",
+      "no default branch resolvable from the mirror's origin/HEAD, and no tracked base_ref tag",
+    );
+  }
+  return resolved;
+}
+
+/**
+ * W1 — baseline freshness: after (re-)fetching, the workspace's HEAD must sit
+ * EXACTLY at the target branch's current tip (merge-base distance 0). A
+ * freshly-provisioned worktree/clone that's fallen behind (the mirror
+ * advanced between provisioning and this assertion) is fast-forwarded with a
+ * `git reset --hard` and re-checked; a workspace that's still behind after
+ * that reset — or whose target branch can't be resolved/fetched at all —
+ * throws `WorkspaceNotReadyError('W1', …)`.
+ */
+export async function assertW1BaselineFresh(
+  dir: string,
+  mirrorDir: string | null,
+  targetBranch: string,
+): Promise<{ baseSha: string; resetPerformed: boolean; detail: string }> {
+  if (mirrorDir) {
+    try {
+      await refreshMirror(mirrorDir);
+    } catch (err: unknown) {
+      throw new WorkspaceNotReadyError(
+        "W1",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  const source = mirrorDir ?? "origin";
+  try {
+    await fetchTargetIntoOriginRef(dir, source, targetBranch);
+  } catch (err: unknown) {
+    throw new WorkspaceNotReadyError(
+      "W1",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  const targetRef = `refs/remotes/origin/${targetBranch}`;
+  const targetTip = await git(["rev-parse", targetRef], { cwd: dir });
+  if (targetTip.code !== 0 || !targetTip.stdout.trim()) {
+    throw new WorkspaceNotReadyError(
+      "W1",
+      `cannot resolve '${targetRef}': ${targetTip.stderr.trim() || targetTip.stdout.trim()}`,
+    );
+  }
+  const tip = targetTip.stdout.trim();
+
+  const isFresh = async (): Promise<boolean> => {
+    const mb = await git(["merge-base", targetRef, "HEAD"], { cwd: dir });
+    return mb.code === 0 && mb.stdout.trim() === tip;
+  };
+
+  if (await isFresh()) {
+    return {
+      baseSha: tip,
+      resetPerformed: false,
+      detail: `merge-base distance 0 against ${targetBranch}@${tip.slice(0, 12)}`,
+    };
+  }
+
+  // Stale — the workspace was cut before the target branch advanced (or the
+  // fetch above just pulled a newer tip). Fast-forward the fresh checkout —
+  // safe because no work has happened on it yet (assertWorkspaceReady runs
+  // immediately after provisioning, before any commits land on the run branch).
+  const reset = await git(["reset", "--hard", targetRef], { cwd: dir });
+  if (reset.code !== 0) {
+    throw new WorkspaceNotReadyError(
+      "W1",
+      `git reset --hard ${targetRef} failed (exit ${reset.code}): ` +
+        (reset.stderr.trim() || reset.stdout.trim()),
+    );
+  }
+  if (!(await isFresh())) {
+    throw new WorkspaceNotReadyError(
+      "W1",
+      `merge-base distance still nonzero after reset --hard ${targetRef}`,
+    );
+  }
+  return {
+    baseSha: tip,
+    resetPerformed: true,
+    detail: `stale at creation — reset --hard ${targetBranch}@${tip.slice(0, 12)} to reach merge-base distance 0`,
+  };
+}
+
+/** Aggregate report from the W1→W2→W3 readiness sequence (persisted as `ready_report`). */
+export interface ReadyReport {
+  w1: {
+    ok: true;
+    baseSha: string;
+    targetBranch: string;
+    resetPerformed: boolean;
+    detail: string;
+  };
+  w2: DepWarmReport;
+  w3: SmokeReport;
+}
+
+export interface AssertWorkspaceReadyOptions {
+  /** The branch W1 freshness + W4 diff-base track for this workspace. */
+  targetBranch: string;
+  pnpmStoreDir?: string;
+  /** Project-level `test_cmd_smoke` override (tracker project settings). */
+  testCmdSmoke?: string | null;
+}
+
+/**
+ * The full W1→W2→W3 readiness assertion sequence (02-workflows.md §7). Runs
+ * IN ORDER — a W1 failure never reaches W2/W3. Only when all three pass does
+ * the caller (createLocalWorkspace) get a `readyAt`/`baseSha`/`report` to
+ * persist; any stage's `WorkspaceNotReadyError` propagates uncaught.
+ */
+export async function assertWorkspaceReady(
+  dir: string,
+  mirrorDir: string | null,
+  opts: AssertWorkspaceReadyOptions,
+): Promise<{ baseSha: string; readyAt: string; report: ReadyReport }> {
+  const w1 = await assertW1BaselineFresh(dir, mirrorDir, opts.targetBranch);
+  const w2 = await assertDependenciesWarm(dir, {
+    pnpmStoreDir: opts.pnpmStoreDir,
+  });
+  const w3 = await runTestCmdSmoke(dir, { command: opts.testCmdSmoke });
+
+  const readyAt = new Date().toISOString();
+  return {
+    baseSha: w1.baseSha,
+    readyAt,
+    report: {
+      w1: {
+        ok: true,
+        baseSha: w1.baseSha,
+        targetBranch: opts.targetBranch,
+        resetPerformed: w1.resetPerformed,
+        detail: w1.detail,
+      },
+      w2,
+      w3,
+    },
+  };
 }
 
 /**
@@ -636,6 +1067,35 @@ export async function getLocalWorkspaceDir(id: string): Promise<string | null> {
   return row.hostPath;
 }
 
+/** The fields {@link localWorkspaceDiff} needs to resolve W4's target branch. */
+interface LocalWorkspaceRow {
+  hostPath: string | null;
+  state: string;
+  repoUrl: string | null;
+  tags: unknown;
+}
+
+async function getLocalWorkspaceRow(
+  id: string,
+): Promise<LocalWorkspaceRow | null> {
+  const db = getV3Db();
+  const [row] = await db
+    .select({
+      hostPath: v3Schema.v3Workspaces.hostPath,
+      state: v3Schema.v3Workspaces.state,
+      repoUrl: v3Schema.v3Workspaces.repoUrl,
+      tags: v3Schema.v3Workspaces.tags,
+    })
+    .from(v3Schema.v3Workspaces)
+    .where(eq(v3Schema.v3Workspaces.id, id))
+    .limit(1);
+
+  if (!row || !row.hostPath || row.state === "destroyed") {
+    return null;
+  }
+  return row;
+}
+
 // ── Host-native read surface (diff / list / read) ───────────────────────────
 //
 // The VM read path (MicrosandboxRuntime) is unavailable for host-native
@@ -663,8 +1123,10 @@ export interface LocalDiffResult {
   diff: string;
   /** Per-file breakdown (path + add/del counts + that file's patch). */
   files: LocalDiffFile[];
-  /** The base ref the diff was taken against (e.g. a merge-base sha or `main`). */
+  /** The base ref the diff was taken against (a merge-base sha, or the resolved `against` commit). */
   base: string;
+  /** Where `base` came from: `"explicit"` (caller passed `against`) or `merge-base(origin/<branch>, HEAD)` (W4). */
+  baseSource: string;
 }
 
 /**
@@ -673,24 +1135,55 @@ export interface LocalDiffResult {
  * The run branch's work is typically already COMMITTED (a commit node ran
  * `git commit`), so a bare `git diff HEAD` (working tree vs HEAD) is empty.
  * To surface BOTH committed branch work AND any uncommitted edits, we diff
- * against the divergence point from the default branch:
+ * against the divergence point from the workspace's tracked target branch:
  *
- *   base = git merge-base origin/main HEAD   (fallbacks: origin/master, main, master)
- *   git diff <base>                          (two-dot: working tree vs base)
+ *   base = git merge-base origin/<target> HEAD   (W4 — resolved AT CALL TIME, never cached)
+ *   git diff <base>                              (two-dot: working tree vs base)
  *
  * Two-dot (not three-dot) is deliberate: it includes uncommitted working-tree
  * changes too, so a workspace mid-edit still shows its diff. When `against` is
- * supplied it overrides the computed base. A workspace with no host_path
- * returns null (caller falls back to the VM path).
+ * supplied it overrides the computed base — resolved directly via
+ * `git rev-parse` with `baseSource: "explicit"`, WITHOUT refreshing the
+ * mirror or computing a merge-base (T-F1-15: an explicit comparison ref for
+ * review-diff scenarios is trusted as-is). A workspace with no host_path
+ * returns null (caller falls back to the VM path). Throws
+ * `DiffBaseUnresolvableError` when the base cannot be resolved (W4) — the
+ * caller (the `workspaceDiff` action, `runSummary`'s diff stats) must catch
+ * this and return `{ error: "diff-base-unresolvable", detail }`, never a diff
+ * computed against a guessed/stale base.
  */
 export async function localWorkspaceDiff(
   id: string,
   against?: string,
 ): Promise<LocalDiffResult | null> {
-  const dir = await getLocalWorkspaceDir(id);
-  if (!dir) return null;
+  const row = await getLocalWorkspaceRow(id);
+  if (!row || !row.hostPath) return null;
+  const dir = row.hostPath;
 
-  const base = against?.trim() || (await resolveDiffBase(dir));
+  let base: string;
+  let baseSource: string;
+  if (against && against.trim()) {
+    const wanted = against.trim();
+    const resolved = await git(["rev-parse", wanted], { cwd: dir });
+    if (resolved.code !== 0 || !resolved.stdout.trim()) {
+      throw new DiffBaseUnresolvableError(
+        dir,
+        wanted,
+        resolved.stderr.trim() || `'${wanted}' does not resolve to a commit`,
+      );
+    }
+    base = resolved.stdout.trim();
+    baseSource = "explicit";
+  } else {
+    const targetBranch = await resolveWorkspaceTargetBranch(row);
+    const mirrorDir =
+      getWorkspaceIsolation() === "worktree" && row.repoUrl
+        ? bareMirrorDir(row.repoUrl)
+        : null;
+    const resolved = await resolveDiffBase(dir, mirrorDir, targetBranch);
+    base = resolved.base;
+    baseSource = resolved.baseSource;
+  }
 
   // Numstat → reliable per-file add/del counts (handles renames/binaries).
   const numstat = await git(["--no-pager", "diff", "--numstat", base], {
@@ -727,27 +1220,43 @@ export async function localWorkspaceDiff(
     })
     .filter((f): f is LocalDiffFile => f !== null);
 
-  return { diff: full.stdout, files, base };
+  return { diff: full.stdout, files, base, baseSource };
 }
 
-/** Resolve the divergence base for a workspace diff. Best-effort with fallbacks. */
-async function resolveDiffBase(dir: string): Promise<string> {
-  for (const ref of ["origin/main", "origin/master", "main", "master"]) {
-    const mb = await git(["merge-base", ref, "HEAD"], { cwd: dir }).catch(
-      () => null,
-    );
-    if (mb && mb.code === 0 && mb.stdout.trim()) return mb.stdout.trim();
+/** Aggregate diff stats for a workspace — no patch text (light "diff 统计" payload for run summaries). */
+export interface LocalDiffStats {
+  base: string;
+  baseSource: string;
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+}
+
+/**
+ * Same base-resolution contract as {@link localWorkspaceDiff} (W4 — dynamic,
+ * throws `DiffBaseUnresolvableError` on failure), but returns aggregate
+ * counts instead of full patch text. Used by `runSummary`'s diff stats (the
+ * SECOND call site W4 must cover per T-F1-11 — `workspaceDiff` is the first).
+ */
+export async function localWorkspaceDiffStats(
+  id: string,
+  against?: string,
+): Promise<LocalDiffStats | null> {
+  const result = await localWorkspaceDiff(id, against);
+  if (!result) return null;
+  let additions = 0;
+  let deletions = 0;
+  for (const f of result.files) {
+    additions += f.additions;
+    deletions += f.deletions;
   }
-  // No upstream to compare against — fall back to the parent commit so at least
-  // the latest commit's changes render; if even that fails, the empty tree.
-  const parent = await git(["rev-parse", "HEAD~1"], { cwd: dir }).catch(
-    () => null,
-  );
-  if (parent && parent.code === 0 && parent.stdout.trim()) {
-    return parent.stdout.trim();
-  }
-  // Git's well-known empty-tree object — diffs the whole HEAD as additions.
-  return "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+  return {
+    base: result.base,
+    baseSource: result.baseSource,
+    filesChanged: result.files.length,
+    additions,
+    deletions,
+  };
 }
 
 /** Parse `git diff --name-status` into path → status-letter. */
@@ -1041,7 +1550,8 @@ export async function commitAndPush(
   // deployment), the commit + push above already published the branch to the
   // local source; there is nothing to open a PR against, so skip it silently
   // instead of throwing. The branch lands in the local bare repo's refs.
-  const isLocalRemote = !/^https:\/\//.test(remote) || !/github\.com/.test(remote);
+  const isLocalRemote =
+    !/^https:\/\//.test(remote) || !/github\.com/.test(remote);
   if (opts.createMr && isLocalRemote) {
     return result;
   }
@@ -1162,7 +1672,12 @@ function parseGithubSlug(
 // ── Secret-leak defense (DESIGN §13 hardening) ───────────────────────────────
 
 /** Glob patterns for files that must NEVER be committed (carry live bearers). */
-const MCP_CONFIG_PATTERNS = [".mcp.json", "*.mcp.json", "**/.mcp.json", "**/*.mcp.json"];
+const MCP_CONFIG_PATTERNS = [
+  ".mcp.json",
+  "*.mcp.json",
+  "**/.mcp.json",
+  "**/*.mcp.json",
+];
 
 /**
  * Add the MCP-config patterns to `.git/info/exclude` so an untracked
@@ -1221,11 +1736,14 @@ async function assertNoStagedSecrets(
     .split("\n")
     .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
   const bearerRe = /Authorization\s*["':]*\s*Bearer\s+[A-Za-z0-9._\-]+/i;
-  const jwtRe = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/;
+  const jwtRe =
+    /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/;
   for (const line of added) {
     if (bearerRe.test(line) || jwtRe.test(line)) {
       // Identify the offending file for the error (best-effort).
-      const names = await git(["diff", "--cached", "--name-only"], { cwd: dir });
+      const names = await git(["diff", "--cached", "--name-only"], {
+        cwd: dir,
+      });
       throw new Error(
         "commitAndPush: refusing to commit — staged changes contain a " +
           "bearer-token-shaped credential (possible secret leak). Files: " +

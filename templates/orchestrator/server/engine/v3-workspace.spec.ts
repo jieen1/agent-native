@@ -59,7 +59,11 @@ vi.mock("../db/index.js", () => ({
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { MicrosandboxRuntime } from "../runtime/microsandbox-runtime.js";
-import { cloneRepo, checkoutRunBranch, runBranchName } from "../runtime/git-wrapper.js";
+import {
+  cloneRepo,
+  checkoutRunBranch,
+  runBranchName,
+} from "../runtime/git-wrapper.js";
 import { mountVmCredentials, VM_HOME } from "../runtime/vm-creds.js";
 import { resolveEgress } from "../runtime/networking.js";
 
@@ -192,11 +196,21 @@ describe("V3 Workspace Adapter", () => {
         teardown: vi.fn().mockResolvedValue(undefined),
       };
 
-      vi.spyOn(MicrosandboxRuntime.prototype, "provision").mockImplementation(async () => mockVm as any);
-      vi.spyOn(MicrosandboxRuntime.prototype, "mount").mockImplementation(async () => {});
-      vi.spyOn(MicrosandboxRuntime.prototype, "init").mockImplementation(async () => {});
-      vi.spyOn(MicrosandboxRuntime.prototype, "exec").mockImplementation(async () => ({ code: 0, stdout: "", stderr: "" }));
-      vi.spyOn(MicrosandboxRuntime.prototype, "teardown").mockImplementation(async () => {});
+      vi.spyOn(MicrosandboxRuntime.prototype, "provision").mockImplementation(
+        async () => mockVm as any,
+      );
+      vi.spyOn(MicrosandboxRuntime.prototype, "mount").mockImplementation(
+        async () => {},
+      );
+      vi.spyOn(MicrosandboxRuntime.prototype, "init").mockImplementation(
+        async () => {},
+      );
+      vi.spyOn(MicrosandboxRuntime.prototype, "exec").mockImplementation(
+        async () => ({ code: 0, stdout: "", stderr: "" }),
+      );
+      vi.spyOn(MicrosandboxRuntime.prototype, "teardown").mockImplementation(
+        async () => {},
+      );
 
       // Mock git operations
       vi.mocked(cloneRepo).mockResolvedValue({
@@ -233,9 +247,85 @@ describe("V3 Workspace Adapter", () => {
       expect(workspace.repoUrl).toBe("https://github.com/test/repo.git");
       expect(workspace.vmName).toBe("test-vm-001");
 
-      // Verify workspace was persisted
+      // F1 readiness bookkeeping (best-effort W1 on the microVM path): the
+      // ready row carries ready_at + a ready_report; an inconclusive in-VM
+      // merge-base probe (the exec stub returns empty stdout) leaves baseSha
+      // null but never blocks readiness (see assertMicrovmBaselineBestEffort).
       const persisted = workspaces.get(workspace.id);
       expect(persisted).toBeDefined();
+      expect(persisted!.state).toBe("ready");
+      expect(
+        (persisted as unknown as { readyAt: Date }).readyAt,
+      ).toBeInstanceOf(Date);
+      expect(
+        (persisted as unknown as { readyReport: { w1: { ok: boolean } } })
+          .readyReport.w1.ok,
+      ).toBe(true);
+    });
+
+    it("T-F1-08 (microVM path): a genuine in-VM W1 failure marks the row 'failed' (not 'error'), tears down the VM, and rethrows WorkspaceNotReadyError(kind=infra)", async () => {
+      vi.resetModules();
+      const { workspaces, db } = createMockDb();
+      hoisted.getV3Db.mockReturnValue(db);
+
+      const mockVm = {
+        name: "test-vm-002",
+        spec: { kind: "microvm" },
+        meta: { workdir: "/work", runtimeEnv: {} },
+      };
+
+      vi.spyOn(MicrosandboxRuntime.prototype, "provision").mockImplementation(
+        async () => mockVm as any,
+      );
+      vi.spyOn(MicrosandboxRuntime.prototype, "mount").mockImplementation(
+        async () => {},
+      );
+      vi.spyOn(MicrosandboxRuntime.prototype, "init").mockImplementation(
+        async () => {},
+      );
+      // EVERY in-VM exec fails — the workdir-clear step ignores its result,
+      // but the W1 merge-base probe sees a genuine non-zero git exit.
+      vi.spyOn(MicrosandboxRuntime.prototype, "exec").mockImplementation(
+        async () => ({
+          code: 128,
+          stdout: "",
+          stderr: "fatal: not a git repository",
+        }),
+      );
+      const teardown = vi
+        .spyOn(MicrosandboxRuntime.prototype, "teardown")
+        .mockImplementation(async () => {});
+
+      vi.mocked(cloneRepo).mockResolvedValue({
+        cloned: true,
+        branchPickedUp: true,
+        reason: "",
+        detail: "",
+      } as any);
+
+      const { createWorkspace } = await import("./v3-workspace.js");
+
+      await expect(
+        createWorkspace({
+          runId: "run-w1-fail",
+          repoUrl: "https://github.com/test/repo.git",
+          branch: "main",
+        }),
+      ).rejects.toMatchObject({
+        name: "WorkspaceNotReadyError",
+        stage: "W1",
+        errorClass: "infra", // infra classification — never an agent failure
+      });
+
+      // Row semantics: `failed` (readiness miss), NOT `error` (provisioning
+      // failure), no ready_at; the provisioned VM was torn down.
+      const rows = Array.from(workspaces.values());
+      expect(rows).toHaveLength(1);
+      expect(rows[0].state).toBe("failed");
+      expect(
+        (rows[0] as unknown as { readyAt?: Date }).readyAt,
+      ).toBeUndefined();
+      expect(teardown).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -263,7 +353,9 @@ describe("V3 Workspace Adapter", () => {
 
       hoisted.getV3Db.mockReturnValue(db);
 
-      vi.spyOn(MicrosandboxRuntime.prototype, "teardown").mockImplementation(async () => {});
+      vi.spyOn(MicrosandboxRuntime.prototype, "teardown").mockImplementation(
+        async () => {},
+      );
 
       vi.resetModules();
       const { destroyWorkspace } = await import("./v3-workspace.js");
@@ -298,7 +390,9 @@ describe("V3 Workspace Adapter", () => {
 
       hoisted.getV3Db.mockReturnValue(db);
 
-      vi.spyOn(MicrosandboxRuntime.prototype, "teardown").mockImplementation(async () => {});
+      vi.spyOn(MicrosandboxRuntime.prototype, "teardown").mockImplementation(
+        async () => {},
+      );
 
       vi.resetModules();
       const { destroyWorkspace } = await import("./v3-workspace.js");
