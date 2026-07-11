@@ -1,6 +1,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and, desc, asc, sql } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 /**
@@ -18,7 +19,10 @@ function runOwnerFilter(runId: string) {
 }
 
 /** Verifies run exists and belongs to caller; throws if not found. */
-async function assertRunAccess(db: ReturnType<typeof getV3Db>, runId: string): Promise<void> {
+async function assertRunAccess(
+  db: ReturnType<typeof getV3Db>,
+  runId: string,
+): Promise<void> {
   const rows = await db
     .select({ id: v3Schema.v3Runs.id })
     .from(v3Schema.v3Runs)
@@ -107,9 +111,9 @@ export const v3RunDag = defineAction({
       throw new Error(`Run '${args.runId}' not found`);
     }
 
-    const dag = runRows[0].dag as
-      | { nodes?: Array<{ id: string; type: string; deps?: string[] }> }
-      | null;
+    const dag = runRows[0].dag as {
+      nodes?: Array<{ id: string; type: string; deps?: string[] }>;
+    } | null;
 
     const nodes = dag?.nodes ?? [];
     const edges: Array<{ from: string; to: string }> = [];
@@ -210,6 +214,14 @@ export const v3RunEvents = defineAction({
   },
 });
 
+// Terminal node statuses — mirrors the private TERMINAL_STATUSES set in
+// server/engine/v3-reconciler.ts (done/failed/skipped). Used only to decide
+// the R9 conduction-gap admission branch below.
+const TERMINAL_NODE_STATUSES = new Set(["done", "failed", "skipped"]);
+// Terminal spawn statuses — mirrors the private SPAWN_TERMINAL_STATUSES set
+// in server/engine/v3-reconciler.ts.
+const TERMINAL_SPAWN_STATUSES = new Set(["done", "failed", "cancelled"]);
+
 /** Retry a node — reset to ready, reconciler will re-spawn. */
 export const nodeRetry = defineAction({
   description: "Retry a V3 node. Resets node status to ready.",
@@ -221,7 +233,11 @@ export const nodeRetry = defineAction({
     const db = getV3Db();
     await assertRunAccess(db, args.runId);
     const rows = await db
-      .select({ id: v3Schema.v3Nodes.id, status: v3Schema.v3Nodes.status })
+      .select({
+        id: v3Schema.v3Nodes.id,
+        status: v3Schema.v3Nodes.status,
+        currentSpawnId: v3Schema.v3Nodes.currentSpawnId,
+      })
       .from(v3Schema.v3Nodes)
       .where(
         and(
@@ -233,8 +249,34 @@ export const nodeRetry = defineAction({
 
     if (!rows.length) throw new Error(`Node '${args.nodeId}' not found in run`);
     const prev = rows[0].status;
-    if (!["failed", "cancelled"].includes(prev)) {
-      throw new Error(`Node is ${prev}; can only retry failed or cancelled nodes`);
+    const currentSpawnId = rows[0].currentSpawnId;
+
+    let admitted = ["failed", "cancelled"].includes(prev);
+
+    // R9 (docs/sdlc-product-design/02-workflows.md §4, SDLC-050) conduction
+    // gap: a node NOT already terminal (e.g. still 'running') whose bound
+    // spawn has ALREADY reached a terminal status is the exact B2 hung-node
+    // shape — the reconciler's tick() conduction rule should normally have
+    // already migrated it, but nodeRetry stays a defensive manual escape
+    // hatch for the window before that happens. A genuinely healthy running
+    // node (no spawn bound yet, or its spawn is still running/pending) is
+    // still rejected below.
+    if (!admitted && !TERMINAL_NODE_STATUSES.has(prev) && currentSpawnId) {
+      const [spawn] = await db
+        .select({ status: v3Schema.v3Spawns.status })
+        .from(v3Schema.v3Spawns)
+        .where(eq(v3Schema.v3Spawns.id, currentSpawnId))
+        .limit(1);
+      if (spawn && TERMINAL_SPAWN_STATUSES.has(spawn.status)) {
+        admitted = true;
+      }
+    }
+
+    if (!admitted) {
+      throw new Error(
+        `Node is ${prev}; can only retry failed or cancelled nodes, or a ` +
+          `non-terminal node whose current spawn has already ended`,
+      );
     }
 
     await db
@@ -339,8 +381,12 @@ export const nodeResolveGate = defineAction({
     if (!runRows.length) throw new Error(`Run '${args.runId}' not found`);
 
     // Find the DAG node definition to extract declared options
-    const dag = runRows[0].dag as { nodes?: Array<{ id: string; type: string; options?: string[] }> } | null;
-    const dagNode = (dag?.nodes ?? []).find((n) => n.id === rows[0].nodeIdInDag);
+    const dag = runRows[0].dag as {
+      nodes?: Array<{ id: string; type: string; options?: string[] }>;
+    } | null;
+    const dagNode = (dag?.nodes ?? []).find(
+      (n) => n.id === rows[0].nodeIdInDag,
+    );
     const declaredOptions: string[] | undefined = dagNode?.options;
 
     // Validate choice against declared options when the node has them
@@ -365,7 +411,7 @@ export const nodeResolveGate = defineAction({
 
     await db.insert(v3Schema.v3Artifacts).values({
       id: artifactId,
-      spawnId: "",            // no spawn for human_gate resolutions
+      spawnId: "", // no spawn for human_gate resolutions
       kind: "human-gate-resolution",
       textContent: JSON.stringify(resolution),
       objectContent: resolution as any,
@@ -378,6 +424,10 @@ export const nodeResolveGate = defineAction({
       .set({ outputArtifactId: artifactId })
       .where(eq(v3Schema.v3Nodes.id, args.nodeId));
 
-    return { nodeId: args.nodeId, choice: args.choice, note: args.note ?? null };
+    return {
+      nodeId: args.nodeId,
+      choice: args.choice,
+      note: args.note ?? null,
+    };
   },
 });

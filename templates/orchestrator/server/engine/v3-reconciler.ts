@@ -23,16 +23,18 @@
 //   G20 — honor on_failure:"continue" before declaring run failed.
 
 import { eq, and, inArray, sql } from "drizzle-orm";
+import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+
+import { getDbExec } from "../db/index.js";
 import {
   v3Runs,
   v3Nodes,
   v3Events,
   v3Artifacts,
+  v3Spawns,
   brainThreads,
 } from "../db/v3-schema.js";
-import { getDbExec } from "../db/index.js";
-import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import { evaluateExpression } from "./expression-parser.js";
 import type { ExpressionContext } from "./expression-parser.js";
 import {
@@ -89,6 +91,11 @@ export interface V3Dispatcher {
 // Terminal node statuses (no further work possible)
 const TERMINAL_STATUSES = new Set(["done", "failed", "skipped"]);
 const RESOLVED_STATUSES = new Set(["done", "skipped"]);
+
+// Terminal spawn statuses — mirrors v3_spawn_status's terminal values
+// (pending/running are the only non-terminal spawn statuses). Used by the R9
+// spawn→node conduction rule (see reconcileSpawnConduction below).
+const SPAWN_TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
 
 // G18: default pool capacity; overridable via constructor option.
 const DEFAULT_POOL_CAPACITY = 8;
@@ -233,10 +240,33 @@ export class V3Reconciler {
     // Build adjacency helpers (in-memory from DAG stored on run/nodes)
     const dag = this.loadDag(run, nodes);
 
+    // ── R9 (docs/sdlc-product-design/02-workflows.md §4): spawn→node
+    // conduction invariant (SDLC-050) ──────────────────────────────────────
+    // fireAndTrackSpawn already drives the node the instant ITS OWN spawn call
+    // settles in-process (success or in-loop G19 retry exhaustion). This step
+    // exists for every OTHER way a spawn can reach a terminal status with
+    // nobody left in-process to advance the node: a process restart / killed
+    // VM settled by queue/v3-spawn-reconcile.ts, an event-stream stall
+    // timeout, or a run-level cancel. Both queue/v3-spawn-reconcile.ts and
+    // queue/v3-run-reconcile-sweep.ts funnel back here via triggerTickSafe
+    // after they observe a stuck case — this ONE rule is the sole place that
+    // decides retry-vs-fail for an orphaned node; it is never re-implemented
+    // at the sweep call sites.
+    await this.reconcileSpawnConduction(runId, nodes, dag);
+
+    // Re-read nodes in case the conduction step migrated any — every
+    // downstream step below (guard eval, ready-candidate scan, dispatch,
+    // completion check) must see the migrated status, not the stale snapshot
+    // taken before conduction ran.
+    const nodesAfterConduction = await this.db
+      .select()
+      .from(v3Nodes)
+      .where(eq(v3Nodes.runId, runId));
+
     // ── G10: Evaluate guard expressions + cascade-skip ────────────────────
     // Build interpolation context from run inputs (dep artifacts require DB — use
     // artifact cache from the event store here, populated lazily per dep).
-    await this.evaluateGuardsAndSkip(runId, run, nodes, dag);
+    await this.evaluateGuardsAndSkip(runId, run, nodesAfterConduction, dag);
 
     // Re-read nodes after guard skip mutations
     const nodesAfterGuards = await this.db
@@ -996,6 +1026,145 @@ export class V3Reconciler {
       default:
         // Unknown type — skip
         return { events, slotConsumed: false };
+    }
+  }
+
+  // ─── R9: Spawn→Node Conduction Invariant (SDLC-050) ────────────────────
+
+  /**
+   * Migrate any node stranded in a non-terminal status whose bound spawn
+   * (`node.currentSpawnId`) has ALREADY reached a terminal status
+   * (failed/cancelled/done) — the R9 invariant (02-workflows.md §4): "不存在
+   * spawn 已终态而其 node 仍 running 超过一个 tick". See the call site in
+   * `_tickLocked` for why this only ever fires on the out-of-band gap (the
+   * happy path is already handled by `fireAndTrackSpawn` in-process).
+   *
+   * Retry policy mirrors G19 (`fireAndTrackSpawn`):
+   * `maxAttempts = (retry.max ?? 0) + 1`. The durable attempt counter is the
+   * COUNT of `v3_spawns` rows bound to this node (`node_id`), NOT
+   * `v3_spawns.attempt` — that column is hardcoded to 1 on every insert
+   * (never incremented across retries — see docs/sdlc-impl-f5-f10.md §6C
+   * option A) and cannot survive a process restart as a counter. Counting
+   * spawn rows is durable for free (every attempt, in-process or
+   * conduction-triggered, inserts exactly one new `v3_spawns` row) and needs
+   * zero schema change.
+   *
+   * Concurrency: `tick()`'s per-run advisory lock serializes TICKS, but the
+   * dispatcher's `fireAndTrackSpawn` writes spawn-terminal + node-terminal
+   * OUTSIDE that lock and NON-transactionally (writeSpawnRecord sets
+   * spawn=done, then a separate UPDATE sets node=done). A conduction pass can
+   * therefore observe the brief window where spawn=done but node=running and
+   * wrongly treat a SUCCEEDING node as a gap. Every migration UPDATE below is
+   * therefore CAS-guarded on `status = <observed non-terminal status> AND
+   * current_spawn_id = <observed spawn id>`: if the dispatcher (or another
+   * writer) resolved the node in the meantime, the WHERE matches nothing and
+   * the migration is a no-op — a concurrently-completing node is never
+   * overwritten. (The advisory-lock comment on `tick()` is about ticks, not
+   * about these async completion writes.)
+   */
+  private async reconcileSpawnConduction(
+    runId: string,
+    nodes: NodeRow[],
+    dag: V3NodeDag[],
+  ): Promise<void> {
+    const dagNodeMap = new Map(dag.map((d) => [d.id, d]));
+
+    for (const node of nodes) {
+      // Only "agent" nodes ever bind a currentSpawnId (parallel_over/loop/
+      // human_gate resolve themselves without a spawn).
+      if (node.type !== "agent") continue;
+      if (TERMINAL_STATUSES.has(node.status)) continue;
+      if (!node.currentSpawnId) continue;
+
+      const [spawn] = await this.db
+        .select({
+          id: v3Spawns.id,
+          status: v3Spawns.status,
+          error: v3Spawns.error,
+        })
+        .from(v3Spawns)
+        .where(eq(v3Spawns.id, node.currentSpawnId));
+
+      if (!spawn || !SPAWN_TERMINAL_STATUSES.has(spawn.status)) continue;
+
+      // The node's own spawn is terminal but the node itself never followed —
+      // exactly the SDLC-050 gap. Decide retry-vs-fail.
+      const dagNode = dagNodeMap.get(node.nodeIdInDag) as V3NodeDag | undefined;
+      const retryPolicy = dagNode?.retry as V3RetryPolicy | undefined;
+      const maxAttempts = (retryPolicy?.max ?? 0) + 1;
+
+      // Durable attempt counter = rows in v3_spawns for this node (see the
+      // method JSDoc). NOTE (accepted caveat, docs-recorded): this counts the
+      // node's ENTIRE spawn history. A node revived by manual nodeRetry after
+      // already accumulating >= maxAttempts spawn rows will, if its new spawn
+      // then strands, be judged "exhausted" immediately (0 automatic
+      // conduction retries) and fail. That errs toward failing (never toward
+      // infinite retry) and stays manually retryable via nodeRetry, so it is
+      // acceptable rather than a correctness bug.
+      const priorSpawns = await this.db
+        .select({ id: v3Spawns.id })
+        .from(v3Spawns)
+        .where(eq(v3Spawns.nodeId, node.id));
+      const attemptsMade = priorSpawns.length > 0 ? priorSpawns.length : 1;
+
+      const spawnSummary =
+        `spawn ${spawn.id} ${spawn.status}` +
+        (spawn.error ? `: ${spawn.error.slice(0, 200)}` : "");
+
+      // CAS guard (see method JSDoc): only migrate if the node is STILL in the
+      // exact non-terminal status + bound to the exact spawn we observed — so
+      // a concurrent dispatcher completion (spawn=done → node=done) is never
+      // clobbered. `node.status`/`node.currentSpawnId` are the snapshot values
+      // read at the top of this loop iteration.
+      const casGuard = and(
+        eq(v3Nodes.id, node.id),
+        eq(v3Nodes.status, node.status),
+        eq(v3Nodes.currentSpawnId, node.currentSpawnId),
+      );
+
+      if (attemptsMade < maxAttempts) {
+        // Retry within policy — re-arm for redispatch on this same tick's
+        // ready-candidate scan (deps are already resolved, that's why this
+        // node was running in the first place).
+        await this.db
+          .update(v3Nodes)
+          .set({
+            status: "ready",
+            currentSpawnId: null,
+            error: `conduction retry ${attemptsMade}/${maxAttempts}: ${spawnSummary}`,
+          })
+          .where(casGuard);
+
+        await this.writeEvent(runId, "conduction.fixed", {
+          nodeId: node.nodeIdInDag,
+          spawnId: spawn.id,
+          spawnStatus: spawn.status,
+          disposition: "retry",
+          attempt: attemptsMade,
+          maxAttempts,
+        });
+      } else {
+        // Retries exhausted — permanently fail the node (fail cascade below
+        // picks this up in the SAME tick).
+        await this.db
+          .update(v3Nodes)
+          .set({
+            status: "failed",
+            currentSpawnId: null,
+            error: `Retries exhausted (${attemptsMade}/${maxAttempts}) — ${spawnSummary}`,
+            completedAt: new Date(),
+          })
+          .where(casGuard);
+
+        await this.writeEvent(runId, "conduction.fixed", {
+          nodeId: node.nodeIdInDag,
+          spawnId: spawn.id,
+          spawnStatus: spawn.status,
+          disposition: "failed",
+          attempt: attemptsMade,
+          maxAttempts,
+        });
+      }
     }
   }
 

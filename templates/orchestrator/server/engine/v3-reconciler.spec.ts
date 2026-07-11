@@ -7,8 +7,9 @@
 //
 // Uses a table-aware in-memory mock Drizzle DB so no real Postgres is needed.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
 import type { V3Dispatcher } from "./v3-reconciler.js";
 
 // ── Mock expression-parser (used by reconciler for loop `until` + guard) ────
@@ -43,7 +44,10 @@ const hoisted = vi.hoisted(() => {
       }
       // G16: atomic CAS UPDATE for running transition — returns 1 row to
       // signal success by default.
-      if (sqlText.includes("UPDATE v3_nodes") && sqlText.includes("RETURNING id")) {
+      if (
+        sqlText.includes("UPDATE v3_nodes") &&
+        sqlText.includes("RETURNING id")
+      ) {
         return { rows: [{ id: "node-1" }] };
       }
       return { rows: [] };
@@ -129,6 +133,15 @@ interface MockEventRow {
   orgId: string | null;
 }
 
+interface MockSpawnRow {
+  id: string;
+  nodeId: string | null;
+  status: string;
+  error: string | null;
+  ownerEmail: string;
+  orgId: string | null;
+}
+
 // ── Table detection helpers ──────────────────────────────────────────────────
 // Instead of mocking the schema, we use duck-typing on the real Drizzle table
 // objects (same approach as v3-patcher.spec.ts).  In Drizzle 0.45.x, table
@@ -136,16 +149,39 @@ interface MockEventRow {
 // name that exists on each table.
 
 function isRunsTable(table: unknown): boolean {
-  return table !== null && typeof table === "object" && "dagVersion" in (table as object);
+  return (
+    table !== null &&
+    typeof table === "object" &&
+    "dagVersion" in (table as object)
+  );
 }
 function isNodesTable(table: unknown): boolean {
-  return table !== null && typeof table === "object" && "nodeIdInDag" in (table as object);
+  return (
+    table !== null &&
+    typeof table === "object" &&
+    "nodeIdInDag" in (table as object)
+  );
 }
 function isEventsTable(table: unknown): boolean {
-  return table !== null && typeof table === "object" && "seqNum" in (table as object);
+  return (
+    table !== null && typeof table === "object" && "seqNum" in (table as object)
+  );
 }
 function isArtifactsTable(table: unknown): boolean {
-  return table !== null && typeof table === "object" && "textContent" in (table as object);
+  return (
+    table !== null &&
+    typeof table === "object" &&
+    "textContent" in (table as object)
+  );
+}
+// v3_spawns has no column name shared with runs/nodes/artifacts/events —
+// "renderedPrompt" is unique to it.
+function isSpawnsTable(table: unknown): boolean {
+  return (
+    table !== null &&
+    typeof table === "object" &&
+    "renderedPrompt" in (table as object)
+  );
 }
 
 // ── Mock DB Builder ──────────────────────────────────────────────────────────
@@ -162,12 +198,14 @@ function createMockDb(
   initialNodes: MockNodeRow[],
   initialArtifacts: MockArtifactRow[] = [],
   initialEvents: MockEventRow[] = [],
+  initialSpawns: MockSpawnRow[] = [],
 ) {
   const runs = new Map<string, MockRunRow>();
   runs.set(initialRun.id, { ...initialRun });
   const nodes: MockNodeRow[] = initialNodes.map((n) => ({ ...n }));
   const artifacts: MockArtifactRow[] = [...initialArtifacts];
   const events: MockEventRow[] = [...initialEvents];
+  const spawns: MockSpawnRow[] = initialSpawns.map((s) => ({ ...s }));
 
   let eventSeq = initialEvents.length;
 
@@ -190,6 +228,8 @@ function createMockDb(
                 result = [...artifacts];
               } else if (isEventsTable(table)) {
                 result = [...events];
+              } else if (isSpawnsTable(table)) {
+                result = [...spawns];
               } else {
                 // Aggregate query (select({ count: ... })) or unknown table — return empty
                 result = [];
@@ -212,20 +252,31 @@ function createMockDb(
           where: async (_filter: unknown) => {
             if (isRunsTable(table)) {
               for (const [, run] of runs) {
-                if (data.status !== undefined) run.status = data.status as string;
-                if (data.startedAt !== undefined) run.startedAt = data.startedAt as Date;
-                if (data.completedAt !== undefined) run.completedAt = data.completedAt as Date;
+                if (data.status !== undefined)
+                  run.status = data.status as string;
+                if (data.startedAt !== undefined)
+                  run.startedAt = data.startedAt as Date;
+                if (data.completedAt !== undefined)
+                  run.completedAt = data.completedAt as Date;
               }
             } else if (isNodesTable(table)) {
               // Apply update to all nodes (filter is opaque in mock — tests are designed
               // so that broad updates still produce correct assertions)
               for (const node of nodes) {
-                if (data.status !== undefined) node.status = data.status as string;
-                if (data.startedAt !== undefined) node.startedAt = data.startedAt as Date;
-                if (data.completedAt !== undefined) node.completedAt = data.completedAt as Date;
-                if (data.error !== undefined) node.error = data.error as string | null;
-                if (data.currentSpawnId !== undefined) node.currentSpawnId = data.currentSpawnId as string | null;
-                if (data.outputArtifactId !== undefined) node.outputArtifactId = data.outputArtifactId as string | null;
+                if (data.status !== undefined)
+                  node.status = data.status as string;
+                if (data.startedAt !== undefined)
+                  node.startedAt = data.startedAt as Date;
+                if (data.completedAt !== undefined)
+                  node.completedAt = data.completedAt as Date;
+                if (data.error !== undefined)
+                  node.error = data.error as string | null;
+                if (data.currentSpawnId !== undefined)
+                  node.currentSpawnId = data.currentSpawnId as string | null;
+                if (data.outputArtifactId !== undefined)
+                  node.outputArtifactId = data.outputArtifactId as
+                    | string
+                    | null;
               }
             }
             return {};
@@ -237,16 +288,19 @@ function createMockDb(
     insert: (table: unknown) => {
       return {
         values: async (row: Record<string, unknown>) => {
-          if (isEventsTable(table) || (row.kind && row.runId && !row.nodeIdInDag)) {
+          if (
+            isEventsTable(table) ||
+            (row.kind && row.runId && !row.nodeIdInDag)
+          ) {
             events.push({
-              id: row.id as string ?? `ev-${++eventSeq}`,
+              id: (row.id as string) ?? `ev-${++eventSeq}`,
               runId: row.runId as string,
               spawnId: (row.spawnId as string | null) ?? null,
               kind: row.kind as string,
               payload: (row.payload as Record<string, unknown>) ?? {},
-              seqNum: row.seqNum as number ?? eventSeq,
-              ts: row.ts as Date ?? new Date(),
-              ownerEmail: row.ownerEmail as string ?? "local@localhost",
+              seqNum: (row.seqNum as number) ?? eventSeq,
+              ts: (row.ts as Date) ?? new Date(),
+              ownerEmail: (row.ownerEmail as string) ?? "local@localhost",
               orgId: (row.orgId as string | null) ?? null,
             });
           } else if (isNodesTable(table) || row.nodeIdInDag) {
@@ -260,7 +314,7 @@ function createMockDb(
     },
   } as unknown as PostgresJsDatabase;
 
-  return { db, runs, nodes, events, artifacts };
+  return { db, runs, nodes, events, artifacts, spawns };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -304,7 +358,9 @@ function makeNode(overrides: Partial<MockNodeRow> = {}): MockNodeRow {
   };
 }
 
-function makeArtifact(overrides: Partial<MockArtifactRow> = {}): MockArtifactRow {
+function makeArtifact(
+  overrides: Partial<MockArtifactRow> = {},
+): MockArtifactRow {
   return {
     id: "artifact-1",
     spawnId: "spawn-1",
@@ -315,6 +371,18 @@ function makeArtifact(overrides: Partial<MockArtifactRow> = {}): MockArtifactRow
     byteSize: 11,
     truncated: 0,
     createdAt: new Date(),
+    ownerEmail: "local@localhost",
+    orgId: null,
+    ...overrides,
+  };
+}
+
+function makeSpawn(overrides: Partial<MockSpawnRow> = {}): MockSpawnRow {
+  return {
+    id: "spawn-1",
+    nodeId: "node-1",
+    status: "failed",
+    error: null,
     ownerEmail: "local@localhost",
     orgId: null,
     ...overrides,
@@ -335,7 +403,10 @@ describe("V3Reconciler", () => {
           return { rows: [{ locked: true }] };
         }
         // G16: atomic CAS UPDATE for running transition — returns 1 row to signal success
-        if (sqlText.includes("UPDATE v3_nodes") && sqlText.includes("RETURNING id")) {
+        if (
+          sqlText.includes("UPDATE v3_nodes") &&
+          sqlText.includes("RETURNING id")
+        ) {
           return { rows: [{ id: "node-1" }] };
         }
         return { rows: [] };
@@ -360,10 +431,9 @@ describe("V3Reconciler", () => {
     it("tick skips paused run", async () => {
       const V3Reconciler = await getReconciler();
       const dispatcher = makeDispatcher();
-      const { db, events } = createMockDb(
-        makeRun({ status: "paused" }),
-        [makeNode()],
-      );
+      const { db, events } = createMockDb(makeRun({ status: "paused" }), [
+        makeNode(),
+      ]);
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.tick("run-1");
@@ -375,10 +445,9 @@ describe("V3Reconciler", () => {
     it("tick skips completed (done) run", async () => {
       const V3Reconciler = await getReconciler();
       const dispatcher = makeDispatcher();
-      const { db, events } = createMockDb(
-        makeRun({ status: "done" }),
-        [makeNode({ status: "done" })],
-      );
+      const { db, events } = createMockDb(makeRun({ status: "done" }), [
+        makeNode({ status: "done" }),
+      ]);
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.tick("run-1");
@@ -390,10 +459,9 @@ describe("V3Reconciler", () => {
     it("tick skips failed run", async () => {
       const V3Reconciler = await getReconciler();
       const dispatcher = makeDispatcher();
-      const { db } = createMockDb(
-        makeRun({ status: "failed" }),
-        [makeNode({ status: "failed", error: "OOM" })],
-      );
+      const { db } = createMockDb(makeRun({ status: "failed" }), [
+        makeNode({ status: "failed", error: "OOM" }),
+      ]);
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.tick("run-1");
@@ -404,10 +472,7 @@ describe("V3Reconciler", () => {
     it("tick skips cancelled run", async () => {
       const V3Reconciler = await getReconciler();
       const dispatcher = makeDispatcher();
-      const { db } = createMockDb(
-        makeRun({ status: "cancelled" }),
-        [],
-      );
+      const { db } = createMockDb(makeRun({ status: "cancelled" }), []);
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.tick("run-1");
@@ -577,9 +642,7 @@ describe("V3Reconciler", () => {
       await reconciler.tick("run-1");
 
       // Fanout children should be created
-      const children = nodes.filter((n) =>
-        n.nodeIdInDag.startsWith("p:["),
-      );
+      const children = nodes.filter((n) => n.nodeIdInDag.startsWith("p:["));
       expect(children).toHaveLength(2);
       expect(children[0]!.nodeIdInDag).toBe("p:[0]");
       expect(children[1]!.nodeIdInDag).toBe("p:[1]");
@@ -646,7 +709,11 @@ describe("V3Reconciler", () => {
                 id: "impl",
                 type: "parallel_over",
                 deps: ["design"],
-                body: { type: "agent", agent: "worker", prompt: "Impl {{item}}" },
+                body: {
+                  type: "agent",
+                  agent: "worker",
+                  prompt: "Impl {{item}}",
+                },
                 items_from: "deps.design.output.files",
               },
             ],
@@ -683,7 +750,9 @@ describe("V3Reconciler", () => {
 
     it("G18: parallel_over respects max_concurrency", async () => {
       // Use a never-resolving dispatcher so fire-and-track does not re-trigger ticks
-      const neverResolve = new Promise<string>(() => { /* never resolves */ });
+      const neverResolve = new Promise<string>(() => {
+        /* never resolves */
+      });
       const dispatcher: V3Dispatcher & { spawn: ReturnType<typeof vi.fn> } = {
         spawn: vi.fn().mockReturnValue(neverResolve),
       } as any;
@@ -708,11 +777,31 @@ describe("V3Reconciler", () => {
         }),
         [
           // parent already done (fanout already expanded)
-          makeNode({ nodeIdInDag: "p", id: "node-p", type: "parallel_over", status: "done" }),
+          makeNode({
+            nodeIdInDag: "p",
+            id: "node-p",
+            type: "parallel_over",
+            status: "done",
+          }),
           // All children pending (were created in a prior tick)
-          makeNode({ nodeIdInDag: "p:[0]", id: "child-0", type: "agent", fanoutIndex: 0 }),
-          makeNode({ nodeIdInDag: "p:[1]", id: "child-1", type: "agent", fanoutIndex: 1 }),
-          makeNode({ nodeIdInDag: "p:[2]", id: "child-2", type: "agent", fanoutIndex: 2 }),
+          makeNode({
+            nodeIdInDag: "p:[0]",
+            id: "child-0",
+            type: "agent",
+            fanoutIndex: 0,
+          }),
+          makeNode({
+            nodeIdInDag: "p:[1]",
+            id: "child-1",
+            type: "agent",
+            fanoutIndex: 1,
+          }),
+          makeNode({
+            nodeIdInDag: "p:[2]",
+            id: "child-2",
+            type: "agent",
+            fanoutIndex: 2,
+          }),
         ],
       );
 
@@ -763,9 +852,7 @@ describe("V3Reconciler", () => {
       expect(loopNode?.status).toBe("done");
 
       // No new body iteration should be created
-      const bodyNodes = nodes.filter((n) =>
-        n.nodeIdInDag.includes("/"),
-      );
+      const bodyNodes = nodes.filter((n) => n.nodeIdInDag.includes("/"));
       expect(bodyNodes).toHaveLength(0);
     });
 
@@ -802,9 +889,7 @@ describe("V3Reconciler", () => {
       await reconciler.tick("run-1");
 
       // Body nodes should be created for iteration 1
-      const bodyNodes = nodes.filter((n) =>
-        n.nodeIdInDag.startsWith("loop1/"),
-      );
+      const bodyNodes = nodes.filter((n) => n.nodeIdInDag.startsWith("loop1/"));
       expect(bodyNodes.length).toBeGreaterThan(0);
     });
 
@@ -841,11 +926,19 @@ describe("V3Reconciler", () => {
       await reconciler.tick("run-1");
 
       // Should create 3 body nodes (fix, retest, rereview) for iteration 1
-      const bodyNodes = nodes.filter((n) => n.nodeIdInDag.startsWith("fix_loop/"));
+      const bodyNodes = nodes.filter((n) =>
+        n.nodeIdInDag.startsWith("fix_loop/"),
+      );
       expect(bodyNodes).toHaveLength(3);
-      expect(bodyNodes.some((n) => n.nodeIdInDag === "fix_loop/fix")).toBe(true);
-      expect(bodyNodes.some((n) => n.nodeIdInDag === "fix_loop/retest")).toBe(true);
-      expect(bodyNodes.some((n) => n.nodeIdInDag === "fix_loop/rereview")).toBe(true);
+      expect(bodyNodes.some((n) => n.nodeIdInDag === "fix_loop/fix")).toBe(
+        true,
+      );
+      expect(bodyNodes.some((n) => n.nodeIdInDag === "fix_loop/retest")).toBe(
+        true,
+      );
+      expect(bodyNodes.some((n) => n.nodeIdInDag === "fix_loop/rereview")).toBe(
+        true,
+      );
     });
 
     it("loop respects max_iterations", async () => {
@@ -902,9 +995,7 @@ describe("V3Reconciler", () => {
       expect(loopNode?.status).toBe("done");
 
       // No new body inserted
-      const bodyNodes = nodes.filter(
-        (n) => n.nodeIdInDag === "loop1/fix",
-      );
+      const bodyNodes = nodes.filter((n) => n.nodeIdInDag === "loop1/fix");
       expect(bodyNodes).toHaveLength(2); // only the 2 existing
     });
 
@@ -935,12 +1026,27 @@ describe("V3Reconciler", () => {
           },
         }),
         [
-          makeNode({ nodeIdInDag: "review_node", id: "n-review", status: "done", outputArtifactId: "art-review" }),
+          makeNode({
+            nodeIdInDag: "review_node",
+            id: "n-review",
+            status: "done",
+            outputArtifactId: "art-review",
+          }),
           makeNode({ nodeIdInDag: "fix_loop", id: "n-loop", type: "loop" }),
-          makeNode({ nodeIdInDag: "fix_loop/fix", id: "n-fix", type: "agent", status: "done", iteration: 1, outputArtifactId: "art-fix" }),
+          makeNode({
+            nodeIdInDag: "fix_loop/fix",
+            id: "n-fix",
+            type: "agent",
+            status: "done",
+            iteration: 1,
+            outputArtifactId: "art-fix",
+          }),
         ],
         [
-          makeArtifact({ id: "art-review", objectContent: { verdict: "fail" } }),
+          makeArtifact({
+            id: "art-review",
+            objectContent: { verdict: "fail" },
+          }),
           makeArtifact({ id: "art-fix", objectContent: { verdict: "pass" } }),
         ],
       );
@@ -986,10 +1092,7 @@ describe("V3Reconciler", () => {
     it("pause sets status", async () => {
       const V3Reconciler = await getReconciler();
       const dispatcher = makeDispatcher();
-      const { db, runs } = createMockDb(
-        makeRun({ status: "running" }),
-        [],
-      );
+      const { db, runs } = createMockDb(makeRun({ status: "running" }), []);
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.pause("run-1");
@@ -1001,10 +1104,7 @@ describe("V3Reconciler", () => {
     it("resume sets status", async () => {
       const V3Reconciler = await getReconciler();
       const dispatcher = makeDispatcher();
-      const { db, runs } = createMockDb(
-        makeRun({ status: "paused" }),
-        [],
-      );
+      const { db, runs } = createMockDb(makeRun({ status: "paused" }), []);
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.resume("run-1");
@@ -1057,13 +1157,22 @@ describe("V3Reconciler", () => {
           dag: {
             nodes: [
               { id: "review", type: "agent", deps: [] },
-              { id: "commit", type: "agent", deps: ["review"], guard: "deps.review.output.verdict == 'pass'" },
+              {
+                id: "commit",
+                type: "agent",
+                deps: ["review"],
+                guard: "deps.review.output.verdict == 'pass'",
+              },
             ],
           },
         }),
         [
           makeNode({ nodeIdInDag: "review", id: "n-review", status: "done" }),
-          makeNode({ nodeIdInDag: "commit", id: "n-commit", status: "pending" }),
+          makeNode({
+            nodeIdInDag: "commit",
+            id: "n-commit",
+            status: "pending",
+          }),
         ],
       );
 
@@ -1086,13 +1195,22 @@ describe("V3Reconciler", () => {
           dag: {
             nodes: [
               { id: "review", type: "agent", deps: [] },
-              { id: "commit", type: "agent", deps: ["review"], guard: "deps.review.output.verdict == 'pass'" },
+              {
+                id: "commit",
+                type: "agent",
+                deps: ["review"],
+                guard: "deps.review.output.verdict == 'pass'",
+              },
             ],
           },
         }),
         [
           makeNode({ nodeIdInDag: "review", id: "n-review", status: "done" }),
-          makeNode({ nodeIdInDag: "commit", id: "n-commit", status: "pending" }),
+          makeNode({
+            nodeIdInDag: "commit",
+            id: "n-commit",
+            status: "pending",
+          }),
         ],
       );
 
@@ -1121,8 +1239,16 @@ describe("V3Reconciler", () => {
         }),
         [
           makeNode({ nodeIdInDag: "review", id: "n-review", status: "done" }),
-          makeNode({ nodeIdInDag: "commit", id: "n-commit", status: "pending" }),
-          makeNode({ nodeIdInDag: "deploy", id: "n-deploy", status: "pending" }),
+          makeNode({
+            nodeIdInDag: "commit",
+            id: "n-commit",
+            status: "pending",
+          }),
+          makeNode({
+            nodeIdInDag: "deploy",
+            id: "n-deploy",
+            status: "pending",
+          }),
         ],
       );
 
@@ -1150,13 +1276,22 @@ describe("V3Reconciler", () => {
           dag: {
             nodes: [
               { id: "review", type: "agent", deps: [] },
-              { id: "commit", type: "agent", deps: ["review"], guard: "deps.review.output.verdict == 'pass'" },
+              {
+                id: "commit",
+                type: "agent",
+                deps: ["review"],
+                guard: "deps.review.output.verdict == 'pass'",
+              },
             ],
           },
         }),
         [
           makeNode({ nodeIdInDag: "review", id: "n-review", status: "done" }),
-          makeNode({ nodeIdInDag: "commit", id: "n-commit", status: "pending" }),
+          makeNode({
+            nodeIdInDag: "commit",
+            id: "n-commit",
+            status: "pending",
+          }),
         ],
       );
 
@@ -1164,7 +1299,8 @@ describe("V3Reconciler", () => {
       await reconciler.tick("run-1");
 
       const skippedEvent = events.find(
-        (e) => e.kind === "node.skipped" && (e.payload as any)?.nodeId === "commit",
+        (e) =>
+          e.kind === "node.skipped" && (e.payload as any)?.nodeId === "commit",
       );
       expect(skippedEvent).toBeDefined();
       expect((skippedEvent?.payload as any)?.reason).toContain("guard");
@@ -1227,7 +1363,9 @@ describe("V3Reconciler", () => {
     it("G17: dispatcher.spawn is called asynchronously (not blocking tick completion)", async () => {
       const V3Reconciler = await getReconciler();
       let resolveSpawn: (id: string) => void = () => {};
-      const spawnPromise = new Promise<string>((resolve) => { resolveSpawn = resolve; });
+      const spawnPromise = new Promise<string>((resolve) => {
+        resolveSpawn = resolve;
+      });
       const dispatcher: V3Dispatcher & { spawn: ReturnType<typeof vi.fn> } = {
         spawn: vi.fn().mockReturnValue(spawnPromise),
       } as any;
@@ -1255,7 +1393,9 @@ describe("V3Reconciler", () => {
       const V3Reconciler = await getReconciler();
       // spawn never resolves during this test (simulates long-running spawn)
       let resolveSpawn: (id: string) => void = () => {};
-      const spawnPromise = new Promise<string>((resolve) => { resolveSpawn = resolve; });
+      const spawnPromise = new Promise<string>((resolve) => {
+        resolveSpawn = resolve;
+      });
       const dispatcher: V3Dispatcher & { spawn: ReturnType<typeof vi.fn> } = {
         spawn: vi.fn().mockReturnValue(spawnPromise),
       } as any;
@@ -1290,7 +1430,9 @@ describe("V3Reconciler", () => {
 
       // Use a never-resolving dispatcher so fire-and-track doesn't re-trigger ticks
       // and inflate the spawn call count beyond what the pool allows.
-      const neverResolve = new Promise<string>(() => { /* intentionally never resolves */ });
+      const neverResolve = new Promise<string>(() => {
+        /* intentionally never resolves */
+      });
       const dispatcher: V3Dispatcher & { spawn: ReturnType<typeof vi.fn> } = {
         spawn: vi.fn().mockReturnValue(neverResolve),
       } as any;
@@ -1330,7 +1472,8 @@ describe("V3Reconciler", () => {
     it("G19: retries transient spawn failures with backoff", async () => {
       // dispatcher.spawn fails on first call, succeeds on second
       const dispatcher: V3Dispatcher & { spawn: ReturnType<typeof vi.fn> } = {
-        spawn: vi.fn()
+        spawn: vi
+          .fn()
           .mockRejectedValueOnce(new Error("ETIMEDOUT: connection timeout"))
           .mockResolvedValueOnce("spawn-2"),
       } as any;
@@ -1339,12 +1482,19 @@ describe("V3Reconciler", () => {
       const { db, events } = createMockDb(
         makeRun({
           dag: {
-            nodes: [{
-              id: "a",
-              type: "agent",
-              deps: [],
-              retry: { max: 1, on: ["transient"], backoff: "fixed", initial_ms: 0 },
-            }],
+            nodes: [
+              {
+                id: "a",
+                type: "agent",
+                deps: [],
+                retry: {
+                  max: 1,
+                  on: ["transient"],
+                  backoff: "fixed",
+                  initial_ms: 0,
+                },
+              },
+            ],
           },
         }),
         [makeNode({ nodeIdInDag: "a", id: "node-a" })],
@@ -1367,19 +1517,28 @@ describe("V3Reconciler", () => {
 
     it("G19: permanent errors are not retried", async () => {
       const dispatcher: V3Dispatcher & { spawn: ReturnType<typeof vi.fn> } = {
-        spawn: vi.fn().mockRejectedValue(new Error("permanent: agent not found")),
+        spawn: vi
+          .fn()
+          .mockRejectedValue(new Error("permanent: agent not found")),
       } as any;
 
       const V3Reconciler = await getReconciler();
       const { db, nodes } = createMockDb(
         makeRun({
           dag: {
-            nodes: [{
-              id: "a",
-              type: "agent",
-              deps: [],
-              retry: { max: 3, on: ["transient"], backoff: "fixed", initial_ms: 0 },
-            }],
+            nodes: [
+              {
+                id: "a",
+                type: "agent",
+                deps: [],
+                retry: {
+                  max: 3,
+                  on: ["transient"],
+                  backoff: "fixed",
+                  initial_ms: 0,
+                },
+              },
+            ],
           },
         }),
         [makeNode({ nodeIdInDag: "a", id: "node-a" })],
@@ -1411,7 +1570,12 @@ describe("V3Reconciler", () => {
         }),
         [
           makeNode({ nodeIdInDag: "main", id: "n-main", status: "done" }),
-          makeNode({ nodeIdInDag: "lint", id: "n-lint", status: "failed", error: "lint error" }),
+          makeNode({
+            nodeIdInDag: "lint",
+            id: "n-lint",
+            status: "failed",
+            error: "lint error",
+          }),
         ],
       );
 
@@ -1438,8 +1602,18 @@ describe("V3Reconciler", () => {
         }),
         [
           makeNode({ nodeIdInDag: "main", id: "n-main", status: "done" }),
-          makeNode({ nodeIdInDag: "lint", id: "n-lint", status: "failed", error: "lint error" }),
-          makeNode({ nodeIdInDag: "test", id: "n-test", status: "failed", error: "test failed" }),
+          makeNode({
+            nodeIdInDag: "lint",
+            id: "n-lint",
+            status: "failed",
+            error: "lint error",
+          }),
+          makeNode({
+            nodeIdInDag: "test",
+            id: "n-test",
+            status: "failed",
+            error: "test failed",
+          }),
         ],
       );
 
@@ -1464,8 +1638,17 @@ describe("V3Reconciler", () => {
           },
         }),
         [
-          makeNode({ nodeIdInDag: "lint", id: "n-lint", status: "failed", error: "lint error" }),
-          makeNode({ nodeIdInDag: "deploy", id: "n-deploy", status: "pending" }),
+          makeNode({
+            nodeIdInDag: "lint",
+            id: "n-lint",
+            status: "failed",
+            error: "lint error",
+          }),
+          makeNode({
+            nodeIdInDag: "deploy",
+            id: "n-deploy",
+            status: "pending",
+          }),
         ],
       );
 
@@ -1618,6 +1801,353 @@ describe("V3Reconciler", () => {
           attempts: 4,
         });
       });
+    });
+  });
+
+  // ── F10 — R9 spawn→node conduction invariant (SDLC-050) ──────────────────
+  //
+  // docs/sdlc-product-design/02-workflows.md §4 R9: "不存在 spawn 已终态而其
+  // node 仍 running 超过一个 tick". These tests construct the exact gap shape
+  // directly (node non-terminal + currentSpawnId pointing at an
+  // already-terminal v3_spawns row) — the mock DB never runs the real
+  // dispatcher/executor, so no spawn is literally killed; per
+  // docs/sdlc-impl-f5-f10.md T-F10-08's own correction, this is the sanctioned
+  // way to exercise the conduction rule without "kill spawn" machinery (which
+  // does not exist for in-process/network spawns — see F1–F4 §6).
+  //
+  // Mock-DB note: createMockDb's spawns table select ignores its `where`
+  // filter and returns the WHOLE spawns array (mirrors every other table in
+  // this mock — see the file header). reconcileSpawnConduction issues two
+  // spawn queries: (a) `eq(id, node.currentSpawnId)` — destructures the FIRST
+  // array element, so the fixture always lists the node's CURRENT spawn
+  // first; (b) `eq(nodeId, node.id)` — count only, order-independent. Tests
+  // below follow that "current spawn first" ordering convention.
+  //
+  // Redispatch-safety note: dispatchNode's G16 CAS ("UPDATE v3_nodes SET
+  // status = 'running' ... RETURNING id") is a RAW getDbExec().execute() call
+  // — the shared beforeEach's default hoisted.mockExecute answers it with a
+  // canned success WITHOUT mutating the in-memory `nodes` array (by design,
+  // for every other describe block in this file). For any test where the
+  // conduction rule migrates a node to 'ready' and expects it to be
+  // redispatched EXACTLY once within the same tick, that default becomes
+  // wrong: the mock node's status visibly stays 'ready' forever, so the
+  // ready-candidate scan matches it again on every recursive
+  // tick()-after-successful-spawn call inside fireAndTrackSpawn — an actual
+  // infinite loop, not a production behavior (this is purely a gap in the
+  // shared mock, not a reconciler bug). installRedispatchAwareCas patches
+  // hoisted.mockExecute, for the current test only, to also flip the node's
+  // status to 'running' in the array — mirroring what the real UPDATE does —
+  // so the SAME node is correctly excluded from the next ready-candidate
+  // scan and the loop terminates after exactly one redispatch.
+  function installRedispatchAwareCas(nodes: MockNodeRow[]): void {
+    vi.mocked(hoisted.mockExecute).mockImplementation(
+      async (query: string | { sql: string; args?: unknown[] }) => {
+        const sqlText = typeof query === "string" ? query : query.sql;
+        if (sqlText.includes("pg_try_advisory_xact_lock")) {
+          return { rows: [{ locked: true }] };
+        }
+        if (
+          sqlText.includes("UPDATE v3_nodes") &&
+          sqlText.includes("status = 'running'") &&
+          sqlText.includes("RETURNING id")
+        ) {
+          const args = typeof query === "string" ? undefined : query.args;
+          const nodeId = args?.[0] as string | undefined;
+          const node = nodeId ? nodes.find((n) => n.id === nodeId) : nodes[0];
+          if (node) node.status = "running";
+          return { rows: [{ id: node?.id ?? "node-1" }] };
+        }
+        return { rows: [] };
+      },
+    );
+  }
+
+  describe("R9 — spawn→node conduction (F10, SDLC-050)", () => {
+    it("T-F10-01: spawn=failed & node=running, no retry policy → node fails permanently + conduction.fixed fires", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, nodes, runs, events } = createMockDb(
+        makeRun({ dag: { nodes: [{ id: "a", type: "agent", deps: [] }] } }),
+        [
+          makeNode({
+            nodeIdInDag: "a",
+            id: "node-a",
+            status: "running",
+            currentSpawnId: "spawn-1",
+          }),
+        ],
+        [],
+        [],
+        [
+          makeSpawn({
+            id: "spawn-1",
+            nodeId: "node-a",
+            status: "failed",
+            error: "worker OOM",
+          }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+      await new Promise((r) => setTimeout(r, 20));
+
+      // No retry policy → maxAttempts = 1; one prior spawn already used it up
+      // → the node migrates straight to failed (not left dangling 'running').
+      const nodeA = nodes.find((n) => n.nodeIdInDag === "a");
+      expect(nodeA?.status).toBe("failed");
+      expect(nodeA?.currentSpawnId).toBeNull();
+      expect(nodeA?.error).toContain("spawn-1");
+
+      const fixedEvent = events.find((e) => e.kind === "conduction.fixed");
+      expect(fixedEvent).toBeDefined();
+      expect((fixedEvent?.payload as any)?.nodeId).toBe("a");
+      expect((fixedEvent?.payload as any)?.spawnId).toBe("spawn-1");
+      expect((fixedEvent?.payload as any)?.disposition).toBe("failed");
+
+      // Terminal — must not be redispatched.
+      expect(dispatcher.spawn).not.toHaveBeenCalled();
+
+      // Fail cascade (existing behavior) finalizes the run as failed since
+      // this is the run's only node and it has no on_failure:continue.
+      expect(runs.get("run-1")?.status).toBe("failed");
+    });
+
+    it("T-F10-02a: attempt = maxAttempts-1 → node migrates to ready and is redispatched within the same tick", async () => {
+      const V3Reconciler = await getReconciler();
+      const { db, nodes, events, spawns } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [{ id: "a", type: "agent", deps: [], retry: { max: 1 } }],
+          },
+        }),
+        [
+          makeNode({
+            nodeIdInDag: "a",
+            id: "node-a",
+            status: "running",
+            currentSpawnId: "spawn-1",
+          }),
+        ],
+        [],
+        [],
+        // retry.max=1 → maxAttempts=2; exactly one spawn used so far (this
+        // one) → attemptsMade=1 = maxAttempts-1 → one retry still allowed.
+        [makeSpawn({ id: "spawn-1", nodeId: "node-a", status: "failed" })],
+      );
+
+      // The shared makeDispatcher() mock resolves without ever inserting a
+      // v3_spawns row — fine for every OTHER test, but here the redispatched
+      // node's currentSpawnId would keep pointing at the SAME terminal
+      // spawn-1 forever, so the conduction rule would refire on every
+      // recursive tick() fireAndTrackSpawn triggers after a successful spawn
+      // (genuine infinite loop in the mock, not in production — the real
+      // V3Dispatcher.spawn() always writes a brand-new, non-terminal spawn
+      // row via openRunningSpawn, which is what actually breaks this cycle).
+      // This dispatcher simulates that by appending a fresh 'running' spawn
+      // row on each call, exactly like production does.
+      let redispatchSeq = 0;
+      const dispatcher: V3Dispatcher & { spawn: ReturnType<typeof vi.fn> } = {
+        spawn: vi.fn().mockImplementation(async (node: { id: string }) => {
+          const id = `spawn-redispatch-${++redispatchSeq}`;
+          spawns.push({
+            id,
+            nodeId: node.id,
+            status: "running",
+            error: null,
+            ownerEmail: "local@localhost",
+            orgId: null,
+          });
+          return id;
+        }),
+      } as any;
+      installRedispatchAwareCas(nodes);
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+      await new Promise((r) => setTimeout(r, 20));
+
+      const fixedEvent = events.find((e) => e.kind === "conduction.fixed");
+      expect(fixedEvent).toBeDefined();
+      expect((fixedEvent?.payload as any)?.disposition).toBe("retry");
+      expect((fixedEvent?.payload as any)?.attempt).toBe(1);
+      expect((fixedEvent?.payload as any)?.maxAttempts).toBe(2);
+
+      // Deps were already resolved (this node was already running) — the
+      // ready-candidate scan later in the SAME tick redispatches it exactly
+      // once (the fresh non-terminal spawn row halts further conduction).
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
+    });
+
+    it("T-F10-02b: attempt = maxAttempts → node fails permanently, error carries the spawn summary, no redispatch", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, nodes, events } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [{ id: "a", type: "agent", deps: [], retry: { max: 1 } }],
+          },
+        }),
+        [
+          makeNode({
+            nodeIdInDag: "a",
+            id: "node-a",
+            status: "running",
+            currentSpawnId: "spawn-2",
+          }),
+        ],
+        [],
+        [],
+        // retry.max=1 → maxAttempts=2; TWO spawns already exist for this node
+        // (spawn-2 is current/first per the mock ordering convention above) →
+        // attemptsMade=2 = maxAttempts → retries exhausted.
+        [
+          makeSpawn({
+            id: "spawn-2",
+            nodeId: "node-a",
+            status: "failed",
+            error: "timeout",
+          }),
+          makeSpawn({ id: "spawn-1", nodeId: "node-a", status: "failed" }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+      await new Promise((r) => setTimeout(r, 20));
+
+      const nodeA = nodes.find((n) => n.nodeIdInDag === "a");
+      expect(nodeA?.status).toBe("failed");
+      expect(nodeA?.error).toContain("Retries exhausted (2/2)");
+      expect(nodeA?.error).toContain("spawn-2");
+
+      const fixedEvent = events.find((e) => e.kind === "conduction.fixed");
+      expect((fixedEvent?.payload as any)?.disposition).toBe("failed");
+      expect((fixedEvent?.payload as any)?.attempt).toBe(2);
+      expect((fixedEvent?.payload as any)?.maxAttempts).toBe(2);
+
+      expect(dispatcher.spawn).not.toHaveBeenCalled();
+    });
+
+    it("T-F10-05 (half-covered — see docs note): conduction is agnostic to WHY the spawn ended, including a killed-process shape", async () => {
+      // Real T-F10-05 exercises `child.kill()` on a real CC child process
+      // (server/runtime/executors/claude-code-executor.ts /
+      // none-runtime.ts — outside this task's file boundary). This test only
+      // proves the reconciler-side half: the conduction rule does not
+      // special-case *how* a spawn reached 'failed' — a killed-PID error and
+      // a stall/orphan-restart error are migrated identically. The
+      // executor-level kill path itself is NOT exercised here — flagged as a
+      // deliberate coverage gap, not a passing claim about the kill path.
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, nodes, events } = createMockDb(
+        makeRun({ dag: { nodes: [{ id: "a", type: "agent", deps: [] }] } }),
+        [
+          makeNode({
+            nodeIdInDag: "a",
+            id: "node-a",
+            status: "running",
+            currentSpawnId: "spawn-1",
+          }),
+        ],
+        [],
+        [],
+        [
+          makeSpawn({
+            id: "spawn-1",
+            nodeId: "node-a",
+            status: "failed",
+            error: "process killed (SIGKILL) by none-runtime executor",
+          }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+      await new Promise((r) => setTimeout(r, 20));
+
+      const nodeA = nodes.find((n) => n.nodeIdInDag === "a");
+      expect(nodeA?.status).toBe("failed");
+      expect(events.find((e) => e.kind === "conduction.fixed")).toBeDefined();
+    });
+
+    it("T-F10-08: synthetic B2 replay — run stays active (not cancelled), node self-heals without a manual runCancel", async () => {
+      // R3 correction: 101's real v3r_ehy1aca2zoy2njaj row is already
+      // cancelled (a manual workaround applied before this fix existed) and
+      // must not be replayed literally. This constructs a fixture matching
+      // B2's ORIGINAL pre-workaround shape instead: run still 'running' (no
+      // one ever cancelled it), one node stuck 'running' whose bound spawn is
+      // already terminal. The point of F10 is that this now self-heals on
+      // the very next tick — no operator has to call runCancel to unstick it.
+      const V3Reconciler = await getReconciler();
+      const { db, nodes, runs, spawns } = createMockDb(
+        makeRun({
+          status: "running",
+          dag: {
+            nodes: [
+              { id: "develop", type: "agent", deps: [], retry: { max: 1 } },
+            ],
+          },
+        }),
+        [
+          makeNode({
+            nodeIdInDag: "develop",
+            id: "node-develop",
+            status: "running",
+            currentSpawnId: "spawn-1",
+          }),
+        ],
+        [],
+        [],
+        [
+          makeSpawn({
+            id: "spawn-1",
+            nodeId: "node-develop",
+            status: "failed",
+            error: "orphaned-restart",
+          }),
+        ],
+      );
+
+      // See T-F10-02a for why the redispatch must insert a fresh non-terminal
+      // spawn row — without it, the mock's dispatcher never advances the
+      // spawns table and recursive re-ticks after a successful redispatch
+      // loop forever (a mock artifact, not a production behavior).
+      let redispatchSeq = 0;
+      const dispatcher: V3Dispatcher & { spawn: ReturnType<typeof vi.fn> } = {
+        spawn: vi.fn().mockImplementation(async (node: { id: string }) => {
+          const id = `spawn-redispatch-${++redispatchSeq}`;
+          spawns.push({
+            id,
+            nodeId: node.id,
+            status: "running",
+            error: null,
+            ownerEmail: "local@localhost",
+            orgId: null,
+          });
+          return id;
+        }),
+      } as any;
+      installRedispatchAwareCas(nodes);
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+      await new Promise((r) => setTimeout(r, 20));
+
+      // The run was never cancelled — it is still active (running or, if the
+      // redispatched node's async tail already looped back to finalize,
+      // still not 'cancelled') — the key assertion is NOT cancelled.
+      expect(runs.get("run-1")?.status).not.toBe("cancelled");
+
+      // The node was NOT left stuck at 'running' with a dead spawn — it was
+      // either redispatched (retry within policy: attemptsMade=1 <
+      // maxAttempts=2) or, if exhausted, moved to 'failed' where nodeRetry can
+      // reach it. Either way it is no longer silently wedged.
+      const nodeDevelop = nodes.find((n) => n.nodeIdInDag === "develop");
+      expect(nodeDevelop?.status).not.toBe("running");
+      // Retry was within policy here (1 prior spawn, max=1 → maxAttempts=2),
+      // so the automatic path redispatched it without any manual action.
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
     });
   });
 });
