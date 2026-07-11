@@ -796,6 +796,21 @@ ALTER TABLE v3_artifacts ADD COLUMN IF NOT EXISTS keep_after_run integer NOT NUL
 ALTER TABLE brain_tasks ADD COLUMN IF NOT EXISTS reap_reason text`,
       },
     },
+    {
+      // F2 executor context management (SDLC docs §2C / 02-workflows.md §4.1
+      // C3). Additive JSONB column on v3_spawns — the executor (engine-loop.ts
+      // + context-checkpoint.ts) persists a { writtenFiles,
+      // remainingTasksSummary, updatedAt } checkpoint at spawn termination so a
+      // future retry can carry forward completed work instead of re-running
+      // from zero. `name:` opts this into name-based tracking (storing-data
+      // skill's migration-collision guidance) since v3_migrations is a shared
+      // list multiple parallel F-stream branches extend concurrently.
+      version: 3,
+      name: "f2-spawn-context",
+      sql: {
+        postgres: `ALTER TABLE v3_spawns ADD COLUMN IF NOT EXISTS context_checkpoint jsonb`,
+      },
+    },
   ],
   { table: "v3_migrations" },
 );
