@@ -81,14 +81,26 @@ export const V3_SPAWN_STALE_GRACE_MS = (() => {
  * R9 (02-workflows.md §4) runtime liveness signal: a 'running' spawn has no
  * live handle to poll (in-process registry is gone across a restart, and
  * there is no OS-level PID for a vLLM/OM-style network spawn — see F1–F4 §6),
- * so the spawn's OWN event stream (`v3_events` rows keyed by spawn_id) is the
- * heartbeat: F2 guarantees a live worker keeps emitting events. When no event
- * has landed for longer than this threshold, the spawn is stranded even if it
- * still has a live-looking microVM (a network black-hole between the
- * orchestrator and the worker leaves `vm_name` set with nothing behind it) —
- * this check fires independently of the no-VM-grace / hard-stale backstops
- * above, catching that case far faster than the 30-minute hard backstop
- * would. Env-overridable via ORCH_SPAWN_STALL_MS (default 120s).
+ * so the spawn's OWN live transcript is the heartbeat.
+ *
+ * The heartbeat source is `spawn_events` (written per intermediate step by
+ * v3-dispatcher.ts's appendSpawnEvent — reasoning text / tool_use /
+ * tool_result), NOT `v3_events`: every v3_events insert in the codebase
+ * hardcodes `spawn_id = NULL` (it is a RUN-level, not spawn-level, log), so a
+ * `MAX(v3_events.ts) WHERE spawn_id = s.id` is ALWAYS NULL in production. An
+ * earlier revision of this file read v3_events and, finding NULL, fell back to
+ * `started_at` — which turned this into "any spawn older than 120s is
+ * stalled" and reset every healthy long-running spawn on the next driver tick.
+ * We read `spawn_events` instead, and only ever judge a spawn stalled on
+ * POSITIVE evidence: there IS at least one spawn_events row (the spawn
+ * genuinely emitted steps) AND the most recent one is older than this
+ * threshold. A spawn with no spawn_events rows yet (mid first generation) is
+ * NEVER judged stalled here — it is left to the no-VM-grace / hard-stale
+ * backstops. This uniquely targets a live-looking microVM (vm_name set) whose
+ * transcript went silent — a network black-hole between orchestrator and
+ * worker — catching it far faster than the 30-minute hard backstop while
+ * never shrinking the safety window for a genuinely-busy spawn.
+ * Env-overridable via ORCH_SPAWN_STALL_MS (default 120s).
  */
 export const ORCH_SPAWN_STALL_MS = (() => {
   const raw = Number(process.env.ORCH_SPAWN_STALL_MS);
@@ -125,10 +137,12 @@ export async function reconcileV3SpawnsOnce(
 
   // ── (A) Stranded RUNNING spawns ──────────────────────────────────────────
   // Candidate running spawns + their parent node/run terminality and VM
-  // liveness, plus the spawn's own last v3_events timestamp (the heartbeat —
-  // see ORCH_SPAWN_STALL_MS above). started_at is the spawn's own clock;
-  // coalesce to epoch so a NULL never looks "recent". liveVm = a microVM
-  // runtime with a vm_name actually written.
+  // liveness, plus the spawn's own last spawn_events timestamp (the REAL live
+  // heartbeat — see ORCH_SPAWN_STALL_MS above; NOT v3_events, whose spawn_id
+  // is always NULL). started_at is the spawn's own clock; coalesce to epoch so
+  // a NULL never looks "recent". liveVm = a microVM runtime with a vm_name
+  // actually written. last_event_at stays NULL when the spawn has emitted no
+  // steps yet — that is a distinct, meaningful state (never judged stalled).
   const runningCandidates = await getDbExec().execute(
     `SELECT
         s.id                AS id,
@@ -139,7 +153,7 @@ export async function reconcileV3SpawnsOnce(
         n.status            AS node_status,
         n.run_id            AS run_id,
         r.status            AS run_status,
-        (SELECT MAX(ts) FROM v3_events WHERE spawn_id = s.id) AS last_event_at
+        (SELECT MAX(created_at) FROM spawn_events WHERE spawn_id = s.id) AS last_event_at
        FROM v3_spawns s
        LEFT JOIN v3_nodes n ON n.id = s.node_id
        LEFT JOIN v3_runs  r ON r.id = n.run_id
@@ -157,12 +171,15 @@ export async function reconcileV3SpawnsOnce(
     const startedAt = row.started_at
       ? new Date(String(row.started_at)).getTime()
       : 0;
-    // Heartbeat = the spawn's most recent v3_events row; fall back to
-    // started_at when no event has landed yet (still a valid "last known
-    // alive" signal for a spawn that just opened).
-    const lastEventAt = row.last_event_at
+    // Heartbeat = the spawn's most recent spawn_events row. Crucially, NULL
+    // (no step ever emitted) is kept as NULL — NOT coalesced to started_at —
+    // so "genuinely alive then went silent" is never confused with "just
+    // started, hasn't emitted a step yet". Only a real, aged heartbeat trips
+    // the stall path below.
+    const hasHeartbeat = row.last_event_at != null;
+    const lastEventAt = hasHeartbeat
       ? new Date(String(row.last_event_at)).getTime()
-      : startedAt;
+      : 0;
 
     const nodeTerminal =
       nodeStatus === "done" ||
@@ -177,25 +194,36 @@ export async function reconcileV3SpawnsOnce(
     // Reset only when there is demonstrably no live work behind this spawn:
     //   (1) parent node/run already terminal, OR
     //   (2) no live VM AND older than the short no-VM grace, OR
-    //   (3) its own event stream has gone silent past the stall threshold
-    //       (catches a dead microVM/network black-hole regardless of
-    //       runtime/vm_name — the R9 "运行期判活" signal), OR
+    //   (3) a LIVE VM whose transcript went silent — it HAS emitted steps
+    //       (hasHeartbeat) but the most recent is older than the stall
+    //       threshold (a dead microVM / network black-hole; the R9 "运行期
+    //       判活" signal). Scoped to liveVm because every non-live-VM spawn is
+    //       already covered by (2) at the 2-min no-VM grace; and gated on
+    //       hasHeartbeat so a live VM with no step yet (mid first generation)
+    //       is left to the hard-stale backstop — a genuinely-busy spawn is
+    //       NEVER reset for merely being old, OR
     //   (4) older than the hard stale backstop regardless.
     const parentTerminal = nodeTerminal || runTerminal;
     const noVmAndAged = !liveVm && startedAt < Date.now() - noVmGraceMs;
-    const eventStalled = !parentTerminal && Date.now() - lastEventAt > stallMs;
+    const eventStalled =
+      !parentTerminal &&
+      liveVm &&
+      hasHeartbeat &&
+      Date.now() - lastEventAt > stallMs;
     const hardStale = startedAt < Date.now() - staleGraceMs;
     if (!parentTerminal && !noVmAndAged && !eventStalled && !hardStale)
       continue;
 
     const ageMin = Math.round((Date.now() - startedAt) / 60_000);
-    const silentMin = Math.round((Date.now() - lastEventAt) / 60_000);
+    const silentMin = hasHeartbeat
+      ? Math.round((Date.now() - lastEventAt) / 60_000)
+      : ageMin;
     const why = parentTerminal
       ? `parent ${nodeTerminal ? `node ${nodeStatus}` : `run ${runStatus}`}`
       : noVmAndAged
         ? `no live microVM (runtime=${runtime ?? "?"}) for ~${ageMin}m`
         : eventStalled
-          ? `no v3_events heartbeat for ~${silentMin}m (stall)`
+          ? `no spawn_events heartbeat for ~${silentMin}m (live-VM stall)`
           : `stale running spawn (~${ageMin}m)`;
     const reason = `reconciled: stranded running spawn — ${why}`;
 

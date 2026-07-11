@@ -23,11 +23,19 @@
 //    spawn row. That is a REAL exercise of the boot-scan mechanism, just
 //    without the surrounding HTTP server.
 //  - T-F10-04 asks to "block :9000" to silence a spawn's event stream. This
-//    test achieves the same OBSERVABLE effect directly at the data level (a
-//    v3_events row whose timestamp is older than the stall threshold, with no
-//    newer event) rather than actually running a network proxy — the
-//    reconcile function only ever looks at `MAX(v3_events.ts)`, so this is a
-//    faithful trigger of the exact code path, not a substitute assertion.
+//    test achieves the same OBSERVABLE effect directly at the data level: a
+//    REAL `spawn_events` row (the exact table + `created_at` column
+//    v3-dispatcher.ts's appendSpawnEvent writes per step — the production
+//    live-heartbeat source) whose timestamp is older than the stall
+//    threshold, with no newer step. The reconcile only ever looks at
+//    `MAX(spawn_events.created_at)`, so this faithfully triggers the exact
+//    code path, not a substitute assertion. (An earlier revision injected a
+//    v3_events row with a non-null spawn_id instead — a shape production never
+//    writes, since every v3_events insert hardcodes spawn_id=NULL — which
+//    masked a real bug where the reconcile read v3_events, always got NULL,
+//    and fell back to started_at, resetting every healthy long-running spawn.
+//    The heartbeat source is now spawn_events, and the REVEALING REGRESSION
+//    test below pins that a healthy long-running live-VM spawn is NOT reset.)
 //  - Every fixture is deliberately built so the conduction rule's decision is
 //    "retries exhausted → fail" (no retry policy on the DAG node, exactly one
 //    spawn attempt made) — this guarantees `triggerTickSafe()`'s real
@@ -188,7 +196,7 @@ describe.skipIf(!dockerAvailable)(
       expect((eventRow.rows[0] as any).payload?.disposition).toBe("failed");
     }, 20_000);
 
-    it("T-F10-04 analogue: an event-stream stall (no v3_events heartbeat) settles a live-looking microVM spawn AND drives its node; nodeRetry then revives the survivor", async () => {
+    it("T-F10-04 analogue: a REAL spawn_events heartbeat gone stale settles a live-looking microVM spawn AND drives its node; nodeRetry then revives the survivor", async () => {
       const { getDbExec } = await import("../db/index.js");
       const { reconcileV3SpawnsOnce, ORCH_SPAWN_STALL_MS } =
         await import("./v3-spawn-reconcile.js");
@@ -213,19 +221,25 @@ describe.skipIf(!dockerAvailable)(
       // Looks alive by every OTHER signal: microVM runtime with a real vm_name
       // (liveVm=true → the no-VM-grace backstop never fires), started only 6
       // minutes ago (well inside the 30-min hard-stale backstop). The ONLY
-      // thing wrong is its event stream went silent 5 minutes ago — longer than
-      // ORCH_SPAWN_STALL_MS (default 120s) — which is exactly what T-F10-04
-      // means by "断流可检" (a silent stream is detectable) and is the ONLY of
-      // the three disposition checks that can catch this shape.
+      // thing wrong is its live transcript went silent 5 minutes ago — longer
+      // than ORCH_SPAWN_STALL_MS (default 120s) — which is exactly what
+      // T-F10-04 means by "断流可检" (a silent stream is detectable).
       await getDbExec().execute({
         sql: `INSERT INTO v3_spawns (id, node_id, rendered_prompt, status, runtime, vm_name, started_at, owner_email)
             VALUES ($1, $2, 'test prompt', 'running', 'microvm', 'vm-f10-test', now() - interval '6 minutes', 'local@localhost')`,
         args: [spawnId, nodeId],
       });
+      // The heartbeat is a REAL `spawn_events` row (the SAME table + column
+      // v3-dispatcher.ts's appendSpawnEvent writes per step). The earlier
+      // revision of this test injected a v3_events row with a non-null
+      // spawn_id — a shape production NEVER writes (all v3_events inserts
+      // hardcode spawn_id=NULL) — which masked the real bug (the reconcile
+      // read v3_events, always got NULL, and fell back to started_at). Using
+      // spawn_events here exercises the actual production heartbeat path.
       await getDbExec().execute({
-        sql: `INSERT INTO v3_events (id, run_id, spawn_id, kind, ts, owner_email)
-            VALUES ($1, $2, $3, 'spawn.step', now() - interval '5 minutes', 'local@localhost')`,
-        args: [`${spawnId}-ev1`, runId, spawnId],
+        sql: `INSERT INTO spawn_events (id, spawn_id, seq, type, created_at, owner_email)
+            VALUES ($1, $2, 0, 'text', now() - interval '5 minutes', 'local@localhost')`,
+        args: [`${spawnId}-step0`, spawnId],
       });
 
       expect(ORCH_SPAWN_STALL_MS).toBeGreaterThan(0);
@@ -260,6 +274,70 @@ describe.skipIf(!dockerAvailable)(
       });
       expect((revived.rows[0] as any).status).toBe("ready");
       expect((revived.rows[0] as any).current_spawn_id).toBeNull();
+    }, 20_000);
+
+    it("REVEALING REGRESSION (fix guard): a healthy long-running live-VM spawn (>120s, no stale heartbeat) is NOT reset — RED before the spawn_events fix, GREEN after", async () => {
+      // This is the test that exposes the blocking bug the reviewer caught.
+      // Pre-fix, the reconcile read `MAX(v3_events.ts) WHERE spawn_id = s.id`
+      // — always NULL in production — and fell back to `started_at`, so ANY
+      // live-VM spawn older than 120s was judged "stalled" and reset to failed
+      // (then migrated by conduction), killing every healthy spawn running >2
+      // minutes. This fixture is exactly that healthy shape: a live microVM
+      // (vm_name set), started 6 minutes ago, run + node both still running,
+      // and NO stale heartbeat (either no spawn_events row at all, or a fresh
+      // one). It MUST be left running.
+      const { getDbExec } = await import("../db/index.js");
+      const { reconcileV3SpawnsOnce } = await import("./v3-spawn-reconcile.js");
+
+      const runId = "f10-run-healthy";
+      const nodeId = "f10-node-healthy";
+      const spawnId = "f10-spawn-healthy";
+
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_runs (id, inputs, dag, status, owner_email)
+            VALUES ($1, '{}'::jsonb, $2::jsonb, 'running', 'local@localhost')`,
+        args: [
+          runId,
+          JSON.stringify({ nodes: [{ id: "a", type: "agent", deps: [] }] }),
+        ],
+      });
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_nodes (id, run_id, node_id_in_dag, type, status, current_spawn_id, owner_email)
+            VALUES ($1, $2, 'a', 'agent', 'running', $3, 'local@localhost')`,
+        args: [nodeId, runId, spawnId],
+      });
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_spawns (id, node_id, rendered_prompt, status, runtime, vm_name, started_at, owner_email)
+            VALUES ($1, $2, 'test prompt', 'running', 'microvm', 'vm-f10-healthy', now() - interval '6 minutes', 'local@localhost')`,
+        args: [spawnId, nodeId],
+      });
+      // A FRESH heartbeat (10s ago) — the spawn is demonstrably alive. Even a
+      // spawn with NO spawn_events row at all must survive (hasHeartbeat=false
+      // → never judged stalled), but a fresh row is the stronger positive
+      // case: MAX(created_at) is recent, so eventStalled is false regardless.
+      await getDbExec().execute({
+        sql: `INSERT INTO spawn_events (id, spawn_id, seq, type, created_at, owner_email)
+            VALUES ($1, $2, 0, 'text', now() - interval '10 seconds', 'local@localhost')`,
+        args: [`${spawnId}-step0`, spawnId],
+      });
+
+      const reconciled = await reconcileV3SpawnsOnce();
+
+      // The healthy spawn must NOT appear in the reconciled set.
+      expect(reconciled.some((r) => r.id === spawnId)).toBe(false);
+
+      const spawnRow = await getDbExec().execute({
+        sql: `SELECT status FROM v3_spawns WHERE id = $1`,
+        args: [spawnId],
+      });
+      expect((spawnRow.rows[0] as any).status).toBe("running");
+
+      const nodeRow = await getDbExec().execute({
+        sql: `SELECT status, current_spawn_id FROM v3_nodes WHERE id = $1`,
+        args: [nodeId],
+      });
+      expect((nodeRow.rows[0] as any).status).toBe("running");
+      expect((nodeRow.rows[0] as any).current_spawn_id).toBe(spawnId);
     }, 20_000);
   },
 );

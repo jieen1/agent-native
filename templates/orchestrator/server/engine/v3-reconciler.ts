@@ -1036,10 +1036,18 @@ export class V3Reconciler {
    * conduction-triggered, inserts exactly one new `v3_spawns` row) and needs
    * zero schema change.
    *
-   * Protected by `tick()`'s own per-run advisory lock (only one tick for this
-   * runId is ever in flight), so a plain conditioned `UPDATE ... WHERE
-   * id = $1 AND status = $2` — mirroring the rest of this file's node writes
-   * — is enough; no cross-tick CAS race is possible here.
+   * Concurrency: `tick()`'s per-run advisory lock serializes TICKS, but the
+   * dispatcher's `fireAndTrackSpawn` writes spawn-terminal + node-terminal
+   * OUTSIDE that lock and NON-transactionally (writeSpawnRecord sets
+   * spawn=done, then a separate UPDATE sets node=done). A conduction pass can
+   * therefore observe the brief window where spawn=done but node=running and
+   * wrongly treat a SUCCEEDING node as a gap. Every migration UPDATE below is
+   * therefore CAS-guarded on `status = <observed non-terminal status> AND
+   * current_spawn_id = <observed spawn id>`: if the dispatcher (or another
+   * writer) resolved the node in the meantime, the WHERE matches nothing and
+   * the migration is a no-op — a concurrently-completing node is never
+   * overwritten. (The advisory-lock comment on `tick()` is about ticks, not
+   * about these async completion writes.)
    */
   private async reconcileSpawnConduction(
     runId: string,
@@ -1072,6 +1080,14 @@ export class V3Reconciler {
       const retryPolicy = dagNode?.retry as V3RetryPolicy | undefined;
       const maxAttempts = (retryPolicy?.max ?? 0) + 1;
 
+      // Durable attempt counter = rows in v3_spawns for this node (see the
+      // method JSDoc). NOTE (accepted caveat, docs-recorded): this counts the
+      // node's ENTIRE spawn history. A node revived by manual nodeRetry after
+      // already accumulating >= maxAttempts spawn rows will, if its new spawn
+      // then strands, be judged "exhausted" immediately (0 automatic
+      // conduction retries) and fail. That errs toward failing (never toward
+      // infinite retry) and stays manually retryable via nodeRetry, so it is
+      // acceptable rather than a correctness bug.
       const priorSpawns = await this.db
         .select({ id: v3Spawns.id })
         .from(v3Spawns)
@@ -1081,6 +1097,17 @@ export class V3Reconciler {
       const spawnSummary =
         `spawn ${spawn.id} ${spawn.status}` +
         (spawn.error ? `: ${spawn.error.slice(0, 200)}` : "");
+
+      // CAS guard (see method JSDoc): only migrate if the node is STILL in the
+      // exact non-terminal status + bound to the exact spawn we observed — so
+      // a concurrent dispatcher completion (spawn=done → node=done) is never
+      // clobbered. `node.status`/`node.currentSpawnId` are the snapshot values
+      // read at the top of this loop iteration.
+      const casGuard = and(
+        eq(v3Nodes.id, node.id),
+        eq(v3Nodes.status, node.status),
+        eq(v3Nodes.currentSpawnId, node.currentSpawnId),
+      );
 
       if (attemptsMade < maxAttempts) {
         // Retry within policy — re-arm for redispatch on this same tick's
@@ -1093,7 +1120,7 @@ export class V3Reconciler {
             currentSpawnId: null,
             error: `conduction retry ${attemptsMade}/${maxAttempts}: ${spawnSummary}`,
           })
-          .where(eq(v3Nodes.id, node.id));
+          .where(casGuard);
 
         await this.writeEvent(runId, "conduction.fixed", {
           nodeId: node.nodeIdInDag,
@@ -1114,7 +1141,7 @@ export class V3Reconciler {
             error: `Retries exhausted (${attemptsMade}/${maxAttempts}) — ${spawnSummary}`,
             completedAt: new Date(),
           })
-          .where(eq(v3Nodes.id, node.id));
+          .where(casGuard);
 
         await this.writeEvent(runId, "conduction.fixed", {
           nodeId: node.nodeIdInDag,
