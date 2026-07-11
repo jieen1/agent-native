@@ -898,6 +898,21 @@ async function resolveWorkspaceTargetBranch(row: {
  * `git reset --hard` and re-checked; a workspace that's still behind after
  * that reset — or whose target branch can't be resolved/fetched at all —
  * throws `WorkspaceNotReadyError('W1', …)`.
+ *
+ * SCOPE (do not over-read this): this only runs once, from
+ * {@link createLocalWorkspace}, at workspace creation. F1 carries no
+ * delivery-time freshness gate — there is no re-assertion of merge-base==tip
+ * before a run's work is committed/pushed. What F1 DOES guarantee for the
+ * lifetime of a run is that {@link resolveDiffBase} (W4) always computes a
+ * correct divergence base at call time, or fails loudly (never a silent
+ * guessed/stale diff). Across a long-lived run, while the target branch keeps
+ * advancing past this baseline, there is a bounded window (B2) where the
+ * workspace's cut point drifts behind the target's current tip; the final
+ * merge-base==tip assertion immediately before landing is `merge-pr`'s
+ * brain/DAG responsibility, not this module's. A `workspace.stale` event for
+ * that in-flight drift and an explicit delivery-time freshness gate are open
+ * F1 follow-ups (T-F1-12 — see the deviations note in the implementation
+ * report), not something this function already covers.
  */
 export async function assertW1BaselineFresh(
   dir: string,

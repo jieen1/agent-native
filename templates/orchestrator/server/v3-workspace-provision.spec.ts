@@ -121,7 +121,7 @@ describe("assertDependenciesWarm (W2, T-F1-06)", () => {
     expect(report.durationMs).toBeGreaterThanOrEqual(0);
     // Exactly one call — the probe. No install.
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec.mock.calls[0][0]).toBe("pnpm exec vitest --version");
+    expect(exec.mock.calls[0]?.[0 as number]).toBe("pnpm exec vitest --version");
   });
 
   it("cold probe → pnpm install --prefer-offline --store-dir <shared store> → re-probe passes", async () => {
