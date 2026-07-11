@@ -69,13 +69,29 @@ export async function upsertModel(
   const db = getV3Db();
   const ownerEmail = resolveOwnerEmail();
 
+  // Owner-scoped read: only the caller's OWN alias rows are visible here, so a
+  // tenant can never observe (and, via the UPDATE below, overwrite) another
+  // owner's alias→real-name mapping. The table's global UNIQUE(alias) still
+  // makes a first-come tenant own a given alias; a second tenant claiming the
+  // same alias finds no prior of its own, takes the INSERT path, and is
+  // rejected by that constraint rather than silently clobbering the first
+  // tenant's row.
   const existing = await db
     .select()
     .from(v3Schema.v3ModelRegistry)
-    .where(eq(v3Schema.v3ModelRegistry.alias, input.alias))
+    .where(
+      and(
+        eq(v3Schema.v3ModelRegistry.alias, input.alias),
+        eq(v3Schema.v3ModelRegistry.ownerEmail, ownerEmail),
+      ),
+    )
     .limit(1);
   const prior = existing[0] ?? null;
   const aliasChanged = !!prior && prior.realName !== input.realName;
+
+  // Generated up front so a fresh insert can RETURN its real id (callers use it
+  // to reference the new registry row) instead of an opaque placeholder.
+  const newId = uid();
 
   if (prior) {
     await db
@@ -86,10 +102,17 @@ export async function upsertModel(
         endpoint: input.endpoint ?? null,
         isClaudeWeight: input.isClaudeWeight ? 1 : 0,
       })
-      .where(eq(v3Schema.v3ModelRegistry.id, prior.id));
+      // Owner-scoped write (defense-in-depth on top of the owner-scoped read
+      // above): the UPDATE can only ever touch a row the caller owns.
+      .where(
+        and(
+          eq(v3Schema.v3ModelRegistry.id, prior.id),
+          eq(v3Schema.v3ModelRegistry.ownerEmail, ownerEmail),
+        ),
+      );
   } else {
     await db.insert(v3Schema.v3ModelRegistry).values({
-      id: uid(),
+      id: newId,
       realName: input.realName,
       alias: input.alias,
       tier: input.tier ?? null,
@@ -114,7 +137,7 @@ export async function upsertModel(
   }
 
   return {
-    id: prior?.id ?? "(pending)",
+    id: prior?.id ?? newId,
     aliasChanged,
     previousRealName: prior?.realName ?? null,
   };

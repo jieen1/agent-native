@@ -84,12 +84,28 @@ describe.skipIf(!enabled)("f7-telemetry migration smoke (real postgres:16)", () 
 
         const dbPluginModule = await import("./db.js");
         await dbPluginModule.default(undefined);
+        // Second boot: the f7-telemetry migration is NAME-based, so a re-run
+        // must be a clean no-op (its name is already recorded in
+        // v3_migrations_named). This proves the name-gate persisted — the exact
+        // failure mode the v1 CREATE-TYPE block stays version-only to avoid.
+        await dbPluginModule.default(undefined);
 
         const postgres = (await import("postgres")).default;
         const sql = postgres(databaseUrl);
         try {
           const tableRows = await sql`SELECT to_regclass('public.v3_model_registry') AS reg`;
           expect(tableRows[0]?.reg).not.toBeNull();
+
+          // Name-based tracking landed: the companion table exists and holds a
+          // single 'f7-telemetry' row (recorded once, not re-applied on the
+          // second boot above). This is the anti-collision property the
+          // version-only→name conversion buys — a sibling F-branch landing a
+          // v3_migrations entry at version ≤ 3 can no longer make MAX(version)
+          // silently skip this migration's DDL.
+          const namedRows = await sql`
+            SELECT name FROM v3_migrations_named WHERE name = 'f7-telemetry'
+          `;
+          expect(namedRows.map((r) => r.name)).toEqual(["f7-telemetry"]);
 
           const cols = await sql`
             SELECT table_name, column_name FROM information_schema.columns

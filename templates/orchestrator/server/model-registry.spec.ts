@@ -119,7 +119,13 @@ describe("assertAliasAllowed / upsertModel — fake-name rejection (T-F7-01)", (
     });
 
     expect(result.aliasChanged).toBe(false);
-    expect(inserted.filter((r) => r.kind === undefined)).toHaveLength(1); // registry row insert
+    const registryRows = inserted.filter((r) => r.kind === undefined);
+    expect(registryRows).toHaveLength(1); // registry row insert
+    // A fresh insert returns the REAL generated id, not an opaque placeholder,
+    // and it matches the row actually written.
+    expect(result.id).toBe(registryRows[0].id);
+    expect(result.id).not.toBe("(pending)");
+    expect(typeof result.id).toBe("string");
   });
 });
 

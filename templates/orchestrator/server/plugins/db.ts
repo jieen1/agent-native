@@ -798,21 +798,31 @@ ALTER TABLE brain_tasks ADD COLUMN IF NOT EXISTS reap_reason text`,
     },
     {
       // f7-telemetry (04 §7/§10/§13 — model-identity + usage-telemetry single
-      // source of truth). This module's `runMigrations` (packages/core/src/db/
-      // migrations.ts, imported above) tracks ONLY `version` in this app's
-      // `v3_migrations` table — there is no `name:` field on `MigrationEntry`
-      // and no companion named-registry table in this core build (verified:
-      // `MigrationEntry` = `{ version, sql }`, `runMigrations` only ever does
-      // `SELECT MAX(version)` against the ONE table passed via `{ table }`).
-      // An earlier planning pass assumed a `{ version: 4, name:
-      // "f7-telemetry" }` slot after F2's `{ version: 3, name:
-      // "f2-spawn-context" }` — but as of this migration's authoring, F2's
-      // entry has not been added to this array (max version here is still 2),
-      // so this is version 3, plain version-only tracking like every other
-      // entry in this array. Kept the `f7-telemetry` name in this COMMENT
-      // (not a `name:` field, which doesn't exist) purely so a future reader
-      // grepping for it still finds this block.
+      // source of truth). NAME-BASED tracking (`name:` below).
+      //
+      // core `runMigrations` (packages/core/src/db/migrations.ts, imported
+      // above) DOES support name-based tracking: `MigrationEntry` has an
+      // optional `name?`, and a named entry is recorded in the companion
+      // `<table>_named` table (here `v3_migrations_named`) and applies IFF its
+      // name is absent there — completely independent of the legacy
+      // `MAX(version)` gate. This same file already uses it (see version 21
+      // `orchestrator-skill-overrides-table` in the migrateV2 array above).
+      //
+      // Why NAME here instead of version-only like the rest of THIS array:
+      // every F0 sibling branch (F2 spawn-context, F10 spawn-conduction, …)
+      // extends this SAME `V3_MIGRATIONS` array. Under pure version-only
+      // gating, if a sibling lands a `version <= 3` entry first, `MAX(version)`
+      // would already be ≥ 3 when this app boots and this entry's DDL would be
+      // SILENTLY SKIPPED — `v3_model_registry` + the telemetry columns would
+      // never be created. Keying on the stable slug `"f7-telemetry"` instead
+      // makes application collision-proof across branches regardless of which
+      // version numbers siblings pick (the framework's own guidance: "New
+      // migrations should always set a name"). The `version: 3` is retained
+      // only as list-order sequence position; the NAME is the real gate. All
+      // statements here are idempotent (CREATE TABLE IF NOT EXISTS + ADD COLUMN
+      // IF NOT EXISTS, no CREATE TYPE), so name-based re-application is safe.
       version: 3,
+      name: "f7-telemetry",
       sql: {
         postgres: `CREATE TABLE IF NOT EXISTS v3_model_registry (
   id text PRIMARY KEY,
