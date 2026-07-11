@@ -8,18 +8,14 @@
 // `actions/brain-task-slot.ts`(新,orchestrator) row: "暴露 brain_tasks 槽位
 //状态(threadId→{status,runId,updatedAt}),ownerScope;替代 tracker 裸 SQL。"
 //
-// NOTE (dedup flag for the merge integrator): this worktree's trunk already
-// has an equivalent, already-wired action — `brain-task-for-thread.ts` — which
-// the CURRENT (pre-F9) `templates/tracker/actions/get-activity.ts` on this
-// same trunk already calls successfully (with its own runs-based fallback).
-// That action returns `{status, runId}` (no `updatedAt`) and is NOT the tool
-// name the F9 tracker branch's `get-activity.ts` calls (it calls
-// `"brain-task-slot"` specifically). This file exists so that branch's
-// contract is satisfied once it merges here; it intentionally does not touch
-// or replace `brain-task-for-thread.ts` (still relied on by this trunk's own
-// `get-activity.ts`). Consolidating the two into one action is a reasonable
-// follow-up at merge time, once both branches land — not done here to avoid
-// destabilizing the trunk's current (working) `get-activity.ts` call site.
+// F0 integration note: the trunk previously also had an equivalent action,
+// `brain-task-for-thread.ts` (`{status, runId}`, no `updatedAt`), called by
+// the pre-F9 `templates/tracker/actions/get-activity.ts`. Per the F0
+// cross-branch reconciliation, that duplicate has been REMOVED (grep-
+// confirmed zero remaining callers inside `templates/orchestrator` — the only
+// caller was the tracker template's own `get-activity.ts`, updated by the
+// tracker-side F9 integration to call `"brain-task-slot"` instead). This is
+// now the single action for reading a brain thread's task slot state.
 
 import { defineAction } from "@agent-native/core";
 import { and, desc, eq } from "drizzle-orm";
