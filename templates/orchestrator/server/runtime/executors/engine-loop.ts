@@ -19,6 +19,9 @@
 // for a future retry (see context-checkpoint.ts). See the "F2 resume note"
 // comment below for why the resume wrapper is a local reimplementation
 // instead of importing core's `runAgentLoopDirectWithSoftTimeout`.
+// checkpoint 消费端在 F2b(dispatcher 重试注入)——本切片 checkpoint 只写;
+// 读取 v3_spawns.context_checkpoint 并注入重试 prompt 的 v3-dispatcher.ts
+// 改动属 F2b 后续切片(F1/F4 并行期 v3-dispatcher 禁碰)。
 
 import {
   actionsToEngineTools,
