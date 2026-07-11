@@ -796,6 +796,41 @@ ALTER TABLE v3_artifacts ADD COLUMN IF NOT EXISTS keep_after_run integer NOT NUL
 ALTER TABLE brain_tasks ADD COLUMN IF NOT EXISTS reap_reason text`,
       },
     },
+    {
+      // f7-telemetry (04 §7/§10/§13 — model-identity + usage-telemetry single
+      // source of truth). This module's `runMigrations` (packages/core/src/db/
+      // migrations.ts, imported above) tracks ONLY `version` in this app's
+      // `v3_migrations` table — there is no `name:` field on `MigrationEntry`
+      // and no companion named-registry table in this core build (verified:
+      // `MigrationEntry` = `{ version, sql }`, `runMigrations` only ever does
+      // `SELECT MAX(version)` against the ONE table passed via `{ table }`).
+      // An earlier planning pass assumed a `{ version: 4, name:
+      // "f7-telemetry" }` slot after F2's `{ version: 3, name:
+      // "f2-spawn-context" }` — but as of this migration's authoring, F2's
+      // entry has not been added to this array (max version here is still 2),
+      // so this is version 3, plain version-only tracking like every other
+      // entry in this array. Kept the `f7-telemetry` name in this COMMENT
+      // (not a `name:` field, which doesn't exist) purely so a future reader
+      // grepping for it still finds this block.
+      version: 3,
+      sql: {
+        postgres: `CREATE TABLE IF NOT EXISTS v3_model_registry (
+  id text PRIMARY KEY,
+  real_name text NOT NULL,
+  alias text NOT NULL,
+  tier text,
+  endpoint text,
+  is_claude_weight integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  owner_email text NOT NULL DEFAULT 'local@localhost',
+  org_id text,
+  CONSTRAINT unique_v3_model_registry_alias UNIQUE (alias)
+);
+ALTER TABLE v3_spawns ADD COLUMN IF NOT EXISTS model_real_name text;
+ALTER TABLE v3_spawns ADD COLUMN IF NOT EXISTS usage_suspect integer NOT NULL DEFAULT 0;
+ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS closing_anomaly text`,
+      },
+    },
   ],
   { table: "v3_migrations" },
 );

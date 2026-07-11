@@ -52,6 +52,18 @@ const WORKDIR = DEFAULT_WORKDIR;
 export interface NodeRunnerResult {
   output: unknown;
   tokensSpent: number;
+  /**
+   * F7 telemetry (04 §7/§13): the input/output split, forwarded verbatim from
+   * the executor's {@link RuntimeExecResult} — see that type for why these are
+   * optional. Threading this through here is REQUIRED for the split to reach
+   * `v3-dispatcher.ts` at all: `provisionAndRun` below builds this object by
+   * explicit field copy from `execResult`, so a field missing from THIS
+   * interface is silently dropped even after the executor populates it
+   * (SDLC-051's real second loss point, beyond `RuntimeExecResult` itself).
+   */
+  tokensInput?: number;
+  /** See {@link tokensInput}. */
+  tokensOutput?: number;
   toolCallCount: number;
   model: string;
   /** The sandbox name of the VM that ran the node (null for none-runtime). */
@@ -305,6 +317,8 @@ export class NodeRunner {
             ? { ...(execResult.output as Record<string, unknown>), delivery }
             : execResult.output,
         tokensSpent: execResult.tokensSpent,
+        tokensInput: execResult.tokensInput,
+        tokensOutput: execResult.tokensOutput,
         toolCallCount: execResult.toolCallCount,
         model: execResult.model,
         steps: execResult.steps,

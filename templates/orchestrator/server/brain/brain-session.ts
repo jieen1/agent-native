@@ -162,20 +162,101 @@ function resolveClaudeAgentAcpEntry(): { command: string; args: string[] } | nul
 export const BRAIN_HARNESS_ENV = "ORCH_BRAIN_HARNESS";
 
 /**
- * Whether this turn should run through the harness adapter path instead of
- * the raw `claude` spawn. Requires BOTH the opt-in env flag AND the ACP
- * packages to actually be installed+resolvable, so an app that sets the flag
- * without the packages installed still gets the raw-spawn path instead of a
- * hard failure every turn.
+ * Result of resolving whether the harness-adapter path is usable this turn.
+ * `degradedReason` is non-null ONLY when the operator explicitly opted in
+ * (`ORCH_BRAIN_HARNESS=1`) but the harness turned out to be unusable — i.e.
+ * a real capability degradation, not just "not requested". Distinguishing
+ * the two is what makes the SDLC-049 fix possible: "flag off" must stay
+ * silent (expected), "flag on but broken" must never stay silent.
  */
-function isBrainHarnessEnabled(): boolean {
-  if (process.env[BRAIN_HARNESS_ENV] !== "1") return false;
+export interface BrainHarnessEvaluation {
+  enabled: boolean;
+  degradedReason: string | null;
+}
+
+/**
+ * Whether this turn should run through the harness adapter path instead of
+ * the raw `claude` spawn, AND — when the operator opted in but it is not
+ * usable — WHY (04 §7 "降级显式化不变量", SDLC-049). Requires BOTH the
+ * opt-in env flag AND the ACP packages to actually be installed+resolvable;
+ * with the flag unset this returns `{enabled:false, degradedReason:null}`
+ * (nothing was requested, so nothing degraded).
+ */
+export function evaluateBrainHarness(): BrainHarnessEvaluation {
+  if (process.env[BRAIN_HARNESS_ENV] !== "1") {
+    return { enabled: false, degradedReason: null };
+  }
   try {
     registerOrchestratorRuntime();
     const entry = getAgentHarnessEntry(ACP_CLAUDE_CODE_HARNESS);
-    return !!entry && isAgentHarnessPackageInstalled(entry);
+    if (!entry) {
+      return {
+        enabled: false,
+        degradedReason: `harness entry "${ACP_CLAUDE_CODE_HARNESS}" is not registered`,
+      };
+    }
+    if (!isAgentHarnessPackageInstalled(entry)) {
+      return {
+        enabled: false,
+        degradedReason: `harness "${ACP_CLAUDE_CODE_HARNESS}" packages are not installed/resolvable`,
+      };
+    }
+    return { enabled: true, degradedReason: null };
+  } catch (err) {
+    return {
+      enabled: false,
+      degradedReason: `harness init threw: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Whether this turn should run through the harness adapter path instead of
+ * the raw `claude` spawn. Thin wrapper over {@link evaluateBrainHarness} for
+ * call sites that only need the boolean (the log line in startBrainTurn).
+ */
+function isBrainHarnessEnabled(): boolean {
+  return evaluateBrainHarness().enabled;
+}
+
+/**
+ * SDLC-049 fix: a declared-but-broken harness must never fall back to
+ * raw-spawn SILENTLY. Logs at error level and writes a `capability.degraded`
+ * v3_event (health-page/S9-banner visible) EVERY time this branch is hit — no
+ * dedup, so the degradation stays visible for the whole time the operator's
+ * flag and the actual capability disagree, not just once. Best-effort: a
+ * failure to WRITE the event must never fail the turn itself.
+ */
+export async function recordHarnessDegradation(
+  db: ReturnType<typeof getV3Db>,
+  threadId: string,
+  ownerEmail: string,
+  orgId: string | null,
+  reason: string,
+): Promise<void> {
+  const message =
+    `[brain] capability degraded: ${BRAIN_HARNESS_ENV}=1 but the ` +
+    `"${ACP_CLAUDE_CODE_HARNESS}" harness is unavailable (${reason}) — ` +
+    `falling back to the raw-spawn CC path for thread ${threadId}.`;
+  // eslint-disable-next-line no-console
+  console.error(message);
+  try {
+    // Not run-scoped (this event has no runId), so seq_num is left null —
+    // the same nullable field v3-dispatcher.ts's writeEvent() populates only
+    // for run-scoped events; ordering here is by `ts`.
+    await db.insert(v3Schema.v3Events).values({
+      id: `ev_${randomUUID()}`,
+      runId: null,
+      spawnId: null,
+      kind: "capability.degraded",
+      payload: { capability: "brain-harness", reason, threadId },
+      seqNum: null,
+      ts: new Date(),
+      ownerEmail,
+      orgId,
+    });
   } catch {
-    return false;
+    // Best-effort — the console.error above already made this visible.
   }
 }
 
@@ -256,8 +337,11 @@ export async function startBrainTurn(
   const login = getManagedClaudeStatus();
   const useSdkBrain = !login.loggedIn;
   // Within the CC path, gated opt-in to the harness-adapter execution engine
-  // instead of the raw `claude` spawn (see file banner + isBrainHarnessEnabled).
-  const useHarnessBrain = !useSdkBrain && isBrainHarnessEnabled();
+  // instead of the raw `claude` spawn (see file banner + evaluateBrainHarness).
+  const harnessEval = useSdkBrain
+    ? { enabled: false, degradedReason: null }
+    : evaluateBrainHarness();
+  const useHarnessBrain = harnessEval.enabled;
 
   // 1) Resolve / create the thread.
   //
@@ -419,8 +503,23 @@ export async function startBrainTurn(
   // three paths are mutually exclusive and chosen above from the managed-CC
   // login state (SDK/vLLM when logged out) and the harness opt-in gate.
   console.log(
-    `[brain] engine=${useSdkBrain ? "vllm-sdk" : useHarnessBrain ? "harness-acp" : "raw-spawn-cc"} thread=${threadId} ccLoggedIn=${!useSdkBrain} harnessEnabled=${isBrainHarnessEnabled()}`,
+    `[brain] engine=${useSdkBrain ? "vllm-sdk" : useHarnessBrain ? "harness-acp" : "raw-spawn-cc"} thread=${threadId} ccLoggedIn=${!useSdkBrain} harnessEnabled=${useHarnessBrain}`,
   );
+
+  // SDLC-049: the operator opted into the harness (ORCH_BRAIN_HARNESS=1) but
+  // it turned out unusable this turn — this must be LOUD, not a silent
+  // raw-spawn fallback (04 §7 "降级显式化不变量"). Every wake that hits this
+  // branch logs + writes a fresh event (no dedup) so the degradation stays
+  // visible for the whole time it persists.
+  if (harnessEval.degradedReason) {
+    await recordHarnessDegradation(
+      db,
+      threadId!,
+      args.ownerEmail,
+      args.orgId ?? null,
+      harnessEval.degradedReason,
+    );
+  }
 
   // 4) Run the brain in the background (do not await).
   // Use the SDK brain (vLLM) when CC is not logged in; otherwise CC path.
@@ -482,7 +581,7 @@ export async function startBrainTurn(
 }
 
 /** Outcome of one streamed `claude` invocation, used to decide on a retry. */
-interface BrainRunOutcome {
+export interface BrainRunOutcome {
   /** True if the session_id passed via --resume could not be found. */
   resumeNotFound: boolean;
   /** The result subtype (success / error_during_execution / …), if any. */
@@ -491,6 +590,14 @@ interface BrainRunOutcome {
   sawResult: boolean;
   exitCode: number;
   stderr: string;
+  /**
+   * True when this turn already appended a final, non-empty `assistant` text
+   * event before the terminal result landed — i.e. a delivery summary exists
+   * (04 §6 turn terminal-state contract, SDLC-060).
+   */
+  sawAssistantText: boolean;
+  /** The raw `result` event text (or null), kept for `closing_anomaly`. */
+  lastResultText: string | null;
 }
 
 /**
@@ -828,7 +935,7 @@ async function runBrainHarnessTurn(opts: {
 }
 
 /** Flip the thread to done/error based on a run outcome. */
-async function finalizeThreadStatus(
+export async function finalizeThreadStatus(
   db: ReturnType<typeof getV3Db>,
   threadId: string,
   outcome: BrainRunOutcome,
@@ -849,13 +956,31 @@ async function finalizeThreadStatus(
     ).catch(() => {});
     return;
   }
+  const isNonSuccessResult =
+    !!outcome.resultSubtype && outcome.resultSubtype !== "success";
+
+  // Turn terminal-state contract (04 §6, SDLC-060): a turn that already
+  // delivered a final assistant summary must not be overwritten to `error`
+  // by a same-turn closing race (`result.subtype === "error_during_execution"`
+  // landing after the summary). error is reserved for turns with NO delivered
+  // summary — "交付成功却被当失败重跑" (B5) is exactly what this prevents.
+  if (isNonSuccessResult && outcome.sawAssistantText) {
+    await db
+      .update(v3Schema.brainThreads)
+      .set({
+        status: "done",
+        closingAnomaly:
+          outcome.lastResultText ?? `(${outcome.resultSubtype})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(v3Schema.brainThreads.id, threadId));
+    return;
+  }
+
   await db
     .update(v3Schema.brainThreads)
     .set({
-      status:
-        outcome.resultSubtype && outcome.resultSubtype !== "success"
-          ? "error"
-          : "done",
+      status: isNonSuccessResult ? "error" : "done",
       updatedAt: new Date(),
     })
     .where(eq(v3Schema.brainThreads.id, threadId));
@@ -948,6 +1073,17 @@ async function streamBrainChild(opts: {
   let sawResult = false;
   let resultSubtype: string | null = null;
   let resumeNotFound = false;
+  // Turn terminal-state contract (04 §6, SDLC-060): true once this turn has
+  // appended at least one non-empty `assistant` text event — i.e. a final
+  // delivery summary already landed in the transcript. finalizeThreadStatus
+  // uses this so a same-turn closing race (`result.subtype ===
+  // "error_during_execution"` arriving AFTER the summary) never overwrites a
+  // turn that already delivered into `error`.
+  let sawAssistantText = false;
+  // The raw `result` event text/subtype, kept for `closing_anomaly` when the
+  // contract above applies (never surfaced as the misleading generic
+  // "error_during_execution", which carries no detail on its own).
+  let lastResultText: string | null = null;
 
   // "No conversation found" is emitted on stderr AND surfaced in the result
   // event's `errors`. Detect it either way so the fresh-session fallback fires.
@@ -1068,6 +1204,7 @@ async function streamBrainChild(opts: {
             typeof b.text === "string" &&
             b.text.trim()
           ) {
+            sawAssistantText = true;
             await appendEvent(opts.threadId, opts.ownerEmail, opts.orgId, {
               type: "assistant",
               text: b.text,
@@ -1144,6 +1281,7 @@ async function streamBrainChild(opts: {
         }
       }
       const resultText = typeof event.result === "string" ? event.result : null;
+      lastResultText = resultText;
       // Suppress the empty/opaque error_during_execution result event when it is
       // really a missing-session resume that we are about to retry fresh — it
       // would otherwise clutter the transcript with a scary non-event.
@@ -1192,7 +1330,15 @@ async function streamBrainChild(opts: {
     });
   }
 
-  return { resumeNotFound, resultSubtype, sawResult, exitCode, stderr };
+  return {
+    resumeNotFound,
+    resultSubtype,
+    sawResult,
+    exitCode,
+    stderr,
+    sawAssistantText,
+    lastResultText,
+  };
 }
 
 interface AppendEventInput {
