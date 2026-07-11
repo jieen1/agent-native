@@ -527,6 +527,25 @@ CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchest
   );
 CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_skill_overrides_path_idx ON orchestrator_skill_overrides (path)`,
     },
+    {
+      // F4 capability matrix (docs/sdlc-impl-f1-f4.md §4A / design 02 §5.4).
+      // `kind` distinguishes DAG-worker agent defs (vllm/claude-code, default
+      // 'worker', unchanged behavior) from the orchestrator BRAIN's own
+      // capability-profile row ('brain') so list-agent-defs's default
+      // (worker-only) output — consumed by WorkflowEditor's DAG-node agent
+      // picker — never offers "brain" as a selectable DAG worker.
+      // `capability_profile` is a JSON map of `{ [phase]: { tools: string[],
+      // workspaceAccess } }` that server/brain/brain-capability.ts reads (via
+      // agent-loader.loadAgent("brain")) to assemble the CLI's --allowedTools
+      // per phase (dispatch | review) instead of hardcoding them. Named
+      // (parallel F1-F4 branches extend this same migration list
+      // concurrently — see the storing-data skill's migration-collision
+      // guidance / the version-21 precedent above).
+      version: 22,
+      name: "f4-capability-matrix",
+      sql: `ALTER TABLE orchestrator_agent_defs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'worker';
+ALTER TABLE orchestrator_agent_defs ADD COLUMN IF NOT EXISTS capability_profile TEXT NOT NULL DEFAULT '{}'`,
+    },
   ],
   { table: "orchestrator_migrations" },
 );
@@ -839,6 +858,22 @@ ALTER TYPE v3_workspace_state ADD VALUE IF NOT EXISTS 'failed'`,
     name: "f2-spawn-context",
     sql: {
       postgres: `ALTER TABLE v3_spawns ADD COLUMN IF NOT EXISTS context_checkpoint jsonb`,
+    },
+  },
+  {
+    // F4 (design 02 §5.4 capability matrix / §3 evaluation independence):
+    // brain_threads.phase persists which tool-face phase a thread's turns
+    // run under — 'dispatch' (NULL default) or 'review' (set once by the
+    // reconciler's run-terminal review fork). Persisted on the THREAD so a
+    // resumed review thread inherits the review face on every later turn,
+    // not only on the wake that created it. Named (parallel F1-F4 branches
+    // extend this same list concurrently). Same `version: 3` as the
+    // f1/f2 entries above is intentional and safe — named migrations gate
+    // purely on the unique `name`, not on version number.
+    version: 3,
+    name: "f4-brain-thread-phase",
+    sql: {
+      postgres: `ALTER TABLE brain_threads ADD COLUMN IF NOT EXISTS phase text`,
     },
   },
 ];

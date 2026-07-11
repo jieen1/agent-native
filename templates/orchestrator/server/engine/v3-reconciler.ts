@@ -94,10 +94,7 @@ function uid(): string {
 }
 
 /** Compute exponential backoff delay in ms. */
-function computeBackoffMs(
-  attempt: number,
-  policy: V3RetryPolicy,
-): number {
+function computeBackoffMs(attempt: number, policy: V3RetryPolicy): number {
   const initial = policy.initial_ms ?? 1000;
   const maxMs = policy.max_ms ?? 30_000;
   const backoff = policy.backoff ?? "exponential";
@@ -251,7 +248,12 @@ export class V3Reconciler {
       const toSkip = nodesAfterGuards.filter(
         (n) =>
           n.status === "pending" &&
-          this.hasFailedAncestor(n.nodeIdInDag, dag, failedCascadeIds, new Set()),
+          this.hasFailedAncestor(
+            n.nodeIdInDag,
+            dag,
+            failedCascadeIds,
+            new Set(),
+          ),
       );
 
       if (toSkip.length > 0) {
@@ -260,13 +262,12 @@ export class V3Reconciler {
           .update(v3Nodes)
           .set({ status: "skipped", error: "Upstream node failed" })
           .where(
-            and(
-              eq(v3Nodes.runId, runId),
-              inArray(v3Nodes.id, skipNodeIds),
-            ),
+            and(eq(v3Nodes.runId, runId), inArray(v3Nodes.id, skipNodeIds)),
           );
 
-        for (const fn of failedNodes.filter((n) => failedCascadeIds.has(n.nodeIdInDag))) {
+        for (const fn of failedNodes.filter((n) =>
+          failedCascadeIds.has(n.nodeIdInDag),
+        )) {
           await this.writeEvent(runId, "node.failed", {
             nodeId: fn.nodeIdInDag,
             error: fn.error,
@@ -327,7 +328,8 @@ export class V3Reconciler {
     });
 
     // 5. Dispatch ready nodes (G16, G17, G18)
-    const events: Array<{ kind: string; payload: Record<string, unknown> }> = [];
+    const events: Array<{ kind: string; payload: Record<string, unknown> }> =
+      [];
 
     // Per-parallel_over concurrency tracking
     const concurrencyCounters = new Map<string, number>();
@@ -343,7 +345,8 @@ export class V3Reconciler {
         // Fanout child — identify parent
         const parentId = node.nodeIdInDag.split(":[")[0];
         const parentDagNode = dagNodeMap.get(parentId);
-        const maxConc = (parentDagNode as V3NodeDag | undefined)?.max_concurrency;
+        const maxConc = (parentDagNode as V3NodeDag | undefined)
+          ?.max_concurrency;
         if (maxConc !== undefined) {
           const currentConc = concurrencyCounters.get(parentId) ?? 0;
           // Count already-running children of this parent
@@ -359,7 +362,14 @@ export class V3Reconciler {
         }
       }
 
-      const result = await this.dispatchNode(runId, run, node, nodesAfterGuards, nodeMap, dag);
+      const result = await this.dispatchNode(
+        runId,
+        run,
+        node,
+        nodesAfterGuards,
+        nodeMap,
+        dag,
+      );
       events.push(...result.events);
       if (result.slotConsumed) {
         availableSlots--;
@@ -385,12 +395,18 @@ export class V3Reconciler {
     const allDoneOrSkipped = updatedNodes.every((n) =>
       RESOLVED_STATUSES.has(n.status),
     );
-    const allTerminalOrWaiting = updatedNodes.every((n) =>
-      TERMINAL_STATUSES.has(n.status) || n.status === "awaiting-approval",
+    const allTerminalOrWaiting = updatedNodes.every(
+      (n) =>
+        TERMINAL_STATUSES.has(n.status) || n.status === "awaiting-approval",
     );
-    const anyWaiting = updatedNodes.some((n) => n.status === "awaiting-approval");
+    const anyWaiting = updatedNodes.some(
+      (n) => n.status === "awaiting-approval",
+    );
 
-    const runGoingTerminal = hasCascadeFail || allDoneOrSkipped || (allTerminalOrWaiting && !anyWaiting);
+    const runGoingTerminal =
+      hasCascadeFail ||
+      allDoneOrSkipped ||
+      (allTerminalOrWaiting && !anyWaiting);
 
     if (hasCascadeFail) {
       await this.finalizeRun(runId, "failed", updatedNodes);
@@ -435,7 +451,9 @@ export class V3Reconciler {
     dag: V3NodeDag[],
   ): Promise<void> {
     // Work on a mutable copy of statuses so we can fixpoint in-memory
-    const statusMap = new Map<string, string>(nodes.map((n) => [n.id, n.status]));
+    const statusMap = new Map<string, string>(
+      nodes.map((n) => [n.id, n.status]),
+    );
     // nodeIdInDag → latest status
     const dagStatusMap = this.buildDagStatusMap(nodes, statusMap);
 
@@ -527,7 +545,10 @@ export class V3Reconciler {
           changed = true;
           await this.db
             .update(v3Nodes)
-            .set({ status: "skipped", error: "Guard expression evaluated to false" })
+            .set({
+              status: "skipped",
+              error: "Guard expression evaluated to false",
+            })
             .where(eq(v3Nodes.id, node.id));
           await this.writeEvent(runId, "node.skipped", {
             nodeId: node.nodeIdInDag,
@@ -549,7 +570,10 @@ export class V3Reconciler {
       const status = statusMap.get(node.id) ?? node.status;
       // Use highest iteration to represent the latest status per dag id
       const existing = dagStatusMap.get(node.nodeIdInDag);
-      if (existing === undefined || this.statusPriority(status) > this.statusPriority(existing)) {
+      if (
+        existing === undefined ||
+        this.statusPriority(status) > this.statusPriority(existing)
+      ) {
         dagStatusMap.set(node.nodeIdInDag, status);
       }
     }
@@ -559,8 +583,13 @@ export class V3Reconciler {
   private statusPriority(status: string): number {
     // Higher = "more done"
     const p: Record<string, number> = {
-      pending: 0, ready: 1, running: 2, "awaiting-approval": 2,
-      done: 3, skipped: 3, failed: 3,
+      pending: 0,
+      ready: 1,
+      running: 2,
+      "awaiting-approval": 2,
+      done: 3,
+      skipped: 3,
+      failed: 3,
     };
     return p[status] ?? 0;
   }
@@ -610,8 +639,12 @@ export class V3Reconciler {
     allNodes: NodeRow[],
     nodeMap: Map<string, NodeRow[]>,
     dag: V3NodeDag[],
-  ): Promise<{ events: Array<{ kind: string; payload: Record<string, unknown> }>; slotConsumed: boolean }> {
-    const events: Array<{ kind: string; payload: Record<string, unknown> }> = [];
+  ): Promise<{
+    events: Array<{ kind: string; payload: Record<string, unknown> }>;
+    slotConsumed: boolean;
+  }> {
+    const events: Array<{ kind: string; payload: Record<string, unknown> }> =
+      [];
 
     switch (node.type) {
       case "agent": {
@@ -651,29 +684,59 @@ export class V3Reconciler {
       }
 
       case "parallel_over": {
-        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as V3NodeDag | undefined;
+        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as
+          | V3NodeDag
+          | undefined;
 
         // G12: Resolve or retrieve frozen items from event store
-        const items = await this.getFrozenFanoutItems(runId, node, allNodes, nodeMap, dagNode, dag, run);
+        const items = await this.getFrozenFanoutItems(
+          runId,
+          node,
+          allNodes,
+          nodeMap,
+          dagNode,
+          dag,
+          run,
+        );
 
         if (items === null) {
           // items_from expression failed — fail the node
           await this.db
             .update(v3Nodes)
-            .set({ status: "failed", error: "items_from expression failed to resolve an array", completedAt: new Date() })
+            .set({
+              status: "failed",
+              error: "items_from expression failed to resolve an array",
+              completedAt: new Date(),
+            })
             .where(eq(v3Nodes.id, node.id));
-          events.push({ kind: "node.failed", payload: { nodeId: node.nodeIdInDag, error: "items_from expression error" } });
+          events.push({
+            kind: "node.failed",
+            payload: {
+              nodeId: node.nodeIdInDag,
+              error: "items_from expression error",
+            },
+          });
           return { events, slotConsumed: false };
         }
 
         // G12: Copy inline or referenced body spec onto each child
         const bodySpec = dagNode?.body;
-        const bodyPrompt = typeof bodySpec === "object" && bodySpec !== null && !Array.isArray(bodySpec)
-          ? (bodySpec as Record<string, unknown>).prompt as string | undefined
-          : undefined;
-        const bodyAgent = typeof bodySpec === "object" && bodySpec !== null && !Array.isArray(bodySpec)
-          ? (bodySpec as Record<string, unknown>).agent as string | undefined
-          : undefined;
+        const bodyPrompt =
+          typeof bodySpec === "object" &&
+          bodySpec !== null &&
+          !Array.isArray(bodySpec)
+            ? ((bodySpec as Record<string, unknown>).prompt as
+                | string
+                | undefined)
+            : undefined;
+        const bodyAgent =
+          typeof bodySpec === "object" &&
+          bodySpec !== null &&
+          !Array.isArray(bodySpec)
+            ? ((bodySpec as Record<string, unknown>).agent as
+                | string
+                | undefined)
+            : undefined;
         const bodyId = typeof bodySpec === "string" ? bodySpec : undefined;
 
         for (let i = 0; i < items.length; i++) {
@@ -742,11 +805,14 @@ export class V3Reconciler {
       }
 
       case "loop": {
-        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as V3NodeDag | undefined;
+        const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as
+          | V3NodeDag
+          | undefined;
         const untilExpr = (dagNode?.until as string | undefined) ?? "false";
-        const maxIter = (dagNode?.max_iterations as number | undefined)
-          ?? (dagNode?.maxIterations as number | undefined)
-          ?? 100;
+        const maxIter =
+          (dagNode?.max_iterations as number | undefined) ??
+          (dagNode?.maxIterations as number | undefined) ??
+          100;
 
         // G12: body[] is an array of node-ids run sequentially per iteration
         const bodyRaw = dagNode?.body;
@@ -757,7 +823,8 @@ export class V3Reconciler {
             : [];
 
         // Count completed body iterations (based on body[last] nodes with status done)
-        const lastBodyId = bodyIds.length > 0 ? bodyIds[bodyIds.length - 1] : null;
+        const lastBodyId =
+          bodyIds.length > 0 ? bodyIds[bodyIds.length - 1] : null;
         const completedIterations = lastBodyId
           ? allNodes.filter(
               (n) =>
@@ -765,7 +832,9 @@ export class V3Reconciler {
                 n.status === "done",
             ).length
           : allNodes.filter(
-              (n) => n.nodeIdInDag === `${node.nodeIdInDag}/body` && n.status === "done",
+              (n) =>
+                n.nodeIdInDag === `${node.nodeIdInDag}/body` &&
+                n.status === "done",
             ).length;
 
         // G12: build REAL expression context for loop until/history/previous_iteration
@@ -928,7 +997,9 @@ export class V3Reconciler {
     node: NodeRow,
     dag: V3NodeDag[],
   ): Promise<void> {
-    const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as V3NodeDag | undefined;
+    const dagNode = dag.find((d) => d.id === node.nodeIdInDag) as
+      | V3NodeDag
+      | undefined;
     const retryPolicy = dagNode?.retry as V3RetryPolicy | undefined;
 
     const maxAttempts = (retryPolicy?.max ?? 0) + 1; // max = additional retries
@@ -970,7 +1041,10 @@ export class V3Reconciler {
 
         // spawn() in V3Dispatcher already sets node.status = "done" on success
         // and "failed" on schema-violation.  Re-trigger tick.
-        await this.writeEvent(runId, "spawn.done", { nodeId: node.nodeIdInDag, spawnId });
+        await this.writeEvent(runId, "spawn.done", {
+          nodeId: node.nodeIdInDag,
+          spawnId,
+        });
         await this.tick(runId);
         return;
       } catch (err) {
@@ -985,9 +1059,7 @@ export class V3Reconciler {
         });
 
         // G19: Should we retry?
-        const shouldRetry =
-          attempt < maxAttempts &&
-          retryOn.includes(errClass);
+        const shouldRetry = attempt < maxAttempts && retryOn.includes(errClass);
 
         if (!shouldRetry) {
           // Permanently fail the node
@@ -995,7 +1067,10 @@ export class V3Reconciler {
             .update(v3Nodes)
             .set({
               status: "failed",
-              error: (err instanceof Error ? err.message : String(err)).slice(0, 1000),
+              error: (err instanceof Error ? err.message : String(err)).slice(
+                0,
+                1000,
+              ),
               completedAt: new Date(),
             })
             .where(eq(v3Nodes.id, node.id));
@@ -1016,7 +1091,10 @@ export class V3Reconciler {
           .update(v3Nodes)
           .set({
             status: "failed",
-            error: (err instanceof Error ? err.message : String(err)).slice(0, 1000),
+            error: (err instanceof Error ? err.message : String(err)).slice(
+              0,
+              1000,
+            ),
           })
           .where(eq(v3Nodes.id, node.id));
       }
@@ -1027,7 +1105,10 @@ export class V3Reconciler {
       .update(v3Nodes)
       .set({
         status: "failed",
-        error: (lastError instanceof Error ? lastError.message : String(lastError)).slice(0, 1000),
+        error: (lastError instanceof Error
+          ? lastError.message
+          : String(lastError)
+        ).slice(0, 1000),
         completedAt: new Date(),
       })
       .where(eq(v3Nodes.id, node.id));
@@ -1071,7 +1152,10 @@ export class V3Reconciler {
 
     // G12: Build previous_iteration and history from completed body nodes
     // history[i] = { bodyNodeId: { output } } for iteration i
-    const historyByIteration = new Map<number, Record<string, { output?: unknown }>>();
+    const historyByIteration = new Map<
+      number,
+      Record<string, { output?: unknown }>
+    >();
 
     for (const bodyId of bodyIds) {
       const iterNodeId = `${loopNode.nodeIdInDag}/${bodyId}`;
@@ -1084,7 +1168,10 @@ export class V3Reconciler {
         iterEntry[bodyId] = { output };
         historyByIteration.set(bodyRow.iteration, iterEntry);
         // deps[bodyId].output = latest iteration output
-        if (!deps[bodyId] || bodyRow.iteration > ((deps[bodyId] as any)._iter ?? -1)) {
+        if (
+          !deps[bodyId] ||
+          bodyRow.iteration > ((deps[bodyId] as any)._iter ?? -1)
+        ) {
           deps[bodyId] = {
             output,
             previous_iteration: deps[bodyId]
@@ -1105,7 +1192,9 @@ export class V3Reconciler {
 
       if (bodyNodes.length > 0) {
         const latestBody = bodyNodes[0]!;
-        const latestOutput = await this.readArtifactContent(latestBody.outputArtifactId);
+        const latestOutput = await this.readArtifactContent(
+          latestBody.outputArtifactId,
+        );
         const prevBody = bodyNodes[1];
         const prevOutput = prevBody
           ? await this.readArtifactContent(prevBody.outputArtifactId)
@@ -1113,7 +1202,8 @@ export class V3Reconciler {
 
         deps["body"] = {
           output: latestOutput,
-          previous_iteration: prevOutput !== undefined ? { output: prevOutput } : undefined,
+          previous_iteration:
+            prevOutput !== undefined ? { output: prevOutput } : undefined,
         };
       }
     }
@@ -1165,15 +1255,15 @@ export class V3Reconciler {
       .select()
       .from(v3Events)
       .where(
-        and(
-          eq(v3Events.runId, runId),
-          eq(v3Events.kind, "fanout.frozen"),
-        ),
+        and(eq(v3Events.runId, runId), eq(v3Events.kind, "fanout.frozen")),
       );
 
     for (const ev of existingFreezeEvent) {
       const payload = ev.payload as Record<string, unknown> | null;
-      if (payload?.nodeId === node.nodeIdInDag && Array.isArray(payload?.items)) {
+      if (
+        payload?.nodeId === node.nodeIdInDag &&
+        Array.isArray(payload?.items)
+      ) {
         return payload.items as unknown[];
       }
     }
@@ -1279,9 +1369,8 @@ export class V3Reconciler {
 
   /** G19: Classify an error into a retryable category. */
   private classifyError(err: unknown): string {
-    const message = err instanceof Error
-      ? `${err.name}: ${err.message}`
-      : String(err);
+    const message =
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     const lower = message.toLowerCase();
 
     // Schema violation — retryable with corrective prompt per design §12
@@ -1306,11 +1395,27 @@ export class V3Reconciler {
 
     // Transient — API/network/OOM/rate-limit
     const transientIndicators = [
-      "etimedout", "econnreset", "econnrefused", "enetunreach",
-      "eai_fail", "eai_again", "network", "timeout", "rate.limit",
-      "rate limit", "too many requests", "429", "502", "503", "504",
-      "oom", "out of memory", "context deadline exceeded",
-      "canceled", "aborted", "transient",
+      "etimedout",
+      "econnreset",
+      "econnrefused",
+      "enetunreach",
+      "eai_fail",
+      "eai_again",
+      "network",
+      "timeout",
+      "rate.limit",
+      "rate limit",
+      "too many requests",
+      "429",
+      "502",
+      "503",
+      "504",
+      "oom",
+      "out of memory",
+      "context deadline exceeded",
+      "canceled",
+      "aborted",
+      "transient",
     ];
     for (const ind of transientIndicators) {
       if (lower.includes(ind)) return "transient";
@@ -1362,7 +1467,8 @@ export class V3Reconciler {
 
     // Add loop body previous iteration output
     const bodyNodes = allNodes.filter(
-      (n) => n.nodeIdInDag === `${loopNode.nodeIdInDag}/body` && n.status === "done",
+      (n) =>
+        n.nodeIdInDag === `${loopNode.nodeIdInDag}/body` && n.status === "done",
     );
     const latestBody = bodyNodes.sort((a, b) => b.iteration - a.iteration)[0];
 
@@ -1615,9 +1721,7 @@ export class V3Reconciler {
     tags: unknown,
   ): Promise<void> {
     const t =
-      tags && typeof tags === "object"
-        ? (tags as Record<string, unknown>)
-        : {};
+      tags && typeof tags === "object" ? (tags as Record<string, unknown>) : {};
     const sessionId = t["orchestrationSessionId"];
     const brainThreadId = t["brainThreadId"];
     const haveSession = typeof sessionId === "string" && sessionId;
@@ -1642,9 +1746,8 @@ export class V3Reconciler {
       `Resume now: poll mcp__orchestrator__runState / v3RunNodes until every node ` +
       `is terminal, then REVIEW with runSummary + nodeSummary (full_diff). If the ` +
       `change passes, DELIVER by calling mcp__orchestrator__workspaceCommit ` +
-      `(host-native; NOT workspaceCommitPush, which needs a VM this deployment ` +
-      `lacks) with createMr:true to commit the feature branch and open the PR, ` +
-      `then report the run id and the PR url. Do not start a new run.`;
+      `(host-native — commits the feature branch and opens the PR) with ` +
+      `createMr:true, then report the run id and the PR url. Do not start a new run.`;
 
     // Durable event (channel 2 + idempotency marker).
     await this.writeEvent(runId, "run.terminal-review-requested", {
@@ -1664,20 +1767,29 @@ export class V3Reconciler {
     // Best-effort + dynamically imported so the engine keeps no static brain dep.
     if (haveThread) {
       try {
-        const { releaseBrainTaskForThread } = await import(
-          "../queue/brain-admit.js"
-        );
+        const { releaseBrainTaskForThread } =
+          await import("../queue/brain-admit.js");
         await releaseBrainTaskForThread(brainThreadId as string, status);
       } catch {
         // Advisory — the brain reaper releases the slot as a backstop.
       }
     }
 
-    // Channel 1: directly resume the brain thread (auto-wake). Dynamically
-    // imported so the engine module has no static dependency on the brain layer.
+    // Channel 1 (F4 — design 02 §3 evaluation independence): the terminal wake
+    // no longer resumes the SPEC/dispatch thread. Grading its own spec's diff
+    // is exactly the self-review blind spot the bootstrap research measured
+    // (zero findings on own-spec runs vs 5 real bugs when grading another
+    // session's work), so the review runs on a STRUCTURALLY SEPARATE, freshly
+    // minted brain thread (`bt_…`): deriveReviewWake() computes the fork +
+    // idempotent tags patch (specThreadId / reviewThreadId persisted on
+    // v3_runs.tags — `!=` is the T-F4-04 structural acceptance), and
+    // startBrainTurn runs it under the REVIEW tool face (phase='review': no
+    // Bash/Edit/Write; verdict lands via runVerdict; the only fix exit is a
+    // new workflowRun). Dynamically imported so the engine module keeps no
+    // static dependency on the brain layer.
     if (haveThread) {
       try {
-        const [thread] = await this.db
+        const [specThread] = await this.db
           .select({
             id: brainThreads.id,
             ownerEmail: brainThreads.ownerEmail,
@@ -1687,16 +1799,47 @@ export class V3Reconciler {
           .from(brainThreads)
           .where(eq(brainThreads.id, brainThreadId as string))
           .limit(1);
-        // Only resume a thread that is NOT already mid-turn (avoid stacking
-        // turns on a brain that is still actively polling this run).
-        if (thread && thread.status !== "running") {
-          const { startBrainTurn } = await import("../brain/brain-session.js");
-          await startBrainTurn({
-            threadId: thread.id,
-            ownerEmail: thread.ownerEmail,
-            orgId: thread.orgId ?? null,
-            message,
-          });
+        if (specThread) {
+          const { deriveReviewWake, buildReviewWakeMessage } =
+            await import("../brain/review-thread.js");
+          const decision = deriveReviewWake(t);
+          if (decision) {
+            // Persist the fork onto the run's tags (idempotent merge) BEFORE
+            // waking, so the review turn — and any observer — can already see
+            // specThreadId/reviewThreadId on the run.
+            await this.db
+              .update(v3Runs)
+              .set({ tags: { ...t, ...decision.tagsPatch } })
+              .where(eq(v3Runs.id, runId));
+            if (decision.isNewReviewThread) {
+              await this.writeEvent(runId, "review.thread-forked", {
+                specThreadId: decision.specThreadId,
+                reviewThreadId: decision.reviewThreadId,
+                status,
+              });
+            }
+
+            // Overlap guard on the REVIEW thread (a fresh bt_ id has no row —
+            // startBrainTurn creates it; a reused one must not be mid-turn).
+            const [reviewThread] = await this.db
+              .select({ status: brainThreads.status })
+              .from(brainThreads)
+              .where(eq(brainThreads.id, decision.reviewThreadId))
+              .limit(1);
+            if (!reviewThread || reviewThread.status !== "running") {
+              const { startBrainTurn } =
+                await import("../brain/brain-session.js");
+              await startBrainTurn({
+                threadId: decision.reviewThreadId,
+                ownerEmail: specThread.ownerEmail,
+                orgId: specThread.orgId ?? null,
+                message: buildReviewWakeMessage({ runId, status }),
+                title: `Review · ${runId}`,
+                phase: "review",
+                reviewOfRunId: runId,
+              });
+            }
+          }
         }
       } catch {
         // Best-effort: the durable event above still lets a manual/poll resume.
@@ -1729,9 +1872,7 @@ export class V3Reconciler {
     nodes: NodeRow[],
   ): Promise<void> {
     const t =
-      tags && typeof tags === "object"
-        ? (tags as Record<string, unknown>)
-        : {};
+      tags && typeof tags === "object" ? (tags as Record<string, unknown>) : {};
     const brainThreadId = t["brainThreadId"];
     if (typeof brainThreadId !== "string" || !brainThreadId) return;
 

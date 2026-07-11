@@ -27,6 +27,25 @@ function agentsDir(): string {
  */
 export type AgentRuntime = "microvm" | "none" | `acp:${string}`;
 
+/** One phase/node-type entry in an agent def's `capability_profile` (F4). */
+export interface AgentCapabilityEntry {
+  /** Allowed tool names for this phase (e.g. "Read", "mcp__orchestrator"). */
+  tools: string[];
+  /** Advisory workspace-access label for the S9 read-only matrix (informational only). */
+  workspaceAccess?: "ro" | "rw" | "none";
+}
+
+/**
+ * `agent_defs.capability_profile` shape (F4 — design 02 §5.4 / docs/
+ * sdlc-impl-f1-f4.md §4A): a JSON map from phase/node-type key (e.g.
+ * "dispatch", "review", "develop", "qa") to its tool face. Consumed by
+ * server/brain/brain-capability.ts for the `kind: "brain"` row; other rows
+ * (`kind: "worker"`, e.g. vllm/claude-code) carry it as descriptive data for
+ * the deferred S9 read-only matrix — nothing in the DAG dispatcher enforces it
+ * yet (out of F4's scope; enforcement there is F2/engine territory).
+ */
+export type AgentCapabilityProfile = Record<string, AgentCapabilityEntry>;
+
 export interface AgentConfig {
   name: string;
   description: string;
@@ -41,9 +60,79 @@ export interface AgentConfig {
   isAcp?: boolean;
   /** The ACP harness ref (e.g. "acp:claude-code") when isAcp is true. */
   acpHarnessRef?: string;
+  /**
+   * "worker" (default — a DAG-node-selectable agent, e.g. vllm/claude-code) or
+   * "brain" (the orchestrator brain's own capability-profile row — never a
+   * selectable DAG-node worker; excluded from list-agent-defs's default
+   * output so it can never appear in the WorkflowEditor's agent picker). F4.
+   */
+  kind?: string;
+  /**
+   * Per-phase tool face (F4) — see {@link AgentCapabilityProfile}. Optional
+   * (not every AgentConfig producer sets it — e.g. existing
+   * v3-dispatcher.spec.ts fixtures predate this field) so callers must treat
+   * a missing value the same as `{}`.
+   */
+  capabilityProfile?: AgentCapabilityProfile;
 }
 
-function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
+/**
+ * Parse a `capability_profile` JSON string (DB column or `.md` frontmatter
+ * value). Never throws — malformed/absent input resolves to `{}` so a caller
+ * can always index `profile[phase]` safely.
+ */
+function parseCapabilityProfile(
+  raw: string | null | undefined,
+): AgentCapabilityProfile {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as AgentCapabilityProfile)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The minimal, prompt-only agent config the dispatcher spawns with when no real
+ * worker def resolves (agent not found, or the resolved row is the brain
+ * capability-profile row). Single source so the two fallback paths in
+ * resolveAgentConfig cannot drift. F4.
+ */
+export function minimalAgentConfig(name: string): AgentConfig {
+  return {
+    name,
+    description: "",
+    runtime: "none",
+    engine: "",
+    model: "",
+    tools: [],
+    systemPrompt: "",
+  };
+}
+
+/**
+ * F4 (design 02 §5.4): reduce a LOADED agent def to the config the dispatcher
+ * should actually spawn a DAG node with. Real worker rows pass through
+ * unchanged; the brain capability-profile row (`kind === "brain"`) is NEVER a
+ * DAG worker, so it collapses to {@link minimalAgentConfig} — mirroring the
+ * agent-not-found fallback (spawn proceeds prompt-only, WITHOUT the brain
+ * row's identity). Pure — this is the unit-tested decision behind
+ * V3Dispatcher.resolveAgentConfig's brain gate.
+ */
+export function dispatchWorkerConfig(
+  loaded: AgentConfig,
+  agentName: string,
+): AgentConfig {
+  return loaded.kind === "brain" ? minimalAgentConfig(agentName) : loaded;
+}
+
+function parseFrontmatter(content: string): {
+  meta: Record<string, string>;
+  body: string;
+} {
   const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
   if (!match) return { meta: {}, body: content };
 
@@ -60,7 +149,10 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
 
 function parseTools(raw: string): string[] {
   const inner = raw.replace(/^\[/, "").replace(/\]$/, "");
-  return inner.split(",").map((s) => s.trim().replace(/['"]/g, "")).filter(Boolean);
+  return inner
+    .split(",")
+    .map((s) => s.trim().replace(/['"]/g, ""))
+    .filter(Boolean);
 }
 
 /**
@@ -98,6 +190,8 @@ export function loadAgentFromFile(name: string): AgentConfig {
     isolation: meta.isolation || undefined,
     maxSummaryTokens,
     systemPrompt: body.trim(),
+    kind: meta.kind || "worker",
+    capabilityProfile: parseCapabilityProfile(meta.capability_profile),
   };
 }
 
@@ -126,17 +220,27 @@ export async function loadAgent(name: string): Promise<AgentConfig> {
       const rawRuntime = row.runtime || "none";
       const isAcp = rawRuntime.startsWith("acp:");
       let tools: string[] = [];
-      try { tools = JSON.parse(row.tools || "[]"); } catch { tools = []; }
+      try {
+        tools = JSON.parse(row.tools || "[]");
+      } catch {
+        tools = [];
+      }
       return {
         name: row.name,
         description: row.description || "",
-        runtime: isAcp ? rawRuntime : rawRuntime === "microvm" ? "microvm" : "none",
+        runtime: isAcp
+          ? rawRuntime
+          : rawRuntime === "microvm"
+            ? "microvm"
+            : "none",
         isAcp,
         acpHarnessRef: isAcp ? rawRuntime : undefined,
         engine: row.engine || "",
         model: row.model || "",
         tools,
         systemPrompt: row.systemPrompt || "",
+        kind: row.kind || "worker",
+        capabilityProfile: parseCapabilityProfile(row.capabilityProfile),
       };
     }
   } catch {
