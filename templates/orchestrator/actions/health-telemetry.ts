@@ -35,8 +35,9 @@
 // slice; F7's five counts have no time window (all-time state).
 
 import { defineAction } from "@agent-native/core";
-import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
+import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 import { computeWritebackTelemetry } from "../server/writeback-telemetry.js";
 
@@ -49,7 +50,10 @@ async function countEventKind(
     .select({ count: sql<number>`count(*)`.mapWith(Number) })
     .from(v3Schema.v3Events)
     .where(
-      and(eq(v3Schema.v3Events.ownerEmail, ownerEmail), eq(v3Schema.v3Events.kind, kind)),
+      and(
+        eq(v3Schema.v3Events.ownerEmail, ownerEmail),
+        eq(v3Schema.v3Events.kind, kind),
+      ),
     );
   return rows[0]?.count ?? 0;
 }
@@ -82,12 +86,28 @@ export default defineAction({
       );
 
     const suspectSpawns = suspectRows[0]?.count ?? 0;
-    const aliasDriftEvents = await countEventKind(db, ownerEmail, "registry.alias-changed");
-    const degradedEvents = await countEventKind(db, ownerEmail, "capability.degraded");
+    const aliasDriftEvents = await countEventKind(
+      db,
+      ownerEmail,
+      "registry.alias-changed",
+    );
+    const degradedEvents = await countEventKind(
+      db,
+      ownerEmail,
+      "capability.degraded",
+    );
     // F10 (server/engine/v3-reconciler.ts) is the producer; not part of this change.
-    const conductionFixes = await countEventKind(db, ownerEmail, "conduction.fixed");
+    const conductionFixes = await countEventKind(
+      db,
+      ownerEmail,
+      "conduction.fixed",
+    );
     // F0/F2's maxOutputTokens clamp point (packages/core) is the producer; not part of this change.
-    const configInconsistencyEvents = await countEventKind(db, ownerEmail, "config.clamped");
+    const configInconsistencyEvents = await countEventKind(
+      db,
+      ownerEmail,
+      "config.clamped",
+    );
 
     const writeback = await computeWritebackTelemetry(args.windowHours ?? 24);
 
