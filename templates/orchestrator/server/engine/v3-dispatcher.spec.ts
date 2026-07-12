@@ -9,9 +9,33 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 // ── Mock dependencies ───────────────────────────────────────────────────────
 
-vi.mock("../agent-loader.js", () => ({
-  loadAgent: vi.fn().mockResolvedValue(null),
-}));
+vi.mock("../agent-loader.js", () => {
+  // F4: resolveAgentConfig's fallback (agent-defs row missing, or loadAgent
+  // resolves null) calls the real minimalAgentConfig, and its success path
+  // calls dispatchWorkerConfig to collapse a `kind: "brain"` row to the same
+  // minimal config. Mock both with the same shape/behavior as the real
+  // agent-loader.ts (see `dispatchWorkerConfig`/`minimalAgentConfig` there) so
+  // every test — whether loadAgent resolves null (default below) or a real
+  // config (per-describe overrides) — exercises a real dispatch instead of
+  // silently falling through to "dispatchWorkerConfig is not a function".
+  const minimalAgentConfig = vi.fn((name: string) => ({
+    name,
+    description: "",
+    runtime: "none",
+    engine: "",
+    model: "",
+    tools: [],
+    systemPrompt: "",
+  }));
+  const dispatchWorkerConfig = vi.fn((loaded: any, agentName: string) =>
+    loaded?.kind === "brain" ? minimalAgentConfig(agentName) : loaded,
+  );
+  return {
+    loadAgent: vi.fn().mockResolvedValue(null),
+    minimalAgentConfig,
+    dispatchWorkerConfig,
+  };
+});
 
 vi.mock("./interpolation.js", () => ({
   renderTemplate: vi.fn((template: string) => template),
