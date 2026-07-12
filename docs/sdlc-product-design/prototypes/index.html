@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foundry · 原型总览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+<style>
+/* ============ Foundry tokens ============ */
+:root{
+  --background:oklch(1 0 0); --foreground:oklch(.141 .005 285.82);
+  --card:oklch(1 0 0); --muted:oklch(.967 .001 286.38);
+  --muted-foreground:oklch(.552 .016 285.94);
+  --border:oklch(.945 .003 286.32); --input:oklch(.92 .004 286.32);
+  --ring:oklch(.705 .015 286.07);
+  --primary:oklch(.21 .006 285.89); --primary-foreground:oklch(.985 0 0);
+  --brand:oklch(.55 .16 255); --brand-foreground:oklch(.985 0 0);
+  --success:oklch(.55 .16 145); --warning:oklch(.68 .15 85);
+  --info:oklch(.55 .18 250); --destructive:oklch(.577 .245 27.33);
+  --agent:oklch(.55 .14 300); --evidence:oklch(.48 .10 180);
+  --chart-1:oklch(.55 .16 255); --chart-2:oklch(.65 .13 255);
+  --chart-3:oklch(.75 .10 255); --chart-4:oklch(.84 .07 255); --chart-5:oklch(.92 .04 255);
+  --sidebar:oklch(.985 .001 286.38);
+  --radius:10px; --radius-sm:6px; --radius-md:8px; --radius-xl:14px;
+  --font-sans:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+}
+.dark{
+  --background:oklch(.18 .005 285.82); --foreground:oklch(.985 0 0);
+  --card:oklch(.21 .006 285.89); --muted:oklch(.274 .006 286.03);
+  --muted-foreground:oklch(.705 .015 286.07);
+  --border:oklch(1 0 0/.08); --input:oklch(1 0 0/.15);
+  --primary:oklch(.92 .004 286.32); --primary-foreground:oklch(.21 .006 285.89);
+  --brand:oklch(.65 .16 255); --success:oklch(.65 .14 145);
+  --warning:oklch(.8 .14 85); --info:oklch(.65 .16 250); --destructive:oklch(.66 .2 27);
+  --agent:oklch(.68 .13 300); --evidence:oklch(.62 .09 180);
+  --chart-1:oklch(.72 .14 255); --chart-2:oklch(.62 .13 255);
+  --chart-3:oklch(.52 .11 255); --chart-4:oklch(.42 .09 255); --chart-5:oklch(.32 .06 255);
+  --sidebar:oklch(.16 .005 285.82);
+}
+/* ============ base ============ */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font-sans);font-size:13px;line-height:1.55;color:var(--foreground);
+  background:var(--background);-webkit-font-smoothing:antialiased;text-autospace:ideograph-alpha ideograph-numeric}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:oklch(0 0 0/.12);border-radius:3px}
+.dark ::-webkit-scrollbar-thumb{background:oklch(1 0 0/.14)}
+i.ti{font-size:16px;line-height:1;vertical-align:-2px}
+.proto-bar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:2px;
+  padding:4px 10px;background:oklch(.18 .01 260);color:oklch(.8 .01 260);
+  font-size:11px;overflow-x:auto;white-space:nowrap}
+.proto-bar .pb-title{font-weight:600;color:oklch(.98 0 0);margin-right:8px;display:flex;gap:6px;align-items:center}
+.proto-bar a{padding:3px 8px;border-radius:6px;cursor:pointer}
+.proto-bar a:hover{background:oklch(1 0 0/.1)}
+.proto-bar a.active{background:var(--brand);color:var(--brand-foreground)}
+.proto-bar .pb-theme{margin-left:auto;padding:3px 8px;border-radius:6px;display:flex;gap:4px;align-items:center;color:inherit}
+.proto-bar .pb-theme:hover{background:oklch(1 0 0/.1)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:500}
+.badge.b-brand{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand)}
+.badge.b-agent{background:color-mix(in oklch,var(--agent) 12%,transparent);color:var(--agent)}
+.badge.b-evidence{background:color-mix(in oklch,var(--evidence) 12%,transparent);color:var(--evidence)}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
+  font-size:11.5px;font-weight:500;border:1px solid var(--border);background:var(--card)}
+/* ============ 总览版式 ============ */
+.wrap{max-width:960px;margin:0 auto;padding:48px 24px 64px}
+.hero{display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;margin-bottom:40px}
+.hero .mark{width:52px;height:52px;border-radius:14px;background:var(--brand);color:var(--brand-foreground);
+  display:flex;align-items:center;justify-content:center;font-size:28px;
+  box-shadow:0 8px 24px color-mix(in oklch,var(--brand) 30%,transparent)}
+.hero h1{font-size:26px;font-weight:700;letter-spacing:-.02em}
+.hero .sub{font-size:14px;color:var(--muted-foreground);max-width:560px}
+.hero .sub b{color:var(--foreground);font-weight:600}
+.meta-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.screen-card{display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--card);
+  border:1px solid var(--border);border-radius:var(--radius-xl);cursor:pointer;
+  transition:border-color .15s,transform .15s,box-shadow .15s}
+.screen-card:hover{border-color:color-mix(in oklch,var(--brand) 45%,var(--border));
+  transform:translateY(-2px);box-shadow:0 8px 24px oklch(0 0 0/.06)}
+.dark .screen-card:hover{box-shadow:0 8px 24px oklch(0 0 0/.35)}
+.screen-card .sc-top{display:flex;align-items:center;gap:10px}
+.screen-card .sc-icon{width:34px;height:34px;border-radius:9px;background:var(--muted);
+  display:flex;align-items:center;justify-content:center;color:var(--brand);flex-shrink:0}
+.screen-card .sc-icon i{font-size:19px}
+.screen-card .sc-name{font-size:13.5px;font-weight:600}
+.screen-card .sc-no{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+.screen-card .sc-desc{font-size:12px;color:var(--muted-foreground);line-height:1.6;flex:1}
+.screen-card .sc-foot{display:flex;align-items:center;gap:6px}
+.screen-card .sc-foot .go{margin-left:auto;color:var(--muted-foreground);display:flex;align-items:center;gap:2px;font-size:11px}
+.screen-card:hover .sc-foot .go{color:var(--brand)}
+.sect{margin-top:44px}
+.sect h2{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted-foreground);
+  font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.sect h2::after{content:'';flex:1;height:1px;background:var(--border)}
+.principles{display:flex;flex-wrap:wrap;gap:8px}
+.principle{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;
+  border:1px solid var(--border);background:var(--card);font-size:12px}
+.principle .pno{font-family:var(--font-mono);font-size:10px;font-weight:600;color:var(--brand)}
+.principle .psrc{font-size:10.5px;color:var(--muted-foreground)}
+.footnote{margin-top:40px;text-align:center;font-size:11.5px;color:var(--muted-foreground)}
+</style>
+</head>
+<body>
+<nav class="proto-bar">
+  <span class="pb-title"><i class="ti ti-flame"></i>Foundry · SDLC 原型</span>
+  <a data-screen="index.html" class="active">总览</a>
+  <a data-screen="s1-tracker-board.html">看板</a>
+  <a data-screen="s2-sprint-studio.html">规划工作台</a>
+  <a data-screen="s3-ui-review.html">UI 评审</a>
+  <a data-screen="s4-work-item.html">工作项</a>
+  <a data-screen="s5-inbox.html">收件箱</a>
+  <a data-screen="s6-sprint-cockpit.html">Sprint 驾驶舱</a>
+  <a data-screen="s7-run-detail.html">运行详情</a>
+  <a data-screen="s8-workflow-library.html">工作流库</a>
+  <a data-screen="s9-brain-console.html">Brain</a>
+  <a data-screen="s10-health-insights.html">健康与洞察</a>
+  <button class="pb-theme" onclick="document.documentElement.classList.toggle('dark')">
+    <i class="ti ti-moon"></i>主题</button>
+</nav>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="mark"><i class="ti ti-flame"></i></div>
+    <h1>Foundry · SDLC 系统原型</h1>
+    <p class="sub"><b>人负责说清楚，系统负责做出来，并且自己证明做对了。</b><br>
+      规划、审批、UI 评审由人主导完成；派发、开发、测试、审计、交付在编排器中全自动执行，全程证据可追溯。</p>
+    <div class="meta-row">
+      <span class="chip"><i class="ti ti-clipboard-list"></i>Tracker · 流程域</span>
+      <span class="chip"><i class="ti ti-topology-star-3"></i>Orchestrator · 执行域</span>
+      <span class="chip"><i class="ti ti-layout-2"></i>Design · UI 域</span>
+      <span class="chip"><i class="ti ti-book"></i>Content · 文档域</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <a class="screen-card" data-screen="s1-tracker-board.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-layout-kanban"></i></div>
+        <div><div class="sc-name">看板</div><div class="sc-no">S1</div></div>
+      </div>
+      <p class="sc-desc">七阶段作战图：卡片带实时运行信号与失败路由；拖拽即触发流程门检查，缺判据自动弹回。</p>
+      <div class="sc-foot"><span class="badge b-brand">tracker</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+    <a class="screen-card" data-screen="s2-sprint-studio.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-clipboard-text"></i></div>
+        <div><div class="sc-name">Sprint 规划工作台</div><div class="sc-no">S2</div></div>
+      </div>
+      <p class="sc-desc">人机协作三栏：步骤轨 + 产物文档 + 访谈会话。一次一问带推荐答案，质量门逐条可核，三道签核就地完成。</p>
+      <div class="sc-foot"><span class="badge b-brand">tracker</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+    <a class="screen-card" data-screen="s3-ui-review.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-layout-2"></i></div>
+        <div><div class="sc-name">UI 设计评审</div><div class="sc-no">S3</div></div>
+      </div>
+      <p class="sc-desc">SDLC 缺失环节的补链：内嵌原型逐屏走查，锚点批注驱动 ui-spec 修订与定点重生成，批注清零才能签核。</p>
+      <div class="sc-foot"><span class="badge b-brand">tracker</span><span class="badge b-evidence">design</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+    <a class="screen-card" data-screen="s4-work-item.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-clipboard-list"></i></div>
+        <div><div class="sc-name">工作项详情</div><div class="sc-no">S4</div></div>
+      </div>
+      <p class="sc-desc">阶段步进条 + 执行记录时间线 + 依赖迷你图；失败路由三操作（重派 / 回退 / 升级）与交付证据一屏可达。</p>
+      <div class="sc-foot"><span class="badge b-brand">tracker</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+    <a class="screen-card" data-screen="s5-inbox.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-inbox"></i></div>
+        <div><div class="sc-name">收件箱</div><div class="sc-no">S5</div></div>
+      </div>
+      <p class="sc-desc">人被打断的唯一入口：签核、升级裁决、失败路由、通知一处处理完。判据不齐的批准按钮会告诉你缺什么。</p>
+      <div class="sc-foot"><span class="badge b-brand">tracker</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+    <a class="screen-card" data-screen="s6-sprint-cockpit.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-dashboard"></i></div>
+        <div><div class="sc-name">Sprint 驾驶舱</div><div class="sc-no">S6</div></div>
+      </div>
+      <p class="sc-desc">一个 sprint 从规划到交付的单页指挥部：八相位时间线、随相位切换的作战面板、产物库与签核状态。</p>
+      <div class="sc-foot"><span class="badge b-brand">tracker</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+    <a class="screen-card" data-screen="s7-run-detail.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-player-play"></i></div>
+        <div><div class="sc-name">运行详情</div><div class="sc-no">S7</div></div>
+      </div>
+      <p class="sc-desc">一个 run 的完整真相：真正的 DAG 图（依赖边、fanout、loop、人工门）+ 节点检查器 + attempt 时间线与证据。</p>
+      <div class="sc-foot"><span class="badge b-agent">orchestrator</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+    <a class="screen-card" data-screen="s8-workflow-library.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-topology-star-3"></i></div>
+        <div><div class="sc-name">工作流库</div><div class="sc-no">S8</div></div>
+      </div>
+      <p class="sc-desc">工作流即数据：九套 SDLC 模板（完整流水线 / 快速任务 / 热修 / 调研…）带 DAG 缩略图、版本链与成功率统计。</p>
+      <div class="sc-foot"><span class="badge b-agent">orchestrator</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+    <a class="screen-card" data-screen="s9-brain-console.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-brain"></i></div>
+        <div><div class="sc-name">Brain 控制台</div><div class="sc-no">S9</div></div>
+      </div>
+      <p class="sc-desc">可替换大脑的驾驶位：线程 transcript、引擎与模型切换、上下文表盘、并发槽，以及「必须经 DAG 干活」的纪律指标。</p>
+      <div class="sc-foot"><span class="badge b-agent">orchestrator</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+    <a class="screen-card" data-screen="s10-health-insights.html">
+      <div class="sc-top">
+        <div class="sc-icon"><i class="ti ti-heart-rate-monitor"></i></div>
+        <div><div class="sc-name">健康与洞察</div><div class="sc-no">S10</div></div>
+      </div>
+      <p class="sc-desc">健康前置门的单一真相页 + scorecard 失败归因：vLLM / Claude Code / 调度器状态，失败按五层归因指向「改哪最值」。</p>
+      <div class="sc-foot"><span class="badge b-agent">orchestrator</span>
+        <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
+    </a>
+  </div>
+
+  <section class="sect">
+    <h2>设计原则</h2>
+    <div class="principles">
+      <span class="principle"><span class="pno">P1</span>四位一体<span class="psrc">agent-native</span></span>
+      <span class="principle"><span class="pno">P2</span>双脑分层<span class="psrc">homerail</span></span>
+      <span class="principle"><span class="pno">P3</span>最小知识契约<span class="psrc">brief 隔离</span></span>
+      <span class="principle"><span class="pno">P4</span>证据优先<span class="psrc">引用即打开</span></span>
+      <span class="principle"><span class="pno">P5</span>有界自愈<span class="psrc">超限升级人类</span></span>
+      <span class="principle"><span class="pno">P6</span>产物即接口<span class="psrc">版本化</span></span>
+      <span class="principle"><span class="pno">P7</span>工作流即数据<span class="psrc">零代码改流程</span></span>
+      <span class="principle"><span class="pno">P8</span>幂等可恢复<span class="psrc">事件溯源</span></span>
+      <span class="principle"><span class="pno">P9</span>乐观与密度<span class="psrc">Linear 级</span></span>
+      <span class="principle"><span class="pno">P10</span>状态可感<span class="psrc">流光 / 呼吸 / 计时</span></span>
+    </div>
+  </section>
+
+  <p class="footnote">Foundry 设计系统 · 设计文档见 docs/sdlc-product-design/ · 演示数据：支付中心 PAY · Sprint 3</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,1233 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foundry · 组件规范</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+<style>
+/* ============ Foundry tokens ============ */
+:root{
+  --background:oklch(1 0 0); --foreground:oklch(.141 .005 285.82);
+  --card:oklch(1 0 0); --panel:oklch(.972 .002 286.35); --muted:oklch(.967 .001 286.38);
+  --muted-foreground:oklch(.552 .016 285.94);
+  --border:oklch(.945 .003 286.32); --input:oklch(.92 .004 286.32);
+  --ring:oklch(.705 .015 286.07);
+  --primary:oklch(.21 .006 285.89); --primary-foreground:oklch(.985 0 0);
+  --brand:oklch(.55 .16 255); --brand-foreground:oklch(.985 0 0);
+  --success:oklch(.55 .16 145); --warning:oklch(.68 .15 85);
+  --info:oklch(.55 .18 250); --destructive:oklch(.577 .245 27.33);
+  --agent:oklch(.55 .14 300); --evidence:oklch(.48 .10 180);
+  --chart-1:oklch(.55 .16 255); --chart-2:oklch(.65 .13 255);
+  --chart-3:oklch(.75 .10 255); --chart-4:oklch(.84 .07 255); --chart-5:oklch(.92 .04 255);
+  --sidebar:oklch(.985 .001 286.38);
+  --radius:10px; --radius-sm:6px; --radius-md:8px; --radius-xl:14px;
+  --font-sans:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+}
+.dark{
+  --background:oklch(.18 .005 285.82); --foreground:oklch(.985 0 0);
+  --card:oklch(.21 .006 285.89); --panel:oklch(.215 .006 285.9); --muted:oklch(.274 .006 286.03);
+  --muted-foreground:oklch(.705 .015 286.07);
+  --border:oklch(1 0 0/.08); --input:oklch(1 0 0/.15);
+  --primary:oklch(.92 .004 286.32); --primary-foreground:oklch(.21 .006 285.89);
+  --brand:oklch(.65 .16 255); --success:oklch(.65 .14 145);
+  --warning:oklch(.8 .14 85); --info:oklch(.65 .16 250); --destructive:oklch(.66 .2 27);
+  --agent:oklch(.68 .13 300); --evidence:oklch(.62 .09 180);
+  --chart-1:oklch(.72 .14 255); --chart-2:oklch(.62 .13 255);
+  --chart-3:oklch(.52 .11 255); --chart-4:oklch(.42 .09 255); --chart-5:oklch(.32 .06 255);
+  --sidebar:oklch(.16 .005 285.82);
+}
+/* ============ base ============ */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font-sans);font-size:13px;line-height:1.55;color:var(--foreground);
+  background:var(--background);-webkit-font-smoothing:antialiased;text-autospace:ideograph-alpha ideograph-numeric}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:oklch(0 0 0/.12);border-radius:3px}
+.dark ::-webkit-scrollbar-thumb{background:oklch(1 0 0/.14)}
+i.ti{font-size:16px;line-height:1;vertical-align:-2px}
+/* ============ 原型导航条 ============ */
+.proto-bar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:2px;
+  padding:4px 10px;background:oklch(.18 .01 260);color:oklch(.8 .01 260);
+  font-size:11px;overflow-x:auto;white-space:nowrap}
+.proto-bar .pb-title{font-weight:600;color:oklch(.98 0 0);margin-right:8px;display:flex;gap:6px;align-items:center}
+.proto-bar a{padding:3px 8px;border-radius:6px;cursor:pointer}
+.proto-bar a:hover{background:oklch(1 0 0/.1)}
+.proto-bar a.active{background:var(--brand);color:var(--brand-foreground)}
+.proto-bar .pb-theme{margin-left:auto;padding:3px 8px;border-radius:6px;display:flex;gap:4px;align-items:center}
+.proto-bar .pb-theme:hover{background:oklch(1 0 0/.1)}
+/* ============ 规范页布局 ============ */
+.specs{display:flex;height:calc(100vh - 27px)}
+.toc{width:224px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);
+  overflow-y:auto;padding:14px 10px}
+.toc .group-label{padding:10px 8px 4px}
+.toc a{display:block;padding:4px 8px;border-radius:var(--radius-md);font-size:12.5px;color:var(--foreground)}
+.toc a:hover{background:oklch(0 0 0/.045)}
+.dark .toc a:hover{background:oklch(1 0 0/.06)}
+.spec-main{flex:1;overflow-y:auto;scroll-behavior:smooth}
+.spec-inner{max-width:880px;margin:0 auto;padding:28px 32px 120px}
+.spec-inner>h1{font-size:18px;font-weight:600;margin-bottom:6px}
+.lede{color:var(--muted-foreground);font-size:13px;margin-bottom:28px}
+section{margin-bottom:44px}
+section h2{font-size:15px;font-weight:600;padding-top:18px;margin-bottom:4px;display:flex;align-items:center;gap:8px;border-top:1px solid var(--border)}
+section h2 .mono{font-size:11px;color:var(--muted-foreground);font-weight:400}
+.usage{font-size:12px;color:var(--muted-foreground);margin-bottom:14px}
+.demo{border:1px solid var(--border);border-radius:var(--radius);padding:18px;display:flex;
+  flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:10px;background:var(--background)}
+.demo.col{flex-direction:column;align-items:stretch}
+.demo-label{width:100%;font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--muted-foreground);font-weight:600;margin-bottom:-2px}
+.dodont{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.dd{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.dd .dd-tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:4px 12px}
+.dd.do .dd-tag{color:var(--success);background:color-mix(in oklch,var(--success) 10%,transparent)}
+.dd.dont .dd-tag{color:var(--destructive);background:color-mix(in oklch,var(--destructive) 8%,transparent)}
+.dd .dd-body{padding:14px}
+.dd .dd-note{font-size:11.5px;color:var(--muted-foreground);padding:0 12px 10px}
+/* ============ 通用组件（规范实现） ============ */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-md);
+  font-size:12.5px;font-weight:500;border:1px solid transparent;cursor:pointer;white-space:nowrap}
+.btn-primary{background:var(--primary);color:var(--primary-foreground)}
+.btn-primary:hover{opacity:.9}
+.btn-brand{background:var(--brand);color:var(--brand-foreground)}
+.btn-brand:hover{opacity:.92}
+.btn-outline{border-color:var(--border);background:var(--card)}
+.btn-outline:hover{background:var(--muted)}
+.btn-ghost:hover{background:var(--muted)}
+.btn-danger{background:var(--destructive);color:#fff}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-sm{padding:3px 8px;font-size:12px}
+.btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--background),0 0 0 4px var(--ring)}
+.iconbtn{width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:var(--radius-md);color:var(--muted-foreground)}
+.iconbtn:hover{background:var(--muted);color:var(--foreground)}
+.spin{width:13px;height:13px;border-radius:50%;border:1.6px solid currentColor;border-top-color:transparent;
+  animation:rot 1s linear infinite;display:inline-block}
+@keyframes rot{to{transform:rotate(360deg)}}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
+  font-size:11.5px;font-weight:500;border:1px solid var(--border);background:var(--card)}
+.chip .x{color:var(--muted-foreground);font-size:12px;cursor:pointer}
+.filter-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;
+  font-size:11.5px;font-weight:500;border:1px solid var(--border);background:var(--card);cursor:pointer}
+.filter-chip.active{background:color-mix(in oklch,var(--brand) 12%,transparent);
+  border-color:color-mix(in oklch,var(--brand) 40%,transparent);color:var(--brand)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:500;white-space:nowrap}
+.badge.b-success{background:color-mix(in oklch,var(--success) 14%,transparent);color:var(--success)}
+.badge.b-warning{background:color-mix(in oklch,var(--warning) 16%,transparent);color:oklch(.55 .13 85)}
+.dark .badge.b-warning{color:var(--warning)}
+.badge.b-info{background:color-mix(in oklch,var(--info) 14%,transparent);color:var(--info)}
+.badge.b-destructive{background:color-mix(in oklch,var(--destructive) 12%,transparent);color:var(--destructive)}
+.badge.b-agent{background:color-mix(in oklch,var(--agent) 12%,transparent);color:var(--agent)}
+.badge.b-brand{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand)}
+.badge.b-muted{background:var(--muted);color:var(--muted-foreground)}
+.badge.b-evidence{background:color-mix(in oklch,var(--evidence) 12%,transparent);color:var(--evidence)}
+kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid var(--border);
+  border-bottom-width:2px;border-radius:4px;background:var(--muted);color:var(--muted-foreground)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}
+.card-pad{padding:14px 16px}
+.section-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+.group-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);font-weight:600}
+.divider{height:1px;background:var(--border)}
+/* 状态环 */
+.ring{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-block;position:relative}
+.st-icon{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;vertical-align:-2px;color:#fff}
+.st-icon i{font-size:10px;line-height:1;display:block}
+.st-icon.sm{width:12px;height:12px}.st-icon.sm i{font-size:8.5px}
+.st-icon.lg{width:18px;height:18px}.st-icon.lg i{font-size:12.5px}
+.st-icon.ok{background:var(--success)}.st-icon.err{background:var(--destructive)}.st-icon.warn{background:var(--warning)}.st-icon.inf{background:var(--info)}.st-icon.mut{background:var(--muted-foreground)}
+.runbadge .st-icon{width:11px;height:11px}.runbadge .st-icon i{font-size:8px}
+.ring.r-pending{border:1.6px dashed var(--muted-foreground)}
+.ring.r-queued{border:1.6px solid var(--warning)}
+.ring.r-queued::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--warning)}
+.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%);animation:breathe 2s ease-in-out infinite}
+.ring.r-review{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 75%,transparent 75% 100%)}
+.ring.r-gate{border:1.6px solid var(--warning)}
+.ring.r-gate::after{content:'';position:absolute;left:5.5px;top:3px;width:1.8px;height:7px;background:var(--warning)}
+.ring.r-skipped{border:1.6px solid var(--muted-foreground);background:linear-gradient(135deg,transparent 45%,var(--muted-foreground) 45%,var(--muted-foreground) 55%,transparent 55%)}
+.ring.r-rejected{border:1.6px solid var(--destructive);background:linear-gradient(135deg,transparent 45%,var(--destructive) 45%,var(--destructive) 55%,transparent 55%)}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.55}}
+/* 优先级 */
+.pbars{display:inline-flex;gap:1.5px;align-items:flex-end;height:12px}
+.pbars span{width:3px;border-radius:1px;background:var(--border)}
+.pbars span:nth-child(1){height:4px}.pbars span:nth-child(2){height:6.5px}
+.pbars span:nth-child(3){height:9px}.pbars span:nth-child(4){height:12px}
+.pbars.p0 span{background:var(--destructive)}
+.pbars.p1 span:nth-child(-n+3){background:oklch(.55 .13 85)}
+.pbars.p2 span:nth-child(-n+2){background:var(--info)}
+.pbars.p3 span:nth-child(1){background:var(--muted-foreground)}
+/* 头像 */
+.avatar{width:20px;height:20px;border-radius:50%;background:var(--brand);color:#fff;
+  display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0;position:relative}
+.avatar.a-agent{border-radius:6px;background:color-mix(in oklch,var(--agent) 15%,transparent);
+  color:var(--agent);border:1px solid color-mix(in oklch,var(--agent) 40%,transparent)}
+.avatar.a-brain{border-radius:6px;background:color-mix(in oklch,var(--brand) 15%,transparent);
+  color:var(--brand);border:1px solid color-mix(in oklch,var(--brand) 40%,transparent)}
+.avatar .presence{position:absolute;right:-2px;bottom:-2px;width:7px;height:7px;border-radius:50%;
+  background:var(--success);border:1.5px solid var(--background);animation:breathe 2s infinite}
+.avstack{display:inline-flex}
+.avstack .avatar{margin-left:-6px;border:1.5px solid var(--background)}
+.avstack .avatar:first-child{margin-left:0}
+/* 表格 */
+table.fd{width:100%;border-collapse:collapse;font-size:12.5px}
+table.fd th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted-foreground);font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border)}
+table.fd td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+table.fd tr:hover td{background:oklch(0 0 0/.02)}
+.dark table.fd tr:hover td{background:oklch(1 0 0/.03)}
+table.fd td.num{text-align:right;font-family:var(--font-mono)}
+/* 动效 */
+.shimmer{background:linear-gradient(90deg,var(--muted-foreground) 0%,var(--foreground) 40%,var(--muted-foreground) 80%);
+  background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
+  animation:shimmer 2.2s linear infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+.impulse{animation:impulse 2.4s ease-in-out infinite}
+@keyframes impulse{0%,100%{box-shadow:0 0 0 0 color-mix(in oklch,var(--brand) 35%,transparent)}
+  50%{box-shadow:0 0 0 4px color-mix(in oklch,var(--brand) 12%,transparent)}}
+.beam{position:relative;overflow:hidden}
+.beam::before{content:'';position:absolute;inset:-40%;background:conic-gradient(from 0deg,transparent 0 70%,var(--info) 85%,transparent 100%);
+  animation:beamrot 3s linear infinite}
+.beam::after{content:'';position:absolute;inset:1.5px;background:var(--card);border-radius:8px}
+.beam>*{position:relative;z-index:1}
+@keyframes beamrot{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.shimmer,.impulse,.ring.r-running,.beam::before,.spin{animation:none}}
+/* 空态 */
+.empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px;color:var(--muted-foreground)}
+.empty .e-icon{width:40px;height:40px;border-radius:50%;background:var(--muted);
+  display:flex;align-items:center;justify-content:center;font-size:20px}
+/* ===== 输入 ===== */
+.inp{height:28px;padding:0 9px;border:1px solid var(--input);border-radius:var(--radius-md);
+  background:var(--card);color:var(--foreground);font:inherit;font-size:12.5px;min-width:180px}
+.inp:focus{outline:none;box-shadow:0 0 0 2px color-mix(in oklch,var(--ring) 45%,transparent)}
+.inp:disabled{opacity:.45}
+.inp.err{border-color:var(--destructive)}
+textarea.inp{height:auto;min-height:56px;padding:6px 9px;resize:vertical}
+.field{display:flex;flex-direction:column;gap:4px;min-width:220px}
+.field label{font-size:12px;font-weight:500}
+.field .hint{font-size:12px;color:var(--muted-foreground)}
+.field .errmsg{font-size:12px;color:var(--destructive)}
+.select-look{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 9px;
+  border:1px solid var(--input);border-radius:var(--radius-md);background:var(--card);font-size:12.5px;cursor:pointer}
+.select-look i{color:var(--muted-foreground);font-size:14px}
+.search-box{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 9px;min-width:220px;
+  border:1px solid var(--input);border-radius:var(--radius-md);background:var(--card);color:var(--muted-foreground);font-size:12.5px}
+.search-box input{border:none;outline:none;background:none;font:inherit;color:var(--foreground);flex:1}
+/* 选择控件 */
+.ck{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer}
+.ck .box{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--input);display:inline-flex;
+  align-items:center;justify-content:center;background:var(--card)}
+.ck.on .box{background:var(--brand);border-color:var(--brand)}
+.ck.on .box::after{content:'';width:6px;height:3.2px;border-left:1.6px solid #fff;border-bottom:1.6px solid #fff;
+  transform:rotate(-45deg);margin-top:-2px}
+.rd .box{border-radius:50%}
+.rd.on .box{background:var(--card);border-color:var(--brand)}
+.rd.on .box::after{content:'';width:6px;height:6px;border:none;border-radius:50%;background:var(--brand);transform:none;margin:0}
+.sw{width:28px;height:16px;border-radius:999px;background:var(--input);position:relative;transition:background .15s;cursor:pointer;flex-shrink:0}
+.sw::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s;box-shadow:0 1px 2px oklch(0 0 0/.2)}
+.sw.on{background:var(--brand)}
+.sw.on::after{left:14px}
+/* seg / tabs */
+.seg{display:inline-flex;background:var(--muted);border-radius:var(--radius-md);padding:2px;gap:2px}
+.seg button{padding:3px 10px;border-radius:6px;font-size:12px;color:var(--muted-foreground)}
+.seg button.on{background:var(--card);color:var(--foreground);font-weight:500;box-shadow:0 1px 2px oklch(0 0 0/.06)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border)}
+.tabs button{padding:7px 12px;font-size:13px;color:var(--muted-foreground);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button.on{color:var(--foreground);font-weight:500;border-bottom-color:var(--brand)}
+/* runbadge / statuspill */
+.runbadge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;
+  border:1px solid var(--border);background:var(--card);font-size:11.5px;cursor:pointer}
+.runbadge:hover{border-color:color-mix(in oklch,var(--brand) 45%,transparent)}
+.status-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;font-size:12px;font-weight:500}
+.status-pill.running{background:color-mix(in oklch,var(--info) 10%,transparent);color:var(--info)}
+.status-pill.done{background:color-mix(in oklch,var(--success) 10%,transparent);color:var(--success)}
+.status-pill.failed{background:color-mix(in oklch,var(--destructive) 9%,transparent);color:var(--destructive)}
+/* KPI / metric / goal / gauge */
+.kpi{min-width:150px;flex:1}
+.kpi .k-num{font-family:var(--font-mono);font-size:20px;font-weight:600;margin-top:4px}
+.kpi .k-delta{font-size:11px;color:var(--success)}
+.metric-row{display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0}
+.metric-row .v{font-family:var(--font-mono)}
+.goal-metric{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12.5px}
+.goal-metric .mkey{font-family:var(--font-mono);font-size:10.5px;padding:1px 6px;border-radius:5px;
+  background:var(--muted);color:var(--muted-foreground);font-weight:600}
+.ctx-bar{height:6px;border-radius:3px;background:var(--muted);overflow:hidden;min-width:180px;flex:1}
+.ctx-bar span{display:block;height:100%;border-radius:3px;background:var(--brand)}
+.ctx-bar.warn span{background:var(--warning)}
+.ctx-bar.crit span{background:var(--destructive)}
+/* proprow / inspector */
+.proprow{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12.5px}
+.proprow .pl{width:88px;flex-shrink:0;color:var(--muted-foreground);font-size:12px}
+.proprow .pv{display:flex;align-items:center;gap:6px;border-radius:6px;padding:2px 6px;margin-left:-6px;cursor:pointer}
+.proprow .pv:hover{background:var(--muted)}
+.panel-demo{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;width:280px}
+/* stagestepper */
+.stepper{display:flex;align-items:center}
+.step{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10.5px;color:var(--muted-foreground);min-width:52px}
+.step.cur{color:var(--foreground);font-weight:500}
+.step-line{height:2px;flex:1;min-width:18px;background:var(--border);margin-bottom:16px;position:relative}
+.step-line.fill{background:var(--success)}
+.step-line .gate-ico{position:absolute;top:-8px;left:50%;transform:translateX(-50%);font-size:12px;
+  color:var(--warning);background:var(--background);padding:0 2px}
+.mini-step{display:inline-flex;gap:1.5px;height:4px;width:84px}
+.mini-step span{flex:1;border-radius:2px;background:var(--border)}
+.mini-step span.f{background:var(--success)}
+.mini-step span.a{background:var(--info)}
+/* board */
+.bcol{width:230px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:8px;flex-shrink:0}
+.bcol-head{display:flex;align-items:center;gap:7px;padding:2px 4px 8px;font-size:12.5px;font-weight:600}
+.bcol-head .cnt{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);font-weight:400}
+.bcard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;
+  display:flex;flex-direction:column;gap:7px;cursor:pointer;margin-bottom:8px}
+.bcard:hover{border-color:oklch(.85 .01 286)}
+.dark .bcard:hover{border-color:oklch(1 0 0/.18)}
+.bcard.sel{border-color:var(--brand);background:color-mix(in oklch,var(--brand) 2.5%,var(--card))}
+.bcard .r1{display:flex;align-items:center;gap:6px;font-size:11px}
+.bcard .key{font-family:var(--font-mono);color:var(--muted-foreground)}
+.bcard .ttl{font-size:12.5px;line-height:1.4}
+.bcard .r3{display:flex;align-items:center;gap:8px}
+.drop-hint{border:1.5px dashed color-mix(in oklch,var(--brand) 45%,transparent);border-radius:var(--radius-md);
+  height:38px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--brand);margin-bottom:8px}
+/* listgrid row */
+.lg-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer}
+.lg-row:hover{background:oklch(0 0 0/.02)}
+.dark .lg-row:hover{background:oklch(1 0 0/.03)}
+.lg-main{flex:1;min-width:0}
+.lg-t{display:flex;align-items:center;gap:7px;font-size:13px}
+.lg-s{font-size:11.5px;color:var(--muted-foreground);margin-top:1px}
+.lg-acts{display:none;gap:2px}
+.lg-row:hover .lg-acts{display:flex}
+.lg-row:hover .lg-meta{display:none}
+.lg-meta{font-size:11.5px;color:var(--muted-foreground);font-family:var(--font-mono)}
+/* gate / evidence / artifact / attempt */
+.gate-check{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;padding:3px 0}
+.evidence-card{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--border);
+  border-radius:var(--radius-md);background:var(--card);font-size:12.5px;flex-wrap:wrap}
+.evidence-card i{color:var(--evidence)}
+.evidence-card .ref{font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
+.art-row{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12.5px}
+.attempt-row{display:flex;align-items:center;gap:9px;padding:7px 10px;border:1px solid var(--border);
+  border-radius:var(--radius-md);font-size:12px;background:var(--card)}
+.attempt-row.hist{opacity:.6}
+/* timeline */
+.collapse-head{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--muted);
+  border-radius:var(--radius-md);font-size:12px;cursor:pointer;color:var(--muted-foreground)}
+.tl-row{display:flex;align-items:flex-start;gap:8px;padding:5px 10px;font-size:12px}
+.tl-row i{margin-top:2px;font-size:14px;color:var(--muted-foreground)}
+.tl-row .tool{font-weight:500}
+.tl-row .prev{color:var(--muted-foreground)}
+.tl-row.err{color:var(--destructive)}
+.tl-row.err i{color:var(--destructive)}
+/* interview / steps rail */
+.interview-card{border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;background:var(--card)}
+.ic-q{font-weight:600;margin-bottom:10px}
+.rec-chip{display:flex;gap:7px;align-items:flex-start;padding:8px 11px;border-radius:var(--radius-md);
+  background:color-mix(in oklch,var(--brand) 8%,transparent);border:1px solid color-mix(in oklch,var(--brand) 30%,transparent);
+  font-size:12.5px;cursor:pointer;margin-bottom:6px}
+.rec-chip i{color:var(--brand);margin-top:1px}
+.alt-chip{display:flex;gap:7px;align-items:flex-start;padding:7px 11px;border-radius:var(--radius-md);
+  border:1px solid var(--border);font-size:12.5px;cursor:pointer;margin-bottom:5px;background:var(--card)}
+.alt-chip:hover{background:var(--muted)}
+.step-item{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:var(--radius-md);font-size:12.5px}
+.step-item.cur{background:color-mix(in oklch,var(--brand) 10%,transparent);color:var(--brand);font-weight:500}
+.step-item .st{margin-left:auto;font-size:10.5px;color:var(--muted-foreground)}
+/* thread / transcript */
+.thread{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:var(--radius-md);font-size:12.5px;cursor:pointer}
+.thread:hover{background:oklch(0 0 0/.04)}
+.dark .thread:hover{background:oklch(1 0 0/.05)}
+.thread.on{background:color-mix(in oklch,var(--brand) 10%,transparent)}
+.thread .tt{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.thread .tm{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+.msg-user{margin-left:auto;max-width:78%;background:color-mix(in oklch,var(--brand) 10%,transparent);
+  border-radius:12px 12px 4px 12px;padding:8px 12px;font-size:12.5px}
+.msg-a{max-width:88%;font-size:12.5px;padding:2px 0}
+/* dag */
+.dagnode{width:200px;background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-md);cursor:pointer}
+.dagnode-inner{padding:9px 11px;display:flex;flex-direction:column;gap:5px}
+.dagnode .dn-row1{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500}
+.dagnode .dn-row1 .ring,.dn-row1 .st-icon{margin-left:auto}
+.dagnode .dn-row2{display:flex;gap:5px}
+.dagnode .dn-stats{display:flex;gap:10px;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+.dagnode.n-running{border-color:var(--info)}
+.dagnode.n-done{border-color:color-mix(in oklch,var(--success) 55%,transparent);background:color-mix(in oklch,var(--success) 2%,var(--card))}
+.dagnode.n-failed{border-color:var(--destructive)}
+.dagnode.n-gate{border-color:var(--warning)}
+.dagnode.n-selected{box-shadow:0 0 0 2px var(--background),0 0 0 4px var(--brand)}
+.fanout{position:relative}
+.fanout::before,.fanout::after{content:'';position:absolute;inset:0;background:var(--card);
+  border:1.5px solid var(--border);border-radius:var(--radius-md);z-index:-1}
+.fanout::before{transform:translate(4px,4px)}
+.fanout::after{transform:translate(8px,8px);opacity:.6}
+/* sidebar 项 */
+.sb-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--radius-md);
+  color:var(--foreground);font-size:13px;cursor:pointer;width:200px}
+.sb-item i{font-size:17px;color:var(--muted-foreground)}
+.sb-item:hover{background:oklch(0 0 0/.045)}
+.dark .sb-item:hover{background:oklch(1 0 0/.06)}
+.sb-item.active{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand);font-weight:500}
+.sb-item.active i{color:var(--brand)}
+.sb-item .count{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+.sb-item .dot-badge{margin-left:auto;min-width:16px;height:16px;padding:0 5px;border-radius:8px;
+  background:var(--brand);color:var(--brand-foreground);font-size:10px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;font-family:var(--font-mono)}
+/* page header / toolbar demo */
+.page-header{display:flex;align-items:center;gap:10px;padding:12px 16px;width:100%}
+.page-header .ph-icon{width:30px;height:30px;border-radius:8px;background:var(--muted);
+  display:flex;align-items:center;justify-content:center;color:var(--muted-foreground)}
+.page-header h1{font-size:16px;font-weight:600}
+.page-header .ph-count{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground)}
+.page-header .ph-actions{margin-left:auto;display:flex;gap:8px}
+/* composer */
+.composer{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);width:100%;max-width:560px}
+.composer textarea{width:100%;border:none;outline:none;background:none;font:inherit;font-size:13px;
+  padding:10px 12px 4px;resize:none;min-height:52px;color:var(--foreground)}
+.composer .cp-foot{display:flex;align-items:center;gap:6px;padding:6px 10px 8px}
+.composer .cp-foot .right{margin-left:auto;display:flex;align-items:center;gap:6px}
+/* overlay demos */
+.ovl{position:fixed;inset:0;background:oklch(0 0 0/.4);display:flex;align-items:center;justify-content:center;z-index:80}
+.dlg{width:420px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);
+  box-shadow:0 18px 50px oklch(0 0 0/.25);padding:18px 20px}
+.dlg h3{font-size:15px;font-weight:600;margin-bottom:6px}
+.dlg p{font-size:12.5px;color:var(--muted-foreground);margin-bottom:16px}
+.dlg .acts{display:flex;justify-content:flex-end;gap:8px}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:420px;background:var(--panel);border-left:1px solid var(--border);
+  box-shadow:-12px 0 40px oklch(0 0 0/.18);z-index:80;padding:18px 20px}
+.pop{position:absolute;top:calc(100% + 6px);left:0;background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius-md);box-shadow:0 8px 28px oklch(0 0 0/.14);padding:4px;z-index:40;min-width:160px}
+.pop .pi{display:flex;align-items:center;gap:8px;padding:5px 9px;border-radius:6px;font-size:12.5px;cursor:pointer}
+.pop .pi:hover{background:var(--muted)}
+.tipwrap{position:relative;display:inline-flex}
+.tip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  background:oklch(.2 .01 285);color:oklch(.98 0 0);font-size:11px;padding:4px 9px;border-radius:6px;
+  white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s .3s}
+.dark .tip{background:oklch(.95 0 0);color:oklch(.15 0 0)}
+.tipwrap:hover .tip{opacity:1}
+.toast-demo{display:flex;align-items:center;gap:9px;padding:10px 14px;background:var(--card);
+  border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 8px 30px oklch(0 0 0/.15);font-size:12.5px}
+.toaststack{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:90}
+/* skeleton / progress */
+.skel{background:var(--muted);border-radius:6px;position:relative;overflow:hidden}
+.skel::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,oklch(1 0 0/.5),transparent);
+  animation:skshine 1.6s infinite}
+.dark .skel::after{background:linear-gradient(90deg,transparent,oklch(1 0 0/.08),transparent)}
+@keyframes skshine{to{transform:translateX(100%)}}
+.prog{height:4px;border-radius:2px;background:var(--muted);min-width:220px;overflow:hidden}
+.prog span{display:block;height:100%;background:var(--brand);border-radius:2px}
+/* swatch */
+.sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px;width:100%}
+.swatch{border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden}
+.swatch .c{height:44px}
+.swatch .n{padding:5px 8px;font-size:10.5px;font-family:var(--font-mono);color:var(--muted-foreground)}
+.surf-demo{width:100%;background:var(--background);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.hdot{width:8px;height:8px;border-radius:50%;display:inline-block}
+</style>
+</head>
+<body x-data="{dlg:false,adlg:false,drw:false,pop:false,toasts:[],sw1:true,sw2:false,tab:'过程',seg:'看板',
+  toast(m,k){const id=Date.now();this.toasts.push({id,m,k});setTimeout(()=>this.toasts=this.toasts.filter(t=>t.id!==id),3500)}}">
+<nav class="proto-bar">
+  <span class="pb-title"><i class="ti ti-flame"></i>Foundry · 组件规范</span>
+  <a data-screen="index.html">返回原型总览</a>
+  <button class="pb-theme" onclick="document.documentElement.classList.toggle('dark')">
+    <i class="ti ti-moon"></i>主题</button>
+</nav>
+<div class="specs">
+  <aside class="toc">
+    <div class="group-label">基础</div>
+    <a href="#tokens">色彩 tokens</a>
+    <a href="#surfaces">表面层级</a>
+    <a href="#type">字体与字号</a>
+    <a href="#icons">图标</a>
+    <div class="group-label">状态语汇</div>
+    <a href="#ring">状态环 StatusRing</a>
+    <a href="#sticon">状态图标 StatusIcon</a>
+    <a href="#stepper">阶段步进 StageStepper</a>
+    <a href="#pbars">优先级 PriorityBars</a>
+    <a href="#avatar">行为者 ActorAvatar</a>
+    <div class="group-label">动作</div>
+    <a href="#button">Button</a>
+    <a href="#seg">Segmented / Tabs</a>
+    <div class="group-label">输入</div>
+    <a href="#input">Input / Select</a>
+    <a href="#choice">Checkbox / Switch</a>
+    <a href="#form">表单布局</a>
+    <a href="#composer">Composer</a>
+    <div class="group-label">展示</div>
+    <a href="#badge">Badge / Chip / kbd</a>
+    <a href="#pill">RunBadge / StatusPill</a>
+    <a href="#kpi">KPI / Goal / 量表</a>
+    <a href="#card">Card / Panel</a>
+    <a href="#table">Table / ListGrid</a>
+    <a href="#board">看板 Board</a>
+    <a href="#prop">PropRow / 检查器</a>
+    <a href="#empty">空态 / 骨架 / 进度</a>
+    <div class="group-label">反馈</div>
+    <a href="#overlay">Dialog / Drawer / Toast</a>
+    <div class="group-label">流程与证据</div>
+    <a href="#gate">签核 GateBanner</a>
+    <a href="#evidence">证据 EvidenceCard</a>
+    <a href="#timeline">时间线 / 尝试行</a>
+    <a href="#artifact">产物卡</a>
+    <a href="#interview">访谈卡 / 步骤轨</a>
+    <a href="#thread">线程轨 / 转录</a>
+    <div class="group-label">DAG</div>
+    <a href="#dag">DAG 节点与连线</a>
+    <div class="group-label">导航</div>
+    <a href="#nav">侧栏 / 页头 / 工具栏</a>
+    <div class="group-label">其他</div>
+    <a href="#motion">动效语汇</a>
+    <a href="#rules">禁则清单</a>
+  </aside>
+  <main class="spec-main">
+  <div class="spec-inner">
+    <h1>Foundry 组件规范（活体）</h1>
+    <p class="lede">本页与 <span class="mono">01-design-system.md</span> 一一对应：每个组件渲染全部变体与状态，是可运行的规范参照。右上角切换暗色主题逐节自查。规范冲突时以本页 + 01 章联合裁决，两处必须同步修改。</p>
+
+    <section id="tokens">
+      <h2>色彩 tokens <span class="mono">§2.1</span></h2>
+      <p class="usage">全部颜色经语义 token 使用，禁止硬编码；状态底色一律 <span class="mono">color-mix(… 15%, transparent)</span>。</p>
+      <div class="demo">
+        <div class="demo-label">中性</div>
+        <div class="sw-grid">
+          <div class="swatch"><div class="c" style="background:var(--background)"></div><div class="n">--background</div></div>
+          <div class="swatch"><div class="c" style="background:var(--panel)"></div><div class="n">--panel</div></div>
+          <div class="swatch"><div class="c" style="background:var(--card)"></div><div class="n">--card</div></div>
+          <div class="swatch"><div class="c" style="background:var(--muted)"></div><div class="n">--muted</div></div>
+          <div class="swatch"><div class="c" style="background:var(--border)"></div><div class="n">--border</div></div>
+          <div class="swatch"><div class="c" style="background:var(--foreground)"></div><div class="n">--foreground</div></div>
+        </div>
+        <div class="demo-label">品牌与语义</div>
+        <div class="sw-grid">
+          <div class="swatch"><div class="c" style="background:var(--brand)"></div><div class="n">--brand</div></div>
+          <div class="swatch"><div class="c" style="background:var(--success)"></div><div class="n">--success</div></div>
+          <div class="swatch"><div class="c" style="background:var(--warning)"></div><div class="n">--warning</div></div>
+          <div class="swatch"><div class="c" style="background:var(--info)"></div><div class="n">--info</div></div>
+          <div class="swatch"><div class="c" style="background:var(--destructive)"></div><div class="n">--destructive</div></div>
+          <div class="swatch"><div class="c" style="background:var(--agent)"></div><div class="n">--agent 紫=agent</div></div>
+          <div class="swatch"><div class="c" style="background:var(--evidence)"></div><div class="n">--evidence 青=证据</div></div>
+          <div class="swatch"><div class="c" style="background:var(--primary)"></div><div class="n">--primary</div></div>
+        </div>
+        <div class="demo-label">图表阶梯（hue 255 明度梯）</div>
+        <div class="sw-grid">
+          <div class="swatch"><div class="c" style="background:var(--chart-1)"></div><div class="n">--chart-1</div></div>
+          <div class="swatch"><div class="c" style="background:var(--chart-2)"></div><div class="n">--chart-2</div></div>
+          <div class="swatch"><div class="c" style="background:var(--chart-3)"></div><div class="n">--chart-3</div></div>
+          <div class="swatch"><div class="c" style="background:var(--chart-4)"></div><div class="n">--chart-4</div></div>
+          <div class="swatch"><div class="c" style="background:var(--chart-5)"></div><div class="n">--chart-5</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="surfaces">
+      <h2>表面层级（四级表面模型） <span class="mono">§2.2</span></h2>
+      <p class="usage">L0 背景 → L1 面板（--panel/--sidebar）→ L2 卡片（--card）→ L3 浮层（+shadow）。同级不叠加；L1 与 L0 必须有可感知色差；阴影仅 L3。</p>
+      <div class="surf-demo">
+        <div class="group-label" style="margin-bottom:8px">L0 --background 页面背景</div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px">
+          <div class="group-label" style="margin-bottom:8px">L1 --panel 次级面板（列表栏 / 检查器 / 线程轨）</div>
+          <div class="card card-pad" style="max-width:340px">
+            <div class="section-title" style="margin-bottom:4px"><i class="ti ti-file-text"></i>L2 --card 卡片</div>
+            <div style="font-size:12px;color:var(--muted-foreground)">卡内分组用 divider + 眉题，不再嵌套卡。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="type">
+      <h2>字体与字号 <span class="mono">§2.4</span></h2>
+      <p class="usage">Sans=Inter/PingFang，Mono=JetBrains Mono；字号只从阶梯取值；id/key/数字一律 mono + tabular-nums。</p>
+      <div class="demo col">
+        <div style="font-size:17px;font-weight:600">页面标题 16–18 / 600 —— Sprint 3 · 支付对账</div>
+        <div class="section-title">分区标题 13 / 600 —— 执行中的运行</div>
+        <div class="group-label">分组眉题 10 / uppercase / muted —— WORKFLOW</div>
+        <div>正文 13 / 400 —— 工作项在测试阶段等待 gatekeeper 判据齐备后推进。</div>
+        <div style="font-size:12px;color:var(--muted-foreground)">辅助 12 / muted —— 更新于 3 分钟前 · 由 brain 派发</div>
+        <div class="mono" style="font-size:12px">mono 数据 —— PAY-204 · v3r_usxh · 3m42s · 18.4k tok</div>
+      </div>
+    </section>
+
+    <section id="icons">
+      <h2>图标（Tabler） <span class="mono">§2.5</span></h2>
+      <p class="usage">Tabler outline 唯一来源；16/18/20 三档；禁 emoji 与文字符号（＋ ↗ ✓ →）。核心语义映射全局唯一。</p>
+      <div class="demo" style="gap:16px">
+        <span><i class="ti ti-folder"></i> 项目</span><span><i class="ti ti-run"></i> Sprint</span>
+        <span><i class="ti ti-clipboard-list"></i> 工作项</span><span><i class="ti ti-layout-kanban"></i> 看板</span>
+        <span><i class="ti ti-topology-star-3"></i> 工作流</span><span><i class="ti ti-player-play"></i> 运行</span>
+        <span><i class="ti ti-cpu"></i> 节点</span><span><i class="ti ti-git-branch"></i> 工作区</span>
+        <span><i class="ti ti-rubber-stamp"></i> 签核</span><span><i class="ti ti-hand-stop"></i> 人工门</span>
+        <span><i class="ti ti-shield-check"></i> 守门</span><span><i class="ti ti-certificate"></i> 证据</span>
+        <span><i class="ti ti-file-text"></i> 产物</span><span><i class="ti ti-brain"></i> Brain</span>
+        <span><i class="ti ti-robot"></i> 智能体</span><span><i class="ti ti-inbox"></i> 收件箱</span>
+        <span><i class="ti ti-list-check"></i> 确定性动作</span><span><i class="ti ti-chart-dots"></i> 洞察</span>
+      </div>
+      <div class="dodont">
+        <div class="dd do"><div class="dd-tag">Do</div><div class="dd-body">
+          <button class="btn btn-outline btn-sm"><i class="ti ti-plus" style="font-size:13px"></i>新建工作项</button>
+        </div><div class="dd-note">Tabler 图标 + 动词文字。</div></div>
+        <div class="dd dont"><div class="dd-tag">Don't</div><div class="dd-body">
+          <button class="btn btn-outline btn-sm">＋ 新建工作项</button>
+        </div><div class="dd-note">文字符号"＋"充当图标（同理禁 ✓ → ↗ 与 emoji）。</div></div>
+      </div>
+    </section>
+
+    <section id="ring">
+      <h2>状态环 StatusRing <span class="mono">§3.1</span></h2>
+      <p class="usage">「进行中」语义（待办/排队/运行/评审/门前/跳过/驳回）的图形载体，纯 CSS 几何绘制；终态（完成/失败）一律用 §3.1a 的 StatusIcon——禁止用伪元素手绘勾叉（像素级偏移不可控，这正是历史上对号忽偏忽正的根因）。</p>
+      <div class="demo" style="gap:18px">
+        <span style="display:flex;gap:7px;align-items:center"><span class="ring r-pending"></span>待办</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="ring r-queued"></span>排队</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="ring r-running"></span>进行中</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="ring r-review"></span>评审中</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="ring r-gate"></span>门前等待</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="st-icon ok"><i class="ti ti-check"></i></span>完成</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="st-icon err"><i class="ti ti-x"></i></span>失败</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="ring r-skipped"></span>已跳过</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="ring r-rejected"></span>已驳回</span>
+      </div>
+    </section>
+
+    <section id="sticon">
+      <h2>状态图标 StatusIcon <span class="mono">§3.1a</span></h2>
+      <p class="usage">终态与判定语义的唯一图标组件：实心圆底 + Tabler 字形，inline-flex 双轴居中，字形永远在正中。固定三档尺寸；禁止用 ✓ ✗ 等文本字符或伪元素画勾叉，禁止逐处内联 width/height 微调。</p>
+      <div class="demo" style="gap:22px;align-items:flex-end">
+        <span style="display:flex;flex-direction:column;gap:6px;align-items:center"><span style="display:flex;gap:8px;align-items:center"><span class="st-icon ok sm"><i class="ti ti-check"></i></span><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="st-icon ok lg"><i class="ti ti-check"></i></span></span><span class="mono" style="font-size:10.5px;color:var(--muted-foreground)">ok · sm/默认/lg</span></span>
+        <span style="display:flex;flex-direction:column;gap:6px;align-items:center"><span style="display:flex;gap:8px;align-items:center"><span class="st-icon err sm"><i class="ti ti-x"></i></span><span class="st-icon err"><i class="ti ti-x"></i></span><span class="st-icon err lg"><i class="ti ti-x"></i></span></span><span class="mono" style="font-size:10.5px;color:var(--muted-foreground)">err</span></span>
+        <span style="display:flex;flex-direction:column;gap:6px;align-items:center"><span style="display:flex;gap:8px;align-items:center"><span class="st-icon warn sm"><i class="ti ti-exclamation-mark"></i></span><span class="st-icon warn"><i class="ti ti-exclamation-mark"></i></span><span class="st-icon warn lg"><i class="ti ti-exclamation-mark"></i></span></span><span class="mono" style="font-size:10.5px;color:var(--muted-foreground)">warn</span></span>
+        <span style="display:flex;flex-direction:column;gap:6px;align-items:center"><span style="display:flex;gap:8px;align-items:center"><span class="st-icon inf sm"><i class="ti ti-arrow-right"></i></span><span class="st-icon inf"><i class="ti ti-arrow-right"></i></span><span class="st-icon inf lg"><i class="ti ti-arrow-right"></i></span></span><span class="mono" style="font-size:10.5px;color:var(--muted-foreground)">inf</span></span>
+        <span style="display:flex;flex-direction:column;gap:6px;align-items:center"><span style="display:flex;gap:8px;align-items:center"><span class="st-icon mut sm"><i class="ti ti-minus"></i></span><span class="st-icon mut"><i class="ti ti-minus"></i></span><span class="st-icon mut lg"><i class="ti ti-minus"></i></span></span><span class="mono" style="font-size:10.5px;color:var(--muted-foreground)">mut</span></span>
+      </div>
+      <div class="demo" style="margin-top:10px">
+        <span style="font-size:12.5px">行内对齐基准：签核 <span class="st-icon ok"><i class="ti ti-check"></i></span> 已通过 · 复验 <span class="st-icon err"><i class="ti ti-x"></i></span> 失败 · 嵌入正文时用 vertical-align:-2px 与 x 高对齐，不随行高漂移。</span>
+      </div>
+    </section>
+
+    <section id="stepper">
+      <h2>阶段步进 StageStepper <span class="mono">§3.2</span></h2>
+      <p class="usage">七阶段全量形态 + 看板卡内 mini 形态；门在连线上以 rubber-stamp / hand-stop 标记；plannedStages 子集时未激活阶段不渲染。</p>
+      <div class="demo col">
+        <div class="stepper" style="width:100%">
+          <div class="step"><span class="st-icon ok"><i class="ti ti-check"></i></span>待办</div><div class="step-line fill"></div>
+          <div class="step"><span class="st-icon ok"><i class="ti ti-check"></i></span>分析</div><div class="step-line fill"></div>
+          <div class="step"><span class="st-icon ok"><i class="ti ti-check"></i></span>设计</div>
+          <div class="step-line fill"><i class="ti ti-rubber-stamp gate-ico"></i></div>
+          <div class="step cur"><span class="ring r-running"></span>实施</div><div class="step-line"></div>
+          <div class="step"><span class="ring r-pending"></span>测试</div>
+          <div class="step-line"><i class="ti ti-hand-stop gate-ico"></i></div>
+          <div class="step"><span class="ring r-pending"></span>验收</div><div class="step-line"></div>
+          <div class="step"><span class="ring r-pending"></span>交付</div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:center">
+          <span class="group-label">mini 形态（看板卡内）</span>
+          <span class="mini-step"><span class="f"></span><span class="f"></span><span class="f"></span><span class="a"></span><span></span><span></span><span></span></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="pbars">
+      <h2>优先级 PriorityBars <span class="mono">§3.3</span></h2>
+      <p class="usage">4 格阶梯信号条；全系统 priority 语义统一 1=P0 … 4=P3；建单、看板、接口共用同一常量。</p>
+      <div class="demo" style="gap:20px">
+        <span style="display:flex;gap:6px;align-items:center"><span class="pbars p0"><span></span><span></span><span></span><span></span></span>P0 紧急</span>
+        <span style="display:flex;gap:6px;align-items:center"><span class="pbars p1"><span></span><span></span><span></span><span></span></span>P1 高</span>
+        <span style="display:flex;gap:6px;align-items:center"><span class="pbars p2"><span></span><span></span><span></span><span></span></span>P2 中</span>
+        <span style="display:flex;gap:6px;align-items:center"><span class="pbars p3"><span></span><span></span><span></span><span></span></span>P3 低</span>
+      </div>
+    </section>
+
+    <section id="avatar">
+      <h2>行为者 ActorAvatar <span class="mono">§3.4</span></h2>
+      <p class="usage">形状即语义：圆=人，方圆角=机器（agent 紫描边 / brain 蓝描边）；运行态右下呼吸点；堆叠最多露 3 个 + N。</p>
+      <div class="demo" style="gap:18px">
+        <span style="display:flex;gap:7px;align-items:center"><span class="avatar">SJ</span>人</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="avatar a-agent"><i class="ti ti-robot" style="font-size:12px"></i></span>agent</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="avatar a-brain"><i class="ti ti-brain" style="font-size:12px"></i></span>brain</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="avatar a-agent"><i class="ti ti-robot" style="font-size:12px"></i><span class="presence"></span></span>运行中</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="avstack"><span class="avatar">SJ</span><span class="avatar" style="background:var(--agent)">LW</span><span class="avatar" style="background:var(--muted);color:var(--muted-foreground)">+2</span></span>堆叠</span>
+      </div>
+    </section>
+
+    <section id="button">
+      <h2>Button <span class="mono">§4.1</span></h2>
+      <p class="usage">一屏一个 primary；brand 用于"启动执行"；破坏动作用 danger + 确认；disabled 不隐藏；loading 用 spinner 替换图标、宽度不跳。</p>
+      <div class="demo">
+        <div class="demo-label">变体</div>
+        <button class="btn btn-primary">保存变更</button>
+        <button class="btn btn-brand"><i class="ti ti-player-play" style="font-size:14px"></i>派发运行</button>
+        <button class="btn btn-outline">导出</button>
+        <button class="btn btn-ghost">取消</button>
+        <button class="btn btn-danger">删除工作项</button>
+      </div>
+      <div class="demo">
+        <div class="demo-label">状态与尺寸</div>
+        <button class="btn btn-primary" disabled>保存变更</button>
+        <button class="btn btn-brand" disabled><span class="spin"></span>派发中…</button>
+        <button class="btn btn-outline btn-sm">小按钮 sm</button>
+        <span class="tipwrap"><button class="iconbtn"><i class="ti ti-copy"></i></button><span class="tip">复制 run id</span></span>
+        <span class="tipwrap"><button class="iconbtn"><i class="ti ti-dots"></i></button><span class="tip">更多操作</span></span>
+      </div>
+      <div class="dodont">
+        <div class="dd do"><div class="dd-tag">Do</div><div class="dd-body" style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost">取消</button><button class="btn btn-primary">创建 Sprint</button>
+        </div><div class="dd-note">一个主动作，取消用 ghost，右对齐。</div></div>
+        <div class="dd dont"><div class="dd-tag">Don't</div><div class="dd-body" style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-primary">取消</button><button class="btn btn-brand">保存</button><button class="btn btn-primary">创建</button>
+        </div><div class="dd-note">多个实底按钮抢焦点，主次不分。</div></div>
+      </div>
+    </section>
+
+    <section id="seg">
+      <h2>SegmentedControl / TabBarUnderline <span class="mono">§4.1</span></h2>
+      <p class="usage">seg：2–4 个互斥小选项（视图/时间窗），超过 4 项改 Select；tabs：页面内容分区，配置类必须做脏守卫。</p>
+      <div class="demo">
+        <div class="seg">
+          <button :class="seg==='列表'&&'on'" @click="seg='列表'">列表</button>
+          <button :class="seg==='看板'&&'on'" @click="seg='看板'">看板</button>
+          <button :class="seg==='泳道'&&'on'" @click="seg='泳道'">泳道</button>
+        </div>
+        <div class="tabs" style="flex:1;min-width:280px">
+          <button :class="tab==='过程'&&'on'" @click="tab='过程'">过程</button>
+          <button :class="tab==='产物'&&'on'" @click="tab='产物'">产物 <span class="mono" style="font-size:10.5px">4</span></button>
+          <button :class="tab==='评论'&&'on'" @click="tab='评论'">评论</button>
+          <button :class="tab==='审计'&&'on'" @click="tab='审计'">审计</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="input">
+      <h2>Input / Textarea / Select / SearchBox <span class="mono">§4.2</span></h2>
+      <p class="usage">focus 用 ring 外发光不改布局；错误=红边+红字说明；placeholder 不当 label；Select 菜单是 L3 浮层（shadcn 基元）。</p>
+      <div class="demo">
+        <input class="inp" placeholder="工作项标题">
+        <input class="inp" value="支付对账单导出" >
+        <input class="inp err" value="p0">
+        <input class="inp" disabled placeholder="不可用">
+        <span class="select-look">issue-pipeline<i class="ti ti-chevron-down"></i></span>
+        <span class="search-box"><i class="ti ti-search" style="font-size:14px"></i><input placeholder="搜索工作项（支持拼音）"><kbd>/</kbd></span>
+      </div>
+    </section>
+
+    <section id="choice">
+      <h2>Checkbox / Radio / Switch / FilterChip <span class="mono">§4.2</span></h2>
+      <p class="usage">Switch 只用于即时生效的开关；表单里用 Checkbox。FilterChip 激活=brand tint + 计数。</p>
+      <div class="demo" style="gap:18px">
+        <span class="ck on"><span class="box"></span>纳入回归集</span>
+        <span class="ck"><span class="box"></span>允许 fanout</span>
+        <span class="ck rd on"><span class="box"></span>整单重跑</span>
+        <span class="ck rd"><span class="box"></span>仅失败节点</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="sw" :class="sw1&&'on'" @click="sw1=!sw1"></span>自动派发</span>
+        <span style="display:flex;gap:7px;align-items:center"><span class="sw" :class="sw2&&'on'" @click="sw2=!sw2"></span>暂停队列</span>
+        <span class="filter-chip active"><i class="ti ti-filter" style="font-size:13px"></i>阶段：实施 <span class="mono">3</span></span>
+        <span class="filter-chip">负责人</span>
+      </div>
+    </section>
+
+    <section id="form">
+      <h2>表单布局 <span class="mono">§4.2</span></h2>
+      <p class="usage">label 上、控件中、说明/错误下；长字段独占整行；提交行右对齐 [取消(ghost)] [提交(primary)]；blur 与提交时校验。</p>
+      <div class="demo col" style="max-width:480px">
+        <div class="field">
+          <label>Sprint 名称</label>
+          <input class="inp" value="Sprint 4 · 对账与导出">
+          <span class="hint">显示在驾驶舱与看板泳道头。</span>
+        </div>
+        <div class="field">
+          <label>Goal（完成判据锚点）</label>
+          <textarea class="inp">对账差异可在 5 分钟内定位到单笔交易；M1 导出成功率 ≥ 99.5%。</textarea>
+          <span class="errmsg">Goal 需要至少一条 M 编号指标。</span>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-ghost">取消</button>
+          <button class="btn btn-primary">创建 Sprint</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="composer">
+      <h2>Composer（AgentComposerFrame 语汇） <span class="mono">§4.2</span></h2>
+      <p class="usage">一切 prompt 输入走共享 composer 栈；底部左=上下文 chips，右=模板 chips + 麦克风 + 发送；⌘Enter 发送；IME 组合中不提交。</p>
+      <div class="demo">
+        <div class="composer">
+          <textarea placeholder="给 Sprint 4 lead 下达指令…"></textarea>
+          <div class="cp-foot">
+            <span class="chip"><i class="ti ti-folder" style="font-size:13px"></i>payhub</span>
+            <span class="chip"><i class="ti ti-git-branch" style="font-size:13px"></i>sprint-4</span>
+            <span class="right">
+              <span class="chip">按 issue-pipeline 处理</span>
+              <span class="tipwrap"><button class="iconbtn"><i class="ti ti-microphone"></i></button><span class="tip">语音输入</span></span>
+              <span style="font-size:11px;color:var(--muted-foreground)"><kbd>⌘Enter</kbd></span>
+              <button class="btn btn-primary btn-sm"><i class="ti ti-send" style="font-size:13px"></i>发送</button>
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="badge">
+      <h2>Badge / Chip / kbd <span class="mono">§4.3</span></h2>
+      <p class="usage">Badge=不可点的名词（状态/类型/模型）；Chip=可点/可删（筛选、引用、模板）；一行徽标 ≤3，多余收 +N。</p>
+      <div class="demo">
+        <span class="badge b-success">passed</span>
+        <span class="badge b-warning">awaiting-gate</span>
+        <span class="badge b-info">running</span>
+        <span class="badge b-destructive">failed</span>
+        <span class="badge b-agent">vllm</span>
+        <span class="badge b-brand">human</span>
+        <span class="badge b-evidence">from-audit</span>
+        <span class="badge b-muted mono">qwen3.6</span>
+        <span class="badge b-muted">+2</span>
+      </div>
+      <div class="demo">
+        <span class="chip"><i class="ti ti-folder" style="font-size:13px"></i>payhub</span>
+        <span class="chip">对账 <i class="ti ti-x x"></i></span>
+        <span class="chip"><span class="avatar" style="width:14px;height:14px;font-size:7px">SJ</span>指派给我</span>
+        <span><kbd>⌘</kbd> <kbd>K</kbd></span>
+      </div>
+    </section>
+
+    <section id="pill">
+      <h2>RunBadge / StatusPill <span class="mono">§4.3</span></h2>
+      <p class="usage">RunBadge=工作项↔运行关联（点击深链运行详情）；StatusPill=对象主状态，一处一个；Badge=附加属性，可多个。</p>
+      <div class="demo" style="gap:16px">
+        <span class="runbadge"><span class="ring r-running"></span><span class="mono">v3r_usxh</span><span class="mono" style="color:var(--muted-foreground)">1m32s</span></span>
+        <span class="runbadge"><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="mono">v3r_btp9</span></span>
+        <span class="runbadge"><span class="st-icon err"><i class="ti ti-x"></i></span><span class="mono">v3r_ehy1</span></span>
+        <span class="status-pill running"><span class="ring r-running"></span>运行中 · develop</span>
+        <span class="status-pill done"><span class="st-icon ok"><i class="ti ti-check"></i></span>已完成</span>
+        <span class="status-pill failed"><span class="st-icon err"><i class="ti ti-x"></i></span>失败 · transient</span>
+      </div>
+    </section>
+
+    <section id="kpi">
+      <h2>KpiCard / MetricRow / GoalCard / ContextGauge <span class="mono">§4.3</span></h2>
+      <p class="usage">KPI 卡一行 3–5 张可下钻；Goal 卡=Goal 语句 + M 编号指标 + 推进按钮；量表 &gt;80% 转 warning、&gt;95% 转 destructive。</p>
+      <div class="demo">
+        <div class="card card-pad kpi"><div class="group-label">吞吐（7d）</div><div class="k-num">23</div><div class="k-delta">+4 vs 上周</div></div>
+        <div class="card card-pad kpi"><div class="group-label">一次通过率</div><div class="k-num">78%</div><div class="k-delta">+6pp</div></div>
+        <div class="card card-pad kpi"><div class="group-label">平均评审等待</div><div class="k-num">42m</div><div class="k-delta" style="color:var(--destructive)">+12m</div></div>
+      </div>
+      <div class="demo">
+        <div class="card card-pad" style="flex:1;min-width:340px">
+          <div class="section-title" style="margin-bottom:2px"><i class="ti ti-target-arrow"></i>Goal：对账差异 5 分钟内定位到单笔</div>
+          <div style="font-size:11.5px;color:var(--muted-foreground);margin-bottom:8px">gap-analysis 按以下判据判 NO_GAPS 才可晋升</div>
+          <div class="goal-metric"><span class="mkey">M1</span>导出成功率 ≥ 99.5%<span class="badge b-success" style="margin-left:auto">实测 99.7%</span></div>
+          <div class="goal-metric"><span class="mkey">M2</span>定位耗时 ≤ 5min<span class="badge b-info" style="margin-left:auto">实测中</span></div>
+          <div class="goal-metric"><span class="mkey">M3</span>差异台账零遗漏<span class="badge b-muted" style="margin-left:auto">待 gap-analysis</span></div>
+          <div class="divider" style="margin:10px 0"></div>
+          <button class="btn btn-brand btn-sm">推进到 verifying · 判据 1/3</button>
+        </div>
+        <div style="flex:1;min-width:260px">
+          <div class="metric-row"><span>今日 brain 轮次</span><span class="v">14</span></div>
+          <div class="metric-row"><span>vLLM 输出 tok</span><span class="v">311.4k</span></div>
+          <div class="metric-row"><span>运行成功率</span><span class="v">11/12</span></div>
+          <div class="divider" style="margin:8px 0"></div>
+          <div style="display:flex;gap:9px;align-items:center">
+            <span class="ctx-bar"><span style="width:34%"></span></span><span class="mono" style="font-size:11px">34% · 1M</span>
+          </div>
+          <div style="display:flex;gap:9px;align-items:center;margin-top:6px">
+            <span class="ctx-bar warn"><span style="width:86%"></span></span><span class="mono" style="font-size:11px">86% · 200k</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="card">
+      <h2>Card / Panel <span class="mono">§4.3 · 禁则2</span></h2>
+      <p class="usage">卡=--card+1px 边+10px 圆角+14–16px 内边距；卡内分组=divider+眉题；<b>禁止卡中卡</b>；次级面板必须 --panel 分层。</p>
+      <div class="dodont">
+        <div class="dd do"><div class="dd-tag">Do</div><div class="dd-body">
+          <div class="card card-pad">
+            <div class="section-title"><i class="ti ti-git-branch"></i>交付物</div>
+            <div style="font-size:12px;color:var(--muted-foreground);padding:4px 0 8px">分支已推送，等待评审。</div>
+            <div class="divider"></div>
+            <div class="group-label" style="padding:8px 0 4px">提交</div>
+            <div class="mono" style="font-size:11.5px">a3e361d 实现签核失效与重确认</div>
+          </div>
+        </div><div class="dd-note">卡内分组：divider + 眉题，扁平展开。</div></div>
+        <div class="dd dont"><div class="dd-tag">Don't</div><div class="dd-body">
+          <div class="card card-pad">
+            <div class="section-title"><i class="ti ti-git-branch"></i>交付物</div>
+            <div class="card card-pad" style="margin-top:8px">
+              <div class="group-label">提交</div>
+              <div class="mono" style="font-size:11.5px">a3e361d 实现签核失效与重确认</div>
+            </div>
+          </div>
+        </div><div class="dd-note">卡中卡：双层圆角+边框嵌套，层级噪音。</div></div>
+      </div>
+    </section>
+
+    <section id="table">
+      <h2>Table / ListGrid <span class="mono">§4.3</span></h2>
+      <p class="usage">表头=眉题样式；数字列右对齐 mono；行操作 hover 原地浮现（不新增空间）；ListGrid 双行主格局 + 批量浮条。</p>
+      <div class="demo col" style="padding:0;overflow:hidden">
+        <table class="fd">
+          <tr><th>运行</th><th>模板</th><th>状态</th><th style="text-align:right">耗时</th><th style="text-align:right">tok</th></tr>
+          <tr><td class="mono">v3r_usxh</td><td>sdlc-dev</td><td><span class="badge b-success">done</span></td><td class="num">1m37s</td><td class="num">311.4k</td></tr>
+          <tr><td class="mono">v3r_ehy1</td><td>sdlc-dev</td><td><span class="badge b-destructive">cancelled</span></td><td class="num">8m02s</td><td class="num">0</td></tr>
+          <tr><td class="mono">v3r_btp9</td><td>sdlc-dev</td><td><span class="badge b-success">done</span></td><td class="num">4m17s</td><td class="num">1.3m</td></tr>
+        </table>
+      </div>
+      <div class="demo col" style="padding:0;overflow:hidden">
+        <div class="lg-row">
+          <span class="ring r-running"></span>
+          <div class="lg-main">
+            <div class="lg-t"><span class="mono" style="color:var(--muted-foreground)">SDLC-040</span>B2 签核失效：锚定产物出新版本时置 stale<span class="badge b-agent">vllm</span></div>
+            <div class="lg-s">实施 · Sprint 自举 · brain 评审中</div>
+          </div>
+          <span class="lg-meta">1m37s</span>
+          <span class="lg-acts">
+            <span class="tipwrap"><button class="iconbtn"><i class="ti ti-player-play"></i></button><span class="tip">重新派发</span></span>
+            <span class="tipwrap"><button class="iconbtn"><i class="ti ti-dots"></i></button><span class="tip">更多</span></span>
+          </span>
+        </div>
+        <div class="lg-row">
+          <span class="st-icon ok"><i class="ti ti-check"></i></span>
+          <div class="lg-main">
+            <div class="lg-t"><span class="mono" style="color:var(--muted-foreground)">SDLC-039</span>B1 extract-goal-metrics 确定性提取</div>
+            <div class="lg-s">已合并 · 8/8 测试通过</div>
+          </div>
+          <span class="lg-meta">昨天</span>
+          <span class="lg-acts"><span class="tipwrap"><button class="iconbtn"><i class="ti ti-dots"></i></button><span class="tip">更多</span></span></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="board">
+      <h2>BoardColumn / BoardCard <span class="mono">§4.3</span></h2>
+      <p class="usage">列=--panel 轨道；卡=类型徽标+PriorityBars+key+标题+底部行（mini-step+头像+RunBadge）；选中=brand 描边+tint，<b>不用左侧色条</b>；拖拽目标列虚线槽。</p>
+      <div class="demo" style="align-items:flex-start">
+        <div class="bcol">
+          <div class="bcol-head"><span class="ring r-running"></span>实施 <span class="cnt">2</span><span style="margin-left:auto" class="tipwrap"><button class="iconbtn" style="width:20px;height:20px"><i class="ti ti-plus" style="font-size:13px"></i></button><span class="tip">新建到此列</span></span></div>
+          <div class="bcard sel">
+            <div class="r1"><span class="badge b-muted">任务</span><span class="pbars p1"><span></span><span></span><span></span><span></span></span><span class="key">SDLC-040</span></div>
+            <div class="ttl">B2 签核失效：锚定产物出新版本时置 stale 并生成重确认审批单</div>
+            <div class="r3"><span class="mini-step"><span class="f"></span><span class="f"></span><span class="f"></span><span class="a"></span><span></span><span></span><span></span></span>
+              <span class="avatar a-brain" style="margin-left:auto"><i class="ti ti-brain" style="font-size:12px"></i></span>
+              <span class="runbadge" style="padding:1px 7px"><span class="ring r-running" style="width:11px;height:11px"></span><span class="mono" style="font-size:10.5px">v3r_usxh</span></span></div>
+          </div>
+          <div class="drop-hint">放到「实施」</div>
+          <div class="bcard">
+            <div class="r1"><span class="badge b-muted">缺陷</span><span class="pbars p0"><span></span><span></span><span></span><span></span></span><span class="key">SDLC-036</span></div>
+            <div class="ttl">导出失败静默：需要用户可见错误与重试入口</div>
+            <div class="r3"><span class="mini-step"><span class="f"></span><span class="a"></span><span></span><span></span><span></span><span></span><span></span></span><span class="avatar" style="margin-left:auto">SJ</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="prop">
+      <h2>PropRow / InspectorPanel <span class="mono">§4.3</span></h2>
+      <p class="usage">检查器 320px、--panel 表面；label 88px 固定；点值开 InlinePicker 乐观提交，失败只回滚该字段。</p>
+      <div class="demo">
+        <div class="panel-demo" x-data="{pop:false}">
+          <div class="group-label" style="margin-bottom:6px">属性</div>
+          <div class="proprow"><span class="pl">状态</span><span class="pv"><span class="ring r-running"></span>实施</span></div>
+          <div class="proprow" style="position:relative"><span class="pl">优先级</span>
+            <span class="pv" @click="pop=!pop"><span class="pbars p1"><span></span><span></span><span></span><span></span></span>P1<i class="ti ti-chevron-down" style="font-size:12px;color:var(--muted-foreground)"></i></span>
+            <div class="pop" x-show="pop" @click.outside="pop=false" style="left:88px;top:26px">
+              <div class="pi"><span class="pbars p0"><span></span><span></span><span></span><span></span></span>P0 紧急</div>
+              <div class="pi"><span class="pbars p1"><span></span><span></span><span></span><span></span></span>P1 高</div>
+              <div class="pi"><span class="pbars p2"><span></span><span></span><span></span><span></span></span>P2 中</div>
+            </div>
+          </div>
+          <div class="proprow"><span class="pl">负责人</span><span class="pv"><span class="avatar">SJ</span>Steve</span></div>
+          <div class="proprow"><span class="pl">Sprint</span><span class="pv">Sprint 自举</span></div>
+          <div class="divider" style="margin:8px 0"></div>
+          <div class="group-label" style="margin-bottom:6px">执行</div>
+          <div class="proprow"><span class="pl">运行</span><span class="pv mono" style="font-size:11.5px">v3r_usxh</span></div>
+          <div class="proprow"><span class="pl">分支</span><span class="pv mono" style="font-size:11.5px">run-9be92ba5</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="empty">
+      <h2>EmptyState / Skeleton / Progress <span class="mono">§4.3</span></h2>
+      <p class="usage">空态说"接下来做什么"；骨架只用于首屏、形状贴近真实内容；全屏 spinner 禁止。</p>
+      <div class="demo" style="align-items:stretch">
+        <div class="card" style="flex:1;min-width:240px"><div class="empty">
+          <div class="e-icon"><i class="ti ti-inbox"></i></div>
+          <div>收件箱已清空，没有等待你的签核</div>
+          <button class="btn btn-outline btn-sm">查看进行中的运行</button>
+        </div></div>
+        <div class="card card-pad" style="flex:1;min-width:240px;display:flex;flex-direction:column;gap:9px">
+          <div style="display:flex;gap:8px;align-items:center"><span class="skel" style="width:20px;height:20px;border-radius:50%"></span><span class="skel" style="height:12px;flex:1"></span></div>
+          <span class="skel" style="height:12px;width:70%"></span>
+          <span class="skel" style="height:12px;width:85%"></span>
+          <div class="prog" style="margin-top:6px"><span style="width:62%"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="overlay">
+      <h2>Dialog / Drawer / Popover / Tooltip / Toast <span class="mono">§4.4</span></h2>
+      <p class="usage">全部 L3 浮层（唯一允许阴影层）；确认用 AlertDialog（禁浏览器 confirm）；toast 右下 4s，错误常驻；成功确认优先原位状态更新。</p>
+      <div class="demo">
+        <button class="btn btn-outline" @click="dlg=true">打开 Dialog</button>
+        <button class="btn btn-danger" @click="adlg=true">删除（AlertDialog）</button>
+        <button class="btn btn-outline" @click="drw=true">打开 Drawer</button>
+        <button class="btn btn-outline" @click="toast('已重新派发 v3r_usxh','ok')">成功 Toast</button>
+        <button class="btn btn-outline" @click="toast('派发失败：spawn 无可用 worker','err')">错误 Toast</button>
+        <span class="tipwrap"><button class="iconbtn"><i class="ti ti-refresh"></i></button><span class="tip">Tooltip：刷新状态</span></span>
+      </div>
+      <template x-teleport="body">
+        <div class="ovl" x-show="dlg" @click.self="dlg=false" x-cloak>
+          <div class="dlg">
+            <h3>重命名 Sprint</h3>
+            <div class="field" style="margin-bottom:16px"><label>名称</label><input class="inp" value="Sprint 4 · 对账与导出"></div>
+            <div class="acts"><button class="btn btn-ghost" @click="dlg=false">取消</button><button class="btn btn-primary" @click="dlg=false">保存</button></div>
+          </div>
+        </div>
+      </template>
+      <template x-teleport="body">
+        <div class="ovl" x-show="adlg" @click.self="adlg=false" x-cloak>
+          <div class="dlg">
+            <h3>删除工作项 SDLC-036？</h3>
+            <p>将同时解除与运行 v3r_ehy1 的关联。此操作不可撤销。</p>
+            <div class="acts"><button class="btn btn-ghost" @click="adlg=false">取消</button><button class="btn btn-danger" @click="adlg=false;toast('已删除 SDLC-036','ok')">删除</button></div>
+          </div>
+        </div>
+      </template>
+      <template x-teleport="body">
+        <div class="drawer" x-show="drw" @click.outside="drw=false" x-cloak x-transition:enter="ov" style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="section-title">节点检查器 · develop</span>
+            <button class="iconbtn" style="margin-left:auto" @click="drw=false"><i class="ti ti-x"></i></button>
+          </div>
+          <div class="card card-pad">
+            <div class="proprow"><span class="pl">引擎</span><span class="badge b-agent">vllm</span></div>
+            <div class="proprow"><span class="pl">模型</span><span class="mono" style="font-size:11.5px">qwen3.6</span></div>
+            <div class="proprow"><span class="pl">状态</span><span class="status-pill running" style="padding:1px 9px"><span class="ring r-running" style="width:11px;height:11px"></span>运行中</span></div>
+          </div>
+        </div>
+      </template>
+      <template x-teleport="body">
+        <div class="toaststack">
+          <template x-for="t in toasts" :key="t.id">
+            <div class="toast-demo">
+              <i class="ti" :class="t.k==='ok'?'ti-circle-check':'ti-alert-circle'" :style="t.k==='ok'?'color:var(--success)':'color:var(--destructive)'"></i>
+              <span x-text="t.m"></span>
+            </div>
+          </template>
+        </div>
+      </template>
+    </section>
+
+    <section id="gate">
+      <h2>GateBanner 签核卡 <span class="mono">§4.5</span></h2>
+      <p class="usage">判据 checklist 逐条给证据环；未齐时批准 disabled 并解释缺什么；驳回必填理由；签核失效转 warning + 重确认。</p>
+      <div class="demo col" style="max-width:560px">
+        <div class="card card-pad">
+          <div class="section-title"><i class="ti ti-rubber-stamp"></i>测试计划签核 · Sprint 4<span class="badge b-warning" style="margin-left:auto">待签核</span></div>
+          <div style="padding:8px 0 4px">
+            <div class="gate-check"><span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>覆盖矩阵含全部 M 指标（M1–M3）</div>
+            <div class="gate-check"><span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>失败路径场景已列（导出失败/重试）</div>
+            <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>回归集勾选缺失 —— 未声明既有用例是否纳入</div>
+          </div>
+          <div style="font-size:11.5px;color:var(--muted-foreground);padding-bottom:10px">请求人 brain · 12 分钟前 · 锚定 test-plan v3</div>
+          <div style="display:flex;gap:8px">
+            <span class="tipwrap"><button class="btn btn-brand btn-sm" disabled>批准</button><span class="tip">判据 2/3：回归集勾选缺失</span></span>
+            <button class="btn btn-outline btn-sm">驳回（需理由）</button>
+          </div>
+        </div>
+        <div class="card card-pad" style="border-color:color-mix(in oklch,var(--warning) 45%,transparent);background:color-mix(in oklch,var(--warning) 4%,var(--card))">
+          <div class="section-title"><i class="ti ti-alert-triangle" style="color:var(--warning)"></i>签核已失效<span class="badge b-warning" style="margin-left:auto">stale</span></div>
+          <div style="font-size:12px;color:var(--muted-foreground);padding:6px 0 10px">锚定产物 test-plan 已出 v4（本签核批于 v3）。差异：新增导出失败重试场景。</div>
+          <div style="display:flex;gap:8px"><button class="btn btn-brand btn-sm">重确认 v4</button><button class="btn btn-ghost btn-sm">查看 v3→v4 diff</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="evidence">
+      <h2>EvidenceCard 证据卡 <span class="mono">§4.5</span></h2>
+      <p class="usage">证据统一青色语汇（--evidence）；mono 引用可一键打开；任何"完成/通过"徽标点开必须落到证据卡。</p>
+      <div class="demo col" style="max-width:560px">
+        <div class="evidence-card"><i class="ti ti-certificate"></i><span class="badge b-evidence">测试输出</span>
+          <span>8/8 通过 · vitest</span><span class="ref">tracker/__tests__/extract-goal-metrics.test.ts</span>
+          <span class="tipwrap" style="margin-left:auto"><button class="iconbtn"><i class="ti ti-external-link"></i></button><span class="tip">打开原文</span></span></div>
+        <div class="evidence-card"><i class="ti ti-certificate"></i><span class="badge b-evidence">提交</span>
+          <span>签核失效实现</span><span class="ref">a3e361d · run-9be92ba5</span>
+          <span class="tipwrap" style="margin-left:auto"><button class="iconbtn"><i class="ti ti-external-link"></i></button><span class="tip">打开 diff</span></span></div>
+      </div>
+    </section>
+
+    <section id="timeline">
+      <h2>TimelineCollapse / AttemptRow <span class="mono">§4.5</span></h2>
+      <p class="usage">中间过程折叠为 N 步；最终结论折叠外全尺寸；尝试行=attempt N + 状态 + errorClass + 耗时，历史尝试降透明度。</p>
+      <div class="demo col" style="max-width:560px" x-data="{open:false}">
+        <div class="collapse-head" @click="open=!open">
+          <i class="ti" :class="open?'ti-chevron-down':'ti-chevron-right'" style="font-size:14px"></i>
+          中间过程 · 12 步 · 1m24s
+        </div>
+        <div x-show="open" style="border-left:1px solid var(--border);margin-left:14px;padding-left:2px">
+          <div class="tl-row"><i class="ti ti-tool"></i><span class="tool">Read</span><span class="prev">tracker/actions/create-sprint-artifact.ts</span></div>
+          <div class="tl-row"><i class="ti ti-tool"></i><span class="tool">Edit</span><span class="prev">锚定版本比对：approval.anchorVersion !== artifact.version…</span></div>
+          <div class="tl-row err"><i class="ti ti-alert-circle"></i><span class="tool">Bash</span><span>vitest：2 failed —— stale 判定未覆盖重建场景</span></div>
+          <div class="tl-row"><i class="ti ti-tool"></i><span class="tool">Edit</span><span class="prev">补 supersedes 链上的重建判定分支</span></div>
+        </div>
+        <div style="font-size:12.5px;padding:2px 0">最终结论：签核失效判定全部通过（8/8），提交 <span class="mono">a3e361d</span> 待评审。</div>
+        <div class="divider"></div>
+        <div class="attempt-row hist"><span class="mono">attempt 1</span><span class="st-icon err"><i class="ti ti-x"></i></span><span class="badge b-warning">transient</span><span style="color:var(--muted-foreground)">spawn 无可用 worker</span><span class="mono" style="margin-left:auto;color:var(--muted-foreground)">2m01s</span></div>
+        <div class="attempt-row"><span class="mono">attempt 2</span><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="badge b-success">done</span><span style="color:var(--muted-foreground)">重派后完成</span><span class="mono" style="margin-left:auto;color:var(--muted-foreground)">1m37s</span></div>
+      </div>
+    </section>
+
+    <section id="artifact">
+      <h2>ArtifactCard / VersionChain <span class="mono">§4.5</span></h2>
+      <p class="usage">docKey mono 徽标 + 版本 + 行为者徽标 + supersedes 链；紧凑 art-row 用于驾驶舱侧栏。</p>
+      <div class="demo col" style="max-width:560px">
+        <div class="card card-pad" style="display:flex;align-items:center;gap:10px">
+          <i class="ti ti-file-text" style="font-size:18px;color:var(--muted-foreground)"></i>
+          <div style="flex:1">
+            <div style="display:flex;gap:6px;align-items:center"><span class="badge b-muted mono">sprint-test-plan</span><span class="mono" style="font-size:11px">v4</span><span class="badge b-agent">agent</span></div>
+            <div style="font-size:11.5px;color:var(--muted-foreground);margin-top:2px">supersedes v3 · 新增导出失败重试场景</div>
+          </div>
+          <button class="btn btn-outline btn-sm">对比 v3</button>
+        </div>
+        <div>
+          <div class="art-row"><i class="ti ti-file-text" style="color:var(--muted-foreground)"></i><span class="badge b-muted mono">sprint-brief</span><span class="mono" style="font-size:11px">v2</span><span class="badge b-brand">human</span><span class="mono" style="margin-left:auto;font-size:11px;color:var(--muted-foreground)">昨天</span></div>
+          <div class="art-row"><i class="ti ti-file-text" style="color:var(--muted-foreground)"></i><span class="badge b-muted mono">technical-design</span><span class="mono" style="font-size:11px">v1</span><span class="badge b-agent">agent</span><span class="mono" style="margin-left:auto;font-size:11px;color:var(--muted-foreground)">3h 前</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="interview">
+      <h2>InterviewCard / StepsRail <span class="mono">§4.5</span></h2>
+      <p class="usage">一次一问：推荐答案 chip（sparkles+brand tint 预填可改）+ 备选 + 自由输入；已答折叠为摘要行；左轨步骤 --panel。</p>
+      <div class="demo" style="align-items:flex-start">
+        <div style="width:180px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:8px">
+          <div class="step-item"><span class="st-icon ok"><i class="ti ti-check"></i></span>目标澄清<span class="st">已完成</span></div>
+          <div class="step-item cur"><span class="ring r-running"></span>场景访谈<span class="st">3/5</span></div>
+          <div class="step-item"><span class="ring r-pending"></span>测试计划<span class="st"></span></div>
+          <div class="step-item"><span class="ring r-pending"></span>签核<span class="st"></span></div>
+        </div>
+        <div class="interview-card" style="flex:1;min-width:300px">
+          <div class="ic-q">导出失败的场景需要单独的集成场景吗？</div>
+          <div class="rec-chip"><i class="ti ti-sparkles"></i>建议：需要——导出失败要有明确的用户可见错误与重试入口，否则商户只会看到静默失败</div>
+          <div class="alt-chip"><i class="ti ti-circle" style="font-size:13px;color:var(--muted-foreground)"></i>不需要，失败路径由单元测试覆盖即可</div>
+          <div class="alt-chip"><i class="ti ti-circle" style="font-size:13px;color:var(--muted-foreground)"></i>合并进场景 1，作为其失败分支步骤</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="thread">
+      <h2>ThreadRail / Transcript <span class="mono">§4.5</span></h2>
+      <p class="usage">线程轨 --panel；活跃线程 brand tint；用户消息右对齐胶囊卡，assistant 左对齐无底色，工具步骤折叠。</p>
+      <div class="demo" style="align-items:flex-start">
+        <div style="width:200px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:6px">
+          <div class="thread on"><span class="ring r-running" style="width:9px;height:9px"></span><span class="tt">B2 签核失效派发</span><span class="tm">4m</span></div>
+          <div class="thread"><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="tt">B1 extract-goal-metrics</span><span class="tm">1h</span></div>
+          <div class="thread"><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="tt">sprint 规划访谈</span><span class="tm">昨天</span></div>
+        </div>
+        <div style="flex:1;min-width:300px;display:flex;flex-direction:column;gap:8px">
+          <div class="msg-user">B2 spawn 卡住了，检查一下节点为什么没有重新入队</div>
+          <div class="msg-a"><span class="shimmer">正在核对 dispatchQueue 与 poolStatus…</span></div>
+          <div class="collapse-head" style="max-width:280px"><i class="ti ti-chevron-right" style="font-size:14px"></i>工具调用 · 6 步 · 42s</div>
+          <div class="msg-a">节点卡在 ready 未派发（无 spawn、队列空、池空闲）——已取消原 run 并重新派发为 <span class="mono">v3r_usxh</span>。</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="dag">
+      <h2>DAG 节点与连线 <span class="mono">§4.6</span></h2>
+      <p class="usage">五种节点视觉编码；running=info 边+border-beam；selected=brand 双描边；fanout 叠片+×N；边正交折线、载荷标签 mono。</p>
+      <div class="demo" style="gap:14px;align-items:flex-start">
+        <div class="dagnode n-done"><div class="dagnode-inner">
+          <div class="dn-row1"><i class="ti ti-git-branch"></i>workspace<span class="st-icon ok"><i class="ti ti-check"></i></span></div>
+          <div class="dn-stats"><span>22s</span><span>sprint-4</span></div>
+        </div></div>
+        <div class="dagnode n-running beam"><div class="dagnode-inner">
+          <div class="dn-row1"><i class="ti ti-cpu"></i>develop<span class="ring r-running"></span></div>
+          <div class="dn-row2"><span class="badge b-agent">vllm</span><span class="badge b-muted mono">qwen3.6</span></div>
+          <div class="dn-stats"><span>1m32s</span><span>18.4k tok</span></div>
+        </div></div>
+        <div class="dagnode n-selected"><div class="dagnode-inner">
+          <div class="dn-row1"><i class="ti ti-robot"></i>reviewer<span class="ring r-pending"></span></div>
+          <div class="dn-row2"><span class="badge b-muted mono">sonnet</span><span class="badge b-muted">只审 diff</span></div>
+        </div></div>
+        <div class="dagnode"><div class="dagnode-inner">
+          <div class="dn-row1"><i class="ti ti-list-check"></i>diff-audit<span class="ring r-pending"></span></div>
+          <div class="dn-row2"><span class="badge b-evidence">确定性</span><span class="badge b-muted">touches 白名单</span></div>
+        </div></div>
+        <div class="dagnode n-gate"><div class="dagnode-inner">
+          <div class="dn-row1"><i class="ti ti-hand-stop" style="color:var(--warning)"></i>人工验收<span class="ring r-gate"></span></div>
+          <div class="dn-row2"><span class="avatar" style="width:16px;height:16px;font-size:7px">SJ</span><span class="badge b-warning">等待批准</span></div>
+        </div></div>
+        <div class="dagnode fanout"><div class="dagnode-inner">
+          <div class="dn-row1"><i class="ti ti-cpu"></i>qa-matrix<span class="badge b-muted mono" style="margin-left:auto">×4</span></div>
+          <div class="dn-row2"><span class="badge b-agent">vllm</span><span class="badge b-muted">每场景一实例</span></div>
+        </div></div>
+        <div class="dagnode n-failed"><div class="dagnode-inner">
+          <div class="dn-row1"><i class="ti ti-cpu"></i>develop<span class="st-icon err"><i class="ti ti-x"></i></span></div>
+          <div class="dn-row2"><span class="badge b-warning">transient</span><span class="badge b-muted mono">attempt 1/2</span></div>
+          <div class="dn-stats"><span style="color:var(--destructive)">spawn 无可用 worker</span></div>
+        </div></div>
+      </div>
+    </section>
+
+    <section id="nav">
+      <h2>侧栏 / 页头 / 工具栏 / 面包屑 <span class="mono">§4.7</span></h2>
+      <p class="usage">侧栏 --sidebar 表面、激活=brand tint（无左条）；页头=图标+标题+mono 计数+右侧动作；面包屑最多两级。</p>
+      <div class="demo" style="align-items:flex-start">
+        <div style="background:var(--sidebar);border:1px solid var(--border);border-radius:var(--radius);padding:8px">
+          <div class="group-label" style="padding:2px 8px 6px">流程域</div>
+          <div class="sb-item"><i class="ti ti-inbox"></i>收件箱<span class="dot-badge">3</span></div>
+          <div class="sb-item active"><i class="ti ti-layout-kanban"></i>看板</div>
+          <div class="sb-item"><i class="ti ti-run"></i>Sprint<span class="count">2</span></div>
+          <div class="sb-item"><i class="ti ti-chart-dots"></i>度量</div>
+        </div>
+        <div style="flex:1;min-width:320px" class="card">
+          <div class="page-header">
+            <div class="ph-icon"><i class="ti ti-run"></i></div>
+            <h1>Sprint 4 · 对账与导出</h1><span class="ph-count">12 项</span>
+            <div class="ph-actions"><button class="btn btn-outline btn-sm">归档</button><button class="btn btn-brand btn-sm"><i class="ti ti-player-play" style="font-size:13px"></i>派发下一项</button></div>
+          </div>
+          <div style="display:flex;gap:8px;padding:0 16px 12px;align-items:center">
+            <span style="font-size:12.5px;color:var(--muted-foreground)">payhub</span>
+            <i class="ti ti-chevron-right" style="font-size:12px;color:var(--muted-foreground)"></i>
+            <span style="font-size:12.5px">Sprint 4</span>
+            <span style="flex:1"></span>
+            <span class="filter-chip active">阶段：实施 <span class="mono">3</span></span>
+            <span class="search-box" style="min-width:150px"><i class="ti ti-search" style="font-size:14px"></i><input placeholder="搜索"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="motion">
+      <h2>动效语汇 <span class="mono">§2.6</span></h2>
+      <p class="usage">动效只表达"正在发生"；全部带 prefers-reduced-motion 降级；静态数据不动。</p>
+      <div class="demo" style="gap:22px">
+        <span class="shimmer">brain 正在评审 diff…</span>
+        <span class="ring r-running"></span>
+        <button class="btn btn-outline impulse"><i class="ti ti-player-play" style="font-size:14px"></i>2 个活跃运行</button>
+        <div class="dagnode n-running beam" style="width:150px"><div class="dagnode-inner"><div class="dn-row1" style="font-size:11.5px"><i class="ti ti-cpu"></i>border-beam</div></div></div>
+        <span class="mono" style="font-size:12px">运行中 · 3m42s（单调计时）</span>
+      </div>
+    </section>
+
+    <section id="rules">
+      <h2>禁则清单 <span class="mono">§6</span></h2>
+      <p class="usage">全局红线——任何屏、任何组件、任何原型都适用。</p>
+      <div class="demo col" style="gap:6px;font-size:12.5px">
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>卡片/行左侧竖向强调色条（改用 tint + 描边 + 状态环）</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>卡片嵌套卡片（卡内用 divider + 眉题扁平分组）</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>次级面板与背景同色仅靠 1px 线（必须 --panel 表面）</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>emoji / 文字符号（＋ ↗ ✓ →）充当图标（一律 Tabler）</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>硬编码颜色（一律语义 token + color-mix）</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>手搓绝对定位弹层 / 浏览器 alert·confirm·prompt</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>L3 以外的阴影分层（卡片靠 border）</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>全屏 loading spinner（用骨架或乐观 UI）</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>自建 prompt 输入框（必须共享 composer 栈）</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>无降级动效（必须 prefers-reduced-motion）</div>
+      </div>
+    </section>
+
+  </div>
+  </main>
+</div>
+<style>[x-cloak]{display:none!important}</style>
+</body>
+</html>

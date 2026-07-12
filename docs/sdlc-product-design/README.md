@@ -1,0 +1,54 @@
+# SDLC 产品设计文档集
+
+> 状态：设计 **v2.2**（产品级完整设计——全部流程 + 全部页面 UI + 设计系统 + 原型 + SDLC 资产复用对照 + 自举实战根因修订）。
+> 本文档集**只谈设计，不谈实施**：不含工期、工时、里程碑与难度评估。
+>
+> 流程域功能设计的前身是 `docs/sdlc-system-design.md`（设计 v1.1）与
+> `docs/sdlc-implementation-plan.md`（验收基准）。v2.0 完整继承 v1.1 的
+> 流程骨架（七阶段状态机、四大执行 DAG、审批门、红线、回写通道），并在其上补齐：
+> 产品与交互设计、UI 设计子流程（v1.1 的空白）、多套可复用工作流、
+> 设计系统与全部页面原型。冲突之处以本文档集为准。
+
+## 文档索引
+
+| # | 文档 | 内容 |
+|---|------|------|
+| 0 | [00-overview.md](./00-overview.md) | 愿景、设计原则、四应用总体架构、端到端旅程、人机分界 |
+| 1 | [01-design-system.md](./01-design-system.md) | Foundry 设计系统：tokens、字体、图标、组件、状态语汇、动效 |
+| 2 | [02-workflows.md](./02-workflows.md) | 流程设计：阶段状态机、规划技能链、执行 DAG 工作流族、恢复与重试、Brain 可替换架构 |
+| 3 | [03-tracker.md](./03-tracker.md) | Tracker（流程域）逐页面设计：看板、Sprint 驾驶舱、规划工作台、审批收件箱、依赖图、度量 |
+| 4 | [04-orchestrator.md](./04-orchestrator.md) | Orchestrator（执行域）逐页面设计：驾驶舱、运行 DAG 视图、工作流库与编辑器、Brain 控制台、智能体、健康页 |
+| 5 | [05-design-content.md](./05-design-content.md) | UI 设计子流程与 Design/Content 协作：ui-spec、原型流水线、UI 评审门、文档交付、跨应用 A2A 全景 |
+| 6 | [06-sdlc-reuse-map.md](./06-sdlc-reuse-map.md) | **SDLC 资产复用与命名对照（权威）**：a-e 每个 skill/agent/脚本/模板的复用策略、docKey 对照、相位对照、对拍验收 |
+| 7 | [07-bootstrap-learnings.md](./07-bootstrap-learnings.md) | **自举实战根因聚类与 v2.2 修订（权威）**：SDLC-037~058 十个根因簇、设计盲区 vs 实现欠账、逐簇"不可能再发生/发生即可见"对策索引 |
+
+## 原型
+
+`prototypes/` 目录存放全部高保真 HTML 原型（自包含单文件，Foundry 设计系统
+tokens 内联，Tabler Icons，Tailwind v4 + Alpine.js CDN），并按 design 应用的
+入库惯例（create-design + create-file，多屏 `data-screen` 互链）同步到 101 的
+design 应用中。原型清单见 [05-design-content.md](./05-design-content.md) 附录。
+
+## 已发布位置（101）
+
+- **content 应用**（组织可见）：文件夹《SDLC 产品设计 v2.2》`/content/page/BYJL17v7PSzP`，
+  六章为其子文档（表格已按 NFM 约定转为 HTML）。
+- **design 应用**（组织可见）：设计系统 **Foundry**（`loQTYBPKrGR01IIS246Su`）+
+  设计《SDLC 产品设计 v2.2 · Foundry 原型》`/design/Tuf9MDu1MraODgWNjpBQU`
+  （11 屏，入口 index.html，屏间 data-screen 互链）。
+
+## 修订记录
+
+| 版本 | 内容 |
+|---|---|
+| v2.0 | 初版完整设计；文档与 UI 各 3 轮独立评审 |
+| v2.1 | Goal 锚定完成判据、auditing 显名 gap-analysis、P11 双表征 / P12 低摩擦、content 项目文档库模型、**06 章 SDLC 资产复用对照 + 全文档命名对齐（technical-design、reviewer/gatekeeper 节点、sdlc-gap-analysis）**、test-plan 富呈现改为覆盖矩阵+审查三问 |
+| v2.2 | **自举实战（B1–B3 派发实测 + M3-D/S0 质量调研）根因修订**：新增 07 章十个根因簇；00 章 P13 机制优先于提示词 + §8.1 假设修订（A21–A23）；02 章工作区契约（§7）/ 状态迁移守卫（§8）/ R9 终态传导 + §4.1 执行器上下文契约 / §5.4 能力面矩阵 / 评审独立性 / 拆分契约；03 章收件箱「评审请求」+ 受守卫人工流转 + 观察问题池泳道 + itemKey 单点分配；04 章模型注册表 + 降级显式化不变量 + 用量采集契约 + 遥测可信卡；06 章测试执行环境归属行；原型 11 屏（S11 移除）+ S4/S5 体现新控件 |
+| v2.2.1 | **Sprint S-v2.1 全量 issue↔设计对照审查（07 §5）**：28 条目全复核（UNANSWERED=0），补 5 处缺口——02 §7 W4 观测基线正确性（SDLC-059 workspaceDiff 静态基线）+ 迁移冒烟证据档（SDLC-061 自建表测试掩盖建表缺失）；02 §8 守卫表派发行（SDLC-063 派发不推业务阶段）；03 §2 评审卡结构化核对清单（新表↔迁移对账 / 事务包裹，SDLC-061/062）；04 §6 turn 终态判定契约（SDLC-060 交付成功误标 error）+ §10 配置生效一致性告警（SDLC-057 64k 静默钳制） |
+
+## 阅读顺序建议
+
+- 想了解"这套系统是什么、怎么用"：读 00 → 02。
+- 要评审交互与页面：读 01 → 03 → 04 → 05，对照原型。
+- 要对照 v1.1 的流程细节（验收纪律、红线、数据模型增量）：v1.1 两份文档仍然有效，
+  v2.0 引用而不重复其内容。

@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracker · 收件箱</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+<style>
+/* ============ Foundry tokens ============ */
+:root{
+  --background:oklch(1 0 0); --foreground:oklch(.141 .005 285.82);
+  --card:oklch(1 0 0); --muted:oklch(.967 .001 286.38);
+  --muted-foreground:oklch(.552 .016 285.94);
+  --border:oklch(.945 .003 286.32); --input:oklch(.92 .004 286.32);
+  --ring:oklch(.705 .015 286.07);
+  --primary:oklch(.21 .006 285.89); --primary-foreground:oklch(.985 0 0);
+  --brand:oklch(.55 .16 255); --brand-foreground:oklch(.985 0 0);
+  --success:oklch(.55 .16 145); --warning:oklch(.68 .15 85);
+  --info:oklch(.55 .18 250); --destructive:oklch(.577 .245 27.33);
+  --agent:oklch(.55 .14 300); --evidence:oklch(.48 .10 180);
+  --sidebar:oklch(.985 .001 286.38);
+  --radius:10px; --radius-sm:6px; --radius-md:8px; --radius-xl:14px;
+  --panel:oklch(.972 .002 286.35);
+  --font-sans:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+}
+.dark{
+  --background:oklch(.18 .005 285.82); --foreground:oklch(.985 0 0);
+  --card:oklch(.21 .006 285.89); --muted:oklch(.274 .006 286.03);
+  --muted-foreground:oklch(.705 .015 286.07);
+  --border:oklch(1 0 0/.08); --input:oklch(1 0 0/.15);
+  --primary:oklch(.92 .004 286.32); --primary-foreground:oklch(.21 .006 285.89);
+  --brand:oklch(.65 .16 255); --success:oklch(.65 .14 145);
+  --warning:oklch(.8 .14 85); --info:oklch(.65 .16 250); --destructive:oklch(.66 .2 27);
+  --agent:oklch(.68 .13 300); --evidence:oklch(.62 .09 180);
+  --sidebar:oklch(.16 .005 285.82);
+  --panel:oklch(.215 .006 285.9);/*--panel-dark-done*/
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font-sans);font-size:13px;line-height:1.55;color:var(--foreground);
+  background:var(--background);-webkit-font-smoothing:antialiased;text-autospace:ideograph-alpha ideograph-numeric}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:oklch(0 0 0/.12);border-radius:3px}
+.dark ::-webkit-scrollbar-thumb{background:oklch(1 0 0/.14)}
+i.ti{font-size:16px;line-height:1;vertical-align:-2px}
+.proto-bar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:2px;
+  padding:4px 10px;background:oklch(.18 .01 260);color:oklch(.8 .01 260);
+  font-size:11px;overflow-x:auto;white-space:nowrap}
+.proto-bar .pb-title{font-weight:600;color:oklch(.98 0 0);margin-right:8px;display:flex;gap:6px;align-items:center}
+.proto-bar a{padding:3px 8px;border-radius:6px;cursor:pointer}
+.proto-bar a:hover{background:oklch(1 0 0/.1)}
+.proto-bar a.active{background:var(--brand);color:var(--brand-foreground)}
+.proto-bar .pb-theme{margin-left:auto;padding:3px 8px;border-radius:6px;display:flex;gap:4px;align-items:center;color:inherit}
+.proto-bar .pb-theme:hover{background:oklch(1 0 0/.1)}
+.app{display:flex;height:calc(100vh - 27px)}
+.sidebar{width:232px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;padding:10px;gap:2px;overflow-y:auto}
+.sb-head{display:flex;align-items:center;gap:8px;padding:6px 8px 10px;font-weight:600;font-size:13px}
+.sb-head .logo{width:22px;height:22px;border-radius:6px;background:var(--brand);color:var(--brand-foreground);
+  display:flex;align-items:center;justify-content:center}
+.sb-search{display:flex;align-items:center;gap:6px;margin:0 4px 8px;padding:5px 8px;border:1px solid var(--border);
+  border-radius:var(--radius-md);color:var(--muted-foreground);font-size:12px;background:var(--card)}
+.sb-search kbd{margin-left:auto}
+.sb-group{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);
+  padding:12px 8px 4px;font-weight:600}
+.sb-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--radius-md);
+  color:var(--foreground);font-size:13px;cursor:pointer}
+.sb-item i{font-size:17px;color:var(--muted-foreground)}
+.sb-item:hover{background:oklch(0 0 0/.045)}
+.dark .sb-item:hover{background:oklch(1 0 0/.06)}
+.sb-item.active{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand);font-weight:500}
+.sb-item.active i{color:var(--brand)}
+.sb-item .count{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+.sb-item .dot-badge{margin-left:auto;min-width:16px;height:16px;padding:0 5px;border-radius:8px;
+  background:var(--brand);color:var(--brand-foreground);font-size:10px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;font-family:var(--font-mono)}
+.inset{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--background)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-md);
+  font-size:12.5px;font-weight:500;border:1px solid transparent;cursor:pointer;white-space:nowrap}
+.btn-primary{background:var(--primary);color:var(--primary-foreground)}
+.btn-primary:hover{opacity:.9}
+.btn-outline{border-color:var(--border);background:var(--card)}
+.btn-outline:hover{background:var(--muted)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:500}
+.badge.b-success{background:color-mix(in oklch,var(--success) 14%,transparent);color:var(--success)}
+.badge.b-warning{background:color-mix(in oklch,var(--warning) 16%,transparent);color:oklch(.55 .13 85)}
+.dark .badge.b-warning{color:var(--warning)}
+.badge.b-info{background:color-mix(in oklch,var(--info) 14%,transparent);color:var(--info)}
+.badge.b-destructive{background:color-mix(in oklch,var(--destructive) 12%,transparent);color:var(--destructive)}
+.badge.b-muted{background:var(--muted);color:var(--muted-foreground)}
+.badge.b-brand{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand)}
+kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid var(--border);
+  border-bottom-width:2px;border-radius:4px;background:var(--muted);color:var(--muted-foreground)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}
+.ring{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-block;position:relative}
+.st-icon{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;vertical-align:-2px;color:#fff}
+.st-icon i{font-size:10px;line-height:1;display:block}
+.st-icon.sm{width:12px;height:12px}.st-icon.sm i{font-size:8.5px}
+.st-icon.lg{width:18px;height:18px}.st-icon.lg i{font-size:12.5px}
+.st-icon.ok{background:var(--success)}.st-icon.err{background:var(--destructive)}.st-icon.warn{background:var(--warning)}.st-icon.inf{background:var(--info)}.st-icon.mut{background:var(--muted-foreground)}
+.runbadge .st-icon{width:11px;height:11px}.runbadge .st-icon i{font-size:8px}
+.ring.r-queued{border:1.6px solid var(--warning)}
+.ring.r-queued::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--warning)}
+.ring.r-gate{border:1.6px solid var(--warning)}
+.ring.r-gate::after{content:'';position:absolute;left:5.5px;top:3px;width:1.8px;height:7px;background:var(--warning)}
+.avatar{width:20px;height:20px;border-radius:50%;background:var(--brand);color:#fff;
+  display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0}
+.avatar.a-agent{border-radius:6px;background:color-mix(in oklch,var(--agent) 15%,transparent);
+  color:var(--agent);border:1px solid color-mix(in oklch,var(--agent) 40%,transparent)}
+.avatar.a-brain{border-radius:6px;background:color-mix(in oklch,var(--brand) 15%,transparent);
+  color:var(--brand);border:1px solid color-mix(in oklch,var(--brand) 40%,transparent)}
+/* ============ 本屏：两栏收件箱 ============ */
+.split{flex:1;display:flex;overflow:hidden}
+.list-pane{width:360px;flex-shrink:0;border-right:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;overflow-y:auto}
+.lp-head{display:flex;align-items:center;gap:8px;padding:14px 16px 8px}
+.lp-head h1{font-size:15px;font-weight:600}
+.lp-head .cnt{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground)}
+.lp-head .flt{margin-left:auto;display:flex;gap:2px}
+.lp-head .flt button{font-size:11px;padding:2px 8px;border-radius:6px;color:var(--muted-foreground)}
+.lp-head .flt button.on{background:var(--muted);color:var(--foreground)}
+.lgroup{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);
+  padding:12px 16px 4px;font-weight:600;display:flex;align-items:center;gap:6px}
+.lgroup .n{font-family:var(--font-mono)}
+.lrow{display:flex;gap:9px;padding:9px 16px;cursor:pointer;border-radius:var(--radius-md);margin:0 6px}
+.lrow:hover{background:oklch(0 0 0/.03)}
+.dark .lrow:hover{background:oklch(1 0 0/.04)}
+.lrow.sel{background:color-mix(in oklch,var(--brand) 10%,transparent)}
+.lrow .lr-main{flex:1;min-width:0}
+.lrow .lr-title{font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:6px}
+.lrow .lr-sub{font-size:11.5px;color:var(--muted-foreground);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .lr-side{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.lrow .lr-time{font-size:10.5px;color:var(--muted-foreground);font-family:var(--font-mono)}
+.detail-pane{flex:1;overflow-y:auto;padding:22px 28px}
+.gate{max-width:640px}
+.gate-head{display:flex;align-items:flex-start;gap:12px}
+.gate-head .g-icon{width:38px;height:38px;border-radius:10px;background:color-mix(in oklch,var(--warning) 16%,transparent);
+  color:oklch(.55 .13 85);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.dark .gate-head .g-icon{color:var(--warning)}
+.gate-head .g-icon i{font-size:20px}
+.gate-head h2{font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
+.gate-head .g-sub{font-size:12px;color:var(--muted-foreground);margin-top:2px}
+.gate .sect{margin-top:20px}
+.gate .sect-t{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted-foreground);font-weight:600;margin-bottom:8px}
+.check{display:flex;align-items:flex-start;gap:9px;padding:9px 12px;border:1px solid var(--border);
+  border-radius:var(--radius-md);background:var(--card)}
+.check+.check{margin-top:6px}
+.check .c-main{flex:1}
+.check .c-title{font-size:12.5px;font-weight:500}
+.check .c-sub{font-size:11.5px;color:var(--muted-foreground);margin-top:1px}
+.check.miss{border-color:color-mix(in oklch,var(--destructive) 35%,var(--border));
+  background:color-mix(in oklch,var(--destructive) 4%,var(--card))}
+.check.miss .c-sub{color:var(--destructive)}
+.check .c-link{font-size:11.5px;color:var(--brand);display:inline-flex;align-items:center;gap:3px;margin-top:4px}
+.req-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-foreground);margin-top:14px}
+.artifact{display:flex;gap:11px;padding:12px 14px;margin-top:8px}
+.artifact .a-icon{width:32px;height:32px;border-radius:8px;background:var(--muted);
+  display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);flex-shrink:0}
+.artifact .a-title{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.artifact .a-excerpt{font-size:11.5px;color:var(--muted-foreground);margin-top:5px;line-height:1.65;
+  border-left:2px solid var(--border);padding-left:9px}
+.artifact .a-open{margin-left:auto;flex-shrink:0}
+.gate-foot{display:flex;align-items:center;gap:10px;margin-top:22px;padding-top:16px;border-top:1px solid var(--border)}
+.gate-foot .hint{font-size:11.5px;color:var(--muted-foreground);display:flex;align-items:center;gap:5px}
+.tip{position:relative}
+.tip:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:0;
+  background:oklch(.18 .01 260);color:#fff;font-size:11px;padding:5px 9px;border-radius:6px;white-space:nowrap;z-index:10}
+</style>
+</head>
+<body>
+<nav class="proto-bar">
+  <span class="pb-title"><i class="ti ti-flame"></i>Foundry · SDLC 原型</span>
+  <a data-screen="index.html">总览</a>
+  <a data-screen="s1-tracker-board.html">看板</a>
+  <a data-screen="s2-sprint-studio.html">规划工作台</a>
+  <a data-screen="s3-ui-review.html">UI 评审</a>
+  <a data-screen="s4-work-item.html">工作项</a>
+  <a data-screen="s5-inbox.html" class="active">收件箱</a>
+  <a data-screen="s6-sprint-cockpit.html">Sprint 驾驶舱</a>
+  <a data-screen="s7-run-detail.html">运行详情</a>
+  <a data-screen="s8-workflow-library.html">工作流库</a>
+  <a data-screen="s9-brain-console.html">Brain</a>
+  <a data-screen="s10-health-insights.html">健康与洞察</a>
+  <button class="pb-theme" onclick="document.documentElement.classList.toggle('dark')">
+    <i class="ti ti-moon"></i>主题</button>
+</nav>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sb-head"><span class="logo"><i class="ti ti-clipboard-list" style="font-size:13px"></i></span>Tracker</div>
+    <div class="sb-search"><i class="ti ti-search"></i>搜索<kbd>⌘K</kbd></div>
+    <a class="sb-item"><i class="ti ti-message-circle"></i>问 Tracker</a>
+    <a class="sb-item active" data-screen="s5-inbox.html"><i class="ti ti-inbox"></i>收件箱<span class="dot-badge">3</span></a>
+    <div class="sb-group">工作</div>
+    <a class="sb-item" data-screen="s1-tracker-board.html"><i class="ti ti-layout-kanban"></i>看板</a>
+    <a class="sb-item" data-screen="s6-sprint-cockpit.html"><i class="ti ti-run"></i>Sprint</a>
+    <a class="sb-item"><i class="ti ti-list-numbers"></i>队列<span class="count">4</span></a>
+    <a class="sb-item"><i class="ti ti-chart-dots"></i>度量</a>
+    <div class="sb-group">项目</div>
+    <a class="sb-item"><i class="ti ti-folder"></i>支付中心<span class="count">PAY</span></a>
+    <div style="margin-top:auto"></div>
+    <div class="divider" style="margin:8px 4px"></div>
+    <a class="sb-item"><i class="ti ti-users"></i>Team</a>
+    <a class="sb-item"><i class="ti ti-settings"></i>设置</a>
+  </aside>
+  <main class="inset" x-data="{sel:'signoff'}">
+    <div class="split">
+      <!-- 左：列表 -->
+      <div class="list-pane">
+        <div class="lp-head">
+          <h1>收件箱</h1><span class="cnt">4 待处理 · 2 通知</span>
+          <div class="flt"><button class="on">待处理</button><button>已处理</button></div>
+        </div>
+        <div class="lgroup"><i class="ti ti-rubber-stamp" style="font-size:12px"></i>签核 <span class="n">1</span></div>
+        <div class="lrow" :class="sel==='signoff'&&'sel'" @click="sel='signoff'">
+          <span class="avatar a-brain"><i class="ti ti-brain" style="font-size:11px"></i></span>
+          <div class="lr-main">
+            <div class="lr-title">plan-signoff · Sprint 4</div>
+            <div class="lr-sub">商户结算自动化 —— 判据 2/3，缺 test-plan 产物</div>
+          </div>
+          <div class="lr-side"><span class="lr-time">32 分钟前</span><span class="ring r-gate"></span></div>
+        </div>
+        <div class="lgroup"><i class="ti ti-git-pull-request" style="font-size:12px"></i>评审请求 <span class="n">1</span></div>
+        <div class="lrow" :class="sel==='review'&&'sel'" @click="sel='review'">
+          <span class="avatar a-agent"><i class="ti ti-robot" style="font-size:11px"></i></span>
+          <div class="lr-main">
+            <div class="lr-title"><span class="mono" style="font-size:11px;color:var(--muted-foreground)">PAY-201</span>待人工评审 · 分支已推送</div>
+            <div class="lr-sub">账单导出 CSV 接口 —— dev 交付 sprint-3/pay-201，测试 14/14 通过，等待批准合并</div>
+          </div>
+          <div class="lr-side"><span class="lr-time">8 分钟前</span><span class="ring r-run"></span></div>
+        </div>
+        <div class="lgroup"><i class="ti ti-gavel" style="font-size:12px"></i>裁决 <span class="n">1</span></div>
+        <div class="lrow" :class="sel==='esc'&&'sel'" @click="sel='esc'">
+          <span class="avatar a-agent"><i class="ti ti-robot" style="font-size:11px"></i></span>
+          <div class="lr-main">
+            <div class="lr-title"><span class="mono" style="font-size:11px;color:var(--muted-foreground)">PAY-203</span>评审 3 次超限 · 升级</div>
+            <div class="lr-sub">金额四舍五入精度错误 —— reviewer 连续 3 轮 FAILED，DAG 挂起等待裁决</div>
+          </div>
+          <div class="lr-side"><span class="lr-time">1 小时前</span><span class="ring r-gate"></span></div>
+        </div>
+        <div class="lgroup"><i class="ti ti-alert-triangle" style="font-size:12px"></i>失败路由 <span class="n">1</span></div>
+        <div class="lrow" :class="sel==='fail'&&'sel'" @click="sel='fail'">
+          <span class="avatar a-agent"><i class="ti ti-robot" style="font-size:11px"></i></span>
+          <div class="lr-main">
+            <div class="lr-title"><span class="mono" style="font-size:11px;color:var(--muted-foreground)">PAY-203</span>hotfix 运行失败</div>
+            <div class="lr-sub">run_6c8p17 · permanent —— gitRemote 认证失败，需重派 / 回退 / 升级</div>
+          </div>
+          <div class="lr-side"><span class="lr-time">2 小时前</span><span class="st-icon err"><i class="ti ti-x"></i></span></div>
+        </div>
+        <div class="lgroup"><i class="ti ti-bell" style="font-size:12px"></i>通知 <span class="n">2</span></div>
+        <div class="lrow">
+          <span class="avatar a-agent"><i class="ti ti-robot" style="font-size:11px"></i></span>
+          <div class="lr-main">
+            <div class="lr-title">Sprint 3 verify RED</div>
+            <div class="lr-sub">集成场景「report 汇总」失败 —— 已自动建单 PAY-198 并进入派发</div>
+          </div>
+          <div class="lr-side"><span class="lr-time">昨天</span><span class="st-icon ok"><i class="ti ti-check"></i></span></div>
+        </div>
+        <div class="lrow">
+          <span class="avatar a-agent"><i class="ti ti-robot" style="font-size:11px"></i></span>
+          <div class="lr-main">
+            <div class="lr-title"><span class="mono" style="font-size:11px;color:var(--muted-foreground)">PAY-204</span>已合入</div>
+            <div class="lr-sub">PR #86 squash 合入 sprint-3 —— 实施阶段自动推进（回写:reconciler）</div>
+          </div>
+          <div class="lr-side"><span class="lr-time">昨天</span><span class="st-icon ok"><i class="ti ti-check"></i></span></div>
+        </div>
+      </div>
+      <!-- 右：GateBanner 详情 -->
+      <div class="detail-pane">
+        <div x-show="sel==='signoff'">
+        <div class="gate">
+          <div class="gate-head">
+            <div class="g-icon"><i class="ti ti-rubber-stamp"></i></div>
+            <div>
+              <h2>plan-signoff · 需求规划签核 <span class="badge b-warning">待处理</span></h2>
+              <div class="g-sub">Sprint 4 · 商户结算自动化 · phase: planning <i class="ti ti-arrow-narrow-right" style="font-size:12px;vertical-align:-1.5px"></i> designing</div>
+            </div>
+          </div>
+          <div class="sect">
+            <div class="sect-t">门判据 · 2/3 通过</div>
+            <div class="check">
+              <span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>
+              <div class="c-main">
+                <div class="c-title">sprint-doc 产物存在</div>
+                <div class="c-sub">v1 · human · Steve 定稿于 7-10 14:22</div>
+              </div>
+            </div>
+            <div class="check">
+              <span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>
+              <div class="c-main">
+                <div class="c-title">成功指标可证伪</div>
+                <div class="c-sub">3/3 指标含可观测信号（Leading 2 · Lagging 1）</div>
+              </div>
+            </div>
+            <div class="check miss">
+              <span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>
+              <div class="c-main">
+                <div class="c-title">test-plan 产物</div>
+                <div class="c-sub">缺失 —— 尚未生成</div>
+                <a class="c-link" data-screen="s2-sprint-studio.html">去规划工作台 · 测试计划步完成<i class="ti ti-chevron-right" style="font-size:12px"></i></a>
+              </div>
+            </div>
+          </div>
+          <div class="req-row">
+            <span class="avatar a-brain"><i class="ti ti-brain" style="font-size:11px"></i></span>
+            Sprint 4 lead 请求于 32 分钟前 · 门配置：项目「支付中心」流程设置
+          </div>
+          <div class="sect">
+            <div class="sect-t">关联产物</div>
+            <div class="card artifact">
+              <div class="a-icon"><i class="ti ti-file-text"></i></div>
+              <div style="flex:1;min-width:0">
+                <div class="a-title">sprint-doc · Sprint 4 商户结算自动化
+                  <span class="badge b-muted mono">v1</span><span class="badge b-brand">human</span></div>
+                <div class="a-excerpt">目标：商户 T+1 结算全流程无人工对账。In Scope：结算单自动生成、
+                  差异自动冲正、结算通知。Out of Scope：跨币种结算。Leading 指标：结算单生成耗时
+                  p95 &lt; 30s（真实商户数据实测）…</div>
+              </div>
+              <button class="btn btn-outline a-open" style="align-self:center"><i class="ti ti-external-link"></i>打开产物</button>
+            </div>
+          </div>
+          <div class="gate-foot">
+            <span class="tip" data-tip="缺少判据：test-plan 产物">
+              <button class="btn btn-primary" disabled><i class="ti ti-check"></i>批准</button>
+            </span>
+            <button class="btn btn-outline"><i class="ti ti-x"></i>驳回…</button>
+            <span class="hint"><i class="ti ti-info-circle"></i>判据齐备后批准按钮自动启用；驳回需填写理由</span>
+          </div>
+        </div>
+        </div>
+
+        <!-- escalation 裁决卡 -->
+        <div x-show="sel==='review'" x-cloak>
+        <div class="gate">
+          <div class="gate-head">
+            <div class="g-icon"><i class="ti ti-git-pull-request"></i></div>
+            <div>
+              <h2>评审请求 · <span class="mono" style="font-size:13px">PAY-201</span> 账单导出 CSV 接口 <span class="badge b-info">待人工评审</span></h2>
+              <div class="g-sub">run_9be2a1 终态 done · 分支 <span class="mono">sprint-3/pay-201</span> 已推送 · diff <span class="mono">+449 −2 · 6 文件</span> · done 的唯一入口在这里</div>
+            </div>
+          </div>
+          <div class="sect">
+            <div class="sect-t">测试执行证据</div>
+            <div class="check">
+              <span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>
+              <div class="c-main">
+                <div class="c-title"><span class="mono">vitest run actions/__tests__/export-csv.test.ts</span></div>
+                <div class="c-sub">14 passed / 14 · 退出码 0 · 2.85s · 工作区 ws_9be2（依赖预热 · smoke 通过）</div>
+              </div>
+            </div>
+          </div>
+          <div class="sect">
+            <div class="sect-t">审查三问</div>
+            <div class="check">
+              <span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>
+              <div class="c-main"><div class="c-title">设计遵循 —— 变更文件 ⊆ brief.touches</div><div class="c-sub">diff-audit 通过 · 无越界文件</div></div>
+            </div>
+            <div class="check">
+              <span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>
+              <div class="c-main"><div class="c-title">边界处理 —— 空数据 / 转义 / 大结果集</div><div class="c-sub">评审会话（独立于 spec 作者）标注：CSV 注入转义已覆盖</div></div>
+            </div>
+            <div class="check">
+              <span class="st-icon warn" style="margin-top:2px"><i class="ti ti-minus"></i></span>
+              <div class="c-main"><div class="c-title">证据可信 —— 用量遥测标记</div><div class="c-sub">spawn 用量无 suspect 标记 · 模型 thinkingcap（真名归因）</div></div>
+            </div>
+          </div>
+          <div class="sect">
+            <div class="sect-t">Diff（按文件折叠）</div>
+            <div class="check"><span class="st-icon ok" style="margin-top:2px"><i class="ti ti-file-diff"></i></span><div class="c-main"><div class="c-title mono" style="font-size:12px">actions/export-csv.ts <span style="color:var(--success)">+208</span></div><div class="c-sub">新建 · 纯函数 + action 定义</div></div></div>
+            <div class="check"><span class="st-icon ok" style="margin-top:2px"><i class="ti ti-file-diff"></i></span><div class="c-main"><div class="c-title mono" style="font-size:12px">actions/__tests__/export-csv.test.ts <span style="color:var(--success)">+214</span></div><div class="c-sub">新建 · 14 用例</div></div></div>
+          </div>
+          <div class="sect" x-data="{h1:false,h2:false,mfail:true}">
+            <div class="sect-t">核对清单（按 nature 装配 · 锚定 artifactId+version）</div>
+            <div class="check">
+              <span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>
+              <div class="c-main"><div class="c-title">新表/新列 ↔ 迁移对账 <span class="badge b-info" style="margin-left:6px">机器</span></div><div class="c-sub">audit-migrations 通过 · 新表 tracker_export_jobs 有 v25 建表迁移 —— 机器通过项已锁定</div></div>
+            </div>
+            <div class="check">
+              <span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>
+              <div class="c-main"><div class="c-title">迁移冒烟证据在场 <span class="badge b-info" style="margin-left:6px">机器</span></div><div class="c-sub" style="color:var(--destructive)">交付说明缺迁移冒烟档输出 —— 机器 fail 项不可人工勾过，须返工补证</div></div>
+            </div>
+            <div class="check" style="cursor:pointer" @click="h1=!h1">
+              <span class="st-icon" :class="h1?'ok':'mut'" style="margin-top:2px"><i class="ti" :class="h1?'ti-check':'ti-point'"></i></span>
+              <div class="c-main"><div class="c-title">事务包裹 —— 多表级联写 <span class="badge" style="margin-left:6px">人工</span></div><div class="c-sub">export_jobs + activities 两表写点 · 点击本行确认已核</div></div>
+            </div>
+            <div class="check" style="cursor:pointer" @click="h2=!h2">
+              <span class="st-icon" :class="h2?'ok':'mut'" style="margin-top:2px"><i class="ti" :class="h2?'ti-check':'ti-point'"></i></span>
+              <div class="c-main"><div class="c-title">ownerScope 贯穿新查询 <span class="badge" style="margin-left:6px">人工</span></div><div class="c-sub">点击本行确认已核</div></div>
+            </div>
+            <div style="display:flex;gap:8px;padding:14px 0 2px">
+              <button class="btn btn-primary" :disabled="mfail || !(h1&&h2)" :title="mfail?'存在机器 fail 项：迁移冒烟证据':(!(h1&&h2)?'存在未确认人工核对项':'')"><i class="ti ti-git-merge"></i>批准合并</button>
+              <button class="btn btn-outline"><i class="ti ti-arrow-back-up"></i>驳回返工</button>
+              <button class="btn btn-outline"><i class="ti ti-external-link"></i>打开运行详情</button>
+            </div>
+            <div class="g-sub" style="padding-top:4px">批准置灰 = 存在未确认核对项或机器 fail 项；勾选实时持久化（set-artifact-review），产物出新版本自动重置</div>
+          </div>
+        </div>
+        </div>
+        <div x-show="sel==='esc'" x-cloak>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+            <span class="avatar a-agent" style="width:28px;height:28px"><i class="ti ti-robot" style="font-size:15px"></i></span>
+            <div><div style="font-size:15px;font-weight:600">escalation · 评审 3 次超限 <span class="badge b-warning">待裁决</span></div>
+            <div style="font-size:12px;color:var(--muted-foreground)"><span class="mono">PAY-203</span> 金额四舍五入精度错误 · <span class="runbadge" data-screen="s7-run-detail.html" style="font-size:10.5px"><span class="ring r-gate"></span>run_6c8p17</span> DAG 挂起于 human_gate</div></div>
+          </div>
+          <div class="card card-pad" style="margin-top:12px">
+            <div class="group-label" style="margin-bottom:8px">评审累计发现（3 轮，reviewer 连续 FAILED）</div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-size:12.5px">
+              <div><span class="badge b-destructive">HIGH</span> R1 舍入出口未收敛：`report/summary.ts` 仍有本地 `Math.round`（越过 `calc.round`）</div>
+              <div><span class="badge b-destructive">HIGH</span> R2 修复未带回归测试：`invoice` 汇总路径无断言</div>
+              <div><span class="badge b-warning">MEDIUM</span> R3 第 3 轮仍复现 R1——同一出口第三处副本（`export/csv.ts`）</div>
+            </div>
+            <div style="margin-top:10px;font-size:11.5px;color:var(--muted-foreground)">reviewer 判定为结构性问题（舍入逻辑应单一出口），超出单次修复范围——按 3 次上限升级人类。</div>
+          </div>
+          <div class="card card-pad" style="margin-top:10px">
+            <div class="group-label" style="margin-bottom:8px">最近失败摘要（第 3 轮转录节选）</div>
+            <div style="font-size:12px;color:var(--muted-foreground);line-height:1.6">dev 修了 `report/summary.ts` 但 reviewer 在 diff 外发现同型副本；按「只审 diff」纪律以 diff 内证据裁决 FAILED，越界发现转为本条 escalation 附注。<a style="color:var(--brand)">查看完整转录</a></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:14px">
+            <button class="btn btn-primary"><i class="ti ti-check"></i>批准继续（第 4 轮，带结构性重构指示）</button>
+            <button class="btn btn-outline"><i class="ti ti-x"></i>驳回终止（run 取消，工作项进失败路由）</button>
+            <a class="btn btn-ghost" data-screen="s7-run-detail.html"><i class="ti ti-external-link"></i>打开运行详情</a>
+          </div>
+        </div>
+
+        <!-- 失败路由卡 -->
+        <div x-show="sel==='fail'" x-cloak>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+            <span class="avatar a-agent" style="width:28px;height:28px"><i class="ti ti-robot" style="font-size:15px"></i></span>
+            <div><div style="font-size:15px;font-weight:600">失败路由 · hotfix 运行失败 <span class="badge b-destructive">permanent</span></div>
+            <div style="font-size:12px;color:var(--muted-foreground)"><span class="mono">PAY-203</span> · <span class="runbadge" data-screen="s7-run-detail.html" style="font-size:10.5px"><span class="st-icon err"><i class="ti ti-x"></i></span>run_6c8p17</span> · 停在实施阶段</div></div>
+          </div>
+          <div class="card card-pad" style="margin-top:12px;border-color:color-mix(in oklch,var(--destructive) 28%,var(--border));background:color-mix(in oklch,var(--destructive) 4%,var(--card))">
+            <div class="group-label" style="margin-bottom:6px">最后错误 · 证据</div>
+            <div class="mono" style="font-size:12px">git push origin sprint-3 -> 403: authentication failed</div>
+            <div style="font-size:11.5px;color:var(--muted-foreground);margin-top:6px">分类 permanent（凭证类，自动重试无意义）；transient 类已由系统自动 fork 重试过 1 次。怀疑边界：payhub 仓 gitRemote 凭证失效（Vault GITHUB_TOKEN 解析）。</div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:14px">
+            <button class="btn btn-primary"><i class="ti ti-rotate"></i>重派（修复凭证后新 run）</button>
+            <button class="btn btn-outline"><i class="ti ti-arrow-back-up"></i>回退阶段</button>
+            <button class="btn btn-outline"><i class="ti ti-arrow-up"></i>升级</button>
+            <a class="btn btn-ghost" data-screen="s4-work-item.html"><i class="ti ti-clipboard-list"></i>打开工作项</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracker · 看板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+<style>
+/* ============ Foundry tokens ============ */
+:root{
+  --background:oklch(1 0 0); --foreground:oklch(.141 .005 285.82);
+  --card:oklch(1 0 0); --muted:oklch(.967 .001 286.38);
+  --muted-foreground:oklch(.552 .016 285.94);
+  --border:oklch(.945 .003 286.32); --input:oklch(.92 .004 286.32);
+  --ring:oklch(.705 .015 286.07);
+  --primary:oklch(.21 .006 285.89); --primary-foreground:oklch(.985 0 0);
+  --brand:oklch(.55 .16 255); --brand-foreground:oklch(.985 0 0);
+  --success:oklch(.55 .16 145); --warning:oklch(.68 .15 85);
+  --info:oklch(.55 .18 250); --destructive:oklch(.577 .245 27.33);
+  --agent:oklch(.55 .14 300); --evidence:oklch(.48 .10 180);
+  --chart-1:oklch(.55 .16 255); --chart-2:oklch(.65 .13 255);
+  --chart-3:oklch(.75 .10 255); --chart-4:oklch(.84 .07 255); --chart-5:oklch(.92 .04 255);
+  --sidebar:oklch(.985 .001 286.38);
+  --radius:10px; --radius-sm:6px; --radius-md:8px; --radius-xl:14px;
+  --panel:oklch(.972 .002 286.35);
+  --font-sans:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+}
+.dark{
+  --background:oklch(.18 .005 285.82); --foreground:oklch(.985 0 0);
+  --card:oklch(.21 .006 285.89); --muted:oklch(.274 .006 286.03);
+  --muted-foreground:oklch(.705 .015 286.07);
+  --border:oklch(1 0 0/.08); --input:oklch(1 0 0/.15);
+  --primary:oklch(.92 .004 286.32); --primary-foreground:oklch(.21 .006 285.89);
+  --brand:oklch(.65 .16 255); --success:oklch(.65 .14 145);
+  --warning:oklch(.8 .14 85); --info:oklch(.65 .16 250); --destructive:oklch(.66 .2 27);
+  --agent:oklch(.68 .13 300); --evidence:oklch(.62 .09 180);
+  --chart-1:oklch(.72 .14 255); --chart-2:oklch(.62 .13 255);
+  --chart-3:oklch(.52 .11 255); --chart-4:oklch(.42 .09 255); --chart-5:oklch(.32 .06 255);
+  --sidebar:oklch(.16 .005 285.82);
+  --panel:oklch(.215 .006 285.9);/*--panel-dark-done*/
+}
+/* ============ base ============ */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font-sans);font-size:13px;line-height:1.55;color:var(--foreground);
+  background:var(--background);-webkit-font-smoothing:antialiased;text-autospace:ideograph-alpha ideograph-numeric}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:oklch(0 0 0/.12);border-radius:3px}
+.dark ::-webkit-scrollbar-thumb{background:oklch(1 0 0/.14)}
+i.ti{font-size:16px;line-height:1;vertical-align:-2px}
+.proto-bar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:2px;
+  padding:4px 10px;background:oklch(.18 .01 260);color:oklch(.8 .01 260);
+  font-size:11px;overflow-x:auto;white-space:nowrap}
+.proto-bar .pb-title{font-weight:600;color:oklch(.98 0 0);margin-right:8px;display:flex;gap:6px;align-items:center}
+.proto-bar a{padding:3px 8px;border-radius:6px;cursor:pointer}
+.proto-bar a:hover{background:oklch(1 0 0/.1)}
+.proto-bar a.active{background:var(--brand);color:var(--brand-foreground)}
+.proto-bar .pb-theme{margin-left:auto;padding:3px 8px;border-radius:6px;display:flex;gap:4px;align-items:center;color:inherit}
+.proto-bar .pb-theme:hover{background:oklch(1 0 0/.1)}
+.app{display:flex;height:calc(100vh - 27px)}
+.sidebar{width:232px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;padding:10px;gap:2px;overflow-y:auto}
+.sb-head{display:flex;align-items:center;gap:8px;padding:6px 8px 10px;font-weight:600;font-size:13px}
+.sb-head .logo{width:22px;height:22px;border-radius:6px;background:var(--brand);color:var(--brand-foreground);
+  display:flex;align-items:center;justify-content:center}
+.sb-search{display:flex;align-items:center;gap:6px;margin:0 4px 8px;padding:5px 8px;border:1px solid var(--border);
+  border-radius:var(--radius-md);color:var(--muted-foreground);font-size:12px;background:var(--card)}
+.sb-search kbd{margin-left:auto}
+.sb-group{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);
+  padding:12px 8px 4px;font-weight:600}
+.sb-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--radius-md);
+  color:var(--foreground);font-size:13px;cursor:pointer}
+.sb-item i{font-size:17px;color:var(--muted-foreground)}
+.sb-item:hover{background:oklch(0 0 0/.045)}
+.dark .sb-item:hover{background:oklch(1 0 0/.06)}
+.sb-item.active{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand);font-weight:500}
+.sb-item.active i{color:var(--brand)}
+.sb-item .count{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+.sb-item .dot-badge{margin-left:auto;min-width:16px;height:16px;padding:0 5px;border-radius:8px;
+  background:var(--brand);color:var(--brand-foreground);font-size:10px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;font-family:var(--font-mono)}
+.inset{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--background)}
+.page-header{display:flex;align-items:center;gap:10px;padding:14px 24px 10px}
+.page-header .ph-icon{width:30px;height:30px;border-radius:8px;background:var(--muted);
+  display:flex;align-items:center;justify-content:center;color:var(--muted-foreground)}
+.page-header h1{font-size:16px;font-weight:600}
+.page-header .ph-count{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground)}
+.page-header .ph-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.toolbar{display:flex;align-items:center;gap:8px;padding:6px 24px 10px;border-bottom:1px solid var(--border)}
+.content{flex:1;overflow:auto}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-md);
+  font-size:12.5px;font-weight:500;border:1px solid transparent;cursor:pointer;white-space:nowrap}
+.btn-primary{background:var(--primary);color:var(--primary-foreground)}
+.btn-primary:hover{opacity:.9}
+.btn-outline{border-color:var(--border);background:var(--card)}
+.btn-outline:hover{background:var(--muted)}
+.btn-sm{padding:3px 8px;font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
+  font-size:11.5px;font-weight:500;border:1px solid var(--border);background:var(--card)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:500}
+.badge.b-success{background:color-mix(in oklch,var(--success) 14%,transparent);color:var(--success)}
+.badge.b-warning{background:color-mix(in oklch,var(--warning) 16%,transparent);color:oklch(.55 .13 85)}
+.dark .badge.b-warning{color:var(--warning)}
+.badge.b-info{background:color-mix(in oklch,var(--info) 14%,transparent);color:var(--info)}
+.badge.b-destructive{background:color-mix(in oklch,var(--destructive) 12%,transparent);color:var(--destructive)}
+.badge.b-agent{background:color-mix(in oklch,var(--agent) 12%,transparent);color:var(--agent)}
+.badge.b-brand{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand)}
+.badge.b-muted{background:var(--muted);color:var(--muted-foreground)}
+.badge.b-evidence{background:color-mix(in oklch,var(--evidence) 12%,transparent);color:var(--evidence)}
+kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid var(--border);
+  border-bottom-width:2px;border-radius:4px;background:var(--muted);color:var(--muted-foreground)}
+.ring{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-block;position:relative}
+.st-icon{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;vertical-align:-2px;color:#fff}
+.st-icon i{font-size:10px;line-height:1;display:block}
+.st-icon.sm{width:12px;height:12px}.st-icon.sm i{font-size:8.5px}
+.st-icon.lg{width:18px;height:18px}.st-icon.lg i{font-size:12.5px}
+.st-icon.ok{background:var(--success)}.st-icon.err{background:var(--destructive)}.st-icon.warn{background:var(--warning)}.st-icon.inf{background:var(--info)}.st-icon.mut{background:var(--muted-foreground)}
+.runbadge .st-icon{width:11px;height:11px}.runbadge .st-icon i{font-size:8px}
+.ring.r-pending{border:1.6px dashed var(--muted-foreground)}
+.ring.r-queued{border:1.6px solid var(--warning)}
+.ring.r-queued::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--warning)}
+.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%);animation:breathe 2s ease-in-out infinite}
+.ring.r-review{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 75%,transparent 75% 100%)}
+.ring.r-gate{border:1.6px solid var(--warning)}
+.ring.r-gate::after{content:'';position:absolute;left:5.5px;top:3px;width:1.8px;height:7px;background:var(--warning)}
+.ring.r-skipped{border:1.6px solid var(--muted-foreground);background:linear-gradient(135deg,transparent 45%,var(--muted-foreground) 45%,var(--muted-foreground) 55%,transparent 55%)}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.55}}
+.pbars{display:inline-flex;gap:1.5px;align-items:flex-end;height:12px}
+.pbars span{width:3px;border-radius:1px;background:var(--border)}
+.pbars span:nth-child(1){height:4px}.pbars span:nth-child(2){height:6.5px}
+.pbars span:nth-child(3){height:9px}.pbars span:nth-child(4){height:12px}
+.pbars.p0 span{background:var(--destructive)}
+.pbars.p1 span:nth-child(-n+3){background:oklch(.55 .13 85)}
+.pbars.p2 span:nth-child(-n+2){background:var(--info)}
+.pbars.p3 span:nth-child(1){background:var(--muted-foreground)}
+.avatar{width:20px;height:20px;border-radius:50%;background:var(--brand);color:#fff;
+  display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0}
+.avatar.a-agent{border-radius:6px;background:color-mix(in oklch,var(--agent) 15%,transparent);
+  color:var(--agent);border:1px solid color-mix(in oklch,var(--agent) 40%,transparent)}
+.avatar.a-brain{border-radius:6px;background:color-mix(in oklch,var(--brand) 15%,transparent);
+  color:var(--brand);border:1px solid color-mix(in oklch,var(--brand) 40%,transparent)}
+.shimmer{background:linear-gradient(90deg,var(--muted-foreground) 0%,var(--foreground) 40%,var(--muted-foreground) 80%);
+  background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
+  animation:shimmer 2.2s linear infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.shimmer,.ring.r-running{animation:none}}
+/* ============ 本屏：分段控件 / 看板 ============ */
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--card)}
+.seg button{padding:4px 10px;font-size:12px;color:var(--muted-foreground);display:flex;align-items:center;gap:5px}
+.seg button.on{background:var(--muted);color:var(--foreground);font-weight:500}
+.seg button+button{border-left:1px solid var(--border)}
+.filter-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid var(--border);
+  border-radius:var(--radius-md);font-size:12px;background:var(--card);cursor:pointer}
+.filter-chip:hover{background:var(--muted)}
+.filter-chip .fc-label{color:var(--muted-foreground)}
+.filter-chip i.ti-chevron-down{font-size:13px;color:var(--muted-foreground)}
+.search-box{display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);
+  border-radius:var(--radius-md);background:var(--card);color:var(--muted-foreground);font-size:12px;width:200px}
+.search-box input{border:none;outline:none;background:none;font:inherit;color:var(--foreground);width:100%}
+.board{display:flex;gap:12px;padding:16px 24px;height:100%;overflow-x:auto;align-items:flex-start}
+.col{width:264px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;max-height:100%}
+.col.slim{width:150px}
+.col-head{display:flex;align-items:center;gap:7px;padding:2px 4px}
+.col-head .cname{font-size:12.5px;font-weight:600}
+.col-head .ccount{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+.col-head .cmeta{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground)}
+.col-body{display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding-bottom:8px}
+.bcard{position:relative;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:10px 12px;display:flex;flex-direction:column;gap:7px;cursor:pointer;
+  transition:border-color .12s,box-shadow .12s}
+.bcard:hover{border-color:color-mix(in oklch,var(--brand) 40%,var(--border));box-shadow:0 2px 8px oklch(0 0 0/.05)}
+.dark .bcard:hover{box-shadow:0 2px 8px oklch(0 0 0/.3)}
+.bcard.failed{background:color-mix(in oklch,var(--destructive) 5%,var(--card));border-color:color-mix(in oklch,var(--destructive) 30%,var(--border))}
+.bcard .row1{display:flex;align-items:center;gap:6px}
+.bcard .row1 .key{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+.bcard .row1 .pbars{margin-left:auto}
+.bcard .title{font-size:12.5px;font-weight:500;line-height:1.45}
+.bcard .tags{display:flex;gap:4px;flex-wrap:wrap}
+.bcard .tag{font-size:10.5px;padding:1px 6px;border-radius:5px;background:var(--muted);color:var(--muted-foreground)}
+.bcard .foot{display:flex;align-items:center;gap:6px}
+.bcard .foot .avatar{margin-left:auto}
+.mini-step{display:inline-flex;gap:2.5px;align-items:center}
+.mini-step i{width:6px;height:6px;border-radius:50%;background:var(--border);display:block}
+.mini-step i.d{background:var(--success)}
+.mini-step i.a{background:var(--info);animation:breathe 2s ease-in-out infinite}
+.mini-step i.f{background:var(--destructive)}
+.runline{display:flex;align-items:center;gap:6px;font-size:11px;padding:5px 8px;margin:-2px 0 0;
+  border-radius:var(--radius-sm);background:color-mix(in oklch,var(--info) 7%,transparent)}
+.errline{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--destructive)}
+.hover-actions{display:none;gap:4px}
+.bcard.failed:hover .hover-actions{display:flex}
+.hover-actions button{font-size:11px;padding:2px 7px;border:1px solid var(--border);border-radius:5px;background:var(--card)}
+.hover-actions button:hover{background:var(--muted)}
+.waiting{display:flex;align-items:center;gap:5px;font-size:11px;color:oklch(.55 .13 85)}
+.dark .waiting{color:var(--warning)}
+.col-empty{border:1px dashed var(--border);border-radius:var(--radius);padding:18px 12px;
+  text-align:center;font-size:11.5px;color:var(--muted-foreground)}
+.ghost{opacity:.6;border:1.6px dashed var(--brand);background:color-mix(in oklch,var(--brand) 5%,var(--card))}
+.drop-hint{border:1.6px dashed var(--brand);border-radius:var(--radius);height:52px;
+  background:color-mix(in oklch,var(--brand) 6%,transparent);display:flex;align-items:center;
+  justify-content:center;font-size:11px;color:var(--brand);gap:5px}
+.toast{position:fixed;right:18px;bottom:18px;z-index:70;display:flex;align-items:flex-start;gap:9px;
+  padding:11px 14px;background:var(--card);border:1px solid color-mix(in oklch,var(--destructive) 45%,var(--border));
+  border-radius:var(--radius);box-shadow:0 8px 28px oklch(0 0 0/.14);max-width:300px}
+.toast i{color:var(--destructive);font-size:17px;margin-top:1px}
+.toast .t-title{font-size:12.5px;font-weight:600}
+.toast .t-desc{font-size:11.5px;color:var(--muted-foreground);margin-top:2px}
+
+/* RunBadge：run 实体统一徽标（01 章 §4.3） */
+.runbadge{display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border:1px solid var(--border);
+  border-radius:6px;font-family:var(--font-mono);font-size:11px;color:var(--foreground);background:var(--card);cursor:pointer}
+.runbadge:hover{border-color:color-mix(in oklch,var(--brand) 55%,transparent);color:var(--brand)}
+.runbadge .ring{width:9px;height:9px}
+</style>
+</head>
+<body>
+<nav class="proto-bar">
+  <span class="pb-title"><i class="ti ti-flame"></i>Foundry · SDLC 原型</span>
+  <a data-screen="index.html">总览</a>
+  <a data-screen="s1-tracker-board.html" class="active">看板</a>
+  <a data-screen="s2-sprint-studio.html">规划工作台</a>
+  <a data-screen="s3-ui-review.html">UI 评审</a>
+  <a data-screen="s4-work-item.html">工作项</a>
+  <a data-screen="s5-inbox.html">收件箱</a>
+  <a data-screen="s6-sprint-cockpit.html">Sprint 驾驶舱</a>
+  <a data-screen="s7-run-detail.html">运行详情</a>
+  <a data-screen="s8-workflow-library.html">工作流库</a>
+  <a data-screen="s9-brain-console.html">Brain</a>
+  <a data-screen="s10-health-insights.html">健康与洞察</a>
+  <button class="pb-theme" onclick="document.documentElement.classList.toggle('dark')">
+    <i class="ti ti-moon"></i>主题</button>
+</nav>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sb-head"><span class="logo"><i class="ti ti-clipboard-list" style="font-size:13px"></i></span>Tracker</div>
+    <div class="sb-search"><i class="ti ti-search"></i>搜索<kbd>⌘K</kbd></div>
+    <a class="sb-item"><i class="ti ti-message-circle"></i>问 Tracker</a>
+    <a class="sb-item" data-screen="s5-inbox.html"><i class="ti ti-inbox"></i>收件箱<span class="dot-badge">3</span></a>
+    <div class="sb-group">工作</div>
+    <a class="sb-item active" data-screen="s1-tracker-board.html"><i class="ti ti-layout-kanban"></i>看板</a>
+    <a class="sb-item" data-screen="s6-sprint-cockpit.html"><i class="ti ti-run"></i>Sprint</a>
+    <a class="sb-item"><i class="ti ti-list-numbers"></i>队列<span class="count">4</span></a>
+    <a class="sb-item"><i class="ti ti-chart-dots"></i>度量</a>
+    <div class="sb-group">项目</div>
+    <a class="sb-item"><i class="ti ti-folder"></i>支付中心<span class="count">PAY</span></a>
+    <div style="margin-top:auto"></div>
+    <div class="divider" style="margin:8px 4px"></div>
+    <a class="sb-item"><i class="ti ti-users"></i>Team</a>
+    <a class="sb-item"><i class="ti ti-settings"></i>设置</a>
+  </aside>
+  <main class="inset">
+    <header class="page-header">
+      <div class="ph-icon"><i class="ti ti-layout-kanban"></i></div>
+      <h1>看板</h1><span class="ph-sub" style="margin-left:2px">Sprint 3 · 计费对账与账单导出</span><span class="ph-count">6 项</span>
+      <div class="ph-actions">
+        <button class="btn btn-primary"><i class="ti ti-plus"></i>新建工作项<kbd style="background:color-mix(in oklch,var(--primary-foreground) 18%,transparent);border-color:color-mix(in oklch,var(--primary-foreground) 25%,transparent);color:color-mix(in oklch,var(--primary-foreground) 85%,transparent)">C</kbd></button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <div class="seg">
+        <button class="on"><i class="ti ti-layout-kanban"></i>看板</button>
+        <button><i class="ti ti-list"></i>列表</button>
+        <button><i class="ti ti-layout-rows"></i>泳道</button>
+      </div>
+      <button class="filter-chip"><span class="fc-label">Sprint</span>Sprint 3 · 计费对账与账单导出<i class="ti ti-chevron-down"></i></button>
+      <button class="filter-chip"><span class="fc-label">类型</span>全部<i class="ti ti-chevron-down"></i></button>
+      <button class="filter-chip"><span class="fc-label">优先级</span>全部<i class="ti ti-chevron-down"></i></button>
+      <div style="margin-left:auto"></div>
+      <div class="search-box"><i class="ti ti-search"></i><input placeholder="搜索标题 / key…"></div>
+    </div>
+    <div class="content">
+      <div class="board">
+        <!-- 待办 -->
+        <div class="col slim">
+          <div class="col-head"><span class="ring r-pending"></span><span class="cname">待办</span><span class="ccount">0</span></div>
+          <div class="col-body"><div class="col-empty">拖入卡片，或按 C 新建</div></div>
+        </div>
+        <!-- 分析 -->
+        <div class="col slim">
+          <div class="col-head"><span class="ring r-pending"></span><span class="cname">分析</span><span class="ccount">0</span></div>
+          <div class="col-body"><div class="col-empty">本相位无卡片</div></div>
+        </div>
+        <!-- 设计 -->
+        <div class="col slim">
+          <div class="col-head"><span class="ring r-review"></span><span class="cname">设计</span><span class="ccount">0</span></div>
+          <div class="col-body"><div class="col-empty">本相位无卡片</div></div>
+        </div>
+        <!-- 实施 -->
+        <div class="col">
+          <div class="col-head"><span class="ring r-running"></span><span class="cname">实施</span><span class="ccount">3</span>
+            <span class="cmeta">运行中 1 · 排队 1</span></div>
+          <div class="col-body">
+            <a class="bcard" data-screen="s4-work-item.html">
+              <div class="row1"><span class="badge b-info">需求</span><span class="key">PAY-201</span><span class="pbars p0"><span></span><span></span><span></span><span></span></span></div>
+              <div class="title">账单导出 CSV 接口</div>
+              <div class="tags"><span class="tag">后端</span><span class="tag">API</span></div>
+              <div class="runline"><span class="ring r-running" style="width:11px;height:11px"></span>
+                <span class="shimmer">dev 运行中 · 3m42s</span>
+                <span class="runbadge" style="margin-left:auto" data-screen="s7-run-detail.html"><span class="ring r-running"></span>run_8f3k21</span></div>
+              <div class="foot">
+                <span class="mini-step"><i class="d"></i><i class="d"></i><i class="d"></i><i class="a"></i><i></i><i></i><i></i></span>
+                <span class="avatar a-agent"><i class="ti ti-robot" style="font-size:11px"></i></span>
+              </div>
+            </a>
+            <a class="bcard failed" data-screen="s4-work-item.html">
+              <div class="row1"><span class="badge b-destructive">缺陷</span><span class="key">PAY-203</span><span class="pbars p0"><span></span><span></span><span></span><span></span></span></div>
+              <div class="title">金额四舍五入精度错误</div>
+              <div class="errline"><i class="ti ti-alert-triangle" style="font-size:13px"></i>gitRemote 认证失败 · permanent</div>
+              <div class="foot">
+                <span class="mini-step"><i class="d"></i><i class="d"></i><i class="d"></i><i class="f"></i><i></i><i></i><i></i></span>
+                <span class="hover-actions">
+                  <button><i class="ti ti-refresh" style="font-size:12px"></i>重派</button>
+                  <button><i class="ti ti-arrow-back-up" style="font-size:12px"></i>回退</button>
+                  <button><i class="ti ti-arrow-up-right" style="font-size:12px"></i>升级</button>
+                </span>
+                <span class="avatar" style="margin-left:auto">S</span>
+              </div>
+            </a>
+            <a class="bcard" data-screen="s4-work-item.html">
+              <div class="row1"><span class="badge b-info">需求</span><span class="key">PAY-202</span><span class="pbars p1"><span></span><span></span><span></span><span></span></span></div>
+              <div class="title">对账报表汇总页</div>
+              <div class="tags"><span class="tag">前端</span><span class="tag">报表</span></div>
+              <div class="waiting"><i class="ti ti-clock" style="font-size:13px"></i>等待 <span class="mono">PAY-201</span> 实施完成</div>
+              <div class="foot">
+                <span class="mini-step"><i class="d"></i><i class="d"></i><i class="d"></i><i></i><i></i><i></i><i></i></span>
+                <span class="avatar a-agent"><i class="ti ti-robot" style="font-size:11px"></i></span>
+              </div>
+            </a>
+          </div>
+        </div>
+        <!-- 测试 -->
+        <div class="col">
+          <div class="col-head"><span class="ring r-running"></span><span class="cname">测试</span><span class="ccount">1</span></div>
+          <div class="col-body">
+            <a class="bcard" data-screen="s4-work-item.html">
+              <div class="row1"><span class="badge b-evidence">from-audit</span><span class="key">PAY-198</span><span class="pbars p0"><span></span><span></span><span></span><span></span></span></div>
+              <div class="title">report 汇总缺 pow 字段</div>
+              <div class="tags"><span class="tag">verify RED 自动建单</span></div>
+              <div class="runline" style="background:color-mix(in oklch,var(--info) 7%,transparent)">
+                <span class="ring r-running" style="width:11px;height:11px"></span>
+                <span class="shimmer">verify 重跑中 · 1m08s</span></div>
+              <div class="foot">
+                <span class="mini-step"><i class="d"></i><i class="a"></i></span>
+                <span style="font-size:10px;color:var(--muted-foreground)">阶段子集：实施 <i class="ti ti-arrow-narrow-right" style="font-size:12px;vertical-align:-1.5px"></i> 测试</span>
+                <span class="avatar a-agent" style="margin-left:auto"><i class="ti ti-robot" style="font-size:11px"></i></span>
+              </div>
+            </a>
+          </div>
+        </div>
+        <!-- 验收（拖拽门提示态） -->
+        <div class="col">
+          <div class="col-head"><span class="ring r-gate"></span><span class="cname">验收</span><span class="ccount">0</span></div>
+          <div class="col-body">
+            <div class="drop-hint"><i class="ti ti-hand-stop"></i>松手=请求 Sprint 相位推进（作用于整个 sprint）</div>
+            <div class="bcard ghost">
+              <div class="row1"><span class="badge b-info">需求</span><span class="key">PAY-204</span></div>
+              <div class="title">账单导出页 UI</div>
+            </div>
+          </div>
+        </div>
+        <!-- 交付 -->
+        <div class="col">
+          <div class="col-head"><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="cname">交付</span><span class="ccount">2</span></div>
+          <div class="col-body">
+            <a class="bcard" data-screen="s4-work-item.html">
+              <div class="row1"><span class="badge b-info">需求</span><span class="key">PAY-204</span><span class="pbars p1"><span></span><span></span><span></span><span></span></span></div>
+              <div class="title">账单导出页 UI</div>
+              <div class="tags"><span class="badge b-success"><i class="ti ti-git-merge" style="font-size:12px"></i>PR #86 已合入</span></div>
+              <div class="foot">
+                <span class="mini-step"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></span>
+                <span class="avatar a-agent"><i class="ti ti-robot" style="font-size:11px"></i></span>
+              </div>
+            </a>
+            <a class="bcard" data-screen="s4-work-item.html">
+              <div class="row1"><span class="badge b-muted">调研</span><span class="key">PAY-190</span><span class="pbars p2"><span></span><span></span><span></span><span></span></span></div>
+              <div class="title">导出格式调研 CSV vs XLSX</div>
+              <div class="tags"><span class="badge b-evidence"><i class="ti ti-certificate" style="font-size:12px"></i>spike-report v1</span></div>
+              <div class="foot">
+                <span class="mini-step"><i class="d"></i><i class="d"></i></span>
+                <span style="font-size:10px;color:var(--muted-foreground)">阶段子集：分析 <i class="ti ti-arrow-narrow-right" style="font-size:12px;vertical-align:-1.5px"></i> 交付</span>
+                <span class="avatar" style="margin-left:auto">S</span>
+              </div>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="toast">
+  <i class="ti ti-hand-stop"></i>
+  <div>
+    <div class="t-title">推进到「验收」= 请求 Sprint 相位推进</div>
+    <div class="t-desc">单卡在相位派生阶段没有独立前进语义——此操作作用于整个 Sprint 3。判据 2/5：<span style="color:var(--destructive)">全部工作项合入（4/6）</span> · <span style="color:var(--destructive)">verify GREEN（当前 S2 RED）</span>；其余已满足。<a data-screen="s6-sprint-cockpit.html" style="color:var(--brand)">查看完整判据</a></div>
+  </div>
+</div>
+</body>
+</html>
