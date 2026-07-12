@@ -4,7 +4,6 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
-import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
 
 // Trigger a stage on a work item: find or create the stage row, set it to
 // "执行中", mark startedAt, and update the work item's current stage to this
@@ -18,7 +17,7 @@ export default defineAction({
     stageName: z.string().min(1).describe("Stage name (e.g. 分析, 设计, 实施, 测试, 验收, 交付)"),
   }),
   http: { method: "POST" },
-  run: async (args, ctx) => {
+  run: async (args) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -95,12 +94,11 @@ export default defineAction({
       .where(eq(schema.workItems.id, args.workItemId));
 
     // --- Insert an activity row ---
-    const actorKind = resolveActorKind(ctx);
     await db.insert(schema.activities).values({
       id: `act_trg_${args.workItemId.slice(0, 6)}_${args.stageName}_${now.replace(/\D/g, "").slice(0, 14)}`,
       workItemId: args.workItemId,
-      actorKind,
-      actorName: resolveActorName(actorKind, ownerEmail),
+      actorKind: "human",
+      actorName: ownerEmail,
       eventType: "触发",
       payload: JSON.stringify({ stageName: args.stageName }),
       createdAt: now,

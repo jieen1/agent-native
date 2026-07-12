@@ -1,7 +1,6 @@
 import {
   IconAlertTriangle,
   IconArrowLeft,
-  IconArrowRight,
   IconBrandGithub,
   IconCheck,
   IconClock,
@@ -23,6 +22,8 @@ import {
   IconMessageCircle,
   IconPlus,
   IconRocket,
+  IconScissors,
+  IconShieldLock,
   IconSitemap,
   IconStack2,
   IconTag,
@@ -35,15 +36,32 @@ import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 
+import type {
+  ScaleEstimate,
+  TransitionOption,
+  WorkItemRunSummary,
+} from "@shared/types";
+
 import { ActivityFeed } from "@/components/ActivityFeed";
 import {
   fmtDateTime,
   orchestratorBrainHref,
+  orchestratorRunHref,
   repoHref,
   repoLabel,
   statusPresentation,
   typeChip,
 } from "@/components/tracker-format";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,6 +75,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
   SelectContent,
@@ -65,6 +84,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -82,18 +102,22 @@ import {
   useUpdateWorkItem,
   useDeleteWorkItem,
   useDispatch,
+  useEstimateBriefScale,
+  useSplitWorkItem,
   useStages,
   useWorkItem,
   useSprints,
+  useOrgMembers,
   useTriggerStage,
   useRollbackStage,
   useAdvanceStage,
-  useRunAcceptance,
+  useTransitionWorkItem,
   useEpicChildren,
   useDocuments,
   useAddDocument,
   useDeleteDocument,
 } from "@/hooks/use-tracker";
+import { buildDraftChildren, canSubmitSplit } from "@/lib/split-draft";
 import { cn } from "@/lib/utils";
 
 // ── Stage stepper ────────────────────────────────────────────────────────────
@@ -494,12 +518,8 @@ function LinksPanel({ workItemId }: { workItemId: string }) {
               >
                 {LINK_TYPE_LABELS[l.linkType] ?? l.linkType}
               </span>
-              <span className="text-muted-foreground">
-                {l.direction === "from" ? (
-                  <IconArrowRight className="size-3" />
-                ) : (
-                  <IconArrowLeft className="size-3" />
-                )}
+              <span className="text-[10px] text-muted-foreground">
+                {l.direction === "from" ? "→" : "←"}
               </span>
               <span className="text-xs font-medium truncate">
                 {l.otherItemTitle || l.otherItemId}
@@ -793,8 +813,13 @@ function EpicChildrenPanel({ workItemId }: { workItemId: string }) {
                   <Link
                     to={`/items/${child.id}`}
                     className="shrink-0 text-xs font-medium hover:underline"
+                    title={
+                      child.itemKeyDisplay && child.itemKeyDisplay !== child.itemKey
+                        ? "历史重号，已消歧显示"
+                        : undefined
+                    }
                   >
-                    {child.itemKey || child.id}
+                    {child.itemKeyDisplay || child.itemKey || child.id}
                   </Link>
                   <span className="truncate text-xs text-muted-foreground">
                     {child.title}
@@ -808,13 +833,9 @@ function EpicChildrenPanel({ workItemId }: { workItemId: string }) {
                     {deps.map((dep, i) => (
                       <div
                         key={i}
-                        className="flex items-center gap-1 text-[10px] text-orange-600 dark:text-orange-400"
+                        className="text-[10px] text-orange-600 dark:text-orange-400"
                       >
-                        <span className="truncate">{dep.fromLabel}</span>
-                        <IconArrowLeft className="size-2.5 shrink-0" />
-                        <span className="shrink-0">blocked-by</span>
-                        <IconArrowLeft className="size-2.5 shrink-0" />
-                        <span className="truncate">{dep.toLabel}</span>
+                        {dep.fromLabel} ← blocked-by ← {dep.toLabel}
                       </div>
                     ))}
                   </div>
@@ -1217,6 +1238,8 @@ function EditableNature({ id, nature }: { id: string; nature: string[] }) {
 
 function EditableOwner({ id, owner }: { id: string; owner: string | null }) {
   const update = useUpdateWorkItem();
+  const { data: membersData } = useOrgMembers();
+  const members = membersData?.members ?? [];
   const [editing, setEditing] = useState(false);
 
   const displayLabel =
@@ -1275,8 +1298,670 @@ function EditableOwner({ id, owner }: { id: string; owner: string | null }) {
         <SelectItem value="agent" className="text-xs">
           智能体
         </SelectItem>
+        {members
+          .filter((m) => m.email !== "agent")
+          .map((m) => (
+            <SelectItem key={m.email} value={m.email} className="text-xs">
+              {m.email}
+            </SelectItem>
+          ))}
       </SelectContent>
     </Select>
+  );
+}
+
+// ── F3: 受守卫流转对话框 (GuardedTransitionDialog) ────────────────────────────
+//
+// Entry point: the "状态" MetaRow (整行可点击). Options come EXCLUSIVELY from
+// get-work-item's `allowedTransitions` — this component never re-implements
+// the guard table (02 §8 / server/lib/transition-guard.ts is the only source
+// of truth; T-F3-08 requires front/back parity).
+
+const COMMIT_RE = /^[0-9a-f]{7,40}$/i;
+
+function GuardedStatusRow({
+  item,
+}: {
+  item: {
+    itemKey?: string;
+    status: string;
+    currentStageName?: string;
+    execState?: string | null;
+    allowedTransitions?: TransitionOption[];
+  };
+}) {
+  const [open, setOpen] = useState(false);
+  const statusLabel = item.status === "done" || item.status === "closed"
+    ? item.status
+    : (item.currentStageName ?? "待办");
+
+  return (
+    <>
+      <button
+        type="button"
+        className="group flex w-full items-start gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-muted"
+        onClick={() => setOpen(true)}
+      >
+        <IconListCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <span className="w-20 shrink-0 pt-px text-xs text-muted-foreground">
+          状态
+        </span>
+        <span className="min-w-0 flex-1 text-sm">{statusLabel}</span>
+        <IconShieldLock className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+      </button>
+      {open ? (
+        <GuardedTransitionDialog item={item} open={open} onOpenChange={setOpen} />
+      ) : null}
+    </>
+  );
+}
+
+function GuardedTransitionDialog({
+  item,
+  open,
+  onOpenChange,
+}: {
+  item: {
+    itemKey?: string;
+    status: string;
+    currentStageName?: string;
+    execState?: string | null;
+    allowedTransitions?: TransitionOption[];
+  };
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { id = "" } = useParams();
+  const transition = useTransitionWorkItem();
+  const options = item.allowedTransitions ?? [];
+
+  const [target, setTarget] = useState<string>(options[0]?.target ?? "");
+  const [reason, setReason] = useState("");
+  const [verdict, setVerdict] = useState<"PASSED" | "CHANGES_REQUESTED">("PASSED");
+  const [commit, setCommit] = useState("");
+  const [runId, setRunId] = useState("");
+  const [links, setLinks] = useState<string[]>([]);
+  const [linkInput, setLinkInput] = useState("");
+  const [deliveryItems, setDeliveryItems] = useState<string[]>([]);
+  const [deliveryInput, setDeliveryInput] = useState("");
+  const [missing, setMissing] = useState<string[]>([]);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const selected = options.find((o) => o.target === target);
+  const isDone = target === "done";
+  const isClosed = target === "closed";
+  const isDelivery = target === "交付";
+  // CHANGES_REQUESTED is a review-rejection, not a done-write — the server
+  // redirects it to a manual-override rollback to 实施 (S4: 驳回并要求返工),
+  // so it only needs `reason`, never a commit.
+  const isChangesRequested = isDone && verdict === "CHANGES_REQUESTED";
+  const needsEvidence = !!selected && selected.need.length > 0 && !isClosed;
+  const needsCommit = !!selected?.need.includes("commit") && !isChangesRequested;
+  const needsLinks = !!selected?.need.includes("links");
+
+  const currentStatusBadge = item.status === "done" || item.status === "closed"
+    ? item.status
+    : (item.currentStageName ?? "待办");
+
+  const reasonValid = reason.trim().length >= 4;
+  const doneEvidenceOk =
+    !isDone || isChangesRequested || (verdict === "PASSED" && COMMIT_RE.test(commit.trim()));
+  const deliveryEvidenceOk = !isDelivery || commit.trim().length > 0 || links.length > 0;
+  const canSubmit =
+    !!target &&
+    reasonValid &&
+    doneEvidenceOk &&
+    deliveryEvidenceOk &&
+    !transition.isPending;
+
+  function addLink() {
+    const v = linkInput.trim();
+    if (!v) return;
+    setLinks((prev) => [...prev, v]);
+    setLinkInput("");
+  }
+  function addDeliveryItem() {
+    const v = deliveryInput.trim();
+    if (!v) return;
+    setDeliveryItems((prev) => [...prev, v]);
+    setDeliveryInput("");
+  }
+
+  // Submit semantics: PESSIMISTIC refetch, deliberately NOT the optimistic
+  // update the S4 design sketched. Nothing is written to the local cache
+  // before the server confirms: the dialog closes and queries invalidate
+  // (refetch) only in onSuccess; on error the dialog stays open with all
+  // fields intact and no local state ever changed. For a guarded transition
+  // (where the server can reject on actor/evidence/CAS-conflict grounds) an
+  // optimistic status flip would routinely show a state the guard then
+  // refuses — safer to wait for the authoritative answer.
+  function submit() {
+    if (!target) return;
+    setServerError(null);
+    setMissing([]);
+    transition.mutate(
+      {
+        id,
+        target: target as any,
+        reason: reason.trim(),
+        ...(isDone ? { verdict } : {}),
+        ...(commit.trim() || links.length > 0 || deliveryItems.length > 0 || runId.trim()
+          ? {
+              evidence: {
+                ...(commit.trim() ? { commit: commit.trim() } : {}),
+                ...(links.length > 0 ? { links } : {}),
+                ...(deliveryItems.length > 0 ? { deliveryItems } : {}),
+                ...(runId.trim() ? { runId: runId.trim() } : {}),
+              },
+            }
+          : {}),
+      },
+      {
+        onSuccess: (res: { noop?: boolean }) => {
+          onOpenChange(false);
+          toast.success(
+            res?.noop
+              ? "无变化(状态未改变)"
+              : isChangesRequested
+                ? "已驳回并要求返工"
+                : "状态已更新",
+          );
+        },
+        onError: (err: unknown) => {
+          const e = err as { code?: string; need?: string[]; message?: string };
+          if (e?.code === "evidence-missing" && Array.isArray(e.need)) {
+            setMissing(e.need);
+          }
+          setServerError(
+            e?.message?.replace(/^Action transition-work-item failed:\s*/, "") ??
+              "状态迁移失败",
+          );
+          // Dialog stays open (per S4 契约) with all fields intact.
+        },
+      },
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[440px]">
+        <DialogHeader>
+          <DialogTitle>变更状态 · {item.itemKey ?? id.slice(0, 8)}</DialogTitle>
+          <DialogDescription>当前状态与你可执行的迁移(仅列出通过守卫的目标)。</DialogDescription>
+        </DialogHeader>
+        <div className="-mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          当前状态
+          <Badge variant="outline" className="h-5 px-1.5 text-[11px]">
+            {currentStatusBadge}
+          </Badge>
+        </div>
+
+        <div className="space-y-3.5">
+          <div className="space-y-1.5">
+            <Label>目标状态</Label>
+            <Select
+              value={target}
+              onValueChange={(v) => {
+                setTarget(v);
+                setMissing([]);
+                setServerError(null);
+              }}
+              disabled={options.length === 0}
+            >
+              <SelectTrigger className={cn(missing.length > 0 && "border-destructive")}>
+                <SelectValue placeholder="选择目标状态" />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((o) => (
+                  <SelectItem key={o.target} value={o.target}>
+                    <span className="flex items-center gap-2">
+                      <span>{o.target}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {o.summary}
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {options.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                当前状态没有你可执行的人工迁移
+              </p>
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="transition-reason">原因</Label>
+            <Textarea
+              id="transition-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="为什么人工变更?写入审计与活动流"
+              rows={3}
+              className={cn(!reasonValid && reason.length > 0 && "border-destructive")}
+            />
+          </div>
+
+          {isDone ? (
+            <div className="space-y-1.5">
+              <Label>评审结论</Label>
+              <RadioGroup
+                value={verdict}
+                onValueChange={(v) => setVerdict(v as "PASSED" | "CHANGES_REQUESTED")}
+                className="grid-flow-col justify-start gap-4"
+              >
+                <label className="flex items-center gap-1.5 text-sm">
+                  <RadioGroupItem value="PASSED" />
+                  PASSED
+                </label>
+                <label className="flex items-center gap-1.5 text-sm">
+                  <RadioGroupItem value="CHANGES_REQUESTED" />
+                  CHANGES_REQUESTED
+                </label>
+              </RadioGroup>
+            </div>
+          ) : null}
+
+          {isClosed ? (
+            <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+              关闭后可在已关闭过滤中找回。
+            </p>
+          ) : null}
+
+          {needsEvidence ? (
+            <div className="space-y-3 rounded-md border border-border p-3">
+              {needsCommit || target === "交付" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="transition-commit">合并 commit</Label>
+                  <Input
+                    id="transition-commit"
+                    value={commit}
+                    onChange={(e) => setCommit(e.target.value)}
+                    placeholder="7-40 位 hex(如 a1b2c3d)"
+                    className={cn(
+                      "font-mono text-xs",
+                      missing.includes("commit") && "border-destructive",
+                    )}
+                  />
+                </div>
+              ) : null}
+
+              <div className="space-y-1.5">
+                <Label htmlFor="transition-run">关联 run(可选)</Label>
+                <Input
+                  id="transition-run"
+                  value={runId}
+                  onChange={(e) => setRunId(e.target.value)}
+                  placeholder="orchestrator run id"
+                  className="font-mono text-xs"
+                />
+              </div>
+
+              {needsLinks || target === "交付" ? (
+                <div className="space-y-1.5">
+                  <Label>链接{needsLinks ? "" : "(可选)"}</Label>
+                  <div className="flex gap-1.5">
+                    <Input
+                      value={linkInput}
+                      onChange={(e) => setLinkInput(e.target.value)}
+                      placeholder="PR / commit 链接"
+                      className={cn(
+                        "text-xs",
+                        missing.includes("links") && "border-destructive",
+                      )}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addLink();
+                        }
+                      }}
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={addLink}>
+                      <IconPlus className="size-3.5" />
+                    </Button>
+                  </div>
+                  {links.length > 0 ? (
+                    <ul className="space-y-1">
+                      {links.map((l, i) => (
+                        <li
+                          key={`${l}-${i}`}
+                          className="flex items-center justify-between gap-2 rounded bg-muted px-2 py-1 text-xs"
+                        >
+                          <span className="truncate">{l}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLinks((prev) => prev.filter((_, idx) => idx !== i))
+                            }
+                            className="shrink-0 text-muted-foreground hover:text-foreground"
+                          >
+                            <IconX className="size-3" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="space-y-1.5">
+                <Label>交付物(可选)</Label>
+                <div className="flex gap-1.5">
+                  <Input
+                    value={deliveryInput}
+                    onChange={(e) => setDeliveryInput(e.target.value)}
+                    placeholder="交付物名称"
+                    className="text-xs"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addDeliveryItem();
+                      }
+                    }}
+                  />
+                  <Button type="button" variant="outline" size="sm" onClick={addDeliveryItem}>
+                    <IconPlus className="size-3.5" />
+                  </Button>
+                </div>
+                {deliveryItems.length > 0 ? (
+                  <ul className="space-y-1">
+                    {deliveryItems.map((d, i) => (
+                      <li
+                        key={`${d}-${i}`}
+                        className="flex items-center justify-between gap-2 rounded bg-muted px-2 py-1 text-xs"
+                      >
+                        <span className="truncate">{d}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDeliveryItems((prev) => prev.filter((_, idx) => idx !== i))
+                          }
+                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                        >
+                          <IconX className="size-3" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {missing.length > 0 || serverError ? (
+            <div className="rounded-md bg-destructive/15 px-3 py-2 text-xs text-destructive">
+              {missing.length > 0
+                ? `缺少证据: ${missing.join(", ")}`
+                : serverError}
+            </div>
+          ) : null}
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={transition.isPending}
+          >
+            取消
+          </Button>
+          <Button onClick={submit} disabled={!canSubmit}>
+            {transition.isPending ? (
+              <IconLoader2 className="size-4 animate-spin" />
+            ) : null}
+            {isDone && verdict === "CHANGES_REQUESTED" ? "驳回并要求返工" : "确认变更"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── F5: 任务拆分阈值(规划前置契约,02 §3.10) ────────────────────────────────
+
+/** 规模徽标 — ok=灰点、split-required=warning badge「规模 N 文件」、无估算=浅字. */
+function ScaleBadge({ estimate }: { estimate: ScaleEstimate | null | undefined }) {
+  if (!estimate) {
+    return <span className="text-[11px] text-muted-foreground/70">未估算</span>;
+  }
+  if (estimate.verdict === "split-required") {
+    return (
+      <Badge className="h-5 gap-1 bg-amber-100 px-1.5 text-[11px] text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400">
+        <IconAlertTriangle className="size-3" />
+        规模 {estimate.files} 文件
+      </Badge>
+    );
+  }
+  return (
+    <span
+      className="inline-block size-2 shrink-0 rounded-full bg-muted-foreground/40"
+      title="规模估算: ok"
+    />
+  );
+}
+
+/** 告警条(brief 详情/派发面板顶部)— verdict==='split-required' 时出现. */
+function ScaleWarningBar({
+  workItemId,
+  estimate,
+  onOpenSplit,
+  overrideDispatchPending,
+  onOverrideDispatch,
+}: {
+  workItemId: string;
+  estimate: ScaleEstimate;
+  onOpenSplit: () => void;
+  overrideDispatchPending: boolean;
+  onOverrideDispatch: () => void;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  return (
+    <div className="mt-3 flex items-start gap-3 rounded-lg border border-amber-300/60 bg-amber-500/10 px-3.5 py-2.5 dark:border-amber-700/40">
+      <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+      <div className="min-w-0 flex-1 text-xs">
+        <p className="font-medium text-foreground">
+          预估涉及 {estimate.files} 个文件
+          {estimate.crossLifecycle ? " / 跨生命周期协同" : ""}
+          ——超过单节点阈值(&gt;6),建议拆分
+        </p>
+        <p className="mt-0.5 text-muted-foreground">
+          M3-D 三次预算耗尽实证:超规模对 vLLM 是确定性失败
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button size="sm" onClick={onOpenSplit} className="gap-1.5">
+          <IconScissors className="size-3.5" />
+          一键拆分
+        </Button>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setConfirmOpen(true)}
+                disabled={overrideDispatchPending}
+              >
+                仍然派发
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>人工覆盖将记录审计</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认覆盖规模阈值派发？</AlertDialogTitle>
+            <AlertDialogDescription>
+              超阈值派发失败率高——M3-D 三次预算耗尽实证。此操作会记录为
+              scale.overridden 活动(含估算快照),供后续审计。确认覆盖？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmOpen(false);
+                onOverrideDispatch();
+              }}
+            >
+              确认覆盖并派发
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+/** 拆分对话框(shadcn Dialog,560px)— docs/sdlc-impl-f5-f10.md §1B. */
+function SplitWorkItemDialog({
+  workItemId,
+  itemKey,
+  estimate,
+  open,
+  onOpenChange,
+}: {
+  workItemId: string;
+  itemKey?: string;
+  estimate: ScaleEstimate | null | undefined;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const splitWorkItem = useSplitWorkItem();
+  const [rows, setRows] = useState<{ title: string; description: string }[]>([]);
+  const [chainBlockedBy, setChainBlockedBy] = useState(true);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  // Re-seed the draft every time the dialog opens (initial pre-fill by file
+  // cluster — §1B: "按 signals 里的文件簇分组建议(每组 ≤6 文件)生成 2–3
+  // 行草稿").
+  function handleOpenChange(v: boolean) {
+    if (v) {
+      setRows(buildDraftChildren(estimate?.signals ?? []));
+      setChainBlockedBy(true);
+      setServerError(null);
+    }
+    onOpenChange(v);
+  }
+
+  function updateRow(i: number, patch: Partial<{ title: string; description: string }>) {
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+
+  function submit() {
+    setServerError(null);
+    splitWorkItem.mutate(
+      {
+        workItemId,
+        children: rows.map((r) => ({
+          title: r.title.trim(),
+          description: r.description.trim() || undefined,
+        })),
+        chainBlockedBy,
+      },
+      {
+        onSuccess: (res: { children?: { id: string; itemKey: string }[] }) => {
+          toast.success(`已拆分为 ${res.children?.length ?? rows.length} 个子单`);
+          onOpenChange(false);
+        },
+        onError: (err: unknown) => {
+          const e = err as { code?: string; message?: string };
+          setServerError(
+            e?.message?.replace(/^Action split-work-item failed:\s*/, "") ??
+              "拆分失败",
+          );
+          // Dialog stays open (S2 契约: 失败红条提示不关框).
+        },
+      },
+    );
+  }
+
+  const canSubmit = canSubmitSplit(rows) && !splitWorkItem.isPending;
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="w-[560px] max-w-[95vw]">
+        <DialogHeader>
+          <DialogTitle>拆分 {itemKey ?? workItemId.slice(0, 8)}</DialogTitle>
+          <DialogDescription>
+            按 signals 文件簇预填 · 每子单 ≤6 文件 · itemKey 由项目序列器分配
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          {rows.map((row, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <div className="flex-1 space-y-1.5">
+                <Input
+                  placeholder="子单标题(必填)"
+                  value={row.title}
+                  onChange={(e) => updateRow(i, { title: e.target.value })}
+                />
+                <Textarea
+                  placeholder="简述(可选)"
+                  rows={2}
+                  value={row.description}
+                  onChange={(e) => updateRow(i, { description: e.target.value })}
+                  className="text-xs"
+                />
+              </div>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="mt-0.5 shrink-0 text-muted-foreground hover:text-destructive"
+                onClick={() => setRows((prev) => prev.filter((_, idx) => idx !== i))}
+                title="删除"
+              >
+                <IconTrash className="size-4" />
+              </Button>
+            </div>
+          ))}
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setRows((prev) => [...prev, { title: "", description: "" }])}
+          >
+            <IconPlus className="size-4" />
+            添加子单
+          </Button>
+
+          <div className="flex items-center gap-2 border-t pt-3">
+            <Switch checked={chainBlockedBy} onCheckedChange={setChainBlockedBy} id="chain-blocked-by" />
+            <Label htmlFor="chain-blocked-by" className="cursor-pointer text-xs font-normal">
+              子单按顺序 blocked-by 链接
+            </Label>
+          </div>
+
+          {serverError ? (
+            <p className="rounded-md bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
+              {serverError}
+            </p>
+          ) : null}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
+            {splitWorkItem.isPending ? (
+              <IconLoader2 className="size-4 animate-spin" />
+            ) : (
+              <IconScissors className="size-4" />
+            )}
+            确认拆分({rows.length} 子单)
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1293,69 +1978,54 @@ export function WorkItemDetailPage() {
   const triggerStage = useTriggerStage();
   const rollbackStage = useRollbackStage();
   const advanceStage = useAdvanceStage();
-  const runAcceptance = useRunAcceptance();
+  const estimateBriefScale = useEstimateBriefScale();
 
   const [monitorInterval, setMonitorInterval] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activityTab, setActivityTab] = useState<"activity" | "comments">(
     "activity",
   );
-  const [acceptDialogOpen, setAcceptDialogOpen] = useState(false);
-  const [acceptUrl, setAcceptUrl] = useState("");
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
 
-  function onDispatch() {
+  function dispatchArgs(overrideScale?: boolean) {
     const trimmed = monitorInterval.trim();
     const parsed = trimmed === "" ? undefined : Number(trimmed);
     const monitorIntervalSec =
       parsed !== undefined && Number.isFinite(parsed) && parsed >= 0
         ? Math.floor(parsed)
         : undefined;
-    dispatch.mutate(
-      monitorIntervalSec !== undefined
-        ? { workItemId: id, monitorIntervalSec }
-        : { workItemId: id },
-      {
-        onSuccess: (res: { threadId: string }) => {
-          toast.success(`已派发 — 大脑线程 ${res.threadId.slice(0, 12)}…`);
-        },
-      },
-    );
+    return {
+      workItemId: id,
+      ...(monitorIntervalSec !== undefined ? { monitorIntervalSec } : {}),
+      ...(overrideScale ? { overrideScale: true } : {}),
+    };
   }
 
-  function submitAcceptance() {
-    const url = acceptUrl.trim();
-    if (!url) {
-      toast.error("请输入待验证页面 URL");
-      return;
-    }
-    runAcceptance.mutate(
-      {
-        workItemId: id,
-        scenarios: [
-          {
-            name: "手动截图验收",
-            kind: "screenshot" as const,
-            url,
-          },
-        ],
+  function onDispatch() {
+    dispatch.mutate(dispatchArgs(), {
+      onSuccess: (res: { threadId?: string; blockedBy?: string[] }) => {
+        if (res.threadId) {
+          toast.success(`已派发 — 大脑线程 ${res.threadId.slice(0, 12)}…`);
+        } else if (res.blockedBy?.length) {
+          toast.info(`等待依赖完成: ${res.blockedBy.join(", ")}`);
+        }
       },
-      {
-        onSuccess: (res: {
-          verdict: "pass" | "reject";
-          passed: number;
-          scenarios: unknown[];
-        }) => {
-          setAcceptDialogOpen(false);
-          setAcceptUrl("");
-          const total = res.scenarios?.length ?? 0;
-          if (res.verdict === "pass") {
-            toast.success(`验收通过 — ${res.passed}/${total}`);
-          } else {
-            toast.error(`验收驳回 — ${res.passed}/${total}`);
-          }
-        },
+    });
+  }
+
+  // F5: "仍然派发" — 人工覆盖 scale-exceeded 拒绝(02 §3.10 决策序①),经
+  // AlertDialog 二次确认后带 overrideScale:true 重新派发(scale.overridden
+  // 活动落库,见 dispatch-to-orchestrator.ts)。
+  function onOverrideDispatch() {
+    dispatch.mutate(dispatchArgs(true), {
+      onSuccess: (res: { threadId?: string; blockedBy?: string[] }) => {
+        if (res.threadId) {
+          toast.success(`已覆盖规模阈值派发 — 大脑线程 ${res.threadId.slice(0, 12)}…`);
+        } else if (res.blockedBy?.length) {
+          toast.info(`等待依赖完成: ${res.blockedBy.join(", ")}`);
+        }
       },
-    );
+    });
   }
 
   if (isLoading && !item) {
@@ -1388,7 +2058,13 @@ export function WorkItemDetailPage() {
   const queue = activity.data?.queue;
   const status = activity.data?.itemStatus ?? item.status;
   const remote = item.project?.gitRemote;
-  const branch = item.project?.defaultBranch ?? "main";
+  // F8 (S4 执行组): show the latest NON-EMPTY branch across the item's run
+  // history (newest-first; runId may still be null pre-F9-backfill, branch
+  // likewise) rather than always the project's default branch — falls back
+  // to the item's own `branch` column, then the project default.
+  const runs = (item as { runs?: WorkItemRunSummary[] }).runs ?? [];
+  const latestRunBranch = runs.find((r) => r.branch)?.branch ?? null;
+  const branch = latestRunBranch || item.branch || item.project?.defaultBranch || "main";
   const ghHref = repoHref(remote);
   const ghLabel = repoLabel(remote);
 
@@ -1398,6 +2074,10 @@ export function WorkItemDetailPage() {
     (item as { sprint?: { id: string; name: string; status: string } | null })
       .sprint ?? null;
   const itemKey = (item as { itemKey?: string }).itemKey;
+  // F8: itemKey 消歧(读路径) — prefer this for anything shown to a human;
+  // `itemKey` (raw) stays available for identity/logic uses.
+  const itemKeyDisplay =
+    (item as { itemKeyDisplay?: string }).itemKeyDisplay ?? itemKey;
   const currentStageName =
     (item as { currentStageName?: string }).currentStageName ?? "待办";
   const plannedStagesList: string[] = (() => {
@@ -1448,6 +2128,21 @@ export function WorkItemDetailPage() {
             {item.type}
           </Badge>
           <StatusChip status={status} />
+          <ScaleBadge estimate={item.scaleEstimate} />
+          {!item.scaleEstimate ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 gap-1 px-1.5 text-[11px] text-muted-foreground"
+              disabled={estimateBriefScale.isPending}
+              onClick={() => estimateBriefScale.mutate({ workItemId: id })}
+            >
+              {estimateBriefScale.isPending ? (
+                <IconLoader2 className="size-3 animate-spin" />
+              ) : null}
+              估算规模
+            </Button>
+          ) : null}
           {slot?.status === "queued" && queue ? (
             <span className="text-xs text-muted-foreground">
               排队中 · {queue.running}/{queue.brainConcurrency} 个槽位忙碌
@@ -1464,6 +2159,24 @@ export function WorkItemDetailPage() {
         <h1 className="text-2xl font-semibold leading-tight tracking-tight">
           {item.title}
         </h1>
+
+        {item.scaleEstimate?.verdict === "split-required" ? (
+          <ScaleWarningBar
+            workItemId={id}
+            estimate={item.scaleEstimate}
+            onOpenSplit={() => setSplitDialogOpen(true)}
+            overrideDispatchPending={dispatch.isPending}
+            onOverrideDispatch={onOverrideDispatch}
+          />
+        ) : null}
+
+        <SplitWorkItemDialog
+          workItemId={id}
+          itemKey={itemKey}
+          estimate={item.scaleEstimate}
+          open={splitDialogOpen}
+          onOpenChange={setSplitDialogOpen}
+        />
 
         {/* Controls row */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -1775,59 +2488,6 @@ export function WorkItemDetailPage() {
                     ) : null}
                     回退至{prevStage ? `「${prevStage}」` : "上一阶段"}
                   </Button>
-                  <Dialog
-                    open={acceptDialogOpen}
-                    onOpenChange={setAcceptDialogOpen}
-                  >
-                    <DialogTrigger asChild>
-                      <Button
-                        className="w-full gap-1.5"
-                        size="sm"
-                        variant="outline"
-                      >
-                        <IconCircleCheck className="size-3.5" />
-                        运行验收
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>运行验收</DialogTitle>
-                        <DialogDescription>
-                          对指定页面截图验证，生成验收报告并完成「验收」阶段。
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="accept-url">待验证页面 URL</Label>
-                        <Input
-                          id="accept-url"
-                          type="url"
-                          value={acceptUrl}
-                          onChange={(e) => setAcceptUrl(e.target.value)}
-                          placeholder="https://..."
-                          autoFocus
-                        />
-                      </div>
-                      <DialogFooter>
-                        <Button
-                          variant="ghost"
-                          onClick={() => setAcceptDialogOpen(false)}
-                        >
-                          取消
-                        </Button>
-                        <Button
-                          disabled={runAcceptance.isPending}
-                          onClick={submitAcceptance}
-                        >
-                          {runAcceptance.isPending ? (
-                            <IconLoader2 className="size-3.5 animate-spin" />
-                          ) : (
-                            <IconCircleCheck className="size-3.5" />
-                          )}
-                          运行
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
                 </div>
               );
             })()}
@@ -1836,7 +2496,16 @@ export function WorkItemDetailPage() {
             <div className="divide-y divide-border rounded-xl border border-border bg-card">
               {itemKey ? (
                 <MetaRow icon={IconHash} label="编号">
-                  <span className="font-mono text-xs">{itemKey}</span>
+                  <span
+                    className="font-mono text-xs"
+                    title={
+                      itemKeyDisplay !== itemKey
+                        ? "历史重号，已消歧显示"
+                        : undefined
+                    }
+                  >
+                    {itemKeyDisplay}
+                  </span>
                 </MetaRow>
               ) : null}
 
@@ -1848,9 +2517,17 @@ export function WorkItemDetailPage() {
                 <EditableSprint id={id} sprint={sprint} />
               </MetaRow>
 
-              <MetaRow icon={IconListCheck} label="当前阶段">
-                <span className="text-sm">{currentStageName}</span>
-              </MetaRow>
+              <GuardedStatusRow
+                item={{
+                  itemKey: itemKeyDisplay,
+                  status: item.status,
+                  currentStageName,
+                  execState: (item as { execState?: string | null }).execState ?? null,
+                  allowedTransitions:
+                    (item as { allowedTransitions?: TransitionOption[] })
+                      .allowedTransitions ?? [],
+                }}
+              />
 
               <MetaRow icon={IconFlag} label="优先级">
                 <EditablePriority id={id} priority={item.priority} />
@@ -1924,6 +2601,54 @@ export function WorkItemDetailPage() {
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
+                </MetaRow>
+              ) : null}
+
+              {/* F8 (S4 执行组接真): full dispatch/run history, newest first
+                  — a redispatch appends a row rather than overwriting the
+                  previous one (SDLC-053), so a superseded run's trail stays
+                  visible (greyed + strikethrough) instead of vanishing. */}
+              {runs.length > 0 ? (
+                <MetaRow icon={IconTimeline} label="关联运行">
+                  <ul className="flex flex-col gap-1.5">
+                    {runs.map((r, i) => (
+                      <li
+                        key={`${r.runId ?? "pending"}-${r.dispatchedAt}-${i}`}
+                        className={cn(
+                          "flex flex-wrap items-center gap-1.5 text-xs",
+                          r.superseded && "text-muted-foreground/60 line-through",
+                        )}
+                      >
+                        {r.runId ? (
+                          <a
+                            href={orchestratorRunHref(r.runId)}
+                            className={cn(
+                              "flex items-center gap-1 font-mono hover:underline",
+                              !r.superseded && "text-foreground/80 hover:text-foreground",
+                            )}
+                          >
+                            {r.runId.slice(0, 12)}…
+                            <IconExternalLink className="size-3 shrink-0 opacity-60" />
+                          </a>
+                        ) : (
+                          <span className="font-mono">等待运行 id 回填</span>
+                        )}
+                        {r.branch ? (
+                          <span className="font-mono text-muted-foreground">
+                            · {r.branch}
+                          </span>
+                        ) : null}
+                        <span className="text-muted-foreground">
+                          · {fmtDateTime(r.dispatchedAt)}
+                        </span>
+                        {r.superseded ? (
+                          <Badge variant="outline" className="h-4 px-1 text-[10px]">
+                            已重派
+                          </Badge>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
                 </MetaRow>
               ) : null}
 

@@ -63,20 +63,29 @@ const enqueueWorkItemSchema = z.object({
   priority: z.coerce.number().int().optional().describe('Queue priority (default 0)'),
 });
 
-const updateWorkItemSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().optional(),
-  description: z.string().optional(),
-  type: z.string().optional(),
-  priority: z.number().int().optional(),
-  risk: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-  executionMode: z.string().optional(),
-  sprintId: z.string().nullable().optional(),
-  plannedStages: z.array(z.string()).optional(),
-  currentStageName: z.string().optional(),
-  branch: z.string().nullable().optional(),
-});
+// F3 (T-F3-07): currentStageName REMOVED from this schema and `.strict()`
+// added — every stage/status change must go through the guarded
+// transition-work-item action or the evidence-backed advance-stage writeback
+// channel; update-work-item is metadata-only now, and any attempt to smuggle
+// currentStageName through it is a schema-level rejection (unrecognized key),
+// not a silently-stripped no-op.
+const updateWorkItemSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    type: z.string().optional(),
+    priority: z.number().int().optional(),
+    risk: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    executionMode: z.string().optional(),
+    sprintId: z.string().nullable().optional(),
+    plannedStages: z.array(z.string()).optional(),
+    branch: z.string().nullable().optional(),
+    owner: z.string().nullable().optional(),
+    nature: z.array(z.string()).optional(),
+  })
+  .strict();
 
 // Mirrors create-work-item.ts's schema.type enum (M1-6: adds "from-audit").
 const createWorkItemSchema = z.object({
@@ -116,6 +125,8 @@ const advanceStageSchema = z.object({
   fromStage: z.string().min(1),
   expectedRunId: z.string().optional(),
 });
+
+const listOrgMembersSchema = z.object({});
 
 // ============================================================================
 // STAGE_ORDER constant (from shared/types.ts)
@@ -800,10 +811,36 @@ describe('update-work-item schema', () => {
       executionMode: 'auto',
       sprintId: null,
       plannedStages: ['分析', '设计'],
-      currentStageName: '分析',
       branch: 'feature/x',
+      owner: 'alice@example.com',
+      nature: ['后端'],
     });
     expect(result.success).toBe(true);
+  });
+
+  // T-F3-07: update-work-item 拒 currentStageName — the旁路(bypass) that let
+  // stage advancement skip the F3 guard entirely must be schema-rejected, not
+  // silently accepted/stripped.
+  it('F3/T-F3-07: rejects currentStageName as an unrecognized key', () => {
+    const result = updateWorkItemSchema.safeParse({
+      id: 'wi1',
+      currentStageName: '实施',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) => i.code === 'unrecognized_keys'),
+      ).toBe(true);
+    }
+  });
+
+  it('F3/T-F3-07: rejects currentStageName even alongside other valid fields', () => {
+    const result = updateWorkItemSchema.safeParse({
+      id: 'wi1',
+      title: 'Sneaky stage bump',
+      currentStageName: 'done' as any,
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects missing id', () => {
@@ -1179,5 +1216,15 @@ describe('TrackerWorkItem type structure', () => {
     expect(fields).toContain('orchestratorThreadId');
     expect(fields).toContain('createdAt');
     expect(fields).toContain('updatedAt');
+  });
+});
+
+// ============================================================================
+// Tests for listOrgMembersSchema
+// ============================================================================
+
+describe('list-org-members schema', () => {
+  it('accepts an empty object (no required params)', () => {
+    expect(() => listOrgMembersSchema.parse({})).not.toThrow();
   });
 });

@@ -1,7 +1,8 @@
 import { defineAction } from "@agent-native/core";
-import { getDb, schema } from "../server/db/index.js";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
+
+import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { readAppStateForCurrentTab } from "./_tab-state.js";
 
@@ -75,6 +76,90 @@ export default defineAction({
             .limit(1)
         )[0];
         if (item) screen.openWorkItem = item;
+      } catch {
+        // continue
+      }
+    }
+
+    // Sprint focus when viewing a sprint detail page.
+    if (nav?.view === "sprint" && nav?.sprintId) {
+      try {
+        const sprintRows = await db
+          .select()
+          .from(schema.sprints)
+          .where(
+            and(
+              eq(schema.sprints.id, nav.sprintId),
+              ownerScope(schema.sprints),
+            ),
+          )
+          .limit(1);
+        if (sprintRows[0]) {
+          const sprint = sprintRows[0];
+          const items = await db
+            .select({
+              id: schema.workItems.id,
+              title: schema.workItems.title,
+              type: schema.workItems.type,
+              status: schema.workItems.status,
+              currentStageName: schema.workItems.currentStageName,
+            })
+            .from(schema.workItems)
+            .where(eq(schema.workItems.sprintId, nav.sprintId));
+          screen.openSprint = {
+            id: sprint.id,
+            projectId: sprint.projectId,
+            name: sprint.name,
+            goal: sprint.goal,
+            status: sprint.status,
+            phase: sprint.phase,
+            itemCount: items.length,
+            delivered: items.filter((i) => i.status === "done").length,
+            items,
+          };
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // Queue focus when viewing the queue page.
+    if (nav?.view === "queue") {
+      try {
+        const allQueueRows = await db
+          .select()
+          .from(schema.execQueue)
+          .where(ownerScope(schema.execQueue))
+          .orderBy(
+            desc(schema.execQueue.priority),
+            asc(schema.execQueue.enqueuedAt),
+          )
+          .limit(500);
+
+        const stats = {
+          queued: allQueueRows.filter((r) => r.status === "queued").length,
+          running: allQueueRows.filter((r) => r.status === "running").length,
+          paused: allQueueRows.filter((r) => r.status === "paused").length,
+        };
+
+        const topRows = allQueueRows.slice(0, 10);
+        const enrichedItems = await Promise.all(
+          topRows.map(async (queueRow) => {
+            const wiRows = await db
+              .select({
+                id: schema.workItems.id,
+                title: schema.workItems.title,
+                type: schema.workItems.type,
+                status: schema.workItems.status,
+              })
+              .from(schema.workItems)
+              .where(eq(schema.workItems.id, queueRow.workItemId))
+              .limit(1);
+            return { ...queueRow, workItem: wiRows[0] ?? null };
+          }),
+        );
+
+        screen.queue = { stats, items: enrichedItems };
       } catch {
         // continue
       }

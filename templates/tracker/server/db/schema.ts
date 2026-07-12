@@ -3,6 +3,7 @@ import {
   text,
   integer,
   ownableColumns,
+  uniqueIndex,
 } from "@agent-native/core/db/schema";
 
 // ---------------------------------------------------------------------------
@@ -28,16 +29,6 @@ export const projects = table("tracker_projects", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   stageGateConfig: text("stage_gate_config").notNull().default("{}"),
-  // --- Stage Configuration (vocabulary / flows / type assignment). Additive,
-  // strictly opt-in: an empty/default value on any of these three columns
-  // means "this project hasn't touched Stage Configuration" and every read
-  // site must fall back to today's hardcoded behavior exactly.
-  // stageDescriptions: JSON {[stageName]: string}.
-  stageDescriptions: text("stage_descriptions").notNull().default("{}"),
-  // stageFlows: JSON array of {id, name, stageNames: string[], dispatchTemplates: {[stageName]: string}}.
-  stageFlows: text("stage_flows").notNull().default("[]"),
-  // stageTypeAssignment: JSON {[workItemType]: flowId}.
-  stageTypeAssignment: text("stage_type_assignment").notNull().default("{}"),
   ...ownableColumns(),
 });
 
@@ -82,11 +73,27 @@ export const workItems = table("tracker_work_items", {
   owner: text("owner").default(null),
   // nature = JSON array of tags from set: 前端 | 后端 | API | 数据
   nature: text("nature").notNull().default("[]"),
-  // --- Stage Configuration: the flow id (tracker_projects.stageFlows entry)
-  // this item's plannedStages was resolved from at creation time. Nullable —
-  // items created before this feature (or when the type had no configured
-  // flow assignment) have none and keep using the legacy default logic.
-  flowId: text("flow_id"),
+  // --- Additive v24 (F3 状态迁移守卫): dispatch-tracking + closure fields.
+  // execState: null|queued|dispatched|running|returned — set by
+  // dispatch-to-orchestrator on successful dispatch; NEVER used to advance
+  // currentStageName (业务阶段不因派发而推进, 02 §8). Distinct from `status`
+  // (open|queued|running|dispatched|done|failed|blocked|closed), which keeps
+  // its pre-existing meaning for board rendering.
+  execState: text("exec_state").default(null),
+  // Set by transition-work-item when target=closed (未派发项人工关闭).
+  closedReason: text("closed_reason").default(null),
+  closedAt: text("closed_at").default(null),
+  // --- Additive v25 (F5 任务拆分阈值/规划前置契约, 02 §3.10):
+  // scaleEstimate: JSON {files,crossLifecycle,verdict,signals,at} written by
+  // estimate-brief-scale.ts (and overlaid by scale-runtime-signal.ts's
+  // runtime-exceeded path) — consumed by dispatch-to-orchestrator.ts's
+  // pre-dispatch gate and the S2/S4 scale badge + warning bar.
+  scaleEstimate: text("scale_estimate").default(null),
+  // splitParentId: set on each child row by split-work-item.ts — points back
+  // at the over-scale parent it was split from. Not a tracker_links edge
+  // (unlike decompose-epic's child-of) because the relationship is 1:1 with
+  // the row that created it, not a general graph edge.
+  splitParentId: text("split_parent_id").default(null),
 });
 
 // ---------------------------------------------------------------------------
@@ -230,6 +237,7 @@ export const execQueue = table("tracker_exec_queue", {
   currentStage: text("current_stage").default(""),
   enqueuedAt: text("enqueued_at").notNull(),
   startedAt: text("started_at").default(null),
+  blockedBy: text("blocked_by").default("[]"),
   ...ownableColumns(),
 });
 
@@ -283,6 +291,9 @@ export const approvals = table("tracker_approvals", {
   reason: text("reason").default(null),
   decidedAt: text("decided_at").default(null),
   createdAt: text("created_at").notNull(),
+  anchorArtifactId: text("anchor_artifact_id").default(null),
+  anchorVersion: integer("anchor_version").default(null),
+  staleAt: text("stale_at").default(null),
   ...ownableColumns(),
 });
 
@@ -322,4 +333,80 @@ export const workItemDocuments = table("tracker_work_item_documents", {
   url: text("url").notNull(),
   createdAt: text("created_at").notNull(),
   ...ownableColumns(),
+});
+
+// ---------------------------------------------------------------------------
+// Artifact reviews — v2.1 review three-question checkboxes per artifact
+// version. Anchored to (artifactId, version) so that when a new artifact
+// version is created, the new version starts with zero checked items
+// (reset semantics achieved purely by query resolution, not migration).
+// ---------------------------------------------------------------------------
+export const artifactReviews = table(
+  "tracker_artifact_reviews",
+  {
+    id: text("id").primaryKey(),
+    artifactId: text("artifact_id").notNull(),
+    version: integer("version").notNull(),
+    reviewKey: text("review_key").notNull(),
+    checked: integer("checked").notNull().default(0),
+    reviewer: text("reviewer").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    ...ownableColumns(),
+  },
+  (t) => ({
+    artifactVersionKeyUnique: uniqueIndex(
+      "tracker_artifact_reviews_artifact_version_key_idx",
+    ).on(t.artifactId, t.version, t.reviewKey),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// F8: work item run history — 回链完整性. Append-only: every successful
+// dispatch (single or bulk) INSERTs a new row rather than overwriting a
+// single slot (SDLC-053 — a redispatch used to silently clobber the prior
+// run's thread/branch, losing the earlier attempt's trail). A redispatch
+// marks the item's prior non-superseded row(s) `superseded=1` and inserts a
+// fresh row. `runId`/`branch` start null at dispatch time (only `threadId` is
+// known immediately) and are backfilled once the bound DAG run starts and
+// reports its branch (F9's writeback channel; see server/lib/work-item-runs.ts
+// for the backfill function F9's action will call). UNIQUE(workItemId, runId)
+// makes that backfill idempotent — re-reporting the same run is a no-op, not
+// a duplicate row (T-F8-04). NULL runId rows (pre-backfill) never collide
+// with each other under Postgres/SQLite unique-index NULL semantics.
+// ---------------------------------------------------------------------------
+export const workItemRuns = table(
+  "tracker_work_item_runs",
+  {
+    id: text("id").primaryKey(),
+    workItemId: text("work_item_id").notNull(),
+    runId: text("run_id").default(null),
+    threadId: text("thread_id").default(null),
+    branch: text("branch").default(null),
+    dispatchedAt: text("dispatched_at").notNull(),
+    superseded: integer("superseded").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+    ...ownableColumns(),
+  },
+  (t) => ({
+    workItemRunUnique: uniqueIndex(
+      "tracker_work_item_runs_work_item_run_idx",
+    ).on(t.workItemId, t.runId),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// F8: itemKey allocation authority — the single project-level sequencer.
+// Replaces the pre-F8 `count(*) + 1` allocation in create-work-item.ts and
+// decompose-epic.ts (SDLC-038: concurrent creates raced on the same count and
+// minted duplicate itemKeys). `nextSeq` holds the LAST issued number; the
+// atomic allocator (server/lib/item-key-sequencer.ts) does
+// `UPDATE ... SET next_seq = next_seq + 1 RETURNING next_seq` so each caller
+// gets a unique, contiguous number even under real concurrency (T-F8-01).
+// No ownable columns — this is an internal per-project counter, never queried
+// directly with ownerScope (the owning project is already ownable).
+// ---------------------------------------------------------------------------
+export const projectSeq = table("tracker_project_seq", {
+  projectId: text("project_id").primaryKey(),
+  nextSeq: integer("next_seq").notNull(),
 });

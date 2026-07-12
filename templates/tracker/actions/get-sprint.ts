@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
 
 export default defineAction({
   description: "Get a single sprint with its bound work items.",
@@ -21,10 +22,28 @@ export default defineAction({
     )[0];
     if (!sprint) throw new Error("Sprint not found or not accessible");
 
-    const items = await db
+    const rawItems = await db
       .select()
       .from(schema.workItems)
       .where(eq(schema.workItems.sprintId, args.id));
+
+    // F8: itemKey 消歧(读路径) — SprintDetailPage reads its items via
+    // useSprint→get-sprint (its OWN query, not list-work-items/get-work-item),
+    // so it needs the same disambiguation applied explicitly or itemKeyDisplay
+    // would be undefined and the page would fall back to the raw (possibly
+    // duplicate) itemKey. See list-queue.ts for the same pattern.
+    const displays = await computeItemKeyDisplays(
+      db,
+      rawItems.map((r) => ({
+        id: r.id,
+        projectId: r.projectId,
+        itemKey: r.itemKey,
+      })),
+    );
+    const items = rawItems.map((r) => ({
+      ...r,
+      itemKeyDisplay: displays.get(r.id) ?? r.itemKey,
+    }));
 
     const { inArray } = await import("drizzle-orm");
     const stages =
@@ -32,7 +51,12 @@ export default defineAction({
         ? await db
             .select()
             .from(schema.stages)
-            .where(inArray(schema.stages.workItemId, items.map((i) => i.id)))
+            .where(
+              inArray(
+                schema.stages.workItemId,
+                items.map((i) => i.id),
+              ),
+            )
         : [];
 
     return {

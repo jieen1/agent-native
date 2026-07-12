@@ -6,6 +6,7 @@ import {
 import { and, asc, desc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
+import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
 
 export default defineAction({
   description:
@@ -60,6 +61,29 @@ export default defineAction({
         return { ...queueRow, workItem: workItems[0] ?? null };
       }),
     );
+
+    // F8: itemKey 消歧(读路径) — the queue page joins work items via its OWN
+    // query above (not list-work-items/get-work-item), so it needs the same
+    // disambiguation applied explicitly rather than inheriting it via
+    // pass-through. See docs/sdlc-impl-f5-f10.md §F8's R3 gap note: this is
+    // exactly the "board/queue page independent list-fetching path" it
+    // warned might bypass the two-action dedup.
+    const displays = await computeItemKeyDisplays(
+      db,
+      enrichedItems
+        .filter((r) => r.workItem)
+        .map((r) => ({
+          id: r.workItem!.id,
+          projectId: r.workItem!.projectId,
+          itemKey: r.workItem!.itemKey,
+        })),
+    );
+    for (const row of enrichedItems) {
+      if (row.workItem) {
+        (row.workItem as { itemKeyDisplay?: string }).itemKeyDisplay =
+          displays.get(row.workItem.id) ?? row.workItem.itemKey;
+      }
+    }
 
     // Aggregate stats for all queue items visible to the caller.
     const allItems = (

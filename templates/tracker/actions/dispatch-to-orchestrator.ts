@@ -9,56 +9,13 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
-import { safeParseFlows } from "../shared/stage-vocabulary.js";
-
-// Stages that are "before implementation" — dispatch should advance past these.
-const PRE_IMPL_STAGES = new Set(["待办", "分析", "设计"]);
-const IMPL_STAGE = "实施";
-
-// Upsert the 实施 stage row for a work item, setting it to 执行中.
-async function upsertImplStage(
-  db: ReturnType<typeof getDb>,
-  workItemId: string,
-  ownerEmail: string,
-  orgId: string | null,
-  now: string,
-): Promise<void> {
-  const existing = (
-    await db
-      .select()
-      .from(schema.stages)
-      .where(
-        and(
-          eq(schema.stages.workItemId, workItemId),
-          eq(schema.stages.stageName, IMPL_STAGE),
-        ),
-      )
-      .limit(1)
-  )[0];
-
-  if (existing) {
-    await db
-      .update(schema.stages)
-      .set({ stageStatus: "执行中", startedAt: now, updatedAt: now })
-      .where(eq(schema.stages.id, existing.id));
-  } else {
-    await db.insert(schema.stages).values({
-      id: `stage_${workItemId.slice(0, 6)}_impl_${now.replace(/\D/g, "").slice(0, 14)}`,
-      workItemId,
-      stageName: IMPL_STAGE,
-      stageStatus: "执行中",
-      deliveryItems: "[]",
-      verdict: null,
-      startedAt: now,
-      completedAt: null,
-      createdAt: now,
-      updatedAt: now,
-      ownerEmail,
-      orgId,
-      visibility: "private",
-    });
-  }
-}
+import { resolveDispatchGate } from "../server/lib/dispatch-gate.js";
+import {
+  resolveScaleGate,
+  scaleExceededError,
+} from "../server/lib/scale-gate.js";
+import { actorFromCaller } from "../server/lib/transition-guard.js";
+import { recordDispatchRun } from "../server/lib/work-item-runs.js";
 
 // Dispatch a work item to the orchestrator's CC brain. Sends a STRUCTURED MCP
 // `tools/call` for `brain-send` with the requirement + the project's repo/branch
@@ -83,9 +40,17 @@ export default defineAction({
         "Periodic drift-check cadence (seconds) for the orchestrator brain " +
           "monitor. Omit → server default (120); 0 → event-only (no timer wakes).",
       ),
+    overrideScale: z
+      .boolean()
+      .optional()
+      .describe(
+        "Human escape hatch (02 §3.10 决策序①): dispatch anyway even though " +
+          "scale_estimate.verdict='split-required'. Logs a scale.overridden " +
+          "activity with the estimate snapshot — never silent.",
+      ),
   }),
   http: { method: "POST" },
-  run: async (args) => {
+  run: async (args, ctx) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -119,33 +84,108 @@ export default defineAction({
       );
     }
 
-    const tags = { source: "tracker", item_id: item.id };
+    // ── Dependency gate check ─────────────────────────────────────────────────
+    const gate = await resolveDispatchGate(
+      db,
+      args.workItemId,
+      ownerEmail,
+      orgId,
+    );
+    const now = new Date().toISOString();
 
-    // Stage Configuration (M2): resolve the dispatch template for the item's
-    // CURRENT stage from its assigned flow's dispatchTemplates, if any. Any
-    // failure to resolve one (no flowId — item predates this feature or its
-    // type had no assignment configured, flow no longer exists, no template
-    // mapped for this stage, malformed JSON) falls straight back to the
-    // literal 'sdlc-dev' exactly as before — this is the backward-
-    // compatibility guarantee, and it's the ONLY path every project takes
-    // until Stage Configuration is explicitly configured.
-    let dispatchTemplate = "sdlc-dev";
-    if (item.flowId) {
-      try {
-        const flows = safeParseFlows(project.stageFlows);
-        const flow = flows.find((f) => f.id === item.flowId);
-        const mapped = flow?.dispatchTemplates?.[item.currentStageName ?? ""];
-        if (mapped && mapped.trim()) dispatchTemplate = mapped.trim();
-      } catch {
-        // Malformed Stage Configuration — fall back to the default template.
-      }
+    if (!gate.ready) {
+      // Upsert the exec_queue row as blocked.
+      await db
+        .insert(schema.execQueue)
+        .values({
+          id: `${args.workItemId.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+          workItemId: args.workItemId,
+          priority: 0,
+          status: "blocked",
+          currentStage: item.currentStageName ?? "",
+          enqueuedAt: now,
+          startedAt: null,
+          blockedBy: JSON.stringify(
+            gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })),
+          ),
+          ownerEmail,
+          orgId,
+        })
+        .onConflictDoUpdate({
+          target: schema.execQueue.workItemId,
+          set: {
+            status: "blocked",
+            blockedBy: JSON.stringify(
+              gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })),
+            ),
+          },
+        });
+
+      // Update work_items.status to blocked (do NOT change currentStageName).
+      await db
+        .update(schema.workItems)
+        .set({ status: "blocked", updatedAt: now })
+        .where(eq(schema.workItems.id, args.workItemId));
+
+      // Write an activity log entry.
+      await db.insert(schema.activities).values({
+        id: `act_block_${args.workItemId.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+        workItemId: args.workItemId,
+        actorKind: "agent",
+        actorName: "智能体",
+        eventType: "等待依赖",
+        payload: JSON.stringify({
+          blockedBy: gate.blockedBy.map((d) => d.itemKey),
+        }),
+        createdAt: now,
+        ownerEmail,
+        orgId,
+      });
+
+      return {
+        workItemId: args.workItemId,
+        status: "blocked",
+        blockedBy: gate.blockedBy.map((d) => d.itemKey),
+      };
     }
+
+    // ── F5 pre-dispatch scale gate (02 §3.10 拆分契约) ──────────────────────
+    // Shared with bulk-dispatch via resolveScaleGate (server/lib/scale-gate.ts)
+    // — the SINGLE source of truth for the scale contract across both dispatch
+    // paths, so the gate can never again live in only one of them (the F3-era
+    // bulk-path blind spot). Reads scale_estimate (persisted by
+    // estimate-brief-scale.ts) or computes it on the fly. verdict='split-
+    // required' without an explicit human overrideScale rejects BEFORE any
+    // state write — mirrors the zero-state-residue contract of the dependency
+    // gate above (T-F5-03: execState stays null/queued, zero activity residue).
+    const { estimate: scaleEstimate, exceeded: scaleExceeded } =
+      resolveScaleGate(item);
+    if (scaleExceeded && !args.overrideScale) {
+      throw scaleExceededError(scaleEstimate);
+    }
+
+    // Determine baseBranch: use chainedBranch if available, otherwise project default.
+    const baseBranch = gate.chainedBranch || project.defaultBranch || "main";
+
+    // F9: carry ownerEmail/orgId so the orchestrator reconciler's writeback
+    // channel (out of tracker's scope — server/tracker-client.ts) can mint a
+    // correctly-scoped A2A JWT for its callback into the tracker's guarded
+    // actions (advance-stage's ownerScope() + this item's own tenant) once the
+    // run reaches a terminal state. org_id is omitted when the caller has no
+    // active org (single-tenant/local mode) — brain-send's tags are
+    // Record<string,string>, so a null/undefined orgId must not be forwarded.
+    const tags: Record<string, string> = {
+      source: "tracker",
+      item_id: item.id,
+      owner_email: ownerEmail,
+    };
+    if (orgId) tags.org_id = orgId;
 
     const requirement = item.description?.trim() || item.title;
     const message =
       `Work item ${item.id} (${project.key}) — "${item.title}".\n\n` +
       `Requirement:\n${requirement}\n\n` +
-      `Work in the checked-out workspace. Follow the orchestrating-v3 skill. Coding/development work DEFAULTS to the configurable development engine: analyze the requirement and the existing code yourself, then after workspaceCreate call workflowRun with template '${dispatchTemplate}' and inputs { spec, workspaceId, devEngine } to hand the actual coding to the develop node. The dev engine defaults to the local vLLM but is configurable — pass a devEngine when the item or project specifies one. You (the brain) analyze, review the resulting git diff, fix anything wrong, and commit — rather than writing the business code yourself. Monitor by polling, then workspaceCommitPush to open a PR. When done, report the run id and the PR url.`;
+      `Work in the checked-out workspace. Follow the orchestrating-v3 skill. Coding/development work DEFAULTS to the configurable development engine: analyze the requirement and the existing code yourself, then after workspaceCreate call workflowRun with template 'sdlc-dev' and inputs { spec, workspaceId, devEngine } to hand the actual coding to the develop node. The dev engine defaults to the local vLLM but is configurable — pass a devEngine when the item or project specifies one. You (the brain) analyze, review the resulting git diff, fix anything wrong, and commit — rather than writing the business code yourself. Monitor by polling, then workspaceCommitPush to open a PR. When done, report the run id and the PR url.`;
 
     // brain-send (additive `tags` param) instructs the brain to attach these
     // tags to every workflowRun/workspaceCreate/spawnOnce so the activity is
@@ -153,7 +193,7 @@ export default defineAction({
     const { data } = await callOrchestratorTool(ownerEmail, "brain-send", {
       message,
       repo: project.gitRemote,
-      baseBranch: project.defaultBranch || "main",
+      baseBranch,
       tags,
       // Forward the configurable periodic drift-check cadence. Undefined lets
       // the orchestrator apply its env default (BRAIN_MONITOR_INTERVAL_SEC).
@@ -172,32 +212,56 @@ export default defineAction({
       );
     }
 
-    const now = new Date().toISOString();
-
-    // Advance to 实施 if still in a pre-implementation stage (待办/分析/设计).
-    // Never roll back a stage that is already at 实施 or beyond.
-    const shouldAdvanceToImpl = PRE_IMPL_STAGES.has(
-      item.currentStageName ?? "待办",
-    );
-    const newStageName = shouldAdvanceToImpl
-      ? IMPL_STAGE
-      : item.currentStageName;
-
+    // F3 (SDLC-063, 派发不推进): dispatch records ONLY that the item has been
+    // handed to the orchestrator — it records `execState='dispatched'` (the
+    // new v24 column) and NEVER writes `currentStageName`. Business-stage
+    // progression is exclusively driven by the F9 evidence-backed
+    // reconciler/writeback channel (实施→测试→… via `advance-stage`) or by a
+    // human through the guarded `transition-work-item` action. Dispatching
+    // twice, dispatching a stale item, or a brain that never delivers must
+    // never leave the item looking further along than it is.
     await db
       .update(schema.workItems)
       .set({
         status: "dispatched",
+        execState: "dispatched",
         orchestratorThreadId: threadId,
         orchestratorWorkspaceId: result.workspaceId ?? null,
         dispatchedAt: now,
         updatedAt: now,
-        ...(shouldAdvanceToImpl ? { currentStageName: IMPL_STAGE } : {}),
       })
       .where(eq(schema.workItems.id, item.id));
 
-    // Upsert the 实施 stage row so the board shows it as 执行中.
-    if (shouldAdvanceToImpl) {
-      await upsertImplStage(db, item.id, ownerEmail, orgId, now);
+    // F8 (回链完整性): append-only run history. A redispatch marks the
+    // item's prior live row(s) superseded=1 and inserts a fresh row — never
+    // overwrites a single slot (SDLC-053). runId/branch are unknown at
+    // dispatch time (only threadId is) and get backfilled once the bound DAG
+    // run starts and reports its branch (F9's writeback channel).
+    await recordDispatchRun(db, {
+      workItemId: item.id,
+      threadId,
+      ownerEmail,
+      orgId,
+      dispatchedAt: now,
+    });
+
+    // F5 (02 §3.10 决策序①): the human explicitly overrode a split-required
+    // verdict to dispatch anyway — never silent (P13). Logged only when the
+    // override was actually exercised (verdict was split-required AND
+    // overrideScale was set), not on every overrideScale:true pass-through.
+    if (scaleExceeded && args.overrideScale) {
+      const actor = actorFromCaller(ctx?.caller, ownerEmail);
+      await db.insert(schema.activities).values({
+        id: `act_scaleov_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+        workItemId: item.id,
+        actorKind: actor.kind,
+        actorName: ownerEmail,
+        eventType: "scale.overridden",
+        payload: JSON.stringify({ estimate: scaleEstimate }),
+        createdAt: now,
+        ownerEmail,
+        orgId,
+      });
     }
 
     return {
@@ -205,12 +269,12 @@ export default defineAction({
       threadId,
       workspaceId: result.workspaceId ?? null,
       status: "dispatched",
-      currentStageName: newStageName,
-      stagedAdvanced: shouldAdvanceToImpl,
+      execState: "dispatched",
+      currentStageName: item.currentStageName,
       dispatchedAt: now,
       monitorIntervalSec: args.monitorIntervalSec ?? null,
       tags,
-      dispatchTemplate,
+      scaleOverridden: scaleExceeded && !!args.overrideScale,
     };
   },
 });

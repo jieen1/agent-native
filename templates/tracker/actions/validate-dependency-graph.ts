@@ -4,6 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
 import {
   validateDependencyGraph,
   type GraphEdge,
@@ -32,14 +33,23 @@ export default defineAction({
         : eq(schema.workItems.sprintId, args.id);
 
     const items = (await db
-      .select({ id: schema.workItems.id, itemKey: schema.workItems.itemKey })
+      .select({
+        id: schema.workItems.id,
+        projectId: schema.workItems.projectId,
+        itemKey: schema.workItems.itemKey,
+      })
       .from(schema.workItems)
       .where(and(ownerScope(schema.workItems), scopeFilter))
-      .limit(2000)) as { id: string; itemKey: string }[];
+      .limit(2000)) as { id: string; projectId: string; itemKey: string }[];
 
+    // F8: itemKey 消歧(读路径) — cycle/orphan error messages surface node
+    // itemKeys directly; a historical duplicate pair would otherwise make an
+    // error like "cycle: A -> B -> A" ambiguous about which of two
+    // same-keyed items is meant.
+    const displays = await computeItemKeyDisplays(db, items);
     const nodes: GraphNode[] = items.map((it) => ({
       id: it.id,
-      itemKey: it.itemKey || it.id,
+      itemKey: displays.get(it.id) || it.itemKey || it.id,
     }));
 
     let edges: GraphEdge[] = [];

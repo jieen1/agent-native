@@ -57,6 +57,29 @@ const STATUS: Record<string, StatusPresentation> = {
     dot: "bg-red-500",
     live: false,
   },
+  // F3: run came back successfully — review pending. The poll writeback caps
+  // here; done is only reachable through the guarded transition-work-item.
+  returned: {
+    label: "returned",
+    chip: "bg-violet-500/10 text-violet-600 border-violet-500/30 dark:text-violet-400",
+    dot: "bg-violet-500",
+    live: false,
+  },
+  blocked: {
+    label: "blocked",
+    chip: "bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400",
+    dot: "bg-orange-500",
+    live: false,
+  },
+  // F3: written by transition-work-item(target=closed) — a human closing an
+  // undispatched item. Distinct from `failed` (a run error) — closed is a
+  // deliberate, guarded, reason-required decision.
+  closed: {
+    label: "closed",
+    chip: "bg-zinc-500/10 text-zinc-600 border-zinc-500/30 dark:text-zinc-400",
+    dot: "bg-zinc-500",
+    live: false,
+  },
 };
 
 export function statusPresentation(status: string): StatusPresentation {
@@ -220,6 +243,15 @@ export function relativeTime(iso: string | null | undefined): string {
  */
 export function orchestratorBrainHref(threadId: string): string {
   return `/orchestrator/brain?thread=${encodeURIComponent(threadId)}`;
+}
+
+/**
+ * Absolute path to the orchestrator's run detail page for a bound DAG run id
+ * (F8 §S4 execution-group deep link). Cross-app link — plain anchor, not a
+ * react-router Link, same reasoning as orchestratorBrainHref above.
+ */
+export function orchestratorRunHref(runId: string): string {
+  return `/orchestrator/runs/${encodeURIComponent(runId)}`;
 }
 
 /** Turn a clone/remote URL into a browsable GitHub URL (strips `.git`). */

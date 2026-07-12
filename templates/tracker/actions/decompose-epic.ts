@@ -3,12 +3,12 @@ import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
-import { and, eq, sql, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
-import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
+import { allocateItemKey } from "../server/lib/item-key-sequencer.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
@@ -47,7 +47,7 @@ export default defineAction({
       .describe("The fixed list of children to create — never inferred by AI"),
   }),
   http: { method: "POST" },
-  run: async (args, ctx) => {
+  run: async (args) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -119,7 +119,14 @@ export default defineAction({
     const childIdByTitle = new Map<string, string>();
     for (const ec of existingChildren) childIdByTitle.set(titleKey(ec.title), ec.id);
 
-    // Project key + running sequence number for itemKey generation.
+    // Project key, for itemKey generation. F8: the actual number comes from
+    // the single project-level sequencer (allocateItemKey) — NOT a
+    // count(*)-based `seq` local to this action. Before F8, decompose-epic
+    // and create-work-item each ran their OWN independent count(*), so a
+    // concurrent create-work-item + decompose-epic call on the same project
+    // could mint the same itemKey twice (SDLC-038's exact failure mode, just
+    // with a second uncoordinated writer). Routing both through the same
+    // atomic sequencer closes that.
     const project = (
       await db
         .select({ key: schema.projects.key })
@@ -127,11 +134,6 @@ export default defineAction({
         .where(eq(schema.projects.id, epic.projectId))
         .limit(1)
     )[0];
-    const countResult = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(schema.workItems)
-      .where(eq(schema.workItems.projectId, epic.projectId));
-    let seq = (Number(countResult[0]?.count) || 0) + 1;
 
     const now = new Date().toISOString();
     const results: { id: string; title: string; itemKey: string; created: boolean }[] = [];
@@ -144,8 +146,7 @@ export default defineAction({
         continue;
       }
       const id = nanoid();
-      const itemKey = `${project?.key ?? "ITEM"}-${String(seq).padStart(3, "0")}`;
-      seq++;
+      const itemKey = await allocateItemKey(epic.projectId, project?.key ?? "ITEM");
       const tags = c.repoName ? [`repo:${c.repoName}`] : [];
       await db.insert(schema.workItems).values({
         id,
@@ -212,12 +213,11 @@ export default defineAction({
 
     // Log one activity row on the epic summarizing the decomposition.
     const createdCount = results.filter((r) => r.created).length;
-    const actorKind = resolveActorKind(ctx);
     await db.insert(schema.activities).values({
       id: nanoid(),
       workItemId: args.epicId,
-      actorKind,
-      actorName: resolveActorName(actorKind, ownerEmail),
+      actorKind: "agent",
+      actorName: "智能体",
       eventType: "decompose-epic",
       payload: JSON.stringify({
         requested: args.children.length,

@@ -189,8 +189,18 @@ function WorkItemCard({ item }: { item: TrackerWorkItem }) {
           </Badge>
           <PriorityChip priority={item.priority} />
           {item.risk ? <RiskChip risk={item.risk} /> : null}
-          <span className="ml-auto font-mono text-[10px] font-medium text-muted-foreground">
-            {item.itemKey}
+          <span
+            className="ml-auto font-mono text-[10px] font-medium text-muted-foreground"
+            // F8: itemKeyDisplay appends a short id suffix only when this
+            // itemKey collides with a sibling in the same project (historical
+            // duplicates, SDLC-032~036) — title surfaces why to a human.
+            title={
+              item.itemKeyDisplay && item.itemKeyDisplay !== item.itemKey
+                ? "历史重号，已消歧显示"
+                : undefined
+            }
+          >
+            {item.itemKeyDisplay ?? item.itemKey}
           </span>
         </div>
 

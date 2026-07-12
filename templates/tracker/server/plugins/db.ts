@@ -1,4 +1,12 @@
-import { runMigrations } from "@agent-native/core/db";
+import crypto from "node:crypto";
+
+import { getDbExec, runMigrations } from "@agent-native/core/db";
+
+/** Derive the array-element type straight from `runMigrations`'s own params
+ *  so this file never re-declares (and risks drifting from) core's
+ *  `MigrationEntry`/`MigrationSql` shape — core doesn't re-export those types
+ *  from its `./db` subpath (only the `runMigrations` value). */
+type MigrationEntry = Parameters<typeof runMigrations>[0][number];
 
 // Tracker schema migrations. Idempotent CREATE TABLE / INDEX IF NOT EXISTS,
 // dialect-agnostic strings (work on both Postgres in deployment and LibSQL in
@@ -10,8 +18,15 @@ import { runMigrations } from "@agent-native/core/db";
 // an un-namespaced CREATE TABLE IF NOT EXISTS would silently bind to the
 // orchestrator's tables (wrong columns). v1-v3 created un-namespaced tables and
 // are retained as no-op history; v4+ create the namespaced tables the app uses.
-export default runMigrations(
-  [
+//
+// Exported (not just used inline) as of F6 so:
+//  - `server/lib/migration-audit.ts` can read the real migration SQL text at
+//    runtime via introspection (no fs read, no build snapshot — see that
+//    module's docblock).
+//  - The hash-collision guard below (`verifyMigrationHashes`) can compute each
+//    version's expected content hash from the SAME array core's `runMigrations`
+//    applies, so the two never drift apart.
+export const TRACKER_MIGRATIONS: MigrationEntry[] = [
     { version: 1, sql: `SELECT 1` },
     { version: 2, sql: `SELECT 1` },
     { version: 3, sql: `SELECT 1` },
@@ -332,20 +347,269 @@ CREATE INDEX IF NOT EXISTS tracker_work_item_documents_work_item_idx ON tracker_
 ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS executor_thread_id TEXT`,
     },
     {
-      // M2: Stage Configuration — per-project stage vocabulary (name +
-      // description, gate criteria lives in the existing stage_gate_config),
-      // reusable stage flows, and work-item-type → flow assignment. All three
-      // default to their "untouched" empty value ('{}' / '[]' / '{}') so a
-      // project that hasn't opened Stage Configuration behaves identically to
-      // today. work_items.flow_id is nullable — items created before this
-      // migration (or without a type assignment configured) have none and
-      // keep resolving plannedStages via the legacy two-branch default.
-      version: 20,
-      sql: `ALTER TABLE tracker_projects ADD COLUMN IF NOT EXISTS stage_descriptions TEXT NOT NULL DEFAULT '{}';
-ALTER TABLE tracker_projects ADD COLUMN IF NOT EXISTS stage_flows TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE tracker_projects ADD COLUMN IF NOT EXISTS stage_type_assignment TEXT NOT NULL DEFAULT '{}';
-ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS flow_id TEXT`,
+      // Additive: blocked_by column on exec_queue for dependency-aware dispatch.
+      // NOTE: originally numbered 20, but the shared production tracker_migrations
+      // table already had version 20 recorded from an independently-developed
+      // parallel branch (migrations are tracked by version number only, no content
+      // hash, so the numeric collision caused this ALTER to be silently skipped
+      // on first deploy) — renumbered to 21 to actually run. See bue067d8s5-adjacent
+      // finding: sequential small-integer migration versions collide across
+      // parallel SDLC self-bootstrap dev branches; needs a structural fix.
+      version: 21,
+      sql: `ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS blocked_by TEXT NOT NULL DEFAULT '[]'`,
     },
-  ],
-  { table: "tracker_migrations" },
+    {
+      // B2 签核失效：anchor_artifact_id / anchor_version / stale_at 三列，
+      // 用于锚定审批到具体产物版本，产物新版本时把旧审批置 stale 并自动生成重确认审批单。
+      version: 22,
+      sql: `ALTER TABLE tracker_approvals ADD COLUMN IF NOT EXISTS anchor_artifact_id TEXT;
+ALTER TABLE tracker_approvals ADD COLUMN IF NOT EXISTS anchor_version INTEGER;
+ALTER TABLE tracker_approvals ADD COLUMN IF NOT EXISTS stale_at TEXT`,
+    },
+    {
+      // B5: artifact reviews — review three-question checkboxes per artifact
+      // version. Anchored to (artifact_id, version, review_key).
+      version: 23,
+      sql: `CREATE TABLE IF NOT EXISTS tracker_artifact_reviews (
+  id TEXT PRIMARY KEY,
+  artifact_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  review_key TEXT NOT NULL,
+  checked INTEGER NOT NULL DEFAULT 0,
+  reviewer TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
 );
+CREATE UNIQUE INDEX IF NOT EXISTS tracker_artifact_reviews_artifact_version_key_idx ON tracker_artifact_reviews (artifact_id, version, review_key)`,
+    },
+    {
+      // F3: 状态迁移守卫 + 派发不推进 + 人工流转通道. exec_state tracks
+      // dispatch progress SEPARATELY from currentStageName (which no longer
+      // advances on dispatch — see actions/dispatch-to-orchestrator.ts and
+      // docs/sdlc-product-design/02-workflows.md §8). closed_reason/closed_at
+      // are written by actions/transition-work-item.ts's closed branch.
+      version: 24,
+      sql: `ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS exec_state TEXT;
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS closed_reason TEXT;
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS closed_at TEXT`,
+    },
+    {
+      // F5: 任务拆分阈值(规划前置契约). scale_estimate carries the JSON
+      // {files,crossLifecycle,verdict,signals,at} written by
+      // actions/estimate-brief-scale.ts / server/lib/scale-runtime-signal.ts.
+      // split_parent_id is set on each child row by actions/split-work-item.ts
+      // — points back at the over-scale parent it was split from.
+      version: 25,
+      sql: `ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS scale_estimate TEXT;
+ALTER TABLE tracker_work_items ADD COLUMN IF NOT EXISTS split_parent_id TEXT`,
+    },
+    {
+      // F6: hash-collision guard — SEPARATE side table, NOT a column added to
+      // `tracker_migrations` itself.
+      //
+      // R3's design doc literally said "给 tracker_migrations 加 hash TEXT
+      // 列"; implementation surfaced a real bug in that plan that isn't visible
+      // until you actually run it: core's `runMigrations` records every applied
+      // version with an INSERT that has NO explicit column list —
+      // `INSERT OR IGNORE INTO tracker_migrations VALUES (?)` on SQLite,
+      // `INSERT INTO tracker_migrations VALUES (?) ON CONFLICT DO NOTHING` on
+      // Postgres (see packages/core/src/db/migrations.ts's `insertSql`) — both
+      // pass exactly ONE positional value (the version) and rely on the table
+      // having exactly ONE column. The moment `tracker_migrations` gains a
+      // second column (`hash`), that INSERT — used for EVERY migration, not
+      // just this one — misbehaves, and the two dialects fail DIFFERENTLY
+      // (R3 review F-6 correction; the earlier "both crash" note was wrong):
+      //   - SQLite: hard error "table tracker_migrations has 2 columns but 1
+      //     values were supplied" (confirmed empirically end-to-end) →
+      //     core's outer catch → process.exit(1). Every migration recording
+      //     after the column is added crashes the boot.
+      //   - Postgres: does NOT crash — a positional INSERT that omits the
+      //     trailing column silently records the row with hash = NULL. No
+      //     error, but the hash column stays perpetually NULL, so the guard is
+      //     blind on Postgres (exactly the dialect production runs on).
+      // Either way adding the column is wrong, and fixing it would require
+      // changing core's own INSERT — out of bounds (F6 red line "不改 core",
+      // precisely to avoid a packages/core changeset). So the hash lives in its
+      // own additive table instead — zero interaction with core's bookkeeping
+      // INSERT, `tracker_migrations` itself untouched by this migration.
+      version: 26,
+      sql: `CREATE TABLE IF NOT EXISTS tracker_migration_hashes (
+  version INTEGER PRIMARY KEY,
+  hash TEXT NOT NULL
+)`,
+    },
+    {
+      // F8: 回链完整性 + itemKey 分配权威. Two new tables (both dialects):
+      // ① tracker_work_item_runs — append-only dispatch/run history (see
+      //    schema.ts for the full rationale; SDLC-053).
+      // ② tracker_project_seq — the single atomic itemKey sequencer per
+      //    project (SDLC-038). `next_seq` stores the LAST issued number, not
+      //    the next one — the atomic allocator's
+      //    `UPDATE ... SET next_seq = next_seq + 1 RETURNING next_seq`
+      //    pre-increments and returns the freshly allocated number in the
+      //    same round trip, so the row must be seeded at the CURRENT max
+      //    (not max+1) for the very first post-migration call to correctly
+      //    return max+1 (T-F8-02). See server/lib/item-key-sequencer.ts.
+      //
+      // Backfill (Postgres only): seed every project that already has work
+      // items from their current max itemKey numeric suffix, so existing
+      // projects never reuse a number. The extraction
+      // (`substring(item_key from '[0-9]+$')`) is Postgres regex syntax with
+      // no portable SQLite equivalent, so this migration is a table-only
+      // no-op on SQLite/libsql (local dev + unit tests) — any project without
+      // a row (including every project under SQLite) is seeded lazily on its
+      // first allocation call by the same lib function, computing the same
+      // "current max itemKey number" via a portable JS-side scan instead of
+      // this SQL regex. `ON CONFLICT (project_id) DO NOTHING` makes the
+      // backfill safe to layer under that lazy path (whichever runs first
+      // for a given project wins; neither clobbers the other).
+      version: 27,
+      sql: {
+        postgres: `CREATE TABLE IF NOT EXISTS tracker_work_item_runs (
+  id TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL,
+  run_id TEXT,
+  thread_id TEXT,
+  branch TEXT,
+  dispatched_at TEXT NOT NULL,
+  superseded INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tracker_work_item_runs_work_item_run_idx ON tracker_work_item_runs (work_item_id, run_id);
+CREATE INDEX IF NOT EXISTS tracker_work_item_runs_work_item_idx ON tracker_work_item_runs (work_item_id, dispatched_at);
+CREATE TABLE IF NOT EXISTS tracker_project_seq (
+  project_id TEXT PRIMARY KEY,
+  next_seq INTEGER NOT NULL
+);
+INSERT INTO tracker_project_seq (project_id, next_seq)
+SELECT project_id, COALESCE(MAX(CAST(NULLIF(substring(item_key from '[0-9]+$'), '') AS INTEGER)), 0)
+FROM tracker_work_items
+GROUP BY project_id
+ON CONFLICT (project_id) DO NOTHING`,
+        sqlite: `CREATE TABLE IF NOT EXISTS tracker_work_item_runs (
+  id TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL,
+  run_id TEXT,
+  thread_id TEXT,
+  branch TEXT,
+  dispatched_at TEXT NOT NULL,
+  superseded INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tracker_work_item_runs_work_item_run_idx ON tracker_work_item_runs (work_item_id, run_id);
+CREATE INDEX IF NOT EXISTS tracker_work_item_runs_work_item_idx ON tracker_work_item_runs (work_item_id, dispatched_at);
+CREATE TABLE IF NOT EXISTS tracker_project_seq (
+  project_id TEXT PRIMARY KEY,
+  next_seq INTEGER NOT NULL
+)`,
+      },
+    },
+  ];
+
+const coreRunMigrations = runMigrations(TRACKER_MIGRATIONS, {
+  table: "tracker_migrations",
+});
+
+/** Deterministic content hash for one migration entry's SQL. Hashes the
+ *  `MigrationSql` value verbatim (string, or the `{postgres,sqlite}` object
+ *  serialized) — a change to either dialect branch changes the hash. */
+function stableMigrationHash(entry: MigrationEntry): string {
+  const canonical =
+    typeof entry.sql === "string" ? entry.sql : JSON.stringify(entry.sql);
+  return crypto.createHash("sha256").update(canonical).digest("hex");
+}
+
+/**
+ * F6 hash-collision guard — see `TRACKER_MIGRATIONS`'s version 26 entry above
+ * for why the hash lives in its own `tracker_migration_hashes` side table
+ * instead of a column on `tracker_migrations` itself, and why this can't live
+ * inside core's `runMigrations` (no content hash, only `MAX(version)` skip).
+ * Runs as an INDEPENDENT full-table verification pass on every boot, separate
+ * from core's version-skip logic — otherwise a same-number-different-content
+ * collision would never rerun and never be caught (that's precisely the bug
+ * this exists to detect).
+ *
+ * For every version core's `tracker_migrations` bookkeeping table records as
+ * APPLIED (read-only — this function never writes to that table, only to
+ * `tracker_migration_hashes`):
+ *   - No hash row yet in `tracker_migration_hashes` (pre-F6 history, or a
+ *     version applied before this table existed) → backfill it from the
+ *     local array now ("first trust").
+ *   - Hash row present and matches this branch's local SQL for that version
+ *     → no-op.
+ *   - Hash row present and DIFFERS → the version number was reused for
+ *     different content by some other branch/deploy. Throw explicitly
+ *     (`migration-hash-conflict: v<N>`) so startup fails loud instead of
+ *     silently running with an unrecorded, unreconciled schema drift.
+ *
+ * Applied versions this array doesn't know about (e.g. a legacy un-namespaced
+ * v1-v3 no-op, or a version owned by a branch not yet merged here) are left
+ * untouched — this guard only judges versions THIS branch's array actually
+ * defines.
+ */
+export async function verifyMigrationHashes(): Promise<void> {
+  const exec = getDbExec();
+  let appliedRows: Array<{ version: number }>;
+  let hashRows: Array<{ version: number; hash: string }>;
+  try {
+    const appliedResult = await exec.execute(
+      `SELECT version FROM tracker_migrations`,
+    );
+    appliedRows = appliedResult.rows as Array<{ version: number }>;
+    const hashResult = await exec.execute(
+      `SELECT version, hash FROM tracker_migration_hashes`,
+    );
+    hashRows = hashResult.rows as Array<{ version: number; hash: string }>;
+  } catch {
+    // `tracker_migration_hashes` isn't there yet — e.g. a dialect
+    // permission-limited role skipped v26 (see core's isPermissionError
+    // path). Nothing to verify against; defer to the next boot.
+    return;
+  }
+
+  // Some Postgres drivers return INTEGER columns as strings depending on
+  // config — normalize before comparing so lookups never silently miss every
+  // row on a dialect where these aren't already JS numbers.
+  const hashByVersion = new Map(hashRows.map((r) => [Number(r.version), r.hash]));
+
+  for (const row of appliedRows) {
+    const version = Number(row.version);
+    const entry = TRACKER_MIGRATIONS.find((m) => m.version === version);
+    if (!entry) continue; // Version not known to this branch's array — not our call.
+
+    const expected = stableMigrationHash(entry);
+    const existingHash = hashByVersion.get(version);
+    if (existingHash == null) {
+      // `ON CONFLICT DO NOTHING` (target-less form — valid on both SQLite ≥3.24
+      // and Postgres) guards against two concurrent serverless cold starts
+      // both backfilling the same version's hash between the SELECT above and
+      // this INSERT (R3 review F-7): a bare INSERT would race to a PK-violation
+      // on the second writer. The value both would insert is identical (same
+      // local SQL → same hash), so silently ignoring the loser is correct.
+      await exec.execute({
+        sql: `INSERT INTO tracker_migration_hashes (version, hash) VALUES (?, ?) ON CONFLICT DO NOTHING`,
+        args: [version, expected],
+      });
+      continue;
+    }
+    if (existingHash !== expected) {
+      throw new Error(`migration-hash-conflict: v${version}`);
+    }
+  }
+}
+
+export default async function trackerDbPlugin(
+  nitroApp?: unknown,
+): Promise<void> {
+  await coreRunMigrations(nitroApp as never);
+  await verifyMigrationHashes();
+}

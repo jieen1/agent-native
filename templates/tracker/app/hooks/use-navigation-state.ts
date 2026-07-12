@@ -3,14 +3,16 @@ import {
   markAgentChatHomeHandoff,
   useAgentRouteState,
 } from "@agent-native/core/client";
-import { useLocation } from "react-router";
 import { trackerRoutePath } from "@shared/navigation";
+import { useLocation } from "react-router";
+
 import { TAB_ID } from "@/lib/tab-id";
 
 interface NavigationState {
   view: string;
   itemId?: string;
   projectId?: string;
+  sprintId?: string;
 }
 
 interface NavigateCommand extends NavigationState {
@@ -55,7 +57,10 @@ function routerPath(path: string): string {
       result = result.slice(basePath.length) || "/";
       continue;
     }
-    if (result.startsWith(`${basePath}?`) || result.startsWith(`${basePath}#`)) {
+    if (
+      result.startsWith(`${basePath}?`) ||
+      result.startsWith(`${basePath}#`)
+    ) {
       result = `/${result.slice(basePath.length)}`;
       continue;
     }
@@ -75,6 +80,8 @@ export function useNavigationState() {
 
       if (pathname === "/") {
         state.view = "home";
+      } else if (pathname === "/items/new") {
+        state.view = "new-item";
       } else if (pathname.startsWith("/items/")) {
         const match = pathname.match(/\/items\/([^/]+)/);
         state.view = "item";
@@ -89,6 +96,14 @@ export function useNavigationState() {
         state.view = "team";
       } else if (pathname.startsWith("/extensions")) {
         state.view = "extensions";
+      } else if (pathname.startsWith("/sprints/")) {
+        const match = pathname.match(/\/sprints\/([^/]+)/);
+        state.view = "sprint";
+        if (match) state.sprintId = decodeURIComponent(match[1]);
+      } else if (pathname.startsWith("/sprints")) {
+        state.view = "sprints";
+      } else if (pathname.startsWith("/queue")) {
+        state.view = "queue";
       }
 
       return state;

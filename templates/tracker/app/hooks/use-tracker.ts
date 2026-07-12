@@ -132,6 +132,13 @@ export function useSprints() {
   };
 }
 
+export function useOrgMembers() {
+  return useActionQuery("list-org-members", {}) as {
+    data?: { members: { email: string; role: string }[] };
+    isLoading: boolean;
+  };
+}
+
 export function useSprint(id: string) {
   return useActionQuery("get-sprint", { id }, { enabled: !!id }) as {
     data?: any;
@@ -209,25 +216,6 @@ export function useAdvanceStage() {
     },
     onError: (err: unknown) => {
       toast.error(messageOf(err, "advance-stage", "Failed to advance stage"));
-    },
-  });
-}
-
-// Run acceptance (T-H): executes the scenario list, archives an evidence
-// report, and triggers + completes the 验收 stage. Gives the UI parity with
-// the agent/MCP-only run-acceptance action.
-export function useRunAcceptance() {
-  const qc = useQueryClient();
-  return useActionMutation("run-acceptance", {
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["action", "list-stages"] });
-      qc.invalidateQueries({ queryKey: ["action", "get-work-item"] });
-      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
-      qc.invalidateQueries({ queryKey: ["action", "list-artifacts"] });
-      qc.invalidateQueries({ queryKey: ["action", "list-tracker-activities"] });
-    },
-    onError: (err: unknown) => {
-      toast.error(messageOf(err, "run-acceptance", "验收执行失败"));
     },
   });
 }
@@ -355,6 +343,33 @@ export function useUpdateWorkItem() {
       toast.error(
         messageOf(err, "update-work-item", "Failed to update work item"),
       );
+    },
+  });
+}
+
+// F3: guarded human transition/close channel (transition-work-item).
+// PESSIMISTIC refetch semantics (no optimistic cache write): only after the
+// server confirms does this invalidate get-work-item (status/
+// currentStageName/allowedTransitions all change) + list-work-items (board
+// reflects the new state) + the activity feed (transition.* rows) — a
+// guarded mutation can be rejected on actor/evidence/CAS grounds, so we
+// never show a state the guard may refuse. Errors are NOT toasted here —
+// the GuardedTransitionDialog needs the raw error's `.code`/`.need` to
+// red-outline the missing evidence field and keep the dialog open with the
+// user's input intact (S4 契约), so it handles its own onError per-call.
+export function useTransitionWorkItem() {
+  const qc = useQueryClient();
+  return useActionMutation("transition-work-item", {
+    onSuccess: (_data: unknown, variables: unknown) => {
+      qc.invalidateQueries({ queryKey: ["action", "get-work-item"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-tracker-activities"] });
+      const workItemId = (variables as { id?: string } | undefined)?.id;
+      if (workItemId) {
+        qc.invalidateQueries({
+          queryKey: ["action", "get-activity", { workItemId }],
+        });
+      }
     },
   });
 }
@@ -545,4 +560,37 @@ export function useValidateDependencyGraph(
     isLoading: boolean;
     error: unknown;
   };
+}
+
+// ── F5: 任务拆分阈值(规划前置契约,02 §3.10) ────────────────────────────────
+
+// Estimate a work item's implementation scale from its description text and
+// persist scale_estimate. PESSIMISTIC (no optimistic write) — the badge/
+// warning-bar should only flip once the server confirms the estimate.
+export function useEstimateBriefScale() {
+  const qc = useQueryClient();
+  return useActionMutation("estimate-brief-scale", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "get-work-item"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "estimate-brief-scale", "规模估算失败"));
+    },
+  });
+}
+
+// Split an over-scale work item into children. Errors are NOT toasted here —
+// the split dialog needs the raw error's `.code` (e.g. already-dispatched) to
+// show an inline red banner and keep the dialog open with the user's rows
+// intact (S2 契约: "失败(already-dispatched)红条提示不关框").
+export function useSplitWorkItem() {
+  const qc = useQueryClient();
+  return useActionMutation("split-work-item", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "get-work-item"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-tracker-activities"] });
+    },
+  });
 }

@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
 
 export default defineAction({
   description:
@@ -41,6 +42,7 @@ export default defineAction({
     const children = await db
       .select({
         id: schema.workItems.id,
+        projectId: schema.workItems.projectId,
         itemKey: schema.workItems.itemKey,
         title: schema.workItems.title,
         status: schema.workItems.status,
@@ -61,14 +63,26 @@ export default defineAction({
         ),
       );
 
-    const byId = new Map(children.map((c) => [c.id, c]));
+    // F8: itemKey 消歧(读路径) — epic children is its own list-style read
+    // path (separate query from list-work-items/get-work-item), so it needs
+    // the same disambiguation applied explicitly rather than inheriting it
+    // via pass-through.
+    const displays = await computeItemKeyDisplays(
+      db,
+      children.map((c) => ({ id: c.id, projectId: c.projectId, itemKey: c.itemKey })),
+    );
+    const childrenDisplay = children.map((c) => ({
+      ...c,
+      itemKeyDisplay: displays.get(c.id) ?? c.itemKey,
+    }));
+    const byId = new Map(childrenDisplay.map((c) => [c.id, c]));
     const dependencies = depLinks.map((l) => ({
       fromId: l.fromItemId,
       toId: l.toItemId,
-      fromLabel: byId.get(l.fromItemId)?.itemKey || byId.get(l.fromItemId)?.title || l.fromItemId,
-      toLabel: byId.get(l.toItemId)?.itemKey || byId.get(l.toItemId)?.title || l.toItemId,
+      fromLabel: byId.get(l.fromItemId)?.itemKeyDisplay || byId.get(l.fromItemId)?.title || l.fromItemId,
+      toLabel: byId.get(l.toItemId)?.itemKeyDisplay || byId.get(l.toItemId)?.title || l.toItemId,
     }));
 
-    return { children, dependencies };
+    return { children: childrenDisplay, dependencies };
   },
 });

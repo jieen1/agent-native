@@ -31,6 +31,17 @@ export default defineAction({
       .describe(
         "Optional JSON string {runId, nodeId} referencing the orchestrator workflow node",
       ),
+    anchorArtifactId: z
+      .string()
+      .optional()
+      .describe(
+        "可选：把该审批锚定到某个 tracker_sprint_artifacts.id，产物出新版本后该审批会被置为 stale 并自动生成重确认审批单",
+      ),
+    anchorVersion: z
+      .number()
+      .int()
+      .optional()
+      .describe("可选：锚定产物当时的 version，配合 anchorArtifactId 一起传"),
   }),
   http: { method: "POST" },
   run: async (args) => {
@@ -89,6 +100,8 @@ export default defineAction({
       reason: null,
       decidedAt: null,
       createdAt: now,
+      anchorArtifactId: args.anchorArtifactId ?? null,
+      anchorVersion: args.anchorVersion ?? null,
       ownerEmail,
       orgId,
       visibility: "private",
@@ -106,6 +119,8 @@ export default defineAction({
       reason: null,
       decidedAt: null,
       createdAt: now,
+      anchorArtifactId: args.anchorArtifactId ?? null,
+      anchorVersion: args.anchorVersion ?? null,
     };
   },
 });

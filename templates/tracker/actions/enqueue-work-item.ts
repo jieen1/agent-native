@@ -8,7 +8,7 @@ import { customAlphabet } from "nanoid";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
-import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
+import { resolveDispatchGate } from "../server/lib/dispatch-gate.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
@@ -22,7 +22,7 @@ export default defineAction({
     priority: z.coerce.number().int().optional().describe("Queue priority (default 0)"),
   }),
   http: { method: "POST" },
-  run: async (args, ctx) => {
+  run: async (args) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -40,6 +40,16 @@ export default defineAction({
     )[0];
     if (!workItem) throw new Error("Work item not found or not accessible");
 
+    // ── Dependency gate check ─────────────────────────────────────────────────
+    // If this item has unfinished blocked-by dependencies, enqueue it in the
+    // "blocked" state instead of "queued" — the item is not rejected, it just
+    // waits until reevaluateBlockedQueue() clears it automatically.
+    const gate = await resolveDispatchGate(db, args.workItemId, ownerEmail, orgId);
+    const queueStatus = gate.ready ? "queued" : "blocked";
+    const blockedByJson = gate.ready
+      ? "[]"
+      : JSON.stringify(gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })));
+
     // Upsert the exec_queue row (INSERT OR REPLACE semantics).
     await db
       .insert(schema.execQueue)
@@ -47,10 +57,11 @@ export default defineAction({
         id: nanoid(),
         workItemId: args.workItemId,
         priority: args.priority ?? 0,
-        status: "queued",
+        status: queueStatus,
         currentStage: workItem.currentStageName ?? "",
         enqueuedAt: now,
         startedAt: null,
+        blockedBy: blockedByJson,
         ownerEmail,
         orgId,
       })
@@ -58,32 +69,34 @@ export default defineAction({
         target: schema.execQueue.workItemId,
         set: {
           priority: args.priority ?? 0,
-          status: "queued",
+          status: queueStatus,
           currentStage: workItem.currentStageName ?? "",
           enqueuedAt: now,
           startedAt: null,
+          blockedBy: blockedByJson,
         },
       });
 
-    // Update the work item: switch to auto execution and queued status.
+    // Update the work item: switch to auto execution; status reflects the gate.
     await db
       .update(schema.workItems)
       .set({
         executionMode: "auto",
-        status: "queued",
+        status: queueStatus,
         updatedAt: now,
       })
       .where(eq(schema.workItems.id, args.workItemId));
 
-    // Append a '触发' activity record.
-    const actorKind = resolveActorKind(ctx);
+    // Append an activity record — '触发' when admitted, '等待依赖' when blocked.
     await db.insert(schema.activities).values({
       id: nanoid(),
       workItemId: args.workItemId,
-      actorKind,
-      actorName: resolveActorName(actorKind, ownerEmail),
-      eventType: "触发",
-      payload: JSON.stringify({ mode: "auto" }),
+      actorKind: "agent",
+      actorName: "智能体",
+      eventType: gate.ready ? "触发" : "等待依赖",
+      payload: gate.ready
+        ? JSON.stringify({ mode: "auto" })
+        : JSON.stringify({ blockedBy: gate.blockedBy.map((d) => d.itemKey) }),
       createdAt: now,
       ownerEmail,
       orgId,

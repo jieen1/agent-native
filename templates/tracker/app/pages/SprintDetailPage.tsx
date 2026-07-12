@@ -9,7 +9,7 @@ import {
   useApproveGate,
   useRejectGate,
 } from "@/hooks/use-tracker";
-import type { SprintDetail, TrackerWorkItem, Stage, SprintArtifact, Approval, GateKey } from "@shared/types";
+import type { ScaleEstimate, SprintDetail, TrackerWorkItem, Stage, SprintArtifact, Approval, GateKey } from "@shared/types";
 import { GATE_KEY_LABELS as gateLabels } from "@shared/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,8 +25,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  IconAlertTriangle,
   IconArrowLeft,
-  IconArrowRight,
   IconCalendar,
   IconFileText,
   IconGitBranch,
@@ -40,6 +40,41 @@ import {
 import { cn } from "@/lib/utils";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+// F5 (v25): get-sprint.ts returns raw DB rows — scale_estimate arrives as a
+// JSON string (or null); parse defensively (see shared/types.ts's
+// TrackerWorkItem.scaleEstimate docblock for why this isn't pre-parsed).
+function parseScaleEstimate(raw: string | null | undefined): ScaleEstimate | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ScaleEstimate;
+  } catch {
+    return null;
+  }
+}
+
+/** 规模徽标(Briefs 列表行,02 §3.10)— ok=灰点,split-required=warning badge. */
+function ScaleBadgeCompact({ raw }: { raw: string | null | undefined }) {
+  const estimate = parseScaleEstimate(raw);
+  if (!estimate) return null;
+  if (estimate.verdict === "split-required") {
+    return (
+      <Badge
+        className="h-5 shrink-0 gap-1 bg-amber-100 px-1.5 text-[11px] text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400"
+        title={`规模估算: ${estimate.files} 文件${estimate.crossLifecycle ? " · 跨生命周期" : ""}`}
+      >
+        <IconAlertTriangle className="size-3" />
+        规模 {estimate.files}
+      </Badge>
+    );
+  }
+  return (
+    <span
+      className="inline-block size-2 shrink-0 rounded-full bg-muted-foreground/40"
+      title="规模估算: ok"
+    />
+  );
+}
 
 function sprintStatusVariant(status: string): "default" | "secondary" | "outline" {
   switch (status) {
@@ -296,9 +331,17 @@ function SprintItemsCard({
               key={item.id}
               className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
             >
-              {/* Item key */}
-              <span className="w-16 shrink-0 font-mono text-[11px] font-medium text-muted-foreground">
-                {item.itemKey}
+              {/* Item key — F8: itemKeyDisplay disambiguates historical
+                  duplicate itemKeys within the same project (SDLC-032~036). */}
+              <span
+                className="w-16 shrink-0 font-mono text-[11px] font-medium text-muted-foreground"
+                title={
+                  item.itemKeyDisplay && item.itemKeyDisplay !== item.itemKey
+                    ? "历史重号，已消歧显示"
+                    : undefined
+                }
+              >
+                {item.itemKeyDisplay ?? item.itemKey}
               </span>
 
               {/* Title (link) */}
@@ -324,6 +367,9 @@ function SprintItemsCard({
               >
                 {priorityLabel(item.priority)}
               </Badge>
+
+              {/* F5: 规模徽标(Briefs 列表行) */}
+              <ScaleBadgeCompact raw={item.scaleEstimate} />
 
               {/* Current stage · stageStatus */}
               {currentStage ? (
@@ -874,7 +920,7 @@ export function SprintDetailPage() {
               <IconCalendar className="size-3.5" />
               <span className="text-xs">{fmtDate(sprint.startDate)}</span>
               {sprint.startDate && sprint.endDate ? (
-                <IconArrowRight className="size-3 text-muted-foreground/50" />
+                <span className="text-muted-foreground/50">→</span>
               ) : null}
               <span className="text-xs">{fmtDate(sprint.endDate)}</span>
             </div>

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
+import { reevaluateBlockedQueue } from "../server/lib/dispatch-gate.js";
 
 // Read activity for a dispatched work item back from the orchestrator: the
 // brain transcript (via the stored threadId) plus any tagged runs/spawns
@@ -32,11 +33,17 @@ const PR_URL_RE = /https?:\/\/[^\s)]+\/pull\/\d+/i;
 const BRANCH_RE = /\b(orchestrator\/[A-Za-z0-9._\-/]+)\b/;
 const COMMIT_RE = /\b([0-9a-f]{7,40})\b/;
 
-function extractDelivery(events: BrainEventRow[]): {
+export function extractDelivery(events: BrainEventRow[]): {
   prUrl?: string | null;
   prNumber?: number | null;
   branch?: string | null;
   commit?: string | null;
+  // Strong = hard to false-positive on (a real PR URL, or a branch+commit
+  // pair). A single bare branch-looking or commit-looking string is common
+  // false-positive bait (e.g. a file path under "orchestrator/", or a hash
+  // mentioned while the thread reads its own `git log` output mid-debug) and
+  // must never alone be trusted as proof of a genuine delivery.
+  isStrong?: boolean;
 } | null {
   // Scan newest-first so a later, more authoritative delivery wins.
   let prUrl: string | null = null;
@@ -66,92 +73,136 @@ function extractDelivery(events: BrainEventRow[]): {
     prNumber: Number.isFinite(prNumber) ? prNumber : null,
     branch,
     commit,
+    isStrong: !!prUrl || (!!branch && !!commit),
   };
 }
 
-// The orchestrator's slot state for this item's brain thread. APP-ISOLATION:
-// the tracker MUST NOT reach into the orchestrator's private `brain_tasks` table
-// even though both apps happen to share one Postgres. We read it straight from
-// the source of truth via the orchestrator's scoped `brain-task-for-thread`
-// read action (over MCP, app boundary preserved) — it returns the newest
-// brain_tasks row's { status, runId } for the thread directly, so the
-// pre-admission "queued" window (a brain_task can sit at `queued` before the
-// admission gate promotes it and any DAG run exists) is represented faithfully
-// instead of being lost.
+// The orchestrator's brain_task slot state for this item's brain thread.
 //
-// FALLBACK: if that call fails or finds no task row (e.g. an older
-// orchestrator without the action, or a thread that predates brain_tasks),
-// `deriveSlotFromRuns` derives the same {status, runId} shape from the bound
-// run returned by `runsList` (matched by the tracker tags) as a best-effort
-// approximation — it cannot see the pre-admission queued window, but is better
-// than nothing.
-//
-// Mapping v3 run status → the brain_task slot vocabulary consumed by
-// deriveItemStatus() and the detail-page slot chips:
-//   running → running · done → done · failed/cancelled → (failed) ·
-//   pending → queued (run exists but no node has started) · paused → passthrough
-//     (unknown to deriveItemStatus, so the stored status is left untouched).
-// `runs` is newest-first (runsList orders by startedAt DESC); the primary run is
-// runs[0], matching the existing runIdFromRuns fallback. Returns null when there
-// is no bound run yet (e.g. the brain task is still queued pre-admission, before
-// any run exists) so activity still renders and the status is left untouched.
-function deriveSlotFromRuns(
-  runs: Array<Record<string, unknown>>,
-): { status: string; runId: string | null } | null {
-  const primary = runs[0];
-  if (!primary) return null;
-  const runStatus = typeof primary.status === "string" ? primary.status : "";
-  const runId = typeof primary.id === "string" ? primary.id : null;
-  const status = runStatus === "pending" ? "queued" : runStatus;
-  return { status, runId };
-}
-
-// Parse the `brain-task-for-thread` MCP response into the same {status, runId}
-// slot shape `deriveSlotFromRuns` produces. Returns null when the call didn't
-// fulfill, the payload wasn't the expected object shape, or no brain_task row
-// was found (status null) — any of which fall through to the runs-based
-// fallback below.
-function deriveSlotFromTask(
-  taskRes: PromiseSettledResult<{ data: unknown }>,
-): { status: string; runId: string | null } | null {
-  if (taskRes.status !== "fulfilled") return null;
-  const data = taskRes.value.data;
-  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-  const status = (data as { status?: unknown }).status;
-  if (typeof status !== "string") return null;
-  const runId = (data as { runId?: unknown }).runId;
-  return { status, runId: typeof runId === "string" ? runId : null };
+// F9 (SDLC-034b): this used to be a raw SQL SELECT straight against the
+// orchestrator's shared brain-task-slot table (the framework's raw db-exec
+// helper, called with a literal table name in the query text) — a cross-app
+// schema-coupling shortcut that broke the moment the two apps' migrations
+// drifted out of step (the exact "F8 leftover transition-period
+// inconsistency" this cleanup resolves). It's now a
+// STRUCTURED MCP `tools/call` to the orchestrator's own `brain-task-slot`
+// action (F9, orchestrator side — exposes the admission-gate row through its
+// own action surface instead of the tracker reaching into its tables), over
+// the same `callOrchestratorTool` client every other cross-app read in this
+// file already uses. Still best-effort: any failure (older orchestrator build
+// without this tool yet, orchestrator down, network hiccup) degrades to null
+// so activity still renders (T-F9-07's functional half) — none of the
+// exceptions here ever propagate to the caller.
+async function readBrainTaskSlot(
+  ownerEmail: string,
+  threadId: string,
+): Promise<{
+  status: string;
+  runId: string | null;
+  updatedAt: string | null;
+} | null> {
+  try {
+    const { data } = await callOrchestratorTool(ownerEmail, "brain-task-slot", {
+      threadId,
+    });
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    const row = data as {
+      status?: string | null;
+      runId?: string | null;
+      updatedAt?: string | null;
+    };
+    if (!row.status) return null;
+    return {
+      status: String(row.status),
+      runId: row.runId ?? null,
+      updatedAt: row.updatedAt ?? null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // Map the orchestrator slot state onto the work-item lifecycle so the board
-// reflects queued → running → done.
+// reflects queued → running → returned.
 //
-// CRITICAL: the bound DAG RUN lifecycle is authoritative, NOT the brain thread
-// and NOT a parsed "delivery". The brain's first turn dispatches work then ENDS
-// (a token-saving pattern), so the brain thread flips idle/done immediately while
+// CRITICAL: the brain_TASK lifecycle is authoritative, NOT the brain thread and
+// NOT a parsed "delivery". The brain's first turn dispatches work then ENDS (a
+// token-saving pattern), so the brain thread flips idle/done immediately while
 // the bound DAG run is still executing — and a delivery regex can false-match
 // the requirement text (e.g. a path like `orchestrator/app/routes/...`). The
-// orchestrator's brain_task slot is itself released to `done`/`failed` ONLY when
-// the bound run reaches terminal, so the run status (read over the app boundary
-// via runsList and mapped by deriveSlotFromRuns) is a faithful stand-in. So:
-//   - slot running/queued  → item is still in flight; NEVER mark it done, even
+// brain_task row is released to `done`/`failed` ONLY when the bound run reaches
+// terminal (releaseBrainTaskForThread) or the reaper confirms real completion.
+//
+// F3 (T-F3-17, SDLC-058): this writeback channel NEVER derives `done`. A
+// terminal-success slot (and/or a delivered PR) means the run CAME BACK —
+// status `returned`, awaiting human review. `done` is exclusively written by
+// the guarded transition-work-item action (human + PASSED verdict + merge
+// commit, from 待人工评审). So:
+//   - slot running/queued  → item is still in flight; never terminal, even
 //     if a "delivery" was parsed from the transcript.
-//   - slot done            → mark done; a parsed delivery is corroboration only.
-//   - slot failed/cancelled → mark failed.
-//   - no bound run yet     → fall back to delivery (or leave status untouched).
-function deriveItemStatus(
+//   - slot done            → mark `returned` (run finished; review pending);
+//     a parsed delivery is corroboration only.
+//   - slot failed/cancelled → mark failed, UNLESS the thread was demonstrably
+//     resumed and produced real new activity afterward with a STRONG delivery
+//     (see below) — a transient interruption (e.g. an orchestrator container
+//     restart killing the brain child mid-turn) marks the slot failed even
+//     though the thread is later resumed and genuinely finishes; without this
+//     override that failed mark is a one-way door the item can never recover
+//     from, even after a real commit lands and is deployed. Recovery also
+//     lands at `returned`, never `done`.
+//   - no slot row at all   → fall back to delivery (legacy / non-Postgres),
+//     also capped at `returned`.
+export function deriveItemStatus(
   slotStatus: string | null,
   hasDelivery: boolean,
+  recovery?: {
+    isStrongDelivery: boolean;
+    slotUpdatedAt: string | null;
+    latestEventAt: string | null;
+  },
 ): string | null {
   // While the slot is live, the work is ongoing regardless of transcript text.
   if (slotStatus === "running") return "running";
   if (slotStatus === "queued") return "queued";
-  // Terminal slot is the source of truth for done/failed.
-  if (slotStatus === "done") return "done";
-  if (slotStatus === "failed" || slotStatus === "cancelled") return "failed";
-  // No brain_task row found: only then trust a parsed delivery as a done signal.
-  if (slotStatus === null && hasDelivery) return "done";
+  // Terminal slot is the source of truth for returned/failed.
+  if (slotStatus === "done") return "returned";
+  if (slotStatus === "failed" || slotStatus === "cancelled") {
+    if (
+      recovery?.isStrongDelivery &&
+      recovery.slotUpdatedAt &&
+      recovery.latestEventAt &&
+      new Date(recovery.latestEventAt).getTime() >
+        new Date(recovery.slotUpdatedAt).getTime()
+    ) {
+      return "returned";
+    }
+    return "failed";
+  }
+  // No brain_task row: only then trust a parsed delivery as a returned signal.
+  if (slotStatus === null && hasDelivery) return "returned";
   return null; // unknown → leave the stored status untouched
+}
+
+// F3 (T-F3-17): the stage target this poll-writeback may advance to. Pure so
+// tests can enumerate it. Rules (02 §8 writeback rows):
+//   - run returned + STRONG delivery (PR / branch+commit) → 「验收」(待人工
+//     评审) — the review-request row; THE CAP. Never 交付, never done.
+//   - run returned without a strong delivery → 「测试」 (实施→测试 row).
+//   - anything else → no stage change.
+// Never rolls back: a stage at or past the computed target stays put.
+const STAGE_LADDER = ["待办", "分析", "设计", "实施", "测试", "验收", "交付"];
+export function deriveWritebackStage(
+  nextStatus: string | null,
+  currentStageName: string | null | undefined,
+  hasStrongDelivery: boolean,
+): string | null {
+  if (nextStatus !== "returned") return null;
+  const target = hasStrongDelivery ? "验收" : "测试";
+  const curIdx = STAGE_LADDER.indexOf(currentStageName ?? "待办");
+  const targetIdx = STAGE_LADDER.indexOf(target);
+  // Unknown current stage → treat as earliest (advance); at/past target → keep.
+  if (curIdx !== -1 && curIdx >= targetIdx) return null;
+  return target;
 }
 
 export default defineAction({
@@ -195,38 +246,29 @@ export default defineAction({
 
     const tagMatch = { source: "tracker", item_id: item.id };
 
-    // Fan out over the app boundary (MCP): brain transcript + tagged runs +
-    // tagged spawns + the global brain queue snapshot (the live concurrency
-    // gate) + this item's own brain_task slot state (read straight from the
-    // orchestrator's source of truth via the scoped `brain-task-for-thread`
-    // action) — NOT read out of the orchestrator's private DB directly.
-    // Tolerate partial failures so a transient orchestrator hiccup still shows
-    // what it can.
-    const [threadRes, runsRes, spawnsRes, queueRes, taskRes] =
-      await Promise.all([
-        Promise.allSettled([
-          callOrchestratorTool(ownerEmail, "brain-thread", {
-            threadId: item.orchestratorThreadId,
-          }),
-        ]).then((r) => r[0]!),
-        Promise.allSettled([
-          callOrchestratorTool(ownerEmail, "runsList", { tagMatch, limit: 50 }),
-        ]).then((r) => r[0]!),
-        Promise.allSettled([
-          callOrchestratorTool(ownerEmail, "spawnList", {
-            tagMatch,
-            limit: 100,
-          }),
-        ]).then((r) => r[0]!),
-        Promise.allSettled([
-          callOrchestratorTool(ownerEmail, "brain-queue-status", {}),
-        ]).then((r) => r[0]!),
-        Promise.allSettled([
-          callOrchestratorTool(ownerEmail, "brain-task-for-thread", {
-            threadId: item.orchestratorThreadId,
-          }),
-        ]).then((r) => r[0]!),
-      ]);
+    // Fan out: brain transcript + tagged runs + tagged spawns + the global
+    // brain queue snapshot (the live concurrency gate). Plus the per-item
+    // brain_task slot read straight from the shared DB. Tolerate partial
+    // failures so a transient orchestrator hiccup still shows what it can.
+    const [threadRes, runsRes, spawnsRes, queueRes, slot] = await Promise.all([
+      Promise.allSettled([
+        callOrchestratorTool(ownerEmail, "brain-thread", {
+          threadId: item.orchestratorThreadId,
+        }),
+      ]).then((r) => r[0]!),
+      Promise.allSettled([
+        callOrchestratorTool(ownerEmail, "runsList", { tagMatch, limit: 50 }),
+      ]).then((r) => r[0]!),
+      Promise.allSettled([
+        callOrchestratorTool(ownerEmail, "spawnList", { tagMatch, limit: 100 }),
+      ]).then((r) => r[0]!),
+      Promise.allSettled([
+        callOrchestratorTool(ownerEmail, "brain-queue-status", {}),
+      ]).then((r) => r[0]!),
+      // Per-item slot state, read via the orchestrator's own action surface
+      // (F9 — no more raw cross-app SQL, see readBrainTaskSlot above).
+      readBrainTaskSlot(ownerEmail, item.orchestratorThreadId),
+    ]);
 
     const errors: Record<string, string> = {};
 
@@ -261,18 +303,6 @@ export default defineAction({
       errors.runs = String(runsRes.reason?.message ?? runsRes.reason);
     if (spawnsRes.status === "rejected")
       errors.spawns = String(spawnsRes.reason?.message ?? spawnsRes.reason);
-    if (taskRes.status === "rejected")
-      errors.task = String(taskRes.reason?.message ?? taskRes.reason);
-
-    // Per-item slot state, read straight from the orchestrator's own
-    // `brain_tasks` row via the scoped `brain-task-for-thread` action (over the
-    // app boundary) — this now includes the pre-admission "queued" window that
-    // the old runs-only approximation lost. Fall back to `deriveSlotFromRuns`
-    // when the task call didn't fulfill or found no row (older orchestrator, or
-    // a thread that predates brain_tasks). If neither source resolves a slot,
-    // it stays null, so the status writeback below is a no-op — the stored
-    // status is left unchanged exactly as the old best-effort read degraded.
-    const slot = deriveSlotFromTask(taskRes) ?? deriveSlotFromRuns(runs);
 
     // For each run, pull its DAG node statuses (design / develop / review / …)
     // so the panel can show node-level progress. Best-effort + bounded.
@@ -321,6 +351,15 @@ export default defineAction({
       : [];
 
     const delivery = extractDelivery(events);
+    const latestEventAt = events.reduce<string | null>((latest, e) => {
+      if (typeof e.createdAt !== "string") return latest;
+      if (
+        !latest ||
+        new Date(e.createdAt).getTime() > new Date(latest).getTime()
+      )
+        return e.createdAt;
+      return latest;
+    }, null);
 
     // Global concurrency gate snapshot (counts + driver health).
     const queue =
@@ -333,10 +372,14 @@ export default defineAction({
       errors.queue = String(queueRes.reason?.message ?? queueRes.reason);
 
     // ── Status writeback ──────────────────────────────────────────────────────
-    // Reflect the live slot gate (queued → running → done) onto the work item so
-    // the board updates without a human touching it. The bound run id (once the
-    // brain starts executing) is also captured for display/proof. A delivered PR
-    // forces `done`. We only write when something actually changed.
+    // Reflect the live slot gate (queued → running → returned) onto the work
+    // item so the board updates without a human touching it. The bound run id
+    // (once the brain starts executing) is also captured for display/proof.
+    //
+    // F3 (T-F3-17, SDLC-058): this UNGUARDED poll path never writes `done` and
+    // never advances the stage past 「验收」(待人工评审). A delivered PR means
+    // the run RETURNED — review pending; `done` is exclusively written by the
+    // guarded transition-work-item action. We only write when changed.
     const runIdFromSlot = slot?.runId ?? null;
     const runIdFromRuns =
       runsWithNodes.length && typeof runsWithNodes[0]?.id === "string"
@@ -344,30 +387,40 @@ export default defineAction({
         : null;
     const orchestratorRunId = runIdFromSlot ?? runIdFromRuns ?? null;
 
-    const nextStatus = deriveItemStatus(slot?.status ?? null, !!delivery);
+    const nextStatus = deriveItemStatus(slot?.status ?? null, !!delivery, {
+      isStrongDelivery: !!delivery?.isStrong,
+      slotUpdatedAt: slot?.updatedAt ?? null,
+      latestEventAt,
+    });
     const patch: Record<string, unknown> = {};
     if (nextStatus && nextStatus !== item.status) patch.status = nextStatus;
     if (orchestratorRunId && orchestratorRunId !== item.orchestratorRunId)
       patch.orchestratorRunId = orchestratorRunId;
 
-    // ── Stage advancement on completion ───────────────────────────────────────
-    // When a run completes (status → done), advance currentStageName to 测试 so
-    // the board card moves to the Testing column. Stages before or at 实施 are
-    // eligible; already-later stages are not rolled back.
-    // When a run fails, leave currentStageName at 实施 (set by dispatch); no
-    // change needed here — the status chip shows the red failed state.
-    const PRE_TEST_STAGES = new Set(["待办", "分析", "设计", "实施"]);
-    const TEST_STAGE = "测试";
-    let nextStageName: string | null = null;
-    if (
-      nextStatus === "done" &&
-      PRE_TEST_STAGES.has(item.currentStageName ?? "待办") &&
-      item.currentStageName !== TEST_STAGE
-    ) {
-      nextStageName = TEST_STAGE;
-      patch.currentStageName = TEST_STAGE;
-    }
+    // ── Stage advancement on run return (capped at 验收) ─────────────────────
+    // Run returned + strong delivery → 验收 (待人工评审, the review row);
+    // returned without strong delivery → 测试. Never done, never rolled back.
+    // On failure, leave currentStageName as-is — the status chip shows red.
+    const itemExecState =
+      (item as { execState?: string | null }).execState ?? null;
+    const nextStageName = deriveWritebackStage(
+      nextStatus,
+      item.currentStageName,
+      !!delivery?.isStrong,
+    );
+    if (nextStageName) patch.currentStageName = nextStageName;
+    // exec_state tracks the dispatch loop separately from the business stage:
+    // a terminal-success run flips it to 'returned' (v24 vocabulary).
+    if (nextStatus === "returned" && itemExecState !== "returned")
+      patch.execState = "returned";
 
+    if (delivery?.branch && delivery.branch !== item.branch)
+      patch.branch = delivery.branch;
+    // A run genuinely coming back may clear the dispatch gate for downstream
+    // items that were blocked-by this one — re-evaluate them. (isGateCleared
+    // keys on the 实施 stage being completed / the stage moving past 实施,
+    // not on status="done", so the returned+验收 writeback still unblocks.)
+    const justCompleted = nextStatus === "returned" && item.status !== "returned";
     if (Object.keys(patch).length) {
       patch.updatedAt = new Date().toISOString();
       await db
@@ -377,6 +430,14 @@ export default defineAction({
         .catch(() => {
           // writeback is best-effort; never fail the read
         });
+    }
+    if (justCompleted) {
+      await reevaluateBlockedQueue(
+        db,
+        item.ownerEmail,
+        item.orgId ?? null,
+        item.id,
+      );
     }
 
     return {

@@ -1,9 +1,8 @@
 import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb, schema } from "../server/db/index.js";
-import { ownerScope } from "../server/lib/access.js";
 
 export default defineAction({
   description: "Reject a pending approval gate. Requires a reason.",
@@ -18,17 +17,14 @@ export default defineAction({
 
     const db = getDb();
 
-    // Scope the lookup to rows the caller owns (or shares via their org), so an
-    // approval outside the caller's access scope is never rejectable — it reads
-    // as not-found rather than being silently mutable by any authenticated user.
     const rows = await db
       .select()
       .from(schema.approvals)
-      .where(and(eq(schema.approvals.id, args.id), ownerScope(schema.approvals)))
+      .where(eq(schema.approvals.id, args.id))
       .limit(1);
 
     if (rows.length === 0) {
-      throw new Error(`Approval ${args.id} not found or not accessible`);
+      throw new Error(`Approval ${args.id} not found`);
     }
 
     const approval = rows[0]!;

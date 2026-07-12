@@ -9,7 +9,6 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
-import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
@@ -31,7 +30,7 @@ export default defineAction({
     url: z.string().url().describe("Document URL"),
   }),
   http: { method: "POST" },
-  run: async (args, ctx) => {
+  run: async (args) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -71,12 +70,11 @@ export default defineAction({
       .returning();
 
     // Append an activity record.
-    const actorKind = resolveActorKind(ctx);
     await db.insert(schema.activities).values({
       id: nanoid(),
       workItemId: args.workItemId,
-      actorKind,
-      actorName: resolveActorName(actorKind, ownerEmail),
+      actorKind: "human",
+      actorName: ownerEmail,
       eventType: "document.added",
       payload: JSON.stringify({
         documentId: id,

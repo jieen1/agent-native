@@ -4,7 +4,6 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
-import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
 
 // Rollback a stage on a work item: set the current stage status to "已驳回",
 // find or create the target stage and set it to "待执行", insert a rollback_log
@@ -20,7 +19,7 @@ export default defineAction({
     reason: z.string().optional().describe("Reason for the rollback"),
   }),
   http: { method: "POST" },
-  run: async (args, ctx) => {
+  run: async (args) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
@@ -145,12 +144,11 @@ export default defineAction({
       .where(eq(schema.workItems.id, args.workItemId));
 
     // --- Insert an activity row ---
-    const actorKind = resolveActorKind(ctx);
     await db.insert(schema.activities).values({
       id: `act_rollback_${args.workItemId.slice(0, 8)}_${now.replace(/[:.]/g, "").slice(0, 8)}`,
       workItemId: args.workItemId,
-      actorKind,
-      actorName: resolveActorName(actorKind, ownerEmail),
+      actorKind: "human",
+      actorName: ownerEmail,
       eventType: "回退",
       payload: JSON.stringify({
         fromStage,

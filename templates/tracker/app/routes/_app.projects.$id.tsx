@@ -44,7 +44,6 @@ import {
 } from "@/components/ui/table";
 import {
   IconArrowLeft,
-  IconArrowRight,
   IconDeviceFloppy,
   IconLoader2,
   IconPlus,
@@ -245,12 +244,7 @@ function ProjectReposSection({ projectId }: { projectId: string }) {
       <Card className="mt-6">
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-base">代码仓库</CardTitle>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5"
-            onClick={openAdd}
-          >
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={openAdd}>
             <IconPlus className="size-4" />
             添加仓库
           </Button>
@@ -694,29 +688,14 @@ export default function ProjectSettingsRoute() {
           </Card>
 
           <Card className="mt-6">
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader>
               <CardTitle className="text-base">阶段门控配置</CardTitle>
-              <Button asChild size="sm" variant="outline" className="gap-1.5">
-                <Link to={`/projects/${id}/stages`}>
-                  阶段配置（词汇 / 流程 / 类型分配）
-                  <IconArrowRight className="size-3.5" />
-                </Link>
-              </Button>
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                下方为按阶段名的原始 JSON 门控编辑器；
-                <Link
-                  to={`/projects/${id}/stages`}
-                  className="text-foreground underline underline-offset-2"
-                >
-                  阶段配置页面
-                </Link>
-                提供逐阶段的表单化编辑，以及可复用流程与工作项类型分配。按阶段名配置推进门槛（JSON）。未配置的阶段可自由推进。示例：
+                按阶段名配置推进门槛（JSON）。未配置的阶段可自由推进。示例：
                 <code className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-xs">
-                  {
-                    '{"分析":{"requireArtifacts":["sprint-doc"],"requireApproval":"plan-signoff"}}'
-                  }
+                  {'{"分析":{"requireArtifacts":["sprint-doc"],"requireApproval":"plan-signoff"}}'}
                 </code>
               </p>
               <div className="space-y-1.5">

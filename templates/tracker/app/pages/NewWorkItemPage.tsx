@@ -27,7 +27,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import {
   IconArrowLeft,
-  IconArrowRight,
   IconGitBranch,
   IconLoader2,
   IconMailPlus,
@@ -217,6 +216,9 @@ export function NewWorkItemPage() {
   const autoMode = executionMode === "auto";
 
   const selectedSprint = sprints.find((s) => s.id === sprintId);
+  const branchPreview = selectedSprint?.branch
+    ? `${selectedSprint.branch} → ${selectedSprint.name}`
+    : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -413,13 +415,11 @@ export function NewWorkItemPage() {
                 )}
               </Field>
 
-              {selectedSprint?.branch && (
+              {branchPreview && (
                 <div className="flex items-center gap-2">
                   <IconGitBranch className="size-3.5 text-muted-foreground" />
-                  <span className="font-mono text-xs text-muted-foreground flex items-center gap-1">
-                    {selectedSprint.branch}
-                    <IconArrowRight className="size-3" />
-                    {selectedSprint.name}
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {branchPreview}
                   </span>
                 </div>
               )}

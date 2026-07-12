@@ -32,12 +32,7 @@ Status moves only by explicit human or agent action. No automatic inference.
 **Orchestrator Dispatch:**
 - `dispatch-to-orchestrator` — send a work item to orchestrator brain for AI execution
 - `bulk-dispatch-to-orchestrator` — dispatch multiple items
-- `get-activity` — read a dispatched item's live orchestrator activity back
-  (brain transcript, tagged runs/spawns, DAG node statuses, parsed delivery)
-  over MCP
-- `list-tracker-activities` — list this item's local tracker activity log
-  (comments, stage transitions, dispatch/acceptance events recorded in the
-  tracker's own `activities` table) — does not talk to the orchestrator
+- `list-tracker-activities` — poll orchestrator activity tagged to an item
 - `enqueue-work-item`, `dequeue-work-item`, `list-queue` — manage execution queue
 
 ## Application State

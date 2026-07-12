@@ -6,23 +6,34 @@ import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
 export default defineAction({
-  description: "Update mutable fields on a work item (metadata, not status transitions).",
-  schema: z.object({
-    id: z.string().min(1),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    type: z.string().optional(),
-    priority: z.number().int().optional(),
-    risk: z.string().optional(),
-    tags: z.array(z.string()).optional(),
-    executionMode: z.string().optional(),
-    sprintId: z.string().nullable().optional(),
-    plannedStages: z.array(z.string()).optional(),
-    currentStageName: z.string().optional(),
-    branch: z.string().nullable().optional(),
-    owner: z.string().nullable().optional(),
-    nature: z.array(z.string()).optional(),
-  }),
+  description:
+    "Update mutable fields on a work item (metadata, not status transitions). " +
+    "F3: currentStageName is NOT settable here — every stage/status change is " +
+    "guarded (see transition-work-item for human-driven transitions/closure, " +
+    "or advance-stage for the evidence-backed writeback channel).",
+  // .strict(): F3/T-F3-07 — currentStageName (and any other unrecognized
+  // key) must be a SCHEMA-LEVEL rejection, not a silently-stripped no-op.
+  // Without .strict(), zod's default "strip unknown keys" behavior would let
+  // a currentStageName-carrying call through unrejected (it'd just be
+  // dropped before ever reaching `run`), which defeats the whole point of
+  // removing the field from the schema.
+  schema: z
+    .object({
+      id: z.string().min(1),
+      title: z.string().optional(),
+      description: z.string().optional(),
+      type: z.string().optional(),
+      priority: z.number().int().optional(),
+      risk: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      executionMode: z.string().optional(),
+      sprintId: z.string().nullable().optional(),
+      plannedStages: z.array(z.string()).optional(),
+      branch: z.string().nullable().optional(),
+      owner: z.string().nullable().optional(),
+      nature: z.array(z.string()).optional(),
+    })
+    .strict(),
   http: { method: "POST" },
   run: async (args) => {
     const ownerEmail = getRequestUserEmail();
@@ -50,7 +61,6 @@ export default defineAction({
     if (args.executionMode !== undefined) patch.executionMode = args.executionMode;
     if (args.sprintId !== undefined) patch.sprintId = args.sprintId;
     if (args.plannedStages !== undefined) patch.plannedStages = JSON.stringify(args.plannedStages);
-    if (args.currentStageName !== undefined) patch.currentStageName = args.currentStageName;
     if (args.branch !== undefined) patch.branch = args.branch;
     if (args.owner !== undefined) patch.owner = args.owner;
     if (args.nature !== undefined) patch.nature = JSON.stringify(args.nature);

@@ -11,13 +11,8 @@
 //    `sub` is the authoritative actor identity. exp is enforced if present.
 //  - Headers: Authorization: Bearer <jwt>, Accept: application/json,
 //    text/event-stream (the SDK transport requires both advertised).
-//
-// The JWT minting + MCP HTTP transport + response parsing are shared with
-// orchestrator-client.ts via ./mcp-client.ts — this file only resolves the
-// content app's base URL/endpoint and keeps its own tool-call wrapper plus all
-// the content-specific response massaging (upload/document id fallbacks) below.
 
-import { callMcpTool, mintA2aJwt, type McpCallResult } from "./mcp-client.js";
+import crypto from "node:crypto";
 
 /**
  * Base URL of the content app, reachable from the tracker container. Override with
@@ -29,24 +24,11 @@ export function contentBaseUrl(): string {
   );
 }
 
-/**
- * Publicly reachable base URL for the content app, used to build evidence
- * links (documents, screenshots) that a human opens in a browser — as
- * opposed to `contentBaseUrl()`, which is the container-internal address
- * used for server-to-server MCP calls and is never browser-reachable.
- *
- * Set `CONTENT_PUBLIC_BASE` in any deployment where the tracker and content
- * app are NOT served from the same origin behind a shared gateway. When
- * unset, this falls back to an empty (relative) base, so links resolve as
- * `/content/...` against whatever origin is serving the page — correct for
- * the common case where a gateway proxies `/content` to the content app on
- * the same host. It intentionally does NOT fall back to `CONTENT_BASE_URL`
- * (that address is container-internal DNS, e.g. `http://an-content:3002`,
- * and would produce a link no browser outside the container network could
- * ever open).
- */
 export function contentPublicBaseUrl(): string {
-  return process.env.CONTENT_PUBLIC_BASE?.replace(/\/$/, "") || "";
+  return (
+    process.env.CONTENT_PUBLIC_BASE?.replace(/\/$/, "") ||
+    "http://192.168.1.101"
+  );
 }
 
 export function contentDocumentUrl(
@@ -60,9 +42,45 @@ function mcpEndpoint(): string {
   return `${contentBaseUrl()}/content/_agent-native/mcp`;
 }
 
+function base64url(input: Buffer | string): string {
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
 /** Mint an HS256 JWT for the content app MCP endpoint (no extra deps). */
 export function mintContentJwt(actorEmail: string): string {
-  return mintA2aJwt(actorEmail, "the content app");
+  const secret = process.env.A2A_SECRET;
+  if (!secret) {
+    throw new Error(
+      "A2A_SECRET is not set — the tracker container must share the same " +
+        "A2A_SECRET as the content app to dispatch over MCP.",
+    );
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = {
+    sub: actorEmail,
+    iat: now,
+    exp: now + 3600,
+    catalog_scope: "full",
+  };
+  const signingInput = `${base64url(JSON.stringify(header))}.${base64url(
+    JSON.stringify(payload),
+  )}`;
+  const signature = base64url(
+    crypto.createHmac("sha256", secret).update(signingInput).digest(),
+  );
+  return `${signingInput}.${signature}`;
+}
+
+interface McpCallResult {
+  /** Parsed JSON result of the action (from MCP structuredContent or text). */
+  data: unknown;
+  /** Raw MCP envelope for debugging. */
+  raw: unknown;
 }
 
 /**
@@ -76,14 +94,22 @@ export async function callContentTool(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<McpCallResult> {
-  return callMcpTool({
-    endpoint: mcpEndpoint(),
-    actorEmail,
-    appLabel: "Content",
-    appDescription: "the content app",
-    toolName,
-    args,
-    extraHeaders: {
+  const jwt = mintContentJwt(actorEmail);
+  const endpoint = mcpEndpoint();
+  const body = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: toolName, arguments: args },
+  };
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      Authorization: `Bearer ${jwt}`,
+      "X-Agent-Native-Owner-Email": actorEmail,
       // Content's `create-document` is a mutating action that declares an
       // `mcpApp.resource` (embeddable editor), so the MCP server only puts
       // the action's full result object into `structuredContent` when the
@@ -94,7 +120,70 @@ export async function callContentTool(
       // back in `structuredContent` instead of having to scrape prose text.
       "x-agent-native-mcp-inline-apps": "1",
     },
+    body: JSON.stringify(body),
   });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(
+      `Content MCP ${toolName} failed (HTTP ${res.status}): ${text.slice(
+        0,
+        500,
+      )}`,
+    );
+  }
+
+  // The stateless transport can return either a JSON body or an SSE frame
+  // (data: <json>). Parse both.
+  const parsed = parseMcpResponse(text);
+  const rpc = parsed as {
+    error?: { message?: string };
+    result?: {
+      isError?: boolean;
+      structuredContent?: unknown;
+      content?: Array<{ type: string; text?: string }>;
+    };
+  };
+  if (rpc.error) {
+    throw new Error(`Content MCP ${toolName} error: ${rpc.error.message}`);
+  }
+  const result = rpc.result;
+  if (!result) {
+    throw new Error(`Content MCP ${toolName}: empty result`);
+  }
+  if (result.isError) {
+    const msg = result.content?.find((c) => c.type === "text")?.text;
+    throw new Error(`Content MCP ${toolName} tool error: ${msg ?? "?"}`);
+  }
+
+  let data: unknown = result.structuredContent;
+  if (data === undefined) {
+    const textPart = result.content?.find((c) => c.type === "text")?.text;
+    if (textPart) {
+      try {
+        data = JSON.parse(textPart);
+      } catch {
+        data = textPart;
+      }
+    }
+  }
+  return { data, raw: parsed };
+}
+
+function parseMcpResponse(text: string): unknown {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    return JSON.parse(trimmed);
+  }
+  // SSE: find the last `data:` line and parse it.
+  const lines = trimmed.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (line.startsWith("data:")) {
+      return JSON.parse(line.slice("data:".length).trim());
+    }
+  }
+  throw new Error(`Unparseable MCP response: ${trimmed.slice(0, 200)}`);
 }
 
 /**
@@ -294,7 +383,8 @@ export async function uploadContentImage(
     error?: string;
   };
 
-  let rawUrl = typeof data.url === "string" && data.url ? data.url : undefined;
+  let rawUrl =
+    typeof data.url === "string" && data.url ? data.url : undefined;
   let id = typeof data.id === "string" && data.id ? data.id : undefined;
 
   // upload-image is a "pure" core action (no mcpApp.resource / readOnly), so

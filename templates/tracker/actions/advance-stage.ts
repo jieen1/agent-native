@@ -1,14 +1,14 @@
 import { defineAction } from "@agent-native/core";
-import type { ActionRunContext } from "@agent-native/core/action";
 import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
-import { resolveActorKind, resolveActorName } from "../server/lib/activity.js";
+import { actorFromCaller, type ActorKind } from "../server/lib/transition-guard.js";
+import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
 import { validateDependencyGraph } from "../shared/graph-validation.js";
 
 const FULL_STAGE_ORDER = [
@@ -20,6 +20,13 @@ const FULL_STAGE_ORDER = [
   "验收",
   "交付",
 ] as const;
+
+// F3 (T-F3-18): the writeback/advance channel is capped BELOW 交付. Per 02 §8,
+// 「人工完成(任意→交付)」 is human-only through the guarded
+// transition-work-item action (evidence: commit/links), and done is only
+// reachable from 待人工评审 through the same action. advance-stage may move
+// an item up to 验收 and no further — advancing INTO 交付 here is refused.
+const GUARDED_FINAL_STAGE = "交付";
 
 // ── Shared helper: advance a single work item one stage ──────────────────────
 
@@ -39,7 +46,7 @@ async function advanceOneItem(
   expectedRunId?: string,
   ownerEmail: string = "",
   orgId: string | null = null,
-  ctx?: ActionRunContext,
+  actorKind: ActorKind = "system",
 ): Promise<AdvanceOneResult> {
   const now = new Date().toISOString();
 
@@ -74,6 +81,19 @@ async function advanceOneItem(
     return { noop: true, reason: "no-next-stage" };
   }
   const nextStage = stageOrder[idx + 1];
+
+  // --- F3 (T-F3-18): 交付 is guarded — not reachable via this channel ---
+  // Advancing INTO 交付 (and the old `status="done"` side effect that came
+  // with it) is refused; the human escape hatch is transition-work-item
+  // (target=交付, evidence required), and done is only reachable from
+  // 待人工评审 through the same guarded action.
+  if (nextStage === GUARDED_FINAL_STAGE) {
+    return {
+      noop: true,
+      reason: "delivery-guarded",
+      workItemId: item.id,
+    };
+  }
 
   // --- Gate criteria check (config for the CURRENT stage = fromStage) ---
   // Fetch project's stageGateConfig
@@ -144,6 +164,7 @@ async function advanceOneItem(
                 eq(schema.approvals.sprintId, sprintId),
                 eq(schema.approvals.gateKey, criteria.requireApproval),
                 eq(schema.approvals.status, "approved"),
+                isNull(schema.approvals.staleAt),
               ),
             )
             .limit(1)
@@ -164,16 +185,20 @@ async function advanceOneItem(
         await db
           .select({
             id: schema.workItems.id,
+            projectId: schema.workItems.projectId,
             itemKey: schema.workItems.itemKey,
           })
           .from(schema.workItems)
           .where(and(ownerScope(schema.workItems), scopeFilter))
           .limit(2000)
-      ) as { id: string; itemKey: string }[];
+      ) as { id: string; projectId: string; itemKey: string }[];
 
+      // F8: itemKey 消歧(读路径) — see validate-dependency-graph.ts (same
+      // check, invoked inline here for the requireGraphValid gate).
+      const displays = await computeItemKeyDisplays(db, items);
       const nodes = items.map((it) => ({
         id: it.id,
-        itemKey: it.itemKey || it.id,
+        itemKey: displays.get(it.id) || it.itemKey || it.id,
       }));
 
       let edges: { fromId: string; toId: string }[] = [];
@@ -283,28 +308,27 @@ async function advanceOneItem(
     });
   }
 
-  // Update work item's current stage
-  const isFinalDelivery =
-    nextStage === "交付" &&
-    stageOrder.length > 0 &&
-    stageOrder[stageOrder.length - 1] === "交付";
-
+  // Update work item's current stage. F3 (T-F3-18): the old
+  // `isFinalDelivery → status="done"` side effect is REMOVED — this channel
+  // never writes done (and never reaches 交付, guarded above); done is
+  // exclusively written by transition-work-item.
   await db
     .update(schema.workItems)
     .set({
       currentStageName: nextStage,
-      status: isFinalDelivery ? "done" : "running",
+      status: "running",
       updatedAt: now,
     })
     .where(eq(schema.workItems.id, item.id));
 
-  // Activity log
-  const actorKind = resolveActorKind(ctx);
+  // Activity log. actorKind is the REAL invoking actor (agent tool-loop
+  // calls record as "agent"), not a hardcoded "human" — the activity feed's
+  // actor badge must be trustworthy (F3, T-F3-18).
   await db.insert(schema.activities).values({
     id: `act_adv_${item.id.slice(0, 6)}_${argsFromStage}_to_${nextStage}_${now.replace(/\D/g, "").slice(0, 14)}`,
     workItemId: item.id,
     actorKind,
-    actorName: resolveActorName(actorKind, ownerEmail),
+    actorName: ownerEmail,
     eventType: "推进",
     payload: JSON.stringify({ fromStage: argsFromStage, toStage: nextStage }),
     createdAt: now,
@@ -334,6 +358,8 @@ export default defineAction({
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
+    // Real invoking actor for the activity trail (agent tool calls → "agent").
+    const actorKind = actorFromCaller(ctx?.caller, ownerEmail).kind;
 
     const db = getDb();
 
@@ -360,8 +386,43 @@ export default defineAction({
         args.expectedRunId,
         ownerEmail,
         orgId,
-        ctx,
+        actorKind,
       );
+
+      // F9 (阶段起点契约, T-F9-02): a scope=item call is how the writeback
+      // channel drives 实施→测试→验收 — its `fromStage` is an EXPECTATION
+      // ("this item should currently be at 实施/测试"), not a search filter.
+      // When that expectation doesn't hold (item drifted/was never moved into
+      // 实施 — dispatch itself never advances the stage, SDLC-063), the guard
+      // above already no-ops (zero stage/status writes — "不搬工作项进实施").
+      // What's missing without this block is VISIBILITY: silence here would
+      // make "阶段起点契约" an untestable prose-only claim. Write a dedicated
+      // activity event so S10 / the item's own activity feed can surface the
+      // mismatch for human triage, instead of the reconciler's forward
+      // advance just silently vanishing. Scope=sprint's batch cascade
+      // deliberately keeps the existing silent-skip behavior (a sprint-wide
+      // advance naturally only applies to the subset of items actually at
+      // fromStage — that's expected, not an anomaly worth an event each).
+      if (result.noop && result.reason === "stage-mismatch") {
+        const now = new Date().toISOString();
+        await db.insert(schema.activities).values({
+          id: `act_wbmismatch_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+          workItemId: item.id,
+          actorKind,
+          actorName: ownerEmail,
+          eventType: "writeback.stage-mismatch",
+          payload: JSON.stringify({
+            expectedFromStage: args.fromStage,
+            actualStage: item.currentStageName,
+            expectedRunId: args.expectedRunId ?? null,
+          }),
+          createdAt: now,
+          ownerEmail,
+          orgId,
+          visibility: "private",
+        });
+      }
+
       return result;
     }
 
@@ -433,7 +494,7 @@ export default defineAction({
           args.expectedRunId,
           ownerEmail,
           orgId,
-          ctx,
+          actorKind,
         );
         if (result.blocked) {
           cascaded.push({
@@ -456,13 +517,12 @@ export default defineAction({
         }
       } catch (e) {
         const errStr = String(e);
-        // Write failure activity
-        const failureActorKind = resolveActorKind(ctx);
+        // Write failure activity (real actor, not hardcoded "human")
         await db.insert(schema.activities).values({
           id: `act_adv_fail_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
           workItemId: item.id,
-          actorKind: failureActorKind,
-          actorName: resolveActorName(failureActorKind, ownerEmail),
+          actorKind,
+          actorName: ownerEmail,
           eventType: "推进失败",
           payload: JSON.stringify({ error: errStr }),
           createdAt: now,

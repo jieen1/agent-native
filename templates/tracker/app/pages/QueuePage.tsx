@@ -74,6 +74,13 @@ function statusBadge(status: string) {
       return (
         <Badge variant="destructive">失败</Badge>
       );
+    case "blocked":
+    case "等待依赖":
+      return (
+        <Badge variant="secondary" className="bg-orange-400/20 text-orange-600">
+          等待依赖
+        </Badge>
+      );
     default:
       return (
         <Badge variant="outline">{status}</Badge>
@@ -153,8 +160,15 @@ function QueueRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           {w?.itemKey ? (
-            <span className="font-mono text-[11px] font-semibold text-muted-foreground">
-              {w.itemKey}
+            <span
+              className="font-mono text-[11px] font-semibold text-muted-foreground"
+              title={
+                w.itemKeyDisplay && w.itemKeyDisplay !== w.itemKey
+                  ? "历史重号，已消歧显示"
+                  : undefined
+              }
+            >
+              {w.itemKeyDisplay ?? w.itemKey}
             </span>
           ) : null}
           <span className="truncate text-sm font-medium">
@@ -233,6 +247,21 @@ function getNextStep(item: QueueItem, w?: TrackerWorkItem): string {
   if (item.status === "paused" || item.status === "已暂停") {
     return "等待人工审批";
   }
+  if (item.status === "blocked" || item.status === "等待依赖") {
+    try {
+      const blockers = item.blockedBy ? JSON.parse(item.blockedBy) : [];
+      const keys = Array.isArray(blockers)
+        ? blockers
+            .map((b: { itemKey?: string } | string) =>
+              typeof b === "string" ? b : b?.itemKey,
+            )
+            .filter(Boolean)
+        : [];
+      return keys.length ? `等待依赖 ${keys.join(", ")}` : "等待依赖";
+    } catch {
+      return "等待依赖";
+    }
+  }
   if (w?.currentStageName) {
     const order = ["待办", "分析", "设计", "实施", "测试", "验收", "交付"];
     const idx = order.indexOf(w.currentStageName);
@@ -262,8 +291,15 @@ function HumanGateCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             {w?.itemKey ? (
-              <span className="font-mono text-xs font-semibold text-muted-foreground">
-                {w.itemKey}
+              <span
+                className="font-mono text-xs font-semibold text-muted-foreground"
+                title={
+                  w.itemKeyDisplay && w.itemKeyDisplay !== w.itemKey
+                    ? "历史重号，已消歧显示"
+                    : undefined
+                }
+              >
+                {w.itemKeyDisplay ?? w.itemKey}
               </span>
             ) : null}
             <span className="truncate text-sm font-medium">
@@ -548,7 +584,7 @@ export function QueuePage() {
           ) : (
             <IconPlayerPause className="size-4" />
           )}
-          {reconcilerPaused ? "恢复 reconciler" : "暂停 reconciler"}
+          {reconcilerPaused ? "▶ 恢复 reconciler" : "⏸ 暂停 reconciler"}
         </Button>
       </div>
 
@@ -590,7 +626,9 @@ export function QueuePage() {
                 )}
               />
               <span className="text-sm font-medium">
-                {reconcilerPaused ? "reconciler 已暂停" : "reconciler 运行中"}
+                {reconcilerPaused
+                  ? "● reconciler 已暂停"
+                  : "● reconciler 运行中"}
               </span>
             </div>
             <span className="text-xs text-muted-foreground">
@@ -612,7 +650,7 @@ export function QueuePage() {
                       variant="outline"
                       className="gap-1 text-xs"
                     >
-                      {w?.itemKey ?? "—"}
+                      {w?.itemKeyDisplay ?? w?.itemKey ?? "—"}
                     </Badge>
                   );
                 })}

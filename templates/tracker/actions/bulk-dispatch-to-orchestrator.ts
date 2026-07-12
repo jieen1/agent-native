@@ -1,14 +1,17 @@
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail, getRequestOrgId } from "@agent-native/core/server/request-context";
+import {
+  getRequestUserEmail,
+  getRequestOrgId,
+} from "@agent-native/core/server/request-context";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
-
-// Stages that precede implementation — dispatch should advance past these.
-const PRE_IMPL_STAGES = new Set(["待办", "分析", "设计"]);
-const IMPL_STAGE = "实施";
+import { resolveDispatchGate } from "../server/lib/dispatch-gate.js";
+import { resolveScaleGate } from "../server/lib/scale-gate.js";
+import { actorFromCaller } from "../server/lib/transition-guard.js";
+import { recordDispatchRun } from "../server/lib/work-item-runs.js";
 
 // Bulk-dispatch many work items to the orchestrator brain in one atomic action.
 // Loops the proven single-item dispatch logic (mint JWT → MCP `brain-send` with
@@ -68,12 +71,32 @@ export default defineAction({
         "Periodic drift-check cadence (seconds) for each brain monitor. Omit → " +
           "server default; 0 → event-only (no timer wakes).",
       ),
+    // F5 (02 §3.10 决策序①): human scale-override, batch-level + per-item.
+    overrideScale: z
+      .boolean()
+      .optional()
+      .describe(
+        "Batch-level scale override: dispatch every over-scale item anyway " +
+          "(logs scale.overridden per item). Prefer overrideScaleIds to override " +
+          "only specific items.",
+      ),
+    overrideScaleIds: z
+      .array(z.string().min(1))
+      .optional()
+      .describe(
+        "Per-item scale override: only these ids bypass the split-required gate; " +
+          "other over-scale items are skipped (reason=scale-exceeded).",
+      ),
   }),
   http: { method: "POST" },
-  run: async (args) => {
+  run: async (args, ctx) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");
     const orgId = getRequestOrgId() ?? null;
+    // F5: real actor (agent vs human) for the scale.overridden activity row —
+    // never hardcode human (mirrors dispatch-to-orchestrator / F3 T-F3-18b).
+    const actor = actorFromCaller(ctx?.caller, ownerEmail);
+    const overrideScaleIdSet = new Set(args.overrideScaleIds ?? []);
 
     const db = getDb();
     const ids = Array.from(new Set(args.workItemIds));
@@ -101,18 +124,44 @@ export default defineAction({
       workItemId: string;
       ok: boolean;
       status?: string;
+      execState?: string;
+      currentStageName?: string;
       threadId?: string;
       taskId?: string | null;
       queuePosition?: number | null;
+      blockedBy?: string[];
       error?: string;
+      // F5: over-scale item skipped (not dispatched, not a hard failure).
+      skipped?: boolean;
+      reason?: string;
+      estimate?: unknown;
+      scaleOverridden?: boolean;
     };
 
     // Dispatch one item: load context, call brain-send, write back. Returns a
     // result record; never throws (failures are captured per item).
     async function dispatchOne(id: string): Promise<ItemResult> {
+      // F9 review fix: `run()` already guards `ownerEmail` with an explicit
+      // `if (!ownerEmail) throw` before dispatchOne is ever invoked, but
+      // TypeScript doesn't carry that narrowing across the closure boundary
+      // into this nested function — the prior code papered over that with a
+      // bare `ownerEmail!` when building the writeback tags. Match this
+      // function's own per-item error-return discipline (used for the other
+      // preconditions below) instead of a silent non-null assertion: an
+      // explicit, in-scope guard right here narrows `ownerEmail` to `string`
+      // for the rest of this function, and — should the impossible ever
+      // happen — fails this ONE item with a clear reason rather than
+      // asserting past it.
+      if (!ownerEmail) {
+        return { workItemId: id, ok: false, error: "Not authenticated" };
+      }
       const item = itemById.get(id);
       if (!item) {
-        return { workItemId: id, ok: false, error: "Not found or not accessible" };
+        return {
+          workItemId: id,
+          ok: false,
+          error: "Not found or not accessible",
+        };
       }
       const project = projectById.get(item.projectId);
       if (!project) {
@@ -126,7 +175,103 @@ export default defineAction({
         };
       }
 
-      const tags = { source: "tracker", item_id: item.id };
+      // ── Dependency gate check ───────────────────────────────────────────────
+      const orgId = getRequestOrgId() ?? null;
+      const gate = await resolveDispatchGate(db, id, ownerEmail!, orgId);
+      const now = new Date().toISOString();
+
+      if (!gate.ready) {
+        // Upsert exec_queue as blocked.
+        await db
+          .insert(schema.execQueue)
+          .values({
+            id: `${id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+            workItemId: id,
+            priority: 0,
+            status: "blocked",
+            currentStage: item.currentStageName ?? "",
+            enqueuedAt: now,
+            startedAt: null,
+            blockedBy: JSON.stringify(
+              gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })),
+            ),
+            ownerEmail: ownerEmail!,
+            orgId,
+          })
+          .onConflictDoUpdate({
+            target: schema.execQueue.workItemId,
+            set: {
+              status: "blocked",
+              blockedBy: JSON.stringify(
+                gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })),
+              ),
+            },
+          });
+
+        // Update work_items.status to blocked.
+        await db
+          .update(schema.workItems)
+          .set({ status: "blocked", updatedAt: now })
+          .where(eq(schema.workItems.id, id));
+
+        // Write activity log.
+        await db.insert(schema.activities).values({
+          id: `act_block_${id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+          workItemId: id,
+          actorKind: "agent",
+          actorName: "智能体",
+          eventType: "等待依赖",
+          payload: JSON.stringify({
+            blockedBy: gate.blockedBy.map((d) => d.itemKey),
+          }),
+          createdAt: now,
+          ownerEmail: ownerEmail!,
+          orgId,
+        });
+
+        return {
+          workItemId: id,
+          ok: true,
+          status: "blocked",
+          blockedBy: gate.blockedBy.map((d) => d.itemKey),
+        };
+      }
+
+      // ── F5 pre-dispatch scale gate (shared with single dispatch) ────────────
+      // Same resolveScaleGate helper the single-item action uses (02 §3.10).
+      // An over-scale item is SKIPPED per-item (reason=scale-exceeded) — it
+      // never aborts the rest of the wave/batch — unless the human overrode it
+      // batch-wide (overrideScale) or by id (overrideScaleIds). A skip writes
+      // NO state (mirrors the single-dispatch zero-residue reject); an override
+      // logs scale.overridden after the dispatch succeeds (below).
+      const { estimate: scaleEstimate, exceeded: scaleExceeded } =
+        resolveScaleGate(item);
+      const scaleOverridden =
+        scaleExceeded && (args.overrideScale || overrideScaleIdSet.has(id));
+      if (scaleExceeded && !scaleOverridden) {
+        return {
+          workItemId: id,
+          ok: false,
+          skipped: true,
+          reason: "scale-exceeded",
+          estimate: scaleEstimate,
+          error:
+            "规模超过单节点阈值,已跳过(建议 split-work-item 或传 override)",
+        };
+      }
+
+      const baseBranch = gate.chainedBranch || project.defaultBranch || "main";
+
+      // F9: same tags enrichment as the single-item dispatch path (see
+      // dispatch-to-orchestrator.ts) — the batch path must not fork here
+      // either, or batch-dispatched items would never get a correctly-scoped
+      // writeback callback.
+      const tags: Record<string, string> = {
+        source: "tracker",
+        item_id: item.id,
+        owner_email: ownerEmail,
+      };
+      if (orgId) tags.org_id = orgId;
       const requirement = item.description?.trim() || item.title;
       const message =
         `Work item ${item.id} (${project.key}) — "${item.title}".\n\n` +
@@ -140,7 +285,7 @@ export default defineAction({
         const { data } = await callOrchestratorTool(ownerEmail!, "brain-send", {
           message,
           repo: project.gitRemote,
-          baseBranch: project.defaultBranch || "main",
+          baseBranch,
           tags,
           ...(args.monitorIntervalSec !== undefined
             ? { monitorIntervalSec: args.monitorIntervalSec }
@@ -160,69 +305,65 @@ export default defineAction({
         const status = statusForSlot(result.status);
         const now = new Date().toISOString();
 
-        // Advance to 实施 if still in a pre-implementation stage.
-        const shouldAdvance = PRE_IMPL_STAGES.has(item.currentStageName ?? "待办");
-
+        // F3 (T-F3-19, SDLC-063 批量路径): identical to the single-item
+        // dispatch action — dispatch records ONLY that the item was handed
+        // to the orchestrator (`execState='dispatched'`) and NEVER advances
+        // `currentStageName`. Business-stage progression is exclusively
+        // driven by the evidence-backed writeback channel or the guarded
+        // transition-work-item action. The batch path must not fork from the
+        // single path here — that fork is exactly how the fake-progress hole
+        // would reopen at scale.
         await db
           .update(schema.workItems)
           .set({
             status,
+            execState: "dispatched",
             orchestratorThreadId: threadId,
             orchestratorTaskId: result.taskId ?? null,
             orchestratorWorkspaceId: result.workspaceId ?? null,
             dispatchedAt: now,
             updatedAt: now,
-            ...(shouldAdvance ? { currentStageName: IMPL_STAGE } : {}),
           })
           .where(eq(schema.workItems.id, item.id));
 
-        // Upsert the 实施 stage row so the board shows it as 执行中.
-        if (shouldAdvance) {
-          const existing = (
-            await db
-              .select()
-              .from(schema.stages)
-              .where(
-                and(
-                  eq(schema.stages.workItemId, item.id),
-                  eq(schema.stages.stageName, IMPL_STAGE),
-                ),
-              )
-              .limit(1)
-          )[0];
+        // F8 (回链完整性): the batch path must not fork from the single-item
+        // dispatch path here either — same reasoning as the execState/stage
+        // write above (T-F3-19's "no fork" precedent). Without this, batch-
+        // dispatched items would have zero run history in get-work-item.runs.
+        await recordDispatchRun(db, {
+          workItemId: item.id,
+          threadId,
+          ownerEmail: ownerEmail!,
+          orgId,
+          dispatchedAt: now,
+        });
 
-          if (existing) {
-            await db
-              .update(schema.stages)
-              .set({ stageStatus: "执行中", startedAt: now, updatedAt: now })
-              .where(eq(schema.stages.id, existing.id));
-          } else {
-            await db.insert(schema.stages).values({
-              id: `stage_${item.id.slice(0, 6)}_impl_${now.replace(/\D/g, "").slice(0, 14)}`,
-              workItemId: item.id,
-              stageName: IMPL_STAGE,
-              stageStatus: "执行中",
-              deliveryItems: "[]",
-              verdict: null,
-              startedAt: now,
-              completedAt: null,
-              createdAt: now,
-              updatedAt: now,
-              ownerEmail: ownerEmail!,
-              orgId,
-              visibility: "private",
-            });
-          }
+        // F5: a human explicitly overrode this item's split-required verdict —
+        // never silent (P13). Same scale.overridden shape as single dispatch.
+        if (scaleOverridden) {
+          await db.insert(schema.activities).values({
+            id: `act_scaleov_${id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+            workItemId: id,
+            actorKind: actor.kind,
+            actorName: ownerEmail!,
+            eventType: "scale.overridden",
+            payload: JSON.stringify({ estimate: scaleEstimate }),
+            createdAt: now,
+            ownerEmail: ownerEmail!,
+            orgId,
+          });
         }
 
         return {
           workItemId: id,
           ok: true,
           status,
-          currentStageName: shouldAdvance ? IMPL_STAGE : item.currentStageName,
+          execState: "dispatched",
+          currentStageName: item.currentStageName,
           threadId,
           taskId: result.taskId ?? null,
           queuePosition: result.queuePosition ?? null,
+          scaleOverridden: scaleOverridden || undefined,
         };
       } catch (err) {
         return {
@@ -245,10 +386,15 @@ export default defineAction({
     }
 
     const dispatched = results.filter((r) => r.ok).length;
-    const failed = results.length - dispatched;
+    // F5: over-scale skips are reported separately — neither dispatched nor a
+    // hard failure (the caller can re-issue with overrideScale/overrideScaleIds
+    // or split them first).
+    const skipped = results.filter((r) => r.skipped).length;
+    const failed = results.length - dispatched - skipped;
     return {
       requested: ids.length,
       dispatched,
+      skipped,
       failed,
       results,
     };
