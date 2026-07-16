@@ -25,6 +25,7 @@
     "locale-kit": "workspace:*",
     "next-themes": "^0.4.6",
     "sonner": "^2.0.7",
+    "yjs": "^13.6.31",
     "zod": "^4.3.6"
   },
   "devDependencies": {

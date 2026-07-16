@@ -28,6 +28,7 @@
     "locale-kit": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "yjs": "^13.6.31",
     "zod": "^4.4.3"
   },
   "devDependencies": {

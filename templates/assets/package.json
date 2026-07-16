@@ -28,6 +28,7 @@
     "nanoid": "^5.1.9",
     "p-limit": "^7.3.0",
     "sharp": "^0.34.5",
+    "yjs": "^13.6.31",
     "zod": "^4.3.6"
   },
   "devDependencies": {
