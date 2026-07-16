@@ -1,16 +1,54 @@
-import { useState, useMemo } from "react";
-import { toast } from "sonner";
 import {
-  useQueue,
-  useDequeueWorkItem,
-  useEnqueueWorkItem,
-  useWorkItems,
-  useApprovals,
-  useApproveGate,
-  useRejectGate,
-} from "@/hooks/use-tracker";
-import { Button } from "@/components/ui/button";
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import type {
+  QueueItem,
+  TrackerWorkItem,
+  Approval,
+  GateKey,
+  QueueHealthStatus,
+} from "@shared/types";
+import { GATE_KEY_LABELS as gateLabels } from "@shared/types";
+import {
+  IconLoader2,
+  IconPlayerPause,
+  IconPlayerPlay,
+  IconX,
+  IconCheck,
+  IconClock,
+  IconGitBranch,
+  IconRepeat,
+  IconShieldCheck,
+  IconExternalLink,
+  IconRocket,
+  IconGripVertical,
+  IconPinned,
+  IconAlertTriangle,
+  IconCloudOff,
+} from "@tabler/icons-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router";
+import { toast } from "sonner";
+
+import { StatusIcon, type StatusIconTone } from "@/components/StatusIcon";
+import { StatusRing } from "@/components/StatusRing";
+import { stageChip, inboxKindChip } from "@/components/tracker-format";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -22,96 +60,44 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  IconLoader2,
-  IconPlayerPause,
-  IconPlayerPlay,
-  IconArrowUp,
-  IconArrowDown,
-  IconX,
-  IconCheck,
-  IconClock,
-  IconGitBranch,
-  IconRepeat,
-  IconShieldCheck,
-} from "@tabler/icons-react";
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  useQueue,
+  useDequeueWorkItem,
+  useEnqueueWorkItem,
+  useWorkItems,
+  useApprovals,
+  useApproveGate,
+  useRejectGate,
+  useDispatch,
+  usePauseScheduler,
+  useResumeScheduler,
+  useQueueHealth,
+  useReorderQueue,
+} from "@/hooks/use-tracker";
+import {
+  QUEUE_GROUP_LABELS,
+  type QueueGroupKey,
+  computeQueueStatsCards,
+  groupQueueItems,
+  moveIdBetween,
+  moveIdToTop,
+  queueGroupOf,
+  waitingLabel,
+} from "@/lib/queue";
 import { cn } from "@/lib/utils";
-import type {
-  QueueItem,
-  TrackerWorkItem,
-  Approval,
-  GateKey,
-} from "@shared/types";
-import { GATE_KEY_LABELS as gateLabels } from "@shared/types";
+
 import { resolveWorkItemId, runQueueGateAction } from "./queue-gate-actions";
 
 // ── Status presentation ─────────────────────────────────────────────────────
 
-function statusBadge(status: string) {
-  switch (status) {
-    case "running":
-    case "运行中":
-      return (
-        <Badge
-          variant="default"
-          className="bg-blue-500 text-white animate-pulse"
-        >
-          运行中
-        </Badge>
-      );
-    case "queued":
-    case "排队中":
-      return (
-        <Badge variant="secondary" className="bg-amber-400/20 text-amber-600">
-          排队中
-        </Badge>
-      );
-    case "paused":
-    case "已暂停":
-      return (
-        <Badge variant="secondary" className="bg-gray-400/20 text-gray-500">
-          已暂停
-        </Badge>
-      );
-    case "done":
-    case "已完成":
-      return (
-        <Badge
-          variant="secondary"
-          className="bg-emerald-400/20 text-emerald-600"
-        >
-          已完成
-        </Badge>
-      );
-    case "failed":
-    case "失败":
-      return <Badge variant="destructive">失败</Badge>;
-    case "blocked":
-    case "等待依赖":
-      return (
-        <Badge variant="secondary" className="bg-orange-400/20 text-orange-600">
-          等待依赖
-        </Badge>
-      );
-    default:
-      return <Badge variant="outline">{status}</Badge>;
-  }
-}
-
 function stageBadge(stage: string) {
-  const colorMap: Record<string, string> = {
-    待办: "bg-slate-400/20 text-slate-600",
-    分析: "bg-purple-400/20 text-purple-600",
-    设计: "bg-indigo-400/20 text-indigo-600",
-    实施: "bg-blue-400/20 text-blue-600",
-    测试: "bg-cyan-400/20 text-cyan-600",
-    验收: "bg-amber-400/20 text-amber-600",
-    交付: "bg-emerald-400/20 text-emerald-600",
-  };
   return (
-    <Badge
-      variant="secondary"
-      className={cn(colorMap[stage] || "bg-muted text-muted-foreground")}
-    >
+    <Badge variant="secondary" className={cn(stageChip(stage))}>
       {stage}
     </Badge>
   );
@@ -128,158 +114,304 @@ function fmtTime(iso?: string | null): string {
   });
 }
 
-// ── Queue row ───────────────────────────────────────────────────────────────
+function formatElapsed(sinceIso: string, nowMs: number): string {
+  const since = new Date(sinceIso).getTime();
+  if (!Number.isFinite(since)) return "—";
+  const seconds = Math.max(0, Math.floor((nowMs - since) / 1000));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
 
-function QueueRow({
+/** Ticks every second — the running group's row timer anchors on the work
+ *  item's real `dispatchedAt` (exec_queue.startedAt is never actually
+ *  written by any action, so it can't back an honest timer). */
+function ElapsedTimer({ since }: { since: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground tabular-nums">
+      <IconClock className="size-3" />
+      {formatElapsed(since, now)}
+    </span>
+  );
+}
+
+// ── Row title (shared by every group) ───────────────────────────────────────
+
+function RowTitle({ w }: { w?: TrackerWorkItem }) {
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-2">
+        {w?.itemKey ? (
+          <span
+            className="font-mono text-[11px] font-semibold text-muted-foreground"
+            title={
+              w.itemKeyDisplay && w.itemKeyDisplay !== w.itemKey
+                ? "历史重号，已消歧显示"
+                : undefined
+            }
+          >
+            {w.itemKeyDisplay ?? w.itemKey}
+          </span>
+        ) : null}
+        <span className="truncate text-sm font-medium">{w?.title ?? "—"}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Row actions (shared by dispatchable / dependency / health groups) ──────
+
+function RowActions({
   item,
-  index,
   onRemove,
-  onMoveUp,
-  onMoveDown,
-  canUp,
-  canDown,
-  isReconcilerPaused,
+  onDispatch,
+  dispatchPending,
+  schedulerPaused,
 }: {
   item: QueueItem;
-  index: number;
   onRemove: (id: string) => void;
-  onMoveUp: (id: string) => void;
-  onMoveDown: (id: string) => void;
-  canUp: boolean;
-  canDown: boolean;
-  isReconcilerPaused: boolean;
+  onDispatch: (item: QueueItem) => void;
+  dispatchPending: boolean;
+  schedulerPaused: boolean;
 }) {
-  const w: TrackerWorkItem | undefined = item.workItem;
-
+  const workItemId = item.workItemId;
   return (
-    <div
-      className={cn(
-        "group flex items-center gap-3 rounded-lg border border-border px-4 py-2.5 transition-colors hover:bg-accent/40",
-        item.status === "running" ? "ring-1 ring-blue-400/30" : "",
-      )}
-    >
-      {/* Number */}
-      <span className="font-mono text-xs font-medium text-muted-foreground tabular-nums">
-        {index + 1}
-      </span>
-
-      {/* itemKey + title */}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          {w?.itemKey ? (
-            <span
-              className="font-mono text-[11px] font-semibold text-muted-foreground"
-              title={
-                w.itemKeyDisplay && w.itemKeyDisplay !== w.itemKey
-                  ? "历史重号，已消歧显示"
-                  : undefined
-              }
+    <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              disabled={dispatchPending || schedulerPaused}
+              onClick={() => onDispatch(item)}
+              title="立即派发（过门检查）"
             >
-              {w.itemKeyDisplay ?? w.itemKey}
-            </span>
-          ) : null}
-          <span className="truncate text-sm font-medium">
-            {w?.title ?? "—"}
+              {dispatchPending ? (
+                <IconLoader2 className="size-3.5 animate-spin" />
+              ) : (
+                <IconRocket className="size-3.5" />
+              )}
+            </Button>
           </span>
-        </div>
-      </div>
+        </TooltipTrigger>
+        <TooltipContent>
+          {schedulerPaused ? "调度器已暂停，无法派发" : "立即派发（过门检查）"}
+        </TooltipContent>
+      </Tooltip>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-7"
+        asChild
+        title="打开工作项"
+      >
+        <Link to={`/items/${encodeURIComponent(workItemId)}`}>
+          <IconExternalLink className="size-3.5" />
+        </Link>
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-7 text-destructive"
+        onClick={() => onRemove(item.id)}
+        title="出队"
+      >
+        <IconX className="size-3.5" />
+      </Button>
+    </div>
+  );
+}
 
-      {/* Current stage */}
+// ── Running row ──────────────────────────────────────────────────────────────
+
+function RunningRow({ item }: { item: QueueItem }) {
+  const w = item.workItem;
+  return (
+    <div className="group flex items-center gap-3 rounded-lg border border-info/30 bg-info/5 px-4 py-2.5">
+      <StatusRing status="running" />
+      <RowTitle w={w} />
       {w?.currentStageName ? stageBadge(w.currentStageName) : null}
-
-      {/* Sprint tag */}
-      {w?.branch ? (
-        <span className="hidden items-center gap-1 font-mono text-[10px] text-muted-foreground md:flex">
-          <IconGitBranch className="size-3" />
-          {w.branch}
-        </span>
-      ) : null}
-
-      {/* Time */}
-      <span className="hidden items-center gap-1 text-[11px] text-muted-foreground sm:flex">
-        <IconClock className="size-3" />
-        {fmtTime(item.enqueuedAt)}
-      </span>
-
-      {/* 下一步 hint */}
-      <span className="hidden text-xs text-muted-foreground lg:block">
-        下一步: {getNextStep(item, w)}
-      </span>
-
-      {/* Status badge */}
-      {statusBadge(item.status)}
-
-      {/* Actions */}
-      <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-        {canUp && !isReconcilerPaused ? (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            onClick={() => onMoveUp(item.id)}
-            title="上移"
-          >
-            <IconArrowUp className="size-3.5" />
-          </Button>
-        ) : null}
-        {canDown && !isReconcilerPaused ? (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            onClick={() => onMoveDown(item.id)}
-            title="下移"
-          >
-            <IconArrowDown className="size-3.5" />
-          </Button>
-        ) : null}
+      {w?.dispatchedAt ? <ElapsedTimer since={w.dispatchedAt} /> : null}
+      <div className="ml-auto flex items-center gap-1">
         <Button
           size="icon"
           variant="ghost"
-          className="size-7 text-destructive"
-          onClick={() => onRemove(item.id)}
-          title="移除"
+          className="size-7"
+          asChild
+          title="打开工作项"
         >
-          <IconX className="size-3.5" />
+          <Link to={`/items/${encodeURIComponent(item.workItemId)}`}>
+            <IconExternalLink className="size-3.5" />
+          </Link>
         </Button>
       </div>
     </div>
   );
 }
 
-function getNextStep(item: QueueItem, w?: TrackerWorkItem): string {
-  if (item.status === "running" || item.status === "运行中") {
-    return "等待当前阶段完成";
-  }
-  if (item.status === "paused" || item.status === "已暂停") {
-    return "等待人工审批";
-  }
-  if (item.status === "blocked" || item.status === "等待依赖") {
-    try {
-      const blockers = item.blockedBy ? JSON.parse(item.blockedBy) : [];
-      const keys = Array.isArray(blockers)
-        ? blockers
-            .map((b: { itemKey?: string } | string) =>
-              typeof b === "string" ? b : b?.itemKey,
-            )
-            .filter(Boolean)
-        : [];
-      return keys.length ? `等待依赖 ${keys.join(", ")}` : "等待依赖";
-    } catch {
-      return "等待依赖";
-    }
-  }
-  if (w?.currentStageName) {
-    const order = ["待办", "分析", "设计", "实施", "测试", "验收", "交付"];
-    const idx = order.indexOf(w.currentStageName);
-    if (idx >= 0 && idx < order.length - 1) {
-      return `进入「${order[idx + 1]}」`;
-    }
-  }
-  return "等待调度";
+// ── Waiting row (dependency / health) ────────────────────────────────────────
+
+function WaitingRow({
+  item,
+  onRemove,
+  onDispatch,
+  dispatchPending,
+  schedulerPaused,
+  justCleared,
+}: {
+  item: QueueItem;
+  onRemove: (id: string) => void;
+  onDispatch: (item: QueueItem) => void;
+  dispatchPending: boolean;
+  schedulerPaused: boolean;
+  justCleared?: boolean;
+}) {
+  const w = item.workItem;
+  const label = waitingLabel(item);
+  return (
+    <div
+      className={cn(
+        "group flex items-center gap-3 rounded-lg border border-border px-4 py-2.5 transition-colors hover:bg-accent/40",
+        justCleared && "animate-in fade-in slide-in-from-top-2 duration-500",
+      )}
+    >
+      <StatusRing status="gate" />
+      <RowTitle w={w} />
+      {w?.currentStageName ? stageBadge(w.currentStageName) : null}
+      {label ? (
+        <Badge
+          variant="secondary"
+          className="max-w-[16rem] truncate bg-warning/10 text-warning border-warning/30"
+          title={label}
+        >
+          {label}
+        </Badge>
+      ) : null}
+      <RowActions
+        item={item}
+        onRemove={onRemove}
+        onDispatch={onDispatch}
+        dispatchPending={dispatchPending}
+        schedulerPaused={schedulerPaused}
+      />
+    </div>
+  );
 }
 
-// ── Human gate card ─────────────────────────────────────────────────────────
+// ── Dispatchable row (draggable) ─────────────────────────────────────────────
+
+function DispatchableRow({
+  item,
+  onRemove,
+  onDispatch,
+  onPinToTop,
+  dispatchPending,
+  schedulerPaused,
+}: {
+  item: QueueItem;
+  onRemove: (id: string) => void;
+  onDispatch: (item: QueueItem) => void;
+  onPinToTop: (workItemId: string) => void;
+  dispatchPending: boolean;
+  schedulerPaused: boolean;
+}) {
+  const w = item.workItem;
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.workItemId });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group flex items-center gap-2 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-accent/40",
+        isDragging && "opacity-60 ring-2 ring-primary/40",
+      )}
+    >
+      <button
+        type="button"
+        className="cursor-grab touch-none text-muted-foreground/60 hover:text-foreground active:cursor-grabbing"
+        aria-label="拖拽排序"
+        {...attributes}
+        {...listeners}
+      >
+        <IconGripVertical className="size-4" />
+      </button>
+      <StatusRing status="queued" />
+      <RowTitle w={w} />
+      {w?.currentStageName ? stageBadge(w.currentStageName) : null}
+      {w?.branch ? (
+        <span className="hidden max-w-[12rem] items-center gap-1 truncate font-mono text-[10px] text-muted-foreground md:flex">
+          <IconGitBranch className="size-3 shrink-0" />
+          <span className="truncate">{w.branch}</span>
+        </span>
+      ) : null}
+      <span className="hidden items-center gap-1 text-[11px] text-muted-foreground sm:flex">
+        <IconClock className="size-3" />
+        {fmtTime(item.enqueuedAt)}
+      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7 opacity-0 transition-opacity group-hover:opacity-100"
+            onClick={() => onPinToTop(item.workItemId)}
+          >
+            <IconPinned className="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>置顶</TooltipContent>
+      </Tooltip>
+      <RowActions
+        item={item}
+        onRemove={onRemove}
+        onDispatch={onDispatch}
+        dispatchPending={dispatchPending}
+        schedulerPaused={schedulerPaused}
+      />
+    </div>
+  );
+}
+
+// ── Group section wrapper ────────────────────────────────────────────────────
+
+function GroupHeading({
+  groupKey,
+  count,
+}: {
+  groupKey: QueueGroupKey;
+  count: number;
+}) {
+  return (
+    <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+      {QUEUE_GROUP_LABELS[groupKey]}
+      <span className="font-mono text-xs tabular-nums">{count}</span>
+    </h3>
+  );
+}
+
+// ── Human gate card (unchanged real feature — see queue-gate-actions.ts) ────
 
 function HumanGateCard({
   item,
@@ -297,21 +429,8 @@ function HumanGateCard({
       <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            {w?.itemKey ? (
-              <span
-                className="font-mono text-xs font-semibold text-muted-foreground"
-                title={
-                  w.itemKeyDisplay && w.itemKeyDisplay !== w.itemKey
-                    ? "历史重号，已消歧显示"
-                    : undefined
-                }
-              >
-                {w.itemKeyDisplay ?? w.itemKey}
-              </span>
-            ) : null}
-            <span className="truncate text-sm font-medium">
-              {w?.title ?? "—"}
-            </span>
+            <StatusIcon tone="warn" size="sm" />
+            <RowTitle w={w} />
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             {w?.currentStageName ? stageBadge(w.currentStageName) : null}
@@ -321,7 +440,7 @@ function HumanGateCard({
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           <Button
             size="sm"
             variant="default"
@@ -362,13 +481,13 @@ function QueueApprovalCard({
       <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <IconShieldCheck className="size-4 text-amber-500 shrink-0" />
+            <IconShieldCheck className="size-4 text-warning shrink-0" />
             <span className="text-sm font-medium">
               {gateLabels[approval.gateKey as GateKey] ?? approval.gateKey}
             </span>
             <Badge
               variant="secondary"
-              className="bg-amber-400/20 text-amber-700"
+              className={inboxKindChip("pending-approval")}
             >
               待审批
             </Badge>
@@ -385,7 +504,7 @@ function QueueApprovalCard({
             <span>发起人: {approval.requestedBy}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           <Button
             size="sm"
             variant="default"
@@ -467,6 +586,172 @@ function QueueRejectDialog({
   );
 }
 
+// ── Health status bar (03-tracker.md §8: vLLM · CC 登录 · brain 槽位 + 最近拒绝) ──
+
+function HealthDot({
+  tone,
+  label,
+  detail,
+}: {
+  tone: StatusIconTone;
+  label: string;
+  detail: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="flex items-center gap-1.5 text-xs">
+          <StatusIcon tone={tone} size="sm" aria-label={label} />
+          {label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{detail}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function HealthStatusBar({ health }: { health?: QueueHealthStatus }) {
+  if (!health) {
+    return (
+      <Card>
+        <CardContent className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
+          <IconLoader2 className="size-3.5 animate-spin" />
+          读取健康门状态…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!health.orchestratorReachable) {
+    return (
+      <Card className="border-destructive/30 bg-destructive/5">
+        <CardContent className="flex items-center gap-2 p-4 text-xs text-destructive">
+          <IconCloudOff className="size-4 shrink-0" />
+          编排器不可达（{health.orchestratorError ?? "连接失败"}）——
+          健康门状态暂不可读，出于诚实原则不展示伪造的健康态。
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const ccOk = !!health.claudeCode?.loggedIn && !health.claudeCode.expired;
+  const brainOk = !!health.brain?.driverAlive;
+  const vllmConfigured = !!health.devEngine?.configured;
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-4 p-4">
+          <HealthDot
+            tone={vllmConfigured ? "ok" : "warn"}
+            label="vLLM"
+            detail={
+              vllmConfigured
+                ? `已配置：${health.devEngine?.model ?? "?"} @ ${health.devEngine?.baseUrl ?? "?"}`
+                : "未配置开发引擎（未探测网络可达性，仅报告配置状态）"
+            }
+          />
+          <HealthDot
+            tone={ccOk ? "ok" : "err"}
+            label="CC 登录"
+            detail={
+              health.claudeCode == null
+                ? "未知"
+                : health.claudeCode.expired
+                  ? "登录已过期，需重新登录"
+                  : health.claudeCode.loggedIn
+                    ? `已登录${health.claudeCode.subscription ? `（${health.claudeCode.subscription}）` : ""}`
+                    : "未登录"
+            }
+          />
+          <HealthDot
+            tone={brainOk ? "ok" : "err"}
+            label="brain 槽位"
+            detail={
+              health.brain == null
+                ? "未知"
+                : `driver ${health.brain.driverAlive ? "存活" : "无响应"} · 运行 ${health.brain.running} · 排队 ${health.brain.queued} · 上限 ${health.brain.concurrency ?? "?"}${health.brain.lastError ? ` · 最近错误：${health.brain.lastError}` : ""}`
+            }
+          />
+          {health.brain ? (
+            <span className="font-mono text-[11px] text-muted-foreground">
+              运行 {health.brain.running} · 排队 {health.brain.queued} · 上限{" "}
+              {health.brain.concurrency ?? "?"}
+            </span>
+          ) : null}
+          <div className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            {health.lastRejection ? (
+              <>
+                <IconAlertTriangle className="size-3.5 shrink-0 text-warning" />
+                最近拒绝：{health.lastRejection.reason} ·{" "}
+                {fmtTime(health.lastRejection.at)}
+              </>
+            ) : (
+              "暂无拒绝记录"
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </TooltipProvider>
+  );
+}
+
+// ── Stat card ───────────────────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "warning" | "info" | "success" | "destructive" | "muted";
+}) {
+  const dotClass =
+    tone === "warning"
+      ? "bg-warning"
+      : tone === "info"
+        ? "bg-info"
+        : tone === "success"
+          ? "bg-success"
+          : tone === "destructive"
+            ? "bg-destructive"
+            : "bg-muted-foreground";
+  return (
+    <Card>
+      <CardContent className="flex items-center gap-3 p-4">
+        <span className={cn("size-2.5 shrink-0 rounded-full", dotClass)} />
+        <div>
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-2xl font-bold tabular-nums">{value}</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Scheduler warning banner ─────────────────────────────────────────────────
+
+function SchedulerPausedBanner({
+  pausedAt,
+  pausedBy,
+}: {
+  pausedAt: string | null;
+  pausedBy: string | null;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 rounded-lg border border-warning/40 bg-warning/10 px-4 py-2.5 text-sm text-warning">
+      <IconAlertTriangle className="size-4 shrink-0" />
+      <span className="font-medium">调度器已暂停</span>
+      <span className="text-xs text-warning/90">
+        新的派发请求会被拒绝，队列中的项不会被处理
+        {pausedAt ? ` · 暂停于 ${fmtTime(pausedAt)}` : ""}
+        {pausedBy ? ` · 操作人 ${pausedBy}` : ""}
+      </span>
+    </div>
+  );
+}
+
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export function QueuePage() {
@@ -474,12 +759,17 @@ export function QueuePage() {
   const { data: allItemsData } = useWorkItems();
   const dequeue = useDequeueWorkItem();
   const enqueueWorkItem = useEnqueueWorkItem();
+  const dispatch = useDispatch();
   const { data: pendingApprovalsData, isLoading: approvalsLoading } =
     useApprovals({ status: "pending" });
   const approveGate = useApproveGate();
+  const { data: health } = useQueueHealth();
+  const pauseScheduler = usePauseScheduler();
+  const resumeScheduler = useResumeScheduler();
+  const reorderQueue = useReorderQueue();
 
   const items: QueueItem[] = useMemo(
-    () => (Array.isArray(queueData) ? queueData : []),
+    () => (Array.isArray(queueData?.items) ? queueData!.items : []),
     [queueData],
   );
 
@@ -488,71 +778,147 @@ export function QueuePage() {
     [pendingApprovalsData],
   );
 
-  const [reconcilerPaused, setReconcilerPaused] = useState(false);
-  const [reconcilerToggleLoading, setReconcilerToggleLoading] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   // Optimistic hide for human-gate rows: added when approve/reject is
   // in flight, removed again if the underlying action fails so the row
   // reappears for retry.
   const [hiddenGateIds, setHiddenGateIds] = useState<Set<string>>(new Set());
+  // Local override for the dispatchable group's drag order — applied
+  // immediately on drop so the row doesn't snap back while reorder-queue's
+  // mutation + the next poll settle (see handleDragEnd).
+  const [orderOverride, setOrderOverride] = useState<string[] | null>(null);
 
-  // Stats
-  const queuedCount = items.filter(
-    (it) => it.status === "queued" || it.status === "排队中",
-  ).length;
-  const runningCount = items.filter(
-    (it) => it.status === "running" || it.status === "运行中",
-  ).length;
-  const failedCount = items.filter(
-    (it) => it.status === "failed" || it.status === "待审批",
-  ).length;
-  const todayDoneCount = useMemo(() => {
-    const allItems = Array.isArray(allItemsData) ? allItemsData : [];
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    return allItems.filter((it: any) => {
-      if (it.status !== "done") return false;
-      const updatedAt = it.updatedAt ? new Date(it.updatedAt) : null;
-      return updatedAt && updatedAt >= todayStart;
-    }).length;
-  }, [allItemsData]);
+  const schedulerPaused = !!health?.scheduler.paused;
 
-  // Human gate items (paused items awaiting approval)
+  // Human gate items (paused items awaiting approval) — kept as its own
+  // section (distinct IA concept from the 4 scheduling groups below); see
+  // the queue-gate-actions.ts docblock and the report's IA note (§2 signoff
+  // semantics reused here, not folded into the 4 groups).
   const humanGateItems = items.filter(
     (it) =>
       (it.status === "paused" || it.status === "待审批") &&
       !hiddenGateIds.has(it.id),
   );
+  const schedulingItems = items.filter((it) => !humanGateItems.includes(it));
 
-  const [order, setOrder] = useState<string[]>(items.map((it) => it.id));
+  const groups = useMemo(
+    () => groupQueueItems(schedulingItems),
+    [schedulingItems],
+  );
+
+  const dispatchableOrdered = useMemo(() => {
+    if (!orderOverride) return groups.dispatchable;
+    const byId = new Map(groups.dispatchable.map((it) => [it.workItemId, it]));
+    const ordered = orderOverride
+      .map((id) => byId.get(id))
+      .filter((it): it is QueueItem => !!it);
+    // Any row not covered by the override (e.g. freshly enqueued mid-drag) is
+    // appended at the end rather than dropped.
+    for (const it of groups.dispatchable) {
+      if (!orderOverride.includes(it.workItemId)) ordered.push(it);
+    }
+    return ordered;
+  }, [groups.dispatchable, orderOverride]);
+
+  // Track which rows were in "等待依赖" on the previous render so a row that
+  // just cleared its dependency gate gets a one-shot slide/fade animation in
+  // its new group (design: "依赖解除时的自动上移动画").
+  const prevGroupRef = useRef<Map<string, QueueGroupKey>>(new Map());
+  const justClearedIds = useMemo(() => {
+    const prev = prevGroupRef.current;
+    const cleared = new Set<string>();
+    for (const item of schedulingItems) {
+      if (
+        prev.get(item.id) === "dependency" &&
+        queueGroupOf(item) !== "dependency"
+      ) {
+        cleared.add(item.id);
+      }
+    }
+    return cleared;
+  }, [schedulingItems]);
+  useEffect(() => {
+    const next = new Map<string, QueueGroupKey>();
+    for (const item of schedulingItems) next.set(item.id, queueGroupOf(item));
+    prevGroupRef.current = next;
+  }, [schedulingItems]);
+
+  const stats = useMemo(
+    () =>
+      computeQueueStatsCards(
+        groups,
+        Array.isArray(allItemsData) ? allItemsData : [],
+      ),
+    [groups, allItemsData],
+  );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const currentIds = dispatchableOrdered.map((it) => it.workItemId);
+    const nextIds = moveIdBetween(
+      currentIds,
+      String(active.id),
+      String(over.id),
+    );
+    setOrderOverride(nextIds);
+    reorderQueue.mutate(
+      { workItemIds: nextIds },
+      {
+        onSuccess: () => setOrderOverride(null),
+        onError: () => setOrderOverride(null),
+      },
+    );
+  }
+
+  function handlePinToTop(workItemId: string) {
+    const currentIds = dispatchableOrdered.map((it) => it.workItemId);
+    const nextIds = moveIdToTop(currentIds, workItemId);
+    setOrderOverride(nextIds);
+    reorderQueue.mutate(
+      { workItemIds: nextIds },
+      {
+        onSuccess: () => {
+          setOrderOverride(null);
+          toast.success("已置顶");
+        },
+        onError: () => setOrderOverride(null),
+      },
+    );
+  }
 
   function handleRemove(id: string) {
     // `id` here is the QueueItem (exec_queue row) id, not the work item id —
     // resolve the real work item id before calling the backend action.
     const workItemId = resolveWorkItemId(items, id);
     void dequeue.mutateAsync({ workItemId });
-    setOrder((prev) => prev.filter((oid) => oid !== id));
     toast.success("已从队列移除");
   }
 
-  function handleMoveUp(id: string) {
-    setOrder((prev) => {
-      const idx = prev.indexOf(id);
-      if (idx <= 0) return prev;
-      const next = [...prev];
-      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-      return next;
-    });
-  }
-
-  function handleMoveDown(id: string) {
-    setOrder((prev) => {
-      const idx = prev.indexOf(id);
-      if (idx < 0 || idx >= prev.length - 1) return prev;
-      const next = [...prev];
-      [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-      return next;
-    });
+  function handleDispatch(item: QueueItem) {
+    setDispatchingId(item.id);
+    dispatch.mutate(
+      { workItemId: item.workItemId },
+      {
+        onSuccess: (result: unknown) => {
+          const status = (result as { status?: string } | undefined)?.status;
+          if (status === "blocked") {
+            toast.warning("仍被依赖门阻塞，未派发");
+          } else {
+            toast.success("已派发");
+          }
+        },
+        onSettled: () => setDispatchingId(null),
+      },
+    );
   }
 
   function unhideGateRow(id: string) {
@@ -604,17 +970,28 @@ export function QueuePage() {
     setRejectTarget(approvalId);
   }
 
-  async function toggleReconciler() {
-    setReconcilerToggleLoading(true);
-    try {
-      setReconcilerPaused((p) => !p);
-      toast.success(
-        reconcilerPaused ? "Reconciler 已恢复" : "Reconciler 已暂停",
+  function toggleScheduler() {
+    if (schedulerPaused) {
+      resumeScheduler.mutate(
+        {},
+        { onSuccess: () => toast.success("调度器已恢复") },
       );
-    } finally {
-      setReconcilerToggleLoading(false);
+    } else {
+      pauseScheduler.mutate(
+        {},
+        { onSuccess: () => toast.success("调度器已暂停") },
+      );
     }
   }
+
+  const schedulerToggleLoading =
+    pauseScheduler.isPending || resumeScheduler.isPending;
+
+  const emptyScheduling =
+    groups.running.length === 0 &&
+    dispatchableOrdered.length === 0 &&
+    groups.dependency.length === 0 &&
+    groups.health.length === 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -625,87 +1002,56 @@ export function QueuePage() {
           size="sm"
           variant="outline"
           className="gap-1.5"
-          onClick={toggleReconciler}
-          disabled={reconcilerToggleLoading}
+          onClick={toggleScheduler}
+          disabled={schedulerToggleLoading}
         >
-          {reconcilerToggleLoading ? (
+          {schedulerToggleLoading ? (
             <IconLoader2 className="size-4 animate-spin" />
-          ) : reconcilerPaused ? (
+          ) : schedulerPaused ? (
             <IconPlayerPlay className="size-4" />
           ) : (
             <IconPlayerPause className="size-4" />
           )}
-          {reconcilerPaused ? "▶ 恢复 reconciler" : "⏸ 暂停 reconciler"}
+          {schedulerPaused ? "恢复调度器" : "暂停调度器"}
         </Button>
       </div>
 
       <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
+        {schedulerPaused ? (
+          <SchedulerPausedBanner
+            pausedAt={health?.scheduler.pausedAt ?? null}
+            pausedBy={health?.scheduler.pausedBy ?? null}
+          />
+        ) : null}
+
         {/* ── Stats row ── */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <StatCard label="排队" value={String(stats.queued)} tone="warning" />
+          <StatCard label="运行中" value={String(stats.running)} tone="info" />
           <StatCard
-            label="队列中"
-            value={String(queuedCount)}
-            accent="bg-amber-500"
+            label="等待依赖"
+            value={String(stats.dependency)}
+            tone="warning"
           />
           <StatCard
-            label="运行中"
-            value={String(runningCount)}
-            accent="bg-blue-500"
+            label="等待健康门"
+            value={String(stats.health)}
+            tone="destructive"
           />
           <StatCard
             label="今日完成"
-            value={String(todayDoneCount)}
-            accent="bg-emerald-500"
+            value={String(stats.doneToday)}
+            tone="success"
           />
           <StatCard
-            label="失败 · 待审批"
-            value={String(failedCount + pendingApprovals.length)}
-            accent="bg-destructive"
+            label="失败"
+            value={String(stats.failed)}
+            tone="destructive"
           />
         </div>
 
-        {/* ── Reconciler status ── */}
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-3 p-4">
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "size-2.5 rounded-full",
-                  reconcilerPaused
-                    ? "bg-gray-400"
-                    : "bg-emerald-500 animate-pulse",
-                )}
-              />
-              <span className="text-sm font-medium">
-                {reconcilerPaused
-                  ? "● reconciler 已暂停"
-                  : "● reconciler 运行中"}
-              </span>
-            </div>
-            <span className="text-xs text-muted-foreground">
-              节流 2s · 并发上限 3
-            </span>
-            <div className="ml-auto flex items-center gap-2">
-              {items
-                .filter(
-                  (it) => it.status === "running" || it.status === "运行中",
-                )
-                .slice(0, 3)
-                .map((it) => {
-                  const w = it.workItem;
-                  return (
-                    <Badge
-                      key={it.id}
-                      variant="outline"
-                      className="gap-1 text-xs"
-                    >
-                      {w?.itemKeyDisplay ?? w?.itemKey ?? "—"}
-                    </Badge>
-                  );
-                })}
-            </div>
-          </CardContent>
-        </Card>
+        {/* ── Health status bar ── */}
+        <HealthStatusBar health={health} />
 
         {/* ── Pending approvals (real data) ── */}
         {approvalsLoading ? (
@@ -732,48 +1078,123 @@ export function QueuePage() {
           </div>
         ) : null}
 
-        {/* ── Queue list ── */}
-        <div className="space-y-1">
-          <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
-            队列 ({items.length})
-          </h3>
-          {isLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="h-14 animate-pulse rounded-lg border border-border bg-muted/40"
-                />
-              ))}
-            </div>
-          ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-12 text-center">
-              <p className="text-sm text-muted-foreground">
-                队列为空。工作项将在创建或入队后出现在这里。
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {order.map((itemId, i) => {
-                const it = items.find((x) => x.id === itemId);
-                if (!it) return null;
-                return (
-                  <QueueRow
-                    key={it.id}
-                    item={it}
-                    index={i}
-                    onRemove={handleRemove}
-                    onMoveUp={handleMoveUp}
-                    onMoveDown={handleMoveDown}
-                    canUp={i > 0}
-                    canDown={i < order.length - 1}
-                    isReconcilerPaused={reconcilerPaused}
+        {/* ── Queue table (grouped: 运行中 / 可派发 / 等待依赖 / 等待健康门) ── */}
+        {isLoading ? (
+          <div className="space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-14 animate-pulse rounded-lg border border-border bg-muted/40"
+              />
+            ))}
+          </div>
+        ) : emptyScheduling ? (
+          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-12 text-center">
+            <p className="text-sm text-muted-foreground">
+              队列为空。工作项将在创建或入队后出现在这里。
+            </p>
+          </div>
+        ) : (
+          <TooltipProvider delayDuration={150}>
+            <div className="space-y-5">
+              {groups.running.length > 0 ? (
+                <div>
+                  <GroupHeading
+                    groupKey="running"
+                    count={groups.running.length}
                   />
-                );
-              })}
+                  <div className="space-y-1">
+                    {groups.running.map((item) => (
+                      <RunningRow key={item.id} item={item} />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {dispatchableOrdered.length > 0 ? (
+                <div>
+                  <GroupHeading
+                    groupKey="dispatchable"
+                    count={dispatchableOrdered.length}
+                  />
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <SortableContext
+                      items={dispatchableOrdered.map((it) => it.workItemId)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="space-y-1">
+                        {dispatchableOrdered.map((item) => (
+                          <DispatchableRow
+                            key={item.id}
+                            item={item}
+                            onRemove={handleRemove}
+                            onDispatch={handleDispatch}
+                            onPinToTop={handlePinToTop}
+                            dispatchPending={
+                              dispatchingId === item.id && dispatch.isPending
+                            }
+                            schedulerPaused={schedulerPaused}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                </div>
+              ) : null}
+
+              {groups.dependency.length > 0 ? (
+                <div>
+                  <GroupHeading
+                    groupKey="dependency"
+                    count={groups.dependency.length}
+                  />
+                  <div className="space-y-1">
+                    {groups.dependency.map((item) => (
+                      <WaitingRow
+                        key={item.id}
+                        item={item}
+                        onRemove={handleRemove}
+                        onDispatch={handleDispatch}
+                        dispatchPending={
+                          dispatchingId === item.id && dispatch.isPending
+                        }
+                        schedulerPaused={schedulerPaused}
+                        justCleared={justClearedIds.has(item.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {groups.health.length > 0 ? (
+                <div>
+                  <GroupHeading
+                    groupKey="health"
+                    count={groups.health.length}
+                  />
+                  <div className="space-y-1">
+                    {groups.health.map((item) => (
+                      <WaitingRow
+                        key={item.id}
+                        item={item}
+                        onRemove={handleRemove}
+                        onDispatch={handleDispatch}
+                        dispatchPending={
+                          dispatchingId === item.id && dispatch.isPending
+                        }
+                        schedulerPaused={schedulerPaused}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
-          )}
-        </div>
+          </TooltipProvider>
+        )}
 
         {/* ── Human gate (queue-paused items) ── */}
         {humanGateItems.length > 0 ? (
@@ -804,29 +1225,5 @@ export function QueuePage() {
         />
       ) : null}
     </div>
-  );
-}
-
-// ── Stat card ───────────────────────────────────────────────────────────────
-
-function StatCard({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="flex items-center gap-3 p-4">
-        <span className={cn("size-2.5 shrink-0 rounded-full", accent)} />
-        <div>
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="text-2xl font-bold tabular-nums">{value}</p>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

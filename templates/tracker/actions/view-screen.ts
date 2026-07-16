@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { buildInboxGroups } from "../server/lib/inbox.js";
+import { getSchedulerState } from "../server/lib/scheduler-gate.js";
 import { readAppStateForCurrentTab } from "./_tab-state.js";
 
 const LIST_LIMIT = 25;
@@ -160,7 +161,8 @@ export default defineAction({
           }),
         );
 
-        screen.queue = { stats, items: enrichedItems };
+        const scheduler = await getSchedulerState().catch(() => null);
+        screen.queue = { stats, items: enrichedItems, scheduler };
       } catch {
         // continue
       }
