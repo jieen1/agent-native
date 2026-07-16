@@ -8,6 +8,7 @@ export const TRACKER_NAVIGATION_VIEWS = [
   "sprints",
   "sprint",
   "queue",
+  "inbox",
   "new-item",
   "extensions",
   "team",
@@ -49,6 +50,8 @@ export function trackerRoutePath(
       return sprintId ? `/sprints/${encodeURIComponent(sprintId)}` : null;
     case "queue":
       return "/queue";
+    case "inbox":
+      return "/inbox";
     case "new-item":
       return "/items/new";
     case "extensions":

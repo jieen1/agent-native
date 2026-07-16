@@ -13,13 +13,13 @@ function writeId() {
 
 export default defineAction({
   description:
-    "Navigate the tracker UI. Views: board (the work-item board), projects, item (with itemId), sprints, sprint (with sprintId), queue, new-item, extensions, team.",
+    "Navigate the tracker UI. Views: board (the work-item board), projects, item (with itemId), sprints, sprint (with sprintId), queue, inbox (things awaiting a human decision), new-item, extensions, team.",
   schema: z.object({
     view: z
       .enum(TRACKER_NAVIGATION_VIEWS)
       .optional()
       .describe(
-        "View: board, projects, item, sprints, sprint, queue, new-item, extensions, team",
+        "View: board, projects, item, sprints, sprint, queue, inbox, new-item, extensions, team",
       ),
     itemId: z.string().optional().describe("Work item to open (for view=item)"),
     projectId: z

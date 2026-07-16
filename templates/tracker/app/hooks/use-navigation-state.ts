@@ -104,6 +104,8 @@ export function useNavigationState() {
         state.view = "sprints";
       } else if (pathname.startsWith("/queue")) {
         state.view = "queue";
+      } else if (pathname.startsWith("/inbox")) {
+        state.view = "inbox";
       }
 
       return state;

@@ -138,12 +138,22 @@ function RunNodeChain({ nodes }: { nodes: OrchestratorRunNode[] }) {
   );
 }
 
-/** Raw error text for any failed/cancelled node — the "证据文本块". Shown in
- *  full (never truncated to an unreadable single line). */
-function FailureEvidence({ nodes }: { nodes: OrchestratorRunNode[] }) {
-  const failing = nodes.filter(
+/** Nodes that failed/were cancelled AND carry raw error text — the single
+ *  filter rule behind the "证据文本块". Exported so other surfaces (e.g. the
+ *  Inbox failed-routing card) can decide whether to render an evidence
+ *  section at all without re-implementing this predicate. */
+export function failingNodesOf(
+  nodes: OrchestratorRunNode[],
+): OrchestratorRunNode[] {
+  return nodes.filter(
     (n) => (n.status === "failed" || n.status === "cancelled") && n.error,
   );
+}
+
+/** Raw error text for any failed/cancelled node — the "证据文本块". Shown in
+ *  full (never truncated to an unreadable single line). */
+export function FailureEvidence({ nodes }: { nodes: OrchestratorRunNode[] }) {
+  const failing = failingNodesOf(nodes);
   if (failing.length === 0) return null;
   return (
     <div className="flex flex-col gap-1.5">

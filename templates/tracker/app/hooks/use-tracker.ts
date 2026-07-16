@@ -480,6 +480,15 @@ export function useRejectGate() {
   });
 }
 
+// Inbox hooks (R3). See server/lib/inbox.ts for which groups are backed by
+// real data (notifications is currently always empty).
+export function useInboxItems() {
+  return useActionQuery("list-inbox", {}, { refetchInterval: 5000 }) as {
+    data?: import("@shared/types").InboxResult;
+    isLoading: boolean;
+  };
+}
+
 // Document hooks (M1-7).
 export function useDocuments(workItemId: string) {
   return useActionQuery(
