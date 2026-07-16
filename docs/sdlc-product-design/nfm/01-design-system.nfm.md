@@ -384,50 +384,10 @@ Foundry 是一个**工程驾驶舱**设计系统：
 
 ### 2.6 动效
 
-<table header-row="true">
-<tr>
-<td>语汇</td>
-<td>用途</td>
-<td>实现</td>
-</tr>
-<tr>
-<td>文字流光 shimmer</td>
-<td>brain / agent 思考中的状态文本</td>
-<td>background-clip:text 扫光 2.2s</td>
-</tr>
-<tr>
-<td>breathe</td>
-<td>运行中状态环 / 行内 spinner</td>
-<td>opacity 呼吸 2s</td>
-</tr>
-<tr>
-<td>单调计时器</td>
-<td>"运行中 · 3m42s"，只增不跳</td>
-<td>挂载时间基准</td>
-</tr>
-<tr>
-<td>呼吸描边 impulse</td>
-<td>有活跃运行的入口（FAB / 导航徽标）</td>
-<td>box-shadow 脉冲 2.4s</td>
-</tr>
-<tr>
-<td>顶部进度条</td>
-<td>路由切换</td>
-<td>2px brand sweep</td>
-</tr>
-<tr>
-<td>border-beam</td>
-<td>当前活跃 DAG 节点卡</td>
-<td>conic-gradient 旋转光带</td>
-</tr>
-<tr>
-<td>过渡</td>
-<td>hover / 展开 / 选中</td>
-<td>120–180ms ease-out；布局级变化 240ms 以内</td>
-</tr>
-</table>
-
-规则：动效只用于"正在发生的事"与直接反馈；静态数据不动。全部动效必须带 `prefers-reduced-motion` 降级（退化为静态色点 / 直接切换）。
+- **Token 体系**：全部动效走 `--fm-*` token，禁止裸写时长/曲线。一次性时长 `--fm-dur-1: 120ms` / `--fm-dur-2: 240ms` / `--fm-dur-3: 400ms` / `--fm-dur-4: 700ms`；氛围循环时长 `--fm-ambient-1: 1600ms` / `--fm-ambient-2: 2500ms` / `--fm-ambient-3: 3200ms`。曲线：`--fm-ease-standard: cubic-bezier(0.4,0,0.2,1)` 及对应 enter/exit 变体；回弹曲线 `--fm-ease-bounce: cubic-bezier(0.5,1.5,0.4,1)` 仅限完成/庆祝时刻使用。
+- **五个标准模式**：`fm-thinking`（文字扫光，agent 运行态专用，替代传统 spinner）、`fm-live`（活跃脉动，只动色彩与阴影，不产生位移）、`fm-complete`（两段式完成：徽章回弹 → 打勾描边）、`fm-nav-progress`（导航扫条，1.4s，路由切换时触发）、`fmCountTo`（数值计数动画）。
+- **红线**：高频操作面禁入场表演动效；`overflow` 容器内禁位移类动效；拖拽/手势进行中禁用 `transition`；全量 `prefers-reduced-motion` 降级，无例外。
+- **实证出处**：参照 multica.ai（同品类开源 agent 协作平台）源码级动效语言校准。完整规范与活体演示见《Foundry·组件规范》§2.6 动效章。
 
 ## 3. 状态语汇（Foundry 的核心资产）
 

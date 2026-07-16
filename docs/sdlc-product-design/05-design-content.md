@@ -222,7 +222,7 @@ tracker UI ──deep link──▶ orchestrator(/runs/:id) · design(/design/:i
 
 ## 7. 附录 · 原型清单（prototypes/）
 
-全部原型（11 屏）入 design 应用 `SDLC 产品设计 v2.1` design（Foundry 设计系统），
+全部原型（11 屏）入 design 应用 `SDLC 产品设计 v2.2` design（Foundry 设计系统），
 同时在仓库 `docs/sdlc-product-design/prototypes/` 保留源文件。
 
 | # | 文件 | 屏 | 对应章节 |

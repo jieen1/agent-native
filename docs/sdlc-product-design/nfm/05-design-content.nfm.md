@@ -294,7 +294,7 @@ SDLC 项目文档库/                       <- org 根文件夹
 
 ## 7. 附录 · 原型清单
 
-全部原型入 design 应用「SDLC 产品设计 v2.1 · Foundry 原型」（链接 Foundry 设计系统），仓库 docs/sdlc-product-design/prototypes/ 保留源文件。
+全部原型入 design 应用「SDLC 产品设计 v2.2 · Foundry 原型」（链接 Foundry 设计系统），仓库 docs/sdlc-product-design/prototypes/ 保留源文件。
 
 <table header-row="true">
 <tr>
