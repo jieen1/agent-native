@@ -5,39 +5,177 @@
 
 ## 一、一页结论
 
-<table>
-<tr><th>层面</th><th>状态</th><th>证据</th></tr>
-<tr><td>机制层(F0–F10 地基,11 项)</td><td><b>~85% 已交付并部署</b>(F2b 消费端切片待办)</td><td>2026-07-12 合入统一主干并部署 101,迁移落库、功能冒烟通过;2026-07-16 随全量重建仍在线</td></tr>
-<tr><td>代码↔部署对齐</td><td><b>已对齐</b>:101 ≈ main HEAD</td><td>2026-07-16 13:55–14:15 全量重建部署(13 应用),content 产物已含 main 最新提交字符串;ACP 包、四条 V3 迁移、brain 默认模型均在位</td></tr>
-<tr><td>真实运转</td><td><b>停摆 4 天</b>:07-12 后 v3_runs = 0</td><td>F4 phase、F7 model_real_name、F9-B 回写事件计数全部为 0——三项能力从未被真实运行触发过</td></tr>
-<tr><td>自动化开发能力</td><td><b>已被证明、未在运转</b></td><td>07-08 系统身份 orchestrator@an.local 自主产出 3 个质量合格的提交(run 限额+CI watch+PR merge),曾被搁置;本次已抢救移植并合入 main(1fd9783fb),移植中还修复了原提交的一处并发锁泄漏隐患(见 §四 R1)</td></tr>
-<tr><td>对照完整 v2.2 产品(UI+工作流族+四域集成)</td><td><b>~20%</b>(区间 15–28%)</td><td>约 21 个设计屏中 6 建成/9 半成/6 缺失;九模板工作流族、规划技能链、design/content 域集成基本未起步</td></tr>
+<table header-row="true">
+<tr>
+<td>层面</td>
+<td>状态</td>
+<td>证据</td>
+</tr>
+<tr>
+<td>机制层(F0–F10 地基,11 项)</td>
+<td><b>~85% 已交付并部署</b>(F2b 消费端切片待办)</td>
+<td>2026-07-12 合入统一主干并部署 101,迁移落库、功能冒烟通过;2026-07-16 随全量重建仍在线</td>
+</tr>
+<tr>
+<td>代码↔部署对齐</td>
+<td><b>已对齐</b>:101 ≈ main HEAD</td>
+<td>2026-07-16 13:55–14:15 全量重建部署(13 应用),content 产物已含 main 最新提交字符串;ACP 包、四条 V3 迁移、brain 默认模型均在位</td>
+</tr>
+<tr>
+<td>真实运转</td>
+<td><b>停摆 4 天</b>:07-12 后 v3_runs = 0</td>
+<td>F4 phase、F7 model_real_name、F9-B 回写事件计数全部为 0——三项能力从未被真实运行触发过</td>
+</tr>
+<tr>
+<td>自动化开发能力</td>
+<td><b>已被证明、未在运转</b></td>
+<td>07-08 系统身份 orchestrator@an.local 自主产出 3 个质量合格的提交(run 限额+CI watch+PR merge),曾被搁置;本次已抢救移植并合入 main(1fd9783fb),移植中还修复了原提交的一处并发锁泄漏隐患(见 §四 R1)</td>
+</tr>
+<tr>
+<td>对照完整 v2.2 产品(UI+工作流族+四域集成)</td>
+<td><b>~20%</b>(区间 15–28%)</td>
+<td>约 21 个设计屏中 6 建成/9 半成/6 缺失;九模板工作流族、规划技能链、design/content 域集成基本未起步</td>
+</tr>
 </table>
 
 **核心判断:当前最大的瓶颈不是"再造机制",而是"让系统转起来"和"给已有机制接上 UI 通路"。** 守卫、回写、遥测、终态传导的钢筋都浇好了,但没有一次真实运行去压它们,人也没有界面去走完一条脊柱场景。
 
 ## 二、逐领域对照(设计 → 代码 → 部署 → 真实运转)
 
-<table>
-<tr><th>领域</th><th>设计出处</th><th>代码</th><th>101 部署</th><th>真实运转</th></tr>
-<tr><td>F1 工作区契约</td><td>路线图 §1</td><td>✅ main</td><td>✅</td><td>❌ 未触发</td></tr>
-<tr><td>F2 执行器上下文</td><td>路线图 §1</td><td>✅(F2b 消费端待办)</td><td>✅</td><td>❌ 未触发</td></tr>
-<tr><td>F3 状态守卫+人工流转</td><td>02 章/F1-F4 细则</td><td>✅ main</td><td>✅ 冒烟通过</td><td>◐ 冒烟验证过,无日常使用</td></tr>
-<tr><td>F4 能力面矩阵/评审分离</td><td>路线图 §1</td><td>✅ main</td><td>✅</td><td>❌ brain_threads.phase 全 NULL</td></tr>
-<tr><td>F5 规模门</td><td>F5-F10 细则</td><td>✅ main</td><td>✅ 冒烟通过</td><td>◐ 冒烟验证过</td></tr>
-<tr><td>F6 迁移对账+核对清单</td><td>F5-F10 细则</td><td>✅ main</td><td>✅</td><td>◐</td></tr>
-<tr><td>F7 遥测/身份单一事实源</td><td>路线图 §1</td><td>✅ main</td><td>✅</td><td>❌ model_real_name 计数 0</td></tr>
-<tr><td>F8 itemKey 权威</td><td>F5-F10 细则</td><td>✅ main</td><td>✅ 冒烟通过</td><td>◐</td></tr>
-<tr><td>F9/F9-B 确定性回写</td><td>路线图 §1</td><td>✅ main(持久 outbox 为后续项)</td><td>✅</td><td>❌ 回写事件计数 0</td></tr>
-<tr><td>F10 终态传导</td><td>F5-F10 细则</td><td>✅ main</td><td>✅</td><td>❌ 未触发</td></tr>
-<tr><td>运行限额兜底 / CI watch / PR merge</td><td>02 章工作流族的组成件</td><td>◐ 本次从被搁置的自动开发分支抢救移植(recover/sdlc-issue-pipeline)</td><td>❌ 待并入后部署</td><td>❌</td></tr>
-<tr><td>九模板工作流族</td><td>02 章 §工作流族</td><td>❌ 仓内零证据,仅单节点 sdlc-dev 活在 101 DB</td><td>—</td><td>—</td></tr>
-<tr><td>规划域技能链(六技能)+ gap-analysis</td><td>02/03 章</td><td>❌ 未建</td><td>—</td><td>—</td></tr>
-<tr><td>tracker UI 屏</td><td>03 章</td><td>◐ 约半数半成:收件箱/规划工作台/度量/Epic 依赖图缺失;守卫流转对话框后端在、UI 未接线;队列审批仍是 toast 桩</td><td>同代码</td><td>—</td></tr>
-<tr><td>orchestrator UI 屏</td><td>04 章</td><td>◐ RunView/Workspace/Spawns/Settings 真实;驾驶舱/引擎注册表/健康页/洞察缺失;模型注册表有后端无 UI</td><td>同代码</td><td>—</td></tr>
-<tr><td>design 域 SDLC 集成(ui-spec 子流程)</td><td>05 章</td><td>❌ 未建(原型资产是手工发布的,非集成代码)</td><td>—</td><td>—</td></tr>
-<tr><td>content 域 SDLC 集成(自动归档)</td><td>05 章</td><td>❌ 未建</td><td>—</td><td>—</td></tr>
-<tr><td>audit/安全对齐(alignment audit P0)</td><td>agent-native-alignment-audit.md</td><td>✅ 已修并入史(fail-closed、参数化、fail-loud、删 V2 死层)</td><td>✅</td><td>✅ 常态生效</td></tr>
+<table header-row="true">
+<tr>
+<td>领域</td>
+<td>设计出处</td>
+<td>代码</td>
+<td>101 部署</td>
+<td>真实运转</td>
+</tr>
+<tr>
+<td>F1 工作区契约</td>
+<td>路线图 §1</td>
+<td>✅ main</td>
+<td>✅</td>
+<td>❌ 未触发</td>
+</tr>
+<tr>
+<td>F2 执行器上下文</td>
+<td>路线图 §1</td>
+<td>✅(F2b 消费端待办)</td>
+<td>✅</td>
+<td>❌ 未触发</td>
+</tr>
+<tr>
+<td>F3 状态守卫+人工流转</td>
+<td>02 章/F1-F4 细则</td>
+<td>✅ main</td>
+<td>✅ 冒烟通过</td>
+<td>◐ 冒烟验证过,无日常使用</td>
+</tr>
+<tr>
+<td>F4 能力面矩阵/评审分离</td>
+<td>路线图 §1</td>
+<td>✅ main</td>
+<td>✅</td>
+<td>❌ brain_threads.phase 全 NULL</td>
+</tr>
+<tr>
+<td>F5 规模门</td>
+<td>F5-F10 细则</td>
+<td>✅ main</td>
+<td>✅ 冒烟通过</td>
+<td>◐ 冒烟验证过</td>
+</tr>
+<tr>
+<td>F6 迁移对账+核对清单</td>
+<td>F5-F10 细则</td>
+<td>✅ main</td>
+<td>✅</td>
+<td>◐</td>
+</tr>
+<tr>
+<td>F7 遥测/身份单一事实源</td>
+<td>路线图 §1</td>
+<td>✅ main</td>
+<td>✅</td>
+<td>❌ model_real_name 计数 0</td>
+</tr>
+<tr>
+<td>F8 itemKey 权威</td>
+<td>F5-F10 细则</td>
+<td>✅ main</td>
+<td>✅ 冒烟通过</td>
+<td>◐</td>
+</tr>
+<tr>
+<td>F9/F9-B 确定性回写</td>
+<td>路线图 §1</td>
+<td>✅ main(持久 outbox 为后续项)</td>
+<td>✅</td>
+<td>❌ 回写事件计数 0</td>
+</tr>
+<tr>
+<td>F10 终态传导</td>
+<td>F5-F10 细则</td>
+<td>✅ main</td>
+<td>✅</td>
+<td>❌ 未触发</td>
+</tr>
+<tr>
+<td>运行限额兜底 / CI watch / PR merge</td>
+<td>02 章工作流族的组成件</td>
+<td>✅ 本次抢救移植并合入 main(1fd9783fb,含原提交并发锁隐患修复)</td>
+<td>❌ 待部署(门槛:先跑一次真实运行验证 checkRunLimits)</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>九模板工作流族</td>
+<td>02 章 §工作流族</td>
+<td>❌ 仓内零证据,仅单节点 sdlc-dev 活在 101 DB</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>规划域技能链(六技能)+ gap-analysis</td>
+<td>02/03 章</td>
+<td>❌ 未建</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>tracker UI 屏</td>
+<td>03 章</td>
+<td>◐ 约半数半成:收件箱/规划工作台/度量/Epic 依赖图缺失;守卫流转对话框后端在、UI 未接线;队列审批仍是 toast 桩</td>
+<td>同代码</td>
+<td>—</td>
+</tr>
+<tr>
+<td>orchestrator UI 屏</td>
+<td>04 章</td>
+<td>◐ RunView/Workspace/Spawns/Settings 真实;驾驶舱/引擎注册表/健康页/洞察缺失;模型注册表有后端无 UI</td>
+<td>同代码</td>
+<td>—</td>
+</tr>
+<tr>
+<td>design 域 SDLC 集成(ui-spec 子流程)</td>
+<td>05 章</td>
+<td>❌ 未建(原型资产是手工发布的,非集成代码)</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>content 域 SDLC 集成(自动归档)</td>
+<td>05 章</td>
+<td>❌ 未建</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>audit/安全对齐(alignment audit P0)</td>
+<td>agent-native-alignment-audit.md</td>
+<td>✅ 已修并入史(fail-closed、参数化、fail-loud、删 V2 死层)</td>
+<td>✅</td>
+<td>✅ 常态生效</td>
+</tr>
 </table>
 
 图例:✅ 完成 ◐ 部分 ❌ 缺失。
@@ -50,14 +188,35 @@
 
 ## 三、文档与设计资产修订记录(本次执行)
 
-<table>
-<tr><th>问题</th><th>处置</th></tr>
-<tr><td>路线图(24OzeoGlaJL9)仍标 8 项 F 能力【缺失】,与部署事实矛盾</td><td>全部状态标签修正为【已交付 2026-07-12】(F2 注明 F2b 待办),加时点声明,repo+content 双改</td></tr>
-<tr><td>《F5–F10 详细实施方案》从未发布到 content</td><td>已发布为新文档,挂在 v2.2 文件夹下、与 F1–F4 细则并列</td></tr>
-<tr><td>生产 design 的 4 屏(s2/s5/s9/s10)落后 repo:F5 规模告警/F6 核对清单/F7 模型注册表+遥测卡 未同步</td><td>已用 update-file 同步发布;S4 守卫流转对话框两边都未补,保持"未补"标注(属 §四 R3 工作)</td></tr>
-<tr><td>00 章 §7「与现状的关系」是 v2.0 时点快照,严重过时</td><td>表格前加时点声明,指向《F0–F10 实现说明》与本文</td></tr>
-<tr><td>05 章引用"v2.1·Foundry 原型"、design 描述引用"v2.0"</td><td>版本号统一修为 v2.2</td></tr>
-<tr><td>旧调研/审计文档群(07-06~07-08 五篇)结论已被 v2.2 树部分取代</td><td>不改内容,定位为历史时点记录;以 v2.2 树 + 实现说明 + 本文为准</td></tr>
+<table header-row="true">
+<tr>
+<td>问题</td>
+<td>处置</td>
+</tr>
+<tr>
+<td>路线图(24OzeoGlaJL9)仍标 8 项 F 能力【缺失】,与部署事实矛盾</td>
+<td>全部状态标签修正为【已交付 2026-07-12】(F2 注明 F2b 待办),加时点声明,repo+content 双改</td>
+</tr>
+<tr>
+<td>《F5–F10 详细实施方案》从未发布到 content</td>
+<td>已发布为新文档,挂在 v2.2 文件夹下、与 F1–F4 细则并列</td>
+</tr>
+<tr>
+<td>生产 design 的 4 屏(s2/s5/s9/s10)落后 repo:F5 规模告警/F6 核对清单/F7 模型注册表+遥测卡 未同步</td>
+<td>已用 update-file 同步发布;S4 守卫流转对话框两边都未补,保持"未补"标注(属 §四 R3 工作)</td>
+</tr>
+<tr>
+<td>00 章 §7「与现状的关系」是 v2.0 时点快照,严重过时</td>
+<td>表格前加时点声明,指向《F0–F10 实现说明》与本文</td>
+</tr>
+<tr>
+<td>05 章引用"v2.1·Foundry 原型"、design 描述引用"v2.0"</td>
+<td>版本号统一修为 v2.2</td>
+</tr>
+<tr>
+<td>旧调研/审计文档群(07-06~07-08 五篇)结论已被 v2.2 树部分取代</td>
+<td>不改内容,定位为历史时点记录;以 v2.2 树 + 实现说明 + 本文为准</td>
+</tr>
 </table>
 
 ## 四、通向目标的差距与建造顺序
