@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shapeWorkItemDetail } from "../get-work-item.js";
+import { legacyRunFallback, shapeWorkItemDetail } from "../get-work-item.js";
 
 function baseItem(overrides: Record<string, unknown> = {}) {
   return {
@@ -154,5 +154,73 @@ describe("shapeWorkItemDetail", () => {
     // Raw itemKey is untouched — extra only adds the display field, it
     // doesn't overwrite the underlying data.
     expect(out.itemKey).toBe("T-7");
+  });
+
+  // ==========================================================================
+  // Regression: SDLC-040/041/043 were confirmed on production to have real,
+  // completed v3_runs (with real DAG nodes) yet get-work-item.runs came back
+  // [] — these items were dispatched before tracker_work_item_runs (F8,
+  // SDLC-053) started recording history, so `listWorkItemRuns` legitimately
+  // finds no row, and RunEvidenceList (gated on `runs.length === 0`) rendered
+  // nothing. legacyRunFallback synthesizes a run summary from the pre-F8
+  // columns that were already being populated (orchestratorThreadId/
+  // orchestratorRunId/branch/dispatchedAt) so dispatched-but-never-backfilled
+  // items still surface their one known run.
+  // ==========================================================================
+  describe("legacyRunFallback", () => {
+    it("returns [] for an item that was never dispatched", () => {
+      expect(legacyRunFallback(baseItem())).toEqual([]);
+    });
+
+    it("synthesizes a single non-superseded run from legacy columns when dispatched", () => {
+      const out = legacyRunFallback(
+        baseItem({
+          orchestratorThreadId: "bt_1",
+          orchestratorRunId: "v3r_1",
+          branch: "orchestrator/run-abc",
+          dispatchedAt: "2026-07-11T05:00:21.059Z",
+        }),
+      );
+      expect(out).toEqual([
+        {
+          runId: "v3r_1",
+          threadId: "bt_1",
+          branch: "orchestrator/run-abc",
+          dispatchedAt: "2026-07-11T05:00:21.059Z",
+          superseded: false,
+        },
+      ]);
+    });
+
+    it("tolerates a dispatched item whose runId/branch never backfilled (still null)", () => {
+      const out = legacyRunFallback(
+        baseItem({
+          orchestratorThreadId: "bt_1",
+          orchestratorRunId: null,
+          branch: null,
+          dispatchedAt: "2026-07-11T04:07:50.872Z",
+        }),
+      );
+      expect(out).toEqual([
+        {
+          runId: null,
+          threadId: "bt_1",
+          branch: null,
+          dispatchedAt: "2026-07-11T04:07:50.872Z",
+          superseded: false,
+        },
+      ]);
+    });
+
+    it("falls back to updatedAt when dispatchedAt itself is missing", () => {
+      const out = legacyRunFallback(
+        baseItem({
+          orchestratorThreadId: "bt_1",
+          dispatchedAt: null,
+          updatedAt: "2026-07-12T00:00:00Z",
+        }),
+      );
+      expect(out[0]?.dispatchedAt).toBe("2026-07-12T00:00:00Z");
+    });
   });
 });

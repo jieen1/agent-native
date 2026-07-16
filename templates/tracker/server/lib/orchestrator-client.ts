@@ -147,8 +147,33 @@ export async function callOrchestratorTool(
         data = textPart;
       }
     }
+  } else {
+    data = unwrapArrayStructuredContent(data);
   }
   return { data, raw: parsed };
+}
+
+// The orchestrator's MCP server wraps a `readOnly: true` action's bare-array
+// result as `{ items: [...] }` in `structuredContent` (see build-server.ts's
+// `readOnlyStructuredResult` — MCP structuredContent must be a JSON object,
+// so a bare array gets boxed under a single `items` key; `content[0].text`
+// keeps the unwrapped array for display). Every array-shaped read this file
+// calls (`runsList`, `spawnList`, `v3RunNodes`) is `readOnly: true`, so their
+// structuredContent always arrives wrapped — callers here expect
+// `Array.isArray(data)` to be true (get-activity.ts's runs/spawns/nodes
+// checks), so unwrap the single-key `{ items: [...] }` envelope back to the
+// plain array. Never unwraps a legitimate multi-key object.
+function unwrapArrayStructuredContent(data: unknown): unknown {
+  if (
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    Object.keys(data as Record<string, unknown>).length === 1 &&
+    Array.isArray((data as { items?: unknown }).items)
+  ) {
+    return (data as { items: unknown[] }).items;
+  }
+  return data;
 }
 
 function parseMcpResponse(text: string): unknown {
