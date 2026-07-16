@@ -292,6 +292,14 @@ export interface TrackerWorkItem {
   // treats plannedStages/tags/nature off get-sprint's raw items).
   scaleEstimate?: string | null;
   splitParentId?: string | null;
+  // F3 (v24): dispatch-tracking column — list-queue.ts's raw workItems
+  // select() includes it even though most call sites of TrackerWorkItem
+  // didn't previously read it; the queue page's "运行中" grouping does.
+  execState?: string | null;
+  // Set on dispatch (actions/dispatch-to-orchestrator.ts) — the queue page's
+  // "运行中" row timer anchors on this real timestamp (exec_queue.startedAt
+  // is never actually written by any action).
+  dispatchedAt?: string | null;
 }
 export interface Stage {
   id: string;
@@ -357,12 +365,61 @@ export interface QueueItem {
   enqueuedAt: string;
   startedAt: string | null;
   blockedBy?: string | null;
+  /** v28: manual drag/pin order within the "可派发" group, 1-based. `<= 0`
+   *  (null on a fresh nullable column, or 0 — some production rows carry a
+   *  legacy `NOT NULL DEFAULT 0` shape, see schema.ts's execQueue docblock)
+   *  means "never manually ordered"; use `app/lib/queue.ts`'s
+   *  `sortDispatchable` rather than comparing this field directly. */
+  position?: number | null;
+  /** v28: unified wait descriptor JSON — `{type:"dependency", items:[...]}` |
+   *  `{type:"health", reason}` | `{}` (not waiting). Parse with
+   *  `parseQueueWaitingOn` (app/lib/queue.ts). */
+  waitingOn?: string | null;
+  /** v28: most recent health-gate rejection for this row, JSON
+   *  `{reason, at}` | null. Parse with `parseQueueHealthLog`. */
+  healthCheckLog?: string | null;
   workItem: TrackerWorkItem;
 }
 export interface QueueStats {
   queued: number;
   running: number;
   paused: number;
+}
+
+// ── Queue scheduler + health gate (03-tracker.md §8) ─────────────────────────
+
+export interface QueueSchedulerState {
+  paused: boolean;
+  pausedAt: string | null;
+  pausedBy: string | null;
+  resumedAt: string | null;
+  resumedBy: string | null;
+}
+
+export interface QueueHealthStatus {
+  scheduler: QueueSchedulerState;
+  orchestratorReachable: boolean;
+  orchestratorError: string | null;
+  claudeCode: {
+    loggedIn: boolean;
+    expired: boolean;
+    subscription: string | null;
+  } | null;
+  devEngine: {
+    engine: string | null;
+    model: string | null;
+    baseUrl: string | null;
+    configured: boolean;
+  } | null;
+  brain: {
+    driverAlive: boolean;
+    concurrency: number | null;
+    running: number;
+    queued: number;
+    lastError: string | null;
+    lastTickAt: string | null;
+  } | null;
+  lastRejection: { reason: string; at: string; workItemId?: string } | null;
 }
 
 // Approval types (M1-3).

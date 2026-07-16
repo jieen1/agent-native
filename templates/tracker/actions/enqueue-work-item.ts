@@ -6,6 +6,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { resolveDispatchGate } from "../server/lib/dispatch-gate.js";
@@ -19,7 +20,11 @@ export default defineAction({
     "is appended so the audit trail reflects the admission.",
   schema: z.object({
     workItemId: z.string().min(1).describe("Work item id to enqueue"),
-    priority: z.coerce.number().int().optional().describe("Queue priority (default 0)"),
+    priority: z.coerce
+      .number()
+      .int()
+      .optional()
+      .describe("Queue priority (default 0)"),
   }),
   http: { method: "POST" },
   run: async (args) => {
@@ -35,7 +40,12 @@ export default defineAction({
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!workItem) throw new Error("Work item not found or not accessible");
@@ -44,11 +54,24 @@ export default defineAction({
     // If this item has unfinished blocked-by dependencies, enqueue it in the
     // "blocked" state instead of "queued" — the item is not rejected, it just
     // waits until reevaluateBlockedQueue() clears it automatically.
-    const gate = await resolveDispatchGate(db, args.workItemId, ownerEmail, orgId);
+    const gate = await resolveDispatchGate(
+      db,
+      args.workItemId,
+      ownerEmail,
+      orgId,
+    );
     const queueStatus = gate.ready ? "queued" : "blocked";
     const blockedByJson = gate.ready
       ? "[]"
-      : JSON.stringify(gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })));
+      : JSON.stringify(
+          gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })),
+        );
+    // waitingOn is the unified dependency|health wait descriptor the queue
+    // page groups by (03-tracker.md §8); written alongside the legacy
+    // blockedBy column rather than replacing it.
+    const waitingOnJson = gate.ready
+      ? "{}"
+      : JSON.stringify({ type: "dependency", items: gate.blockedBy });
 
     // Upsert the exec_queue row (INSERT OR REPLACE semantics).
     await db
@@ -62,6 +85,7 @@ export default defineAction({
         enqueuedAt: now,
         startedAt: null,
         blockedBy: blockedByJson,
+        waitingOn: waitingOnJson,
         ownerEmail,
         orgId,
       })
@@ -74,6 +98,7 @@ export default defineAction({
           enqueuedAt: now,
           startedAt: null,
           blockedBy: blockedByJson,
+          waitingOn: waitingOnJson,
         },
       });
 

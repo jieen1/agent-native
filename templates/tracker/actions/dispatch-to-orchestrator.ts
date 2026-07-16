@@ -8,12 +8,13 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
-import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
 import { resolveDispatchGate } from "../server/lib/dispatch-gate.js";
+import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
 import {
   resolveScaleGate,
   scaleExceededError,
 } from "../server/lib/scale-gate.js";
+import { assertSchedulerNotPaused } from "../server/lib/scheduler-gate.js";
 import { actorFromCaller } from "../server/lib/transition-guard.js";
 import { recordDispatchRun } from "../server/lib/work-item-runs.js";
 
@@ -56,6 +57,37 @@ export default defineAction({
     const orgId = getRequestOrgId() ?? null;
 
     const db = getDb();
+
+    // Real, persisted scheduler pause gate (03-tracker.md §8) — throws BEFORE
+    // any orchestrator call so a paused scheduler has a real effect on every
+    // dispatch entry point (work-item detail page's manual dispatch AND the
+    // queue page's "立即派发"), not just a queue-page banner. On reject, also
+    // note the reason on this item's exec_queue row (if it has one) so the
+    // queue table's "等待健康门" group shows WHY, not just that it's stuck.
+    try {
+      await assertSchedulerNotPaused(args.workItemId);
+    } catch (err) {
+      try {
+        const rejectedAt = new Date().toISOString();
+        await db
+          .update(schema.execQueue)
+          .set({
+            healthCheckLog: JSON.stringify({
+              reason: "调度器已暂停",
+              at: rejectedAt,
+            }),
+            waitingOn: JSON.stringify({
+              type: "health",
+              reason: "调度器已暂停",
+            }),
+          })
+          .where(eq(schema.execQueue.workItemId, args.workItemId));
+      } catch {
+        // Non-fatal — the real scheduler-paused error below still propagates.
+      }
+      throw err;
+    }
+
     const item = (
       await db
         .select()
@@ -94,6 +126,13 @@ export default defineAction({
     const now = new Date().toISOString();
 
     if (!gate.ready) {
+      const blockedByJson = JSON.stringify(
+        gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })),
+      );
+      const waitingOnJson = JSON.stringify({
+        type: "dependency",
+        items: gate.blockedBy,
+      });
       // Upsert the exec_queue row as blocked.
       await db
         .insert(schema.execQueue)
@@ -105,9 +144,8 @@ export default defineAction({
           currentStage: item.currentStageName ?? "",
           enqueuedAt: now,
           startedAt: null,
-          blockedBy: JSON.stringify(
-            gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })),
-          ),
+          blockedBy: blockedByJson,
+          waitingOn: waitingOnJson,
           ownerEmail,
           orgId,
         })
@@ -115,9 +153,8 @@ export default defineAction({
           target: schema.execQueue.workItemId,
           set: {
             status: "blocked",
-            blockedBy: JSON.stringify(
-              gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })),
-            ),
+            blockedBy: blockedByJson,
+            waitingOn: waitingOnJson,
           },
         });
 

@@ -238,6 +238,22 @@ export const execQueue = table("tracker_exec_queue", {
   enqueuedAt: text("enqueued_at").notNull(),
   startedAt: text("started_at").default(null),
   blockedBy: text("blocked_by").default("[]"),
+  // v28 (03-tracker.md §8 队列与调度接真): manual drag/pin order within the
+  // "可派发" group. On a genuinely fresh DB this column is nullable (null =
+  // never reordered); on 101's production Postgres, v9's CREATE TABLE text
+  // had already (undocumented, pre-v26 hash-guard) created this column as
+  // `NOT NULL DEFAULT 0` for an unrelated legacy purpose — v28's `ADD COLUMN
+  // IF NOT EXISTS` was a no-op there. app/lib/queue.ts's sortDispatchable
+  // treats `position <= 0` as the "unordered" sentinel so both shapes work;
+  // reorder-queue.ts assigns 1-based positions to keep 0 free as that
+  // sentinel. waitingOn is the unified dependency-vs-health wait descriptor
+  // (JSON `{type:'dependency'|'health', ...}`); blockedBy above is kept
+  // (legacy reader) and written alongside it. healthCheckLog is the most
+  // recent health-gate rejection for this row (JSON `{reason, at}`), written
+  // by the scheduler-paused gate.
+  position: integer("position"),
+  waitingOn: text("waiting_on").default("{}"),
+  healthCheckLog: text("health_check_log"),
   ...ownableColumns(),
 });
 

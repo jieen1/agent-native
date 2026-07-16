@@ -2,6 +2,9 @@ import { useActionQuery, useActionMutation } from "@agent-native/core/client";
 import type {
   ActivityResponse,
   Project,
+  QueueHealthStatus,
+  QueueItem,
+  QueueStats,
   WorkItem,
   WorkItemDetail,
 } from "@shared/types";
@@ -276,7 +279,7 @@ export function useComments(workItemId: string) {
 // Queue hooks.
 export function useQueue() {
   return useActionQuery("list-queue", {}, { refetchInterval: 3000 }) as {
-    data?: any;
+    data?: { items: QueueItem[]; stats: QueueStats };
     isLoading: boolean;
   };
 }
@@ -306,6 +309,65 @@ export function useDequeueWorkItem() {
       toast.error(
         messageOf(err, "dequeue-work-item", "Failed to dequeue work item"),
       );
+    },
+  });
+}
+
+// Queue scheduler pause/resume — real, persisted (server/lib/scheduler-gate.ts).
+export function usePauseScheduler() {
+  const qc = useQueryClient();
+  return useActionMutation("pause-scheduler", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "get-queue-health"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "pause-scheduler", "暂停调度器失败"));
+    },
+  }) as {
+    mutate: (
+      vars: Record<string, never>,
+      options?: { onSuccess?: () => void; onError?: (err: unknown) => void },
+    ) => void;
+    isPending: boolean;
+  };
+}
+
+export function useResumeScheduler() {
+  const qc = useQueryClient();
+  return useActionMutation("resume-scheduler", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "get-queue-health"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "resume-scheduler", "恢复调度器失败"));
+    },
+  }) as {
+    mutate: (
+      vars: Record<string, never>,
+      options?: { onSuccess?: () => void; onError?: (err: unknown) => void },
+    ) => void;
+    isPending: boolean;
+  };
+}
+
+// Real cross-app health-gate status (orchestrator get-runtime-status +
+// brain-queue-status over MCP) — see actions/get-queue-health.ts.
+export function useQueueHealth() {
+  return useActionQuery("get-queue-health", {}, { refetchInterval: 5000 }) as {
+    data?: QueueHealthStatus;
+    isLoading: boolean;
+  };
+}
+
+// Persist manual drag/pin order for the queue's dispatchable rows.
+export function useReorderQueue() {
+  const qc = useQueryClient();
+  return useActionMutation("reorder-queue", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-queue"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "reorder-queue", "保存排序失败"));
     },
   });
 }

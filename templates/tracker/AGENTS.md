@@ -30,10 +30,20 @@ Status moves only by explicit human or agent action. No automatic inference.
 - `create-sprint`, `update-sprint`, `get-sprint`, `list-sprints` — sprint management
 
 **Orchestrator Dispatch:**
-- `dispatch-to-orchestrator` — send a work item to orchestrator brain for AI execution
+- `dispatch-to-orchestrator` — send a work item to orchestrator brain for AI execution.
+  Rejects with a `scheduler-paused` error when the queue scheduler is paused
+  (`pause-scheduler`) — checked BEFORE any orchestrator call.
 - `bulk-dispatch-to-orchestrator` — dispatch multiple items
 - `list-tracker-activities` — poll orchestrator activity tagged to an item
 - `enqueue-work-item`, `dequeue-work-item`, `list-queue` — manage execution queue
+- `pause-scheduler`, `resume-scheduler` — real, persisted (settings-store) queue
+  scheduler pause/resume — a paused scheduler rejects new dispatch attempts
+- `reorder-queue` — persist manual drag/pin-to-top order for the queue's
+  dispatchable rows (`exec_queue.position`)
+- `get-queue-health` — real health-gate status: scheduler pause state + the
+  orchestrator's Claude Code login / dev-engine config / brain driver &
+  concurrency (read over the same signed MCP channel `dispatch-to-orchestrator`
+  uses) + the last dispatch rejection
 
 ## Application State
 

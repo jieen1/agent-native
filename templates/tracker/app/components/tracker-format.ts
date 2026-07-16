@@ -129,6 +129,26 @@ export function typeChip(type: string): string {
   return TYPE_CHIP[type] ?? "bg-muted text-muted-foreground border-border";
 }
 
+// ── Stage (7-stage pipeline) ──────────────────────────────────────────────────
+//
+// Same hue assignment as BoardPage.tsx's local STAGE_DOT_COLORS (dot-only) —
+// centralized here as full chip classes so other pages (queue) don't
+// reinvent the mapping. 设计/实施 share --agent (both "build" phases);
+// Foundry's 6 non-neutral hues don't stretch to a 7th distinct one.
+const STAGE_CHIP: Record<string, string> = {
+  待办: "bg-muted text-muted-foreground border-border",
+  分析: "bg-info/10 text-info border-info/25",
+  设计: "bg-agent/10 text-agent border-agent/25",
+  实施: "bg-agent/10 text-agent border-agent/25",
+  测试: "bg-warning/10 text-warning border-warning/25",
+  验收: "bg-success/10 text-success border-success/25",
+  交付: "bg-evidence/10 text-evidence border-evidence/25",
+};
+
+export function stageChip(stage: string): string {
+  return STAGE_CHIP[stage] ?? "bg-muted text-muted-foreground border-border";
+}
+
 // ── DAG node status (design / develop / review / commit) ─────────────────────
 
 export interface NodeStatusPresentation {
