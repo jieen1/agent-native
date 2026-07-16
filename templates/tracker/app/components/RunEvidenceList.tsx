@@ -79,10 +79,6 @@ function TranscriptLink({ runId }: { runId: string }) {
   );
 }
 
-// success/running (emerald/blue below) have no `--success`/`--info` token in
-// this template's app/global.css (only `--destructive` is defined) — kept
-// literal pending a real token; failed/cancelled uses the real `--destructive`
-// token since one exists.
 function NodeStatusIcon({ status }: { status: string }) {
   if (status === "done") {
     return <IconCircleCheck className="size-3.5 text-success" />;
@@ -270,9 +266,7 @@ export function RunBadgeCompact({
 }) {
   if (!run.runId) {
     return (
-      <span className="text-xs text-muted-foreground">
-        等待运行 id 回填
-      </span>
+      <span className="text-xs text-muted-foreground">等待运行 id 回填</span>
     );
   }
   const matched = activity?.runs?.find((r) => r.id === run.runId);

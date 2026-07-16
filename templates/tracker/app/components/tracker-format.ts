@@ -95,11 +95,9 @@ export function statusPresentation(status: string): StatusPresentation {
 
 // ── Inbox kind badges (S5) ────────────────────────────────────────────────────
 //
-// This template's app/global.css only defines a `--destructive` semantic
-// token (no `--warning`/`--info`) — these stay literal Tailwind color
-// utilities for now (same gap already noted on the NODE_STATUS/STATUS maps
-// above), but centralized here so call sites reuse one named chip instead of
-// each inlining its own amber/violet literal.
+// Not yet mapped onto the --warning/--evidence semantic tokens used by
+// STATUS/TYPE_CHIP/NODE_STATUS above — centralized here so call sites reuse
+// one named chip instead of each inlining its own amber/violet literal.
 export type InboxKind = "pending-approval" | "review-request";
 
 const INBOX_KIND_CHIP: Record<InboxKind, string> = {
