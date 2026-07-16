@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   useQueue,
   useDequeueWorkItem,
+  useEnqueueWorkItem,
   useWorkItems,
   useApprovals,
   useApproveGate,
@@ -10,11 +11,14 @@ import {
 } from "@/hooks/use-tracker";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -31,8 +35,14 @@ import {
   IconShieldCheck,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import type { QueueItem, TrackerWorkItem, Approval, GateKey } from "@shared/types";
+import type {
+  QueueItem,
+  TrackerWorkItem,
+  Approval,
+  GateKey,
+} from "@shared/types";
 import { GATE_KEY_LABELS as gateLabels } from "@shared/types";
+import { resolveWorkItemId, runQueueGateAction } from "./queue-gate-actions";
 
 // ── Status presentation ─────────────────────────────────────────────────────
 
@@ -65,15 +75,16 @@ function statusBadge(status: string) {
     case "done":
     case "已完成":
       return (
-        <Badge variant="secondary" className="bg-emerald-400/20 text-emerald-600">
+        <Badge
+          variant="secondary"
+          className="bg-emerald-400/20 text-emerald-600"
+        >
           已完成
         </Badge>
       );
     case "failed":
     case "失败":
-      return (
-        <Badge variant="destructive">失败</Badge>
-      );
+      return <Badge variant="destructive">失败</Badge>;
     case "blocked":
     case "等待依赖":
       return (
@@ -82,9 +93,7 @@ function statusBadge(status: string) {
         </Badge>
       );
     default:
-      return (
-        <Badge variant="outline">{status}</Badge>
-      );
+      return <Badge variant="outline">{status}</Badge>;
   }
 }
 
@@ -101,9 +110,7 @@ function stageBadge(stage: string) {
   return (
     <Badge
       variant="secondary"
-      className={cn(
-        colorMap[stage] || "bg-muted text-muted-foreground",
-      )}
+      className={cn(colorMap[stage] || "bg-muted text-muted-foreground")}
     >
       {stage}
     </Badge>
@@ -359,13 +366,18 @@ function QueueApprovalCard({
             <span className="text-sm font-medium">
               {gateLabels[approval.gateKey as GateKey] ?? approval.gateKey}
             </span>
-            <Badge variant="secondary" className="bg-amber-400/20 text-amber-700">
+            <Badge
+              variant="secondary"
+              className="bg-amber-400/20 text-amber-700"
+            >
               待审批
             </Badge>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
             <span>Sprint: {approval.sprintId}</span>
-            {approval.workItemId ? <span>工作项: {approval.workItemId}</span> : null}
+            {approval.workItemId ? (
+              <span>工作项: {approval.workItemId}</span>
+            ) : null}
             <span className="flex items-center gap-1">
               <IconClock className="size-3" />
               {approval.createdAt?.slice(0, 16).replace("T", " ") ?? "—"}
@@ -415,7 +427,9 @@ function QueueRejectDialog({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!reason.trim()) return;
-    void rejectGate.mutateAsync({ id: approvalId, reason: reason.trim() }).then(onClose);
+    void rejectGate
+      .mutateAsync({ id: approvalId, reason: reason.trim() })
+      .then(onClose);
   }
 
   return (
@@ -459,7 +473,9 @@ export function QueuePage() {
   const { data: queueData, isLoading } = useQueue();
   const { data: allItemsData } = useWorkItems();
   const dequeue = useDequeueWorkItem();
-  const { data: pendingApprovalsData, isLoading: approvalsLoading } = useApprovals({ status: "pending" });
+  const enqueueWorkItem = useEnqueueWorkItem();
+  const { data: pendingApprovalsData, isLoading: approvalsLoading } =
+    useApprovals({ status: "pending" });
   const approveGate = useApproveGate();
 
   const items: QueueItem[] = useMemo(
@@ -473,9 +489,12 @@ export function QueuePage() {
   );
 
   const [reconcilerPaused, setReconcilerPaused] = useState(false);
-  const [reconcilerToggleLoading, setReconcilerToggleLoading] =
-    useState(false);
+  const [reconcilerToggleLoading, setReconcilerToggleLoading] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+  // Optimistic hide for human-gate rows: added when approve/reject is
+  // in flight, removed again if the underlying action fails so the row
+  // reappears for retry.
+  const [hiddenGateIds, setHiddenGateIds] = useState<Set<string>>(new Set());
 
   // Stats
   const queuedCount = items.filter(
@@ -500,15 +519,18 @@ export function QueuePage() {
 
   // Human gate items (paused items awaiting approval)
   const humanGateItems = items.filter(
-    (it) => it.status === "paused" || it.status === "待审批",
+    (it) =>
+      (it.status === "paused" || it.status === "待审批") &&
+      !hiddenGateIds.has(it.id),
   );
 
-  const [order, setOrder] = useState<string[]>(
-    items.map((it) => it.id),
-  );
+  const [order, setOrder] = useState<string[]>(items.map((it) => it.id));
 
   function handleRemove(id: string) {
-    void dequeue.mutateAsync({ workItemId: id });
+    // `id` here is the QueueItem (exec_queue row) id, not the work item id —
+    // resolve the real work item id before calling the backend action.
+    const workItemId = resolveWorkItemId(items, id);
+    void dequeue.mutateAsync({ workItemId });
     setOrder((prev) => prev.filter((oid) => oid !== id));
     toast.success("已从队列移除");
   }
@@ -533,14 +555,45 @@ export function QueuePage() {
     });
   }
 
-  function handleApprove(id: string) {
-    toast.success("已批准，入队继续");
-    // In a real app, would call an approve action. For now, just reorder.
+  function unhideGateRow(id: string) {
+    setHiddenGateIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }
 
+  function hideGateRow(id: string) {
+    setHiddenGateIds((prev) => new Set(prev).add(id));
+  }
+
+  // Approving a human-gate queue row means letting it continue: re-admit it
+  // through the real enqueue-work-item action (the same admission path a
+  // fresh enqueue uses), rather than a UI-only toast.
+  function handleApprove(id: string) {
+    void runQueueGateAction({
+      id,
+      items,
+      mutateAsync: (vars) => enqueueWorkItem.mutateAsync(vars),
+      hide: hideGateRow,
+      unhide: unhideGateRow,
+      onSuccess: () => toast.success("已批准，重新入队"),
+      onError: () => toast.error("批准失败，请重试"),
+    });
+  }
+
+  // Rejecting a human-gate queue row means kicking it out of the queue via
+  // the real dequeue-work-item action.
   function handleReject(id: string) {
-    toast.info("已驳回");
-    handleRemove(id);
+    void runQueueGateAction({
+      id,
+      items,
+      mutateAsync: (vars) => dequeue.mutateAsync(vars),
+      hide: hideGateRow,
+      unhide: unhideGateRow,
+      onSuccess: () => toast.success("已驳回，移出队列"),
+      onError: () => toast.error("驳回失败，请重试"),
+    });
   }
 
   function handleApprovalApprove(approvalId: string) {
@@ -567,9 +620,7 @@ export function QueuePage() {
     <div className="flex h-full flex-col">
       {/* ── Header ── */}
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
-        <h2 className="text-base font-semibold tracking-tight">
-          执行队列
-        </h2>
+        <h2 className="text-base font-semibold tracking-tight">执行队列</h2>
         <Button
           size="sm"
           variant="outline"
@@ -637,9 +688,7 @@ export function QueuePage() {
             <div className="ml-auto flex items-center gap-2">
               {items
                 .filter(
-                  (it) =>
-                    it.status === "running" ||
-                    it.status === "运行中",
+                  (it) => it.status === "running" || it.status === "运行中",
                 )
                 .slice(0, 3)
                 .map((it) => {
