@@ -1,11 +1,20 @@
+import type { SprintArtifact } from "@shared/types";
+import { IconFileText } from "@tabler/icons-react";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 /**
  * Producer badge (agent vs. human) for a versioned artifact.
  *
- * Shared between the per-sprint "产物" section (SprintDetailPage) and the
- * per-work-item "产物" panel (ArtifactsPanel) so both surfaces speak the same
- * agent/human visual vocabulary — matches
+ * Shared between the per-sprint "产物" section (SprintDetailPage), the
+ * per-work-item "产物" panel (ArtifactsPanel), and the Inbox "关联产物" card
+ * so every surface speaks the same agent/human visual vocabulary — matches
  * docs/sdlc-product-design/prototypes/s4-work-item.html's `.badge.b-agent`
  * treatment — instead of each screen inventing its own tone.
  */
@@ -22,5 +31,42 @@ export function ArtifactBadge({ kind }: { kind: string }) {
     >
       {isHuman ? "人工" : "智能体"}
     </span>
+  );
+}
+
+export function ArtifactViewDialog({
+  artifact,
+  open,
+  onClose,
+}: {
+  artifact: SprintArtifact | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  if (!artifact) return null;
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <IconFileText className="size-4 shrink-0 text-muted-foreground" />
+            {artifact.name}
+            <ArtifactBadge kind={artifact.producedByKind} />
+            <span className="ml-1 text-xs font-normal text-muted-foreground">
+              v{artifact.version}
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="max-h-96 overflow-y-auto p-1">
+          {artifact.content ? (
+            <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed">
+              {artifact.content}
+            </pre>
+          ) : (
+            <p className="text-sm italic text-muted-foreground">（内容为空）</p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -489,6 +489,30 @@ export function useInboxItems() {
   };
 }
 
+// Review checklist hooks (F6 gate criteria — S5 门判据 panel).
+export function useReviewChecklist(workItemId: string | undefined) {
+  return useActionQuery(
+    "get-review-checklist",
+    { workItemId: workItemId ?? "" },
+    { enabled: !!workItemId },
+  ) as {
+    data?: import("@shared/types").ReviewChecklistResult;
+    isLoading: boolean;
+  };
+}
+
+export function useSetArtifactReview() {
+  const qc = useQueryClient();
+  return useActionMutation("set-artifact-review", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "get-review-checklist"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "set-artifact-review", "更新核对项失败"));
+    },
+  });
+}
+
 // Document hooks (M1-7).
 export function useDocuments(workItemId: string) {
   return useActionQuery(

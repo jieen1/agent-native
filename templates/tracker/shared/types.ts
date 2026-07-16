@@ -1,6 +1,11 @@
 // Shared tracker types (UI + actions).
 
-export type WorkItemType = "requirement" | "task" | "defect" | "incident" | "epic";
+export type WorkItemType =
+  | "requirement"
+  | "task"
+  | "defect"
+  | "incident"
+  | "epic";
 export type WorkItemStatus =
   | "open"
   | "queued"
@@ -215,40 +220,164 @@ export interface ActivityResponse {
 
 // Sprint / stage / artifact tracker types.
 
-export type ItemType = '需求' | '任务' | '缺陷' | '测试' | '生产问题' | '集合';
-export type ItemRisk = 'low' | 'medium' | 'high';
-export type ExecutionMode = 'manual' | 'auto';
-export type SprintStatus = '规划' | '进行中' | '已完成' | '已发布';
-export type SprintPhase = 'planning' | 'executing' | 'done';
-export type StageStatus = '待执行' | '执行中' | '已完成' | '已驳回' | '跳过';
-export type StageName = '待办' | '分析' | '设计' | '实施' | '测试' | '验收' | '交付';
-export const STAGE_ORDER: StageName[] = ['待办','分析','设计','实施','测试','验收','交付'];
+export type ItemType = "需求" | "任务" | "缺陷" | "测试" | "生产问题" | "集合";
+export type ItemRisk = "low" | "medium" | "high";
+export type ExecutionMode = "manual" | "auto";
+export type SprintStatus = "规划" | "进行中" | "已完成" | "已发布";
+export type SprintPhase = "planning" | "executing" | "done";
+export type StageStatus = "待执行" | "执行中" | "已完成" | "已驳回" | "跳过";
+export type StageName =
+  | "待办"
+  | "分析"
+  | "设计"
+  | "实施"
+  | "测试"
+  | "验收"
+  | "交付";
+export const STAGE_ORDER: StageName[] = [
+  "待办",
+  "分析",
+  "设计",
+  "实施",
+  "测试",
+  "验收",
+  "交付",
+];
 
-export interface Sprint { id:string; projectId:string; name:string; goal:string; status:SprintStatus|string; phase:SprintPhase|string; executorThreadId?:string|null; branch:string; startDate:string; endDate:string; createdAt:string; updatedAt:string; itemCount?:number; delivered?:number; }
-export interface SprintDetail extends Sprint { items: TrackerWorkItem[]; itemCount: number; delivered: number; stages: Stage[]; }
-export interface TrackerWorkItem { id:string; projectId:string; sprintId:string|null; itemKey:string; itemKeyDisplay?:string; type:ItemType|string; title:string; description:string; status:string; priority:number; risk:ItemRisk|string; tags:string[]; executionMode:ExecutionMode; currentStageName:StageName|string; plannedStages:string[]; branch:string|null; orchestratorThreadId:string|null; createdAt:string; updatedAt:string;
+export interface Sprint {
+  id: string;
+  projectId: string;
+  name: string;
+  goal: string;
+  status: SprintStatus | string;
+  phase: SprintPhase | string;
+  executorThreadId?: string | null;
+  branch: string;
+  startDate: string;
+  endDate: string;
+  createdAt: string;
+  updatedAt: string;
+  itemCount?: number;
+  delivered?: number;
+}
+export interface SprintDetail extends Sprint {
+  items: TrackerWorkItem[];
+  itemCount: number;
+  delivered: number;
+  stages: Stage[];
+}
+export interface TrackerWorkItem {
+  id: string;
+  projectId: string;
+  sprintId: string | null;
+  itemKey: string;
+  itemKeyDisplay?: string;
+  type: ItemType | string;
+  title: string;
+  description: string;
+  status: string;
+  priority: number;
+  risk: ItemRisk | string;
+  tags: string[];
+  executionMode: ExecutionMode;
+  currentStageName: StageName | string;
+  plannedStages: string[];
+  branch: string | null;
+  orchestratorThreadId: string | null;
+  createdAt: string;
+  updatedAt: string;
   // F5 (v25): get-sprint.ts returns raw DB rows (unlike get-work-item.ts,
   // which parses) — scaleEstimate arrives as a raw JSON string (or null),
   // parse defensively at the point of use (matches how this codebase already
   // treats plannedStages/tags/nature off get-sprint's raw items).
-  scaleEstimate?: string | null; splitParentId?: string | null; }
-export interface Stage { id:string; workItemId:string; stageName:StageName|string; stageStatus:StageStatus|string; deliveryItems:string[]; verdict:{result:'通过'|'驳回';reason:string;rootCauseStage:string}|null; startedAt:string|null; completedAt:string|null; createdAt:string; updatedAt:string; }
-export interface Artifact { id:string; workItemId:string; stageId:string; stageName:string; kind:string; name:string; version:number; contentRef:string; producedByKind:'agent'|'human'; supersedes:string|null; createdAt:string; }
-export interface TrackerActivity { id:string; workItemId:string; actorKind:'agent'|'human'; actorName:string; eventType:string; payload:Record<string,unknown>; createdAt:string; }
-export interface TrackerComment { id:string; workItemId:string; authorKind:'agent'|'human'; authorName:string; body:string; createdAt:string; }
-export interface ItemLink { id:string; fromItemId:string; toItemId:string; linkType:string; otherItemId:string; otherItemTitle:string; direction:'from'|'to'; }
-export interface QueueItem { id:string; workItemId:string; priority:number; status:string; currentStage:string; enqueuedAt:string; startedAt:string|null; blockedBy?:string|null; workItem:TrackerWorkItem; }
-export interface QueueStats { queued:number; running:number; paused:number; }
+  scaleEstimate?: string | null;
+  splitParentId?: string | null;
+}
+export interface Stage {
+  id: string;
+  workItemId: string;
+  stageName: StageName | string;
+  stageStatus: StageStatus | string;
+  deliveryItems: string[];
+  verdict: {
+    result: "通过" | "驳回";
+    reason: string;
+    rootCauseStage: string;
+  } | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface Artifact {
+  id: string;
+  workItemId: string;
+  stageId: string;
+  stageName: string;
+  kind: string;
+  name: string;
+  version: number;
+  contentRef: string;
+  producedByKind: "agent" | "human";
+  supersedes: string | null;
+  createdAt: string;
+}
+export interface TrackerActivity {
+  id: string;
+  workItemId: string;
+  actorKind: "agent" | "human";
+  actorName: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+export interface TrackerComment {
+  id: string;
+  workItemId: string;
+  authorKind: "agent" | "human";
+  authorName: string;
+  body: string;
+  createdAt: string;
+}
+export interface ItemLink {
+  id: string;
+  fromItemId: string;
+  toItemId: string;
+  linkType: string;
+  otherItemId: string;
+  otherItemTitle: string;
+  direction: "from" | "to";
+}
+export interface QueueItem {
+  id: string;
+  workItemId: string;
+  priority: number;
+  status: string;
+  currentStage: string;
+  enqueuedAt: string;
+  startedAt: string | null;
+  blockedBy?: string | null;
+  workItem: TrackerWorkItem;
+}
+export interface QueueStats {
+  queued: number;
+  running: number;
+  paused: number;
+}
 
 // Approval types (M1-3).
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
-export type GateKey = 'plan-signoff' | 'design-signoff' | 'escalation' | 'audit-deferral';
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+export type GateKey =
+  | "plan-signoff"
+  | "design-signoff"
+  | "escalation"
+  | "audit-deferral";
 
 export const GATE_KEY_LABELS: Record<GateKey, string> = {
-  'plan-signoff': '计划签批',
-  'design-signoff': '设计签批',
-  'escalation': '升级审批',
-  'audit-deferral': '审计推迟',
+  "plan-signoff": "计划签批",
+  "design-signoff": "设计签批",
+  escalation: "升级审批",
+  "audit-deferral": "审计推迟",
 };
 
 export interface Approval {
@@ -263,6 +392,29 @@ export interface Approval {
   reason: string | null;
   decidedAt: string | null;
   createdAt: string;
+}
+
+// Review checklist types (F6 gate criteria, S5 门判据 panel) — mirrors
+// server/lib/review-checklist.ts's ChecklistItem/ChecklistState shapes so the
+// client can render get-review-checklist's result without `any`.
+export type ChecklistItemSource = "machine" | "human";
+export type ChecklistItemState = "pass" | "fail" | "needs-human";
+
+export interface ChecklistItem {
+  key: string;
+  label: string;
+  source: ChecklistItemSource;
+  state: ChecklistItemState;
+  detail?: string;
+  checked: boolean;
+}
+
+export interface ReviewChecklistResult {
+  workItemId: string;
+  artifactId: string | null;
+  version: number | null;
+  complete: boolean;
+  items: ChecklistItem[];
 }
 
 // Sprint artifact types (M1-2).
@@ -329,7 +481,12 @@ export interface EpicChildrenResult {
 
 // Dependency-graph validation (M1-5): validate-dependency-graph action result.
 export interface GraphValidationIssue {
-  code: "self-dependency" | "cycle" | "chain-too-deep" | "no-parallelism" | "orphan";
+  code:
+    | "self-dependency"
+    | "cycle"
+    | "chain-too-deep"
+    | "no-parallelism"
+    | "orphan";
   message: string;
   path?: string[];
 }
@@ -377,6 +534,9 @@ export interface InboxRow {
   timestamp: string;
   approvalId?: string;
   gateKey?: GateKey | string;
+  /** Optional JSON `{runId, nodeId}` — set when the gate was requested with a
+   *  reference to the orchestrator run/node it blocks (escalation rows). */
+  gateRef?: string | null;
   workItemId?: string;
   sprintId?: string | null;
   itemKey?: string;

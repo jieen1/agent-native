@@ -93,6 +93,25 @@ export function statusPresentation(status: string): StatusPresentation {
   );
 }
 
+// ── Inbox kind badges (S5) ────────────────────────────────────────────────────
+//
+// This template's app/global.css only defines a `--destructive` semantic
+// token (no `--warning`/`--info`) — these stay literal Tailwind color
+// utilities for now (same gap already noted on the NODE_STATUS/STATUS maps
+// above), but centralized here so call sites reuse one named chip instead of
+// each inlining its own amber/violet literal.
+export type InboxKind = "pending-approval" | "review-request";
+
+const INBOX_KIND_CHIP: Record<InboxKind, string> = {
+  "pending-approval":
+    "bg-amber-400/20 text-amber-700 dark:bg-amber-400/10 dark:text-amber-400",
+  "review-request": "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+};
+
+export function inboxKindChip(kind: InboxKind): string {
+  return INBOX_KIND_CHIP[kind];
+}
+
 // ── Work-item type ───────────────────────────────────────────────────────────
 
 const TYPE_CHIP: Record<string, string> = {
@@ -107,9 +126,7 @@ const TYPE_CHIP: Record<string, string> = {
 };
 
 export function typeChip(type: string): string {
-  return (
-    TYPE_CHIP[type] ?? "bg-muted text-muted-foreground border-border"
-  );
+  return TYPE_CHIP[type] ?? "bg-muted text-muted-foreground border-border";
 }
 
 // ── DAG node status (design / develop / review / commit) ─────────────────────
@@ -179,7 +196,10 @@ export function nodeStatusPresentation(status: string): NodeStatusPresentation {
  */
 export type EventKind = "assistant" | "tool" | "result" | "user" | "system";
 
-export function classifyEvent(type: string, toolName?: string | null): EventKind {
+export function classifyEvent(
+  type: string,
+  toolName?: string | null,
+): EventKind {
   const t = (type ?? "").toLowerCase();
   if (toolName) return "tool";
   if (t.includes("tool_result") || t.includes("result")) return "result";
