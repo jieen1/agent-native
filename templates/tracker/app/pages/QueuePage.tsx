@@ -361,9 +361,9 @@ function DispatchableRow({
       <RowTitle w={w} />
       {w?.currentStageName ? stageBadge(w.currentStageName) : null}
       {w?.branch ? (
-        <span className="hidden items-center gap-1 font-mono text-[10px] text-muted-foreground md:flex">
-          <IconGitBranch className="size-3" />
-          {w.branch}
+        <span className="hidden max-w-[12rem] items-center gap-1 truncate font-mono text-[10px] text-muted-foreground md:flex">
+          <IconGitBranch className="size-3 shrink-0" />
+          <span className="truncate">{w.branch}</span>
         </span>
       ) : null}
       <span className="hidden items-center gap-1 text-[11px] text-muted-foreground sm:flex">
