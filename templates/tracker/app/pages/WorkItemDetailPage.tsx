@@ -1,11 +1,15 @@
 import {
   IconAlertTriangle,
+  IconArrowBackUp,
   IconArrowLeft,
+  IconArrowUp,
   IconBrandGithub,
+  IconCategory,
   IconCheck,
   IconClock,
   IconEdit,
   IconCircleCheck,
+  IconDotsVertical,
   IconExternalLink,
   IconFileText,
   IconFlag,
@@ -23,6 +27,7 @@ import {
   IconPlus,
   IconRocket,
   IconScissors,
+  IconSettings,
   IconShieldLock,
   IconSitemap,
   IconStack2,
@@ -43,7 +48,9 @@ import type {
 } from "@shared/types";
 
 import { ActivityFeed } from "@/components/ActivityFeed";
-import { RunEvidenceList } from "@/components/RunEvidenceList";
+import { ArtifactsPanel } from "@/components/ArtifactsPanel";
+import { InspectorSection } from "@/components/InspectorSection";
+import { RunBadgeCompact, RunEvidenceList } from "@/components/RunEvidenceList";
 import {
   fmtDateTime,
   orchestratorBrainHref,
@@ -74,8 +81,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
@@ -93,6 +108,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { WorkItemBreadcrumb } from "@/components/WorkItemBreadcrumb";
 import {
   useActivity,
   useComments,
@@ -104,6 +120,7 @@ import {
   useDeleteWorkItem,
   useDispatch,
   useEstimateBriefScale,
+  useRequestApproval,
   useSplitWorkItem,
   useStages,
   useWorkItem,
@@ -120,6 +137,7 @@ import {
 } from "@/hooks/use-tracker";
 import { buildDraftChildren, canSubmitSplit } from "@/lib/split-draft";
 import { cn } from "@/lib/utils";
+import { canEscalateWorkItem, stageNeighbors } from "@/lib/work-item-header";
 
 // ── Stage stepper ────────────────────────────────────────────────────────────
 
@@ -1980,6 +1998,7 @@ export function WorkItemDetailPage() {
   const rollbackStage = useRollbackStage();
   const advanceStage = useAdvanceStage();
   const estimateBriefScale = useEstimateBriefScale();
+  const requestApproval = useRequestApproval();
 
   const [monitorInterval, setMonitorInterval] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -2102,64 +2121,245 @@ export function WorkItemDetailPage() {
     }
   })();
 
+  // Header controls: 触发下一阶段 / 回退阶段 share this stage-neighbor lookup
+  // (also used to feed the removed sidebar "Actions card" — both buttons now
+  // live in the page header, prototype-style).
+  const stageOrder =
+    plannedStagesList.length > 0 ? plannedStagesList : [...STAGE_NODES];
+  const { nextStage, prevStage } = stageNeighbors(stageOrder, currentStageName);
+
+  function onAdvanceStage() {
+    if (!nextStage) return;
+    advanceStage.mutate(
+      { scope: "item", id, fromStage: currentStageName },
+      {
+        onSuccess: (res: any) => {
+          if (res?.noop) {
+            toast.info("无变化(状态已更新)");
+          } else if (res?.blocked) {
+            toast.error(`阶段推进被阻塞: ${(res.missing || []).join("、")}`);
+          } else {
+            toast.success(`已推进至「${res?.stageName}」`);
+          }
+        },
+      },
+    );
+  }
+
+  function onRollbackStage() {
+    if (!prevStage) return;
+    rollbackStage.mutate(
+      { workItemId: id, targetStage: prevStage },
+      { onSuccess: () => toast.success(`已回退至「${prevStage}」`) },
+    );
+  }
+
+  // "升级至裁决" — real request-approval(gateKey:'escalation') gate, the same
+  // mechanism the Inbox's failed-routing cards already use (app/lib/inbox.ts
+  // canEscalate). Only rendered when the item has a sprint (request-approval
+  // requires sprintId) — no fake button when there's nothing to escalate.
+  function onEscalate() {
+    if (!sprint?.id) return;
+    requestApproval.mutate(
+      { sprintId: sprint.id, gateKey: "escalation", workItemId: id },
+      { onSuccess: () => toast.success("已升级至裁决") },
+    );
+  }
+
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-6">
-      {/* Back link */}
-      <Button asChild variant="ghost" size="sm" className="-ml-2 mb-3 gap-1.5">
-        <Link to={`/board?project=${encodeURIComponent(item.projectId)}`}>
-          <IconArrowLeft className="size-4" /> 看板
-        </Link>
-      </Button>
+      {/* Breadcrumb — 项目 › Sprint › itemKey (原型 s4-work-item.html ~380-384),
+          replaces the old bare "← 看板" back-link: the first crumb already
+          covers that navigation. */}
+      <WorkItemBreadcrumb
+        projectId={item.projectId}
+        projectName={item.project?.name ?? item.projectId}
+        sprint={sprint}
+        itemKeyDisplay={itemKeyDisplay ?? item.projectId}
+      />
 
-      {/* ── Header ── */}
+      {/* ── Header — single prototype-style row: badges + title on the left,
+          all primary actions (派发/回退阶段/升级至裁决/更多) on the right. ── */}
       <header className="mb-5">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          {item.project?.key ? (
-            <span className="font-mono text-xs font-medium text-muted-foreground">
-              {item.project.key}
-            </span>
-          ) : null}
-          <Badge
-            variant="outline"
-            className={cn(
-              "h-5 px-1.5 text-[11px] capitalize",
-              typeChip(item.type),
-            )}
-          >
-            {item.type}
-          </Badge>
-          <StatusChip status={status} />
-          <ScaleBadge estimate={item.scaleEstimate} />
-          {!item.scaleEstimate ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-5 gap-1 px-1.5 text-[11px] text-muted-foreground"
-              disabled={estimateBriefScale.isPending}
-              onClick={() => estimateBriefScale.mutate({ workItemId: id })}
-            >
-              {estimateBriefScale.isPending ? (
-                <IconLoader2 className="size-3 animate-spin" />
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+              {itemKeyDisplay ? (
+                <span className="font-mono text-xs text-muted-foreground">
+                  {itemKeyDisplay}
+                </span>
               ) : null}
-              估算规模
-            </Button>
-          ) : null}
-          {slot?.status === "queued" && queue ? (
-            <span className="text-xs text-muted-foreground">
-              排队中 · {queue.running}/{queue.brainConcurrency} 个槽位忙碌
-            </span>
-          ) : null}
-          {slot?.status === "running" ? (
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
-              <IconLoader2 className="size-3.5 animate-spin" />
-              运行中
-            </span>
-          ) : null}
-        </div>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "h-5 px-1.5 text-[11px] capitalize",
+                  typeChip(item.type),
+                )}
+              >
+                {item.type}
+              </Badge>
+              <StatusChip status={status} />
+              {slot?.status === "queued" && queue ? (
+                <span className="text-xs text-muted-foreground">
+                  排队中 · {queue.running}/{queue.brainConcurrency} 个槽位忙碌
+                </span>
+              ) : null}
+              {slot?.status === "running" ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+                  <IconLoader2 className="size-3.5 animate-spin" />
+                  运行中
+                </span>
+              ) : null}
+            </div>
+            <h1 className="text-2xl font-semibold leading-tight tracking-tight">
+              {item.title}
+            </h1>
+          </div>
 
-        <h1 className="text-2xl font-semibold leading-tight tracking-tight">
-          {item.title}
-        </h1>
+          {/* Action cluster — mirrors 重派/回退阶段/升级/更多 (原型 388-395行);
+              F5's 估算规模/规模徽标 and the real 监控间隔 setting keep a
+              reasonable spot alongside rather than being dropped. */}
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <ScaleBadge estimate={item.scaleEstimate} />
+            {!item.scaleEstimate ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-1.5 text-[11px] text-muted-foreground"
+                disabled={estimateBriefScale.isPending}
+                onClick={() => estimateBriefScale.mutate({ workItemId: id })}
+              >
+                {estimateBriefScale.isPending ? (
+                  <IconLoader2 className="size-3 animate-spin" />
+                ) : null}
+                估算规模
+              </Button>
+            ) : null}
+
+            <Button
+              onClick={onDispatch}
+              disabled={dispatch.isPending}
+              className="gap-1.5"
+              variant={dispatched ? "outline" : "default"}
+            >
+              {dispatch.isPending ? (
+                <IconLoader2 className="size-4 animate-spin" />
+              ) : (
+                <IconRocket className="size-4" />
+              )}
+              {dispatch.isPending
+                ? "派发中…"
+                : dispatched
+                  ? "重新派发"
+                  : "派发给编排器"}
+            </Button>
+
+            <Button
+              variant="outline"
+              className="gap-1.5"
+              disabled={rollbackStage.isPending || !prevStage}
+              onClick={onRollbackStage}
+            >
+              {rollbackStage.isPending ? (
+                <IconLoader2 className="size-4 animate-spin" />
+              ) : (
+                <IconArrowBackUp className="size-4" />
+              )}
+              回退至{prevStage ? `「${prevStage}」` : "上一阶段"}
+            </Button>
+
+            {canEscalateWorkItem(sprint) ? (
+              <Button
+                variant="outline"
+                className="gap-1.5"
+                disabled={requestApproval.isPending}
+                onClick={onEscalate}
+              >
+                <IconArrowUp className="size-4" />
+                升级至裁决
+              </Button>
+            ) : null}
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-9 text-muted-foreground"
+                  title="监控设置"
+                >
+                  <IconSettings className="size-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 space-y-2">
+                <Label
+                  htmlFor="monitor-interval"
+                  className="text-xs text-muted-foreground"
+                >
+                  监控间隔
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="monitor-interval"
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    placeholder="120"
+                    value={monitorInterval}
+                    onChange={(e) => setMonitorInterval(e.target.value)}
+                    className="h-8 pr-9 text-sm"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-[11px] text-muted-foreground">
+                    秒
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  周期性漂移检查的节奏。留空 = 默认 120 秒。0 = 仅事件触发(无定时唤醒)。
+                </p>
+              </PopoverContent>
+            </Popover>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-9 text-muted-foreground"
+                  title="更多"
+                >
+                  <IconDotsVertical className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem
+                  className="gap-2"
+                  disabled={!nextStage || advanceStage.isPending}
+                  onClick={onAdvanceStage}
+                >
+                  <IconRocket className="size-4" />
+                  触发{nextStage ? `「${nextStage}」` : "下一"}阶段
+                </DropdownMenuItem>
+                {dispatched && item.orchestratorThreadId ? (
+                  <DropdownMenuItem asChild className="gap-2">
+                    <a href={orchestratorBrainHref(item.orchestratorThreadId)}>
+                      <IconMessageCircle className="size-4" />
+                      打开大脑线程
+                      <IconExternalLink className="ml-auto size-3 opacity-60" />
+                    </a>
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="gap-2 text-destructive focus:text-destructive"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <IconTrash className="size-4" />
+                  删除
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
 
         {item.scaleEstimate?.verdict === "split-required" ? (
           <ScaleWarningBar
@@ -2179,120 +2379,48 @@ export function WorkItemDetailPage() {
           onOpenChange={setSplitDialogOpen}
         />
 
-        {/* Controls row */}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button
-            onClick={onDispatch}
-            disabled={dispatch.isPending}
-            className="gap-1.5"
-            variant={dispatched ? "outline" : "default"}
-          >
-            {dispatch.isPending ? (
-              <IconLoader2 className="size-4 animate-spin" />
-            ) : (
-              <IconRocket className="size-4" />
-            )}
-            {dispatch.isPending
-              ? "派发中…"
-              : dispatched
-                ? "重新派发"
-                : "派发给编排器"}
-          </Button>
-
-          <div className="flex items-center gap-2">
-            <Label
-              htmlFor="monitor-interval"
-              className="whitespace-nowrap text-xs text-muted-foreground"
-            >
-              监控间隔
-            </Label>
-            <div className="relative">
-              <Input
-                id="monitor-interval"
-                type="number"
-                min={0}
-                inputMode="numeric"
-                placeholder="120"
-                value={monitorInterval}
-                onChange={(e) => setMonitorInterval(e.target.value)}
-                className="h-8 w-24 pr-9 text-sm"
-                title="周期性漂移检查的节奏。留空 = 默认 120 秒。0 = 仅事件触发(无定时唤醒)。"
-              />
-              <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-[11px] text-muted-foreground">
-                秒
-              </span>
-            </div>
-          </div>
-
-          {dispatched && item.orchestratorThreadId ? (
+        {/* Delete confirmation — triggered from the "更多" menu above. */}
+        {confirmDelete ? (
+          <div className="mt-3 flex items-center justify-end gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+            <span className="text-xs text-destructive">
+              确认删除该工作项？此操作不可恢复。
+            </span>
             <Button
-              asChild
-              variant="ghost"
               size="sm"
-              className="ml-auto h-8 gap-1.5 text-muted-foreground"
-            >
-              <a href={orchestratorBrainHref(item.orchestratorThreadId)}>
-                <IconMessageCircle className="size-3.5" />
-                打开大脑线程
-                <IconExternalLink className="size-3 opacity-60" />
-              </a>
-            </Button>
-          ) : null}
-
-          {/* Delete button */}
-          {confirmDelete ? (
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-destructive">确认删除？</span>
-              <Button
-                size="sm"
-                variant="destructive"
-                className="h-7 gap-1"
-                disabled={deleteItem.isPending}
-                onClick={() => {
-                  deleteItem.mutate(
-                    { id },
-                    {
-                      onSuccess: () => {
-                        toast.success("工作项已删除");
-                        navigate(
-                          `/board?project=${encodeURIComponent(item.projectId)}`,
-                        );
-                      },
+              variant="destructive"
+              className="h-7 gap-1"
+              disabled={deleteItem.isPending}
+              onClick={() => {
+                deleteItem.mutate(
+                  { id },
+                  {
+                    onSuccess: () => {
+                      toast.success("工作项已删除");
+                      navigate(
+                        `/board?project=${encodeURIComponent(item.projectId)}`,
+                      );
                     },
-                  );
-                }}
-              >
-                {deleteItem.isPending ? (
-                  <IconLoader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <IconTrash className="size-3.5" />
-                )}
-                删除
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7"
-                onClick={() => setConfirmDelete(false)}
-              >
-                取消
-              </Button>
-            </div>
-          ) : (
+                  },
+                );
+              }}
+            >
+              {deleteItem.isPending ? (
+                <IconLoader2 className="size-3.5 animate-spin" />
+              ) : (
+                <IconTrash className="size-3.5" />
+              )}
+              确认删除
+            </Button>
             <Button
               size="sm"
               variant="ghost"
-              className={cn(
-                "h-8 gap-1.5 text-muted-foreground hover:text-destructive",
-                dispatched ? "" : "ml-auto",
-              )}
-              onClick={() => setConfirmDelete(true)}
+              className="h-7"
+              onClick={() => setConfirmDelete(false)}
             >
-              <IconTrash className="size-3.5" />
-              删除
+              取消
             </Button>
-          )}
-        </div>
+          </div>
+        ) : null}
       </header>
 
       {/* ── Body ── */}
@@ -2324,6 +2452,30 @@ export function WorkItemDetailPage() {
             </div>
           </section>
 
+          {/* 执行记录 — the run's node chain + failure evidence + history
+              (原型 s4-work-item.html ~420-462). Full detail lives here in the
+              main column; the Inspector's "关联运行" row (执行 group) only
+              shows a compact reference badge, matching the prototype's split
+              between the two surfaces. */}
+          {runs.length > 0 ? (
+            <section>
+              <h2 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <IconTimeline className="size-3.5" />
+                执行记录
+              </h2>
+              <div className="rounded-xl border border-border bg-card/40 p-4">
+                <RunEvidenceList
+                  runs={runs}
+                  activity={activity.data}
+                  activityLoading={activity.isLoading}
+                />
+              </div>
+            </section>
+          ) : null}
+
+          {/* 产物 — versioned outputs a stage produced (原型 ~464-485). */}
+          <ArtifactsPanel workItemId={id} />
+
           {/* Epic children (only for epic/集合 work items) */}
           {(item.type === "epic" || item.type === "集合") && (
             <EpicChildrenPanel workItemId={id} />
@@ -2332,7 +2484,9 @@ export function WorkItemDetailPage() {
           {/* Links */}
           <LinksPanel workItemId={id} />
 
-          {/* Documents */}
+          {/* Documents — real feature beyond the prototype's scope (design/
+              prototype/acceptance/spec doc links); kept, grouped next to
+              产物 since both are "attached reference material" panels. */}
           <DocumentsPanel workItemId={id} />
 
           {/* Unified activity + comments tab panel */}
@@ -2403,121 +2557,15 @@ export function WorkItemDetailPage() {
           ) : null}
         </div>
 
-        {/* Right column: context */}
+        {/* Right column: context — Inspector, grouped into 属性/执行/时间
+            (原型 s4-work-item.html ~533-564), replacing the old flat
+            MetaRow list. The 触发下一阶段/回退阶段 buttons that used to live
+            here in a separate "Actions card" now live in the page header —
+            the prototype's Inspector holds only grouped info, no action
+            buttons. */}
         <aside className="order-1 lg:order-2">
-          <div className="space-y-3 lg:sticky lg:top-4">
-            {/* Actions card */}
-            {(() => {
-              // Use item's plannedStages; fallback to full 7-stage order
-              const FALLBACK_ORDER = [
-                "待办",
-                "分析",
-                "设计",
-                "实施",
-                "测试",
-                "验收",
-                "交付",
-              ] as const;
-              let plannedStagesArr: string[];
-              try {
-                const raw = (item as any).plannedStages;
-                plannedStagesArr = Array.isArray(raw)
-                  ? raw
-                  : JSON.parse(raw ?? "[]");
-              } catch {
-                plannedStagesArr = [];
-              }
-              const stageOrder =
-                plannedStagesArr.length > 0 ? plannedStagesArr : FALLBACK_ORDER;
-              const idx = stageOrder.indexOf(currentStageName);
-              const nextStage =
-                idx >= 0 && idx < stageOrder.length - 1
-                  ? stageOrder[idx + 1]
-                  : null;
-              const prevStage = idx > 0 ? stageOrder[idx - 1] : null;
-              return (
-                <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-                  <Button
-                    className="w-full gap-1.5"
-                    size="sm"
-                    disabled={!nextStage || advanceStage.isPending}
-                    onClick={() =>
-                      nextStage &&
-                      advanceStage.mutate(
-                        { scope: "item", id, fromStage: currentStageName },
-                        {
-                          onSuccess: (res: any) => {
-                            if (res?.noop) {
-                              toast.info("无变化(状态已更新)");
-                            } else if (res?.blocked) {
-                              toast.error(
-                                `阶段推进被阻塞: ${(res.missing || []).join("、")}`,
-                              );
-                            } else {
-                              toast.success(`已推进至「${res?.stageName}」`);
-                            }
-                          },
-                        },
-                      )
-                    }
-                  >
-                    {advanceStage.isPending ? (
-                      <IconLoader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <IconRocket className="size-3.5" />
-                    )}
-                    触发{nextStage ? `「${nextStage}」` : "下一"}阶段
-                  </Button>
-                  <Button
-                    className="w-full gap-1.5"
-                    size="sm"
-                    variant="outline"
-                    disabled={rollbackStage.isPending || !prevStage}
-                    onClick={() =>
-                      prevStage &&
-                      rollbackStage.mutate(
-                        { workItemId: id, targetStage: prevStage },
-                        {
-                          onSuccess: () =>
-                            toast.success(`已回退至 ${prevStage}`),
-                        },
-                      )
-                    }
-                  >
-                    {rollbackStage.isPending ? (
-                      <IconLoader2 className="size-3.5 animate-spin" />
-                    ) : null}
-                    回退至{prevStage ? `「${prevStage}」` : "上一阶段"}
-                  </Button>
-                </div>
-              );
-            })()}
-
-            {/* Attributes card */}
-            <div className="divide-y divide-border rounded-xl border border-border bg-card">
-              {itemKey ? (
-                <MetaRow icon={IconHash} label="编号">
-                  <span
-                    className="font-mono text-xs"
-                    title={
-                      itemKeyDisplay !== itemKey
-                        ? "历史重号，已消歧显示"
-                        : undefined
-                    }
-                  >
-                    {itemKeyDisplay}
-                  </span>
-                </MetaRow>
-              ) : null}
-
-              <MetaRow icon={IconUser} label="负责人">
-                <EditableOwner id={id} owner={owner} />
-              </MetaRow>
-
-              <MetaRow icon={IconStack2} label="Sprint">
-                <EditableSprint id={id} sprint={sprint} />
-              </MetaRow>
-
+          <div className="space-y-3 lg:sticky lg:top-4 rounded-xl border border-border bg-card px-1">
+            <InspectorSection label="属性" first>
               <GuardedStatusRow
                 item={{
                   itemKey: itemKeyDisplay,
@@ -2538,13 +2586,47 @@ export function WorkItemDetailPage() {
                 <EditableRisk id={id} risk={riskVal} />
               </MetaRow>
 
+              <MetaRow icon={IconCategory} label="类型">
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "h-5 px-1.5 text-[11px] capitalize",
+                    typeChip(item.type),
+                  )}
+                >
+                  {item.type}
+                </Badge>
+              </MetaRow>
+
               <MetaRow icon={IconTag} label="性质">
                 <EditableNature id={id} nature={nature} />
               </MetaRow>
 
-              <MetaRow icon={IconTag} label="标签">
-                <EditableTags id={id} tags={tags} />
+              <MetaRow icon={IconStack2} label="Sprint">
+                <EditableSprint id={id} sprint={sprint} />
               </MetaRow>
+
+              <MetaRow icon={IconUser} label="负责人">
+                <EditableOwner id={id} owner={owner} />
+              </MetaRow>
+
+              {/* Real fields beyond the prototype's 属性 group — appended
+                  after the prototype-matching rows above rather than
+                  dropped. */}
+              {itemKey ? (
+                <MetaRow icon={IconHash} label="编号">
+                  <span
+                    className="font-mono text-xs"
+                    title={
+                      itemKeyDisplay !== itemKey
+                        ? "历史重号，已消歧显示"
+                        : undefined
+                    }
+                  >
+                    {itemKeyDisplay}
+                  </span>
+                </MetaRow>
+              ) : null}
 
               <MetaRow icon={IconLayoutKanban} label="项目">
                 <Link
@@ -2555,6 +2637,12 @@ export function WorkItemDetailPage() {
                 </Link>
               </MetaRow>
 
+              <MetaRow icon={IconTag} label="标签">
+                <EditableTags id={id} tags={tags} />
+              </MetaRow>
+            </InspectorSection>
+
+            <InspectorSection label="执行">
               <MetaRow icon={IconBrandGithub} label="仓库">
                 {ghHref ? (
                   <a
@@ -2580,6 +2668,19 @@ export function WorkItemDetailPage() {
                 </span>
               </MetaRow>
 
+              {/* Compact reference only (status + run id + deep link) —
+                  the full node chain / evidence / history lives in the main
+                  column's "执行记录" section above, matching the prototype's
+                  split between the two surfaces (原型 ~558 vs ~420-462). */}
+              {runs.length > 0 ? (
+                <MetaRow icon={IconTimeline} label="关联运行">
+                  <RunBadgeCompact
+                    run={runs.find((r) => !r.superseded) ?? runs[0]!}
+                    activity={activity.data}
+                  />
+                </MetaRow>
+              ) : null}
+
               {item.orchestratorThreadId ? (
                 <MetaRow icon={IconMessageCircle} label="大脑">
                   <TooltipProvider delayDuration={300}>
@@ -2604,31 +2705,21 @@ export function WorkItemDetailPage() {
                   </TooltipProvider>
                 </MetaRow>
               ) : null}
+            </InspectorSection>
 
-              {/* F8 (S4 执行组接真): full dispatch/run history, newest first
-                  — a redispatch appends a row rather than overwriting the
-                  previous one (SDLC-053), so a superseded run's trail stays
-                  visible (greyed + strikethrough) instead of vanishing.
-                  RunEvidenceList additionally renders, per run, a compact
-                  status + node mini-map + "查看完整转录" deep link sourced
-                  from the same get-activity poll (see RunEvidenceList.tsx
-                  for the retry-count investigation/gap). */}
-              {runs.length > 0 ? (
-                <MetaRow icon={IconTimeline} label="关联运行">
-                  <RunEvidenceList
-                    runs={runs}
-                    activity={activity.data}
-                    activityLoading={activity.isLoading}
-                  />
-                </MetaRow>
-              ) : null}
-
-              <MetaRow icon={IconClock} label="创建时间">
+            <InspectorSection label="时间">
+              <MetaRow icon={IconClock} label="创建">
                 <span className="text-xs text-muted-foreground">
                   {fmtDateTime(item.createdAt)}
                 </span>
               </MetaRow>
-            </div>
+
+              <MetaRow icon={IconClock} label="更新">
+                <span className="text-xs text-muted-foreground">
+                  {fmtDateTime(item.updatedAt)}
+                </span>
+              </MetaRow>
+            </InspectorSection>
           </div>
         </aside>
       </div>
