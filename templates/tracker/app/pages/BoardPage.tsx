@@ -1,9 +1,30 @@
+import type {
+  TrackerWorkItem,
+  Sprint,
+  GraphValidationIssue,
+} from "@shared/types";
+import {
+  IconSearch,
+  IconPlus,
+  IconAffiliate,
+  IconAlertTriangle,
+  IconCircleCheck,
+} from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { useWorkItems, useSprints, useValidateDependencyGraph } from "@/hooks/use-tracker";
+
+import { statusPresentation, typeChip } from "@/components/tracker-format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -12,42 +33,37 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  IconSearch,
-  IconPlus,
-  IconAffiliate,
-  IconAlertTriangle,
-  IconCircleCheck,
-} from "@tabler/icons-react";
+  useWorkItems,
+  useSprints,
+  useValidateDependencyGraph,
+} from "@/hooks/use-tracker";
 import { cn } from "@/lib/utils";
-import {
-  statusPresentation,
-  typeChip,
-} from "@/components/tracker-format";
-import type { TrackerWorkItem, Sprint, GraphValidationIssue } from "@shared/types";
 
 // ── Stage constants ──────────────────────────────────────────────────────────
 
 const STAGE_ORDER = [
-  "待办", "分析", "设计", "实施", "测试", "验收", "交付",
+  "待办",
+  "分析",
+  "设计",
+  "实施",
+  "测试",
+  "验收",
+  "交付",
 ] as const;
 type StageName = (typeof STAGE_ORDER)[number];
 
+// Foundry's token set (success/warning/info/destructive/agent/evidence) has
+// exactly 6 non-neutral hues for these 7 stages — 设计/实施 share --agent
+// (both are "build" phases) rather than force the 7th stage onto
+// --destructive, which would misread a normal in-progress stage as an error.
 const STAGE_DOT_COLORS: Record<StageName, string> = {
-  "待办": "bg-zinc-400",
-  "分析": "bg-blue-500",
-  "设计": "bg-violet-500",
-  "实施": "bg-indigo-500",
-  "测试": "bg-amber-500",
-  "验收": "bg-emerald-500",
-  "交付": "bg-cyan-500",
+  待办: "bg-muted-foreground",
+  分析: "bg-info",
+  设计: "bg-agent",
+  实施: "bg-agent",
+  测试: "bg-warning",
+  验收: "bg-success",
+  交付: "bg-evidence",
 };
 
 // ── Priority helpers ─────────────────────────────────────────────────────────
@@ -60,16 +76,15 @@ const PRIORITY_LABELS: Record<number, string> = {
 };
 
 const PRIORITY_COLORS: Record<number, string> = {
-  1: "bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400",
-  2: "bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400",
-  3: "bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-400",
-  4: "bg-zinc-500/10 text-zinc-600 border-zinc-500/30 dark:text-zinc-400",
+  1: "bg-destructive/10 text-destructive border-destructive/30",
+  2: "bg-warning/10 text-warning border-warning/30",
+  3: "bg-info/10 text-info border-info/30",
+  4: "bg-muted text-muted-foreground border-border",
 };
 
 function PriorityChip({ priority }: { priority: number }) {
   const label = PRIORITY_LABELS[priority] ?? `P${priority}`;
-  const color =
-    PRIORITY_COLORS[priority] ?? PRIORITY_COLORS[4];
+  const color = PRIORITY_COLORS[priority] ?? PRIORITY_COLORS[4];
   return (
     <span
       className={cn(
@@ -91,9 +106,9 @@ const RISK_LABELS: Record<string, string> = {
 };
 
 const RISK_COLORS: Record<string, string> = {
-  low: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
-  medium: "bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400",
-  high: "bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400",
+  low: "bg-success/10 text-success border-success/30",
+  medium: "bg-warning/10 text-warning border-warning/30",
+  high: "bg-destructive/10 text-destructive border-destructive/30",
 };
 
 function RiskChip({ risk }: { risk: string }) {
@@ -341,7 +356,8 @@ function GraphValidationDialog({
 
               <div className="flex flex-col gap-1.5">
                 <h4 className="text-xs font-semibold text-muted-foreground">
-                  拓扑排序{data.topoOrder.length === 0 ? "(存在环,无法排序)" : ""}
+                  拓扑排序
+                  {data.topoOrder.length === 0 ? "(存在环,无法排序)" : ""}
                 </h4>
                 {data.topoOrder.length > 0 ? (
                   <ol className="flex flex-col gap-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
@@ -361,7 +377,11 @@ function GraphValidationDialog({
         </ScrollArea>
 
         <DialogFooter>
-          <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
             关闭
           </Button>
         </DialogFooter>
@@ -419,7 +439,8 @@ export function BoardPage() {
   // Apply all filters
   const filteredItems = useMemo(() => {
     return items.filter((it) => {
-      if (selectedSprintId !== "all" && it.sprintId !== selectedSprintId) return false;
+      if (selectedSprintId !== "all" && it.sprintId !== selectedSprintId)
+        return false;
       if (typeFilter !== "all" && it.type !== typeFilter) return false;
       if (priorityFilter !== "all" && it.priority !== Number(priorityFilter))
         return false;
@@ -583,10 +604,7 @@ export function BoardPage() {
               {/* Column header: colored dot + stage name + count */}
               <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
                 <span
-                  className={cn(
-                    "size-2 rounded-full",
-                    STAGE_DOT_COLORS[stage],
-                  )}
+                  className={cn("size-2 rounded-full", STAGE_DOT_COLORS[stage])}
                 />
                 <h3 className="text-sm font-semibold">{stage}</h3>
                 <Badge
@@ -611,9 +629,7 @@ export function BoardPage() {
                     暂无内容
                   </p>
                 ) : (
-                  colItems.map((it) => (
-                    <WorkItemCard key={it.id} item={it} />
-                  ))
+                  colItems.map((it) => <WorkItemCard key={it.id} item={it} />)
                 )}
               </div>
             </div>

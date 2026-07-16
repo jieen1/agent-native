@@ -24,51 +24,51 @@ const STATUS: Record<string, StatusPresentation> = {
   open: {
     label: "open",
     chip: "bg-muted text-muted-foreground border-border",
-    dot: "bg-zinc-400",
+    dot: "bg-muted-foreground",
     live: false,
   },
   queued: {
     label: "queued",
-    chip: "bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400",
-    dot: "bg-amber-500",
+    chip: "bg-warning/10 text-warning border-warning/30",
+    dot: "bg-warning",
     live: false,
   },
   running: {
     label: "running",
-    chip: "bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-400",
-    dot: "bg-blue-500",
+    chip: "bg-info/10 text-info border-info/30",
+    dot: "bg-info",
     live: true,
   },
   dispatched: {
     label: "dispatched",
-    chip: "bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400",
-    dot: "bg-sky-500",
+    chip: "bg-info/10 text-info border-info/30",
+    dot: "bg-info",
     live: true,
   },
   done: {
     label: "done",
-    chip: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
-    dot: "bg-emerald-500",
+    chip: "bg-success/10 text-success border-success/30",
+    dot: "bg-success",
     live: false,
   },
   failed: {
     label: "failed",
-    chip: "bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400",
-    dot: "bg-red-500",
+    chip: "bg-destructive/10 text-destructive border-destructive/30",
+    dot: "bg-destructive",
     live: false,
   },
   // F3: run came back successfully — review pending. The poll writeback caps
   // here; done is only reachable through the guarded transition-work-item.
   returned: {
     label: "returned",
-    chip: "bg-violet-500/10 text-violet-600 border-violet-500/30 dark:text-violet-400",
-    dot: "bg-violet-500",
+    chip: "bg-agent/10 text-agent border-agent/30",
+    dot: "bg-agent",
     live: false,
   },
   blocked: {
     label: "blocked",
-    chip: "bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400",
-    dot: "bg-orange-500",
+    chip: "bg-warning/10 text-warning border-warning/30",
+    dot: "bg-warning",
     live: false,
   },
   // F3: written by transition-work-item(target=closed) — a human closing an
@@ -76,8 +76,8 @@ const STATUS: Record<string, StatusPresentation> = {
   // deliberate, guarded, reason-required decision.
   closed: {
     label: "closed",
-    chip: "bg-zinc-500/10 text-zinc-600 border-zinc-500/30 dark:text-zinc-400",
-    dot: "bg-zinc-500",
+    chip: "bg-muted text-muted-foreground border-border",
+    dot: "bg-muted-foreground",
     live: false,
   },
 };
@@ -87,7 +87,7 @@ export function statusPresentation(status: string): StatusPresentation {
     STATUS[status] ?? {
       label: status || "unknown",
       chip: "bg-muted text-muted-foreground border-border",
-      dot: "bg-zinc-400",
+      dot: "bg-muted-foreground",
       live: false,
     }
   );
@@ -95,11 +95,9 @@ export function statusPresentation(status: string): StatusPresentation {
 
 // ── Inbox kind badges (S5) ────────────────────────────────────────────────────
 //
-// This template's app/global.css only defines a `--destructive` semantic
-// token (no `--warning`/`--info`) — these stay literal Tailwind color
-// utilities for now (same gap already noted on the NODE_STATUS/STATUS maps
-// above), but centralized here so call sites reuse one named chip instead of
-// each inlining its own amber/violet literal.
+// Not yet mapped onto the --warning/--evidence semantic tokens used by
+// STATUS/TYPE_CHIP/NODE_STATUS above — centralized here so call sites reuse
+// one named chip instead of each inlining its own amber/violet literal.
 export type InboxKind = "pending-approval" | "review-request";
 
 const INBOX_KIND_CHIP: Record<InboxKind, string> = {
@@ -115,14 +113,16 @@ export function inboxKindChip(kind: InboxKind): string {
 // ── Work-item type ───────────────────────────────────────────────────────────
 
 const TYPE_CHIP: Record<string, string> = {
-  requirement:
-    "bg-blue-500/10 text-blue-600 border-blue-500/25 dark:text-blue-400",
-  task: "bg-violet-500/10 text-violet-600 border-violet-500/25 dark:text-violet-400",
-  defect: "bg-rose-500/10 text-rose-600 border-rose-500/25 dark:text-rose-400",
-  incident:
-    "bg-amber-500/10 text-amber-600 border-amber-500/25 dark:text-amber-400",
-  epic: "bg-indigo-500/10 text-indigo-600 border-indigo-500/25 dark:text-indigo-400",
-  集合: "bg-indigo-500/10 text-indigo-600 border-indigo-500/25 dark:text-indigo-400",
+  requirement: "bg-info/10 text-info border-info/25",
+  task: "bg-agent/10 text-agent border-agent/25",
+  defect: "bg-destructive/10 text-destructive border-destructive/25",
+  incident: "bg-warning/10 text-warning border-warning/25",
+  // No dedicated indigo-family token exists in the Foundry token set (only
+  // success/warning/info/destructive/agent/evidence) — epic/集合 reuses
+  // --evidence (teal) as the one remaining unused hue so all 5 type chips
+  // stay visually distinct, at the cost of a hue shift from the old indigo.
+  epic: "bg-evidence/10 text-evidence border-evidence/25",
+  集合: "bg-evidence/10 text-evidence border-evidence/25",
 };
 
 export function typeChip(type: string): string {
@@ -142,43 +142,46 @@ export interface NodeStatusPresentation {
 
 const NODE_STATUS: Record<string, NodeStatusPresentation> = {
   done: {
-    dot: "bg-emerald-500",
-    chip: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+    dot: "bg-success",
+    chip: "bg-success/10 text-success border-success/30",
     live: false,
   },
   running: {
-    dot: "bg-blue-500",
-    chip: "bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-400",
+    dot: "bg-info",
+    chip: "bg-info/10 text-info border-info/30",
     live: true,
   },
   ready: {
-    dot: "bg-sky-400",
-    chip: "bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400",
+    dot: "bg-info",
+    chip: "bg-info/10 text-info border-info/30",
     live: false,
   },
   failed: {
-    dot: "bg-red-500",
-    chip: "bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400",
+    dot: "bg-destructive",
+    chip: "bg-destructive/10 text-destructive border-destructive/30",
     live: false,
   },
+  // Foundry has no dedicated "transient/cancelled" tone — the spec's own DAG
+  // demo tags a retryable transient failure with `badge b-warning`, so
+  // cancelled reuses --warning rather than inventing a new token.
   cancelled: {
-    dot: "bg-orange-500",
-    chip: "bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400",
+    dot: "bg-warning",
+    chip: "bg-warning/10 text-warning border-warning/30",
     live: false,
   },
   skipped: {
-    dot: "bg-zinc-400",
-    chip: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30",
+    dot: "bg-muted-foreground",
+    chip: "bg-muted text-muted-foreground border-border",
     live: false,
   },
   pending: {
-    dot: "bg-zinc-400",
+    dot: "bg-muted-foreground",
     chip: "bg-muted text-muted-foreground border-border",
     live: false,
   },
   "awaiting-approval": {
-    dot: "bg-purple-500",
-    chip: "bg-purple-500/10 text-purple-600 border-purple-500/30 dark:text-purple-400",
+    dot: "bg-agent",
+    chip: "bg-agent/10 text-agent border-agent/30",
     live: false,
   },
 };

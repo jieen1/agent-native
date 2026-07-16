@@ -79,16 +79,12 @@ function TranscriptLink({ runId }: { runId: string }) {
   );
 }
 
-// success/running (emerald/blue below) have no `--success`/`--info` token in
-// this template's app/global.css (only `--destructive` is defined) — kept
-// literal pending a real token; failed/cancelled uses the real `--destructive`
-// token since one exists.
 function NodeStatusIcon({ status }: { status: string }) {
   if (status === "done") {
-    return <IconCircleCheck className="size-3.5 text-emerald-500" />;
+    return <IconCircleCheck className="size-3.5 text-success" />;
   }
   if (status === "running") {
-    return <IconLoader2 className="size-3.5 animate-spin text-blue-500" />;
+    return <IconLoader2 className="size-3.5 animate-spin text-info" />;
   }
   if (status === "failed" || status === "cancelled") {
     return <IconCircleX className="size-3.5 text-destructive" />;
@@ -121,7 +117,7 @@ function RunNodeChain({ nodes }: { nodes: OrchestratorRunNode[] }) {
               <IconChevronRight
                 className={cn(
                   "size-3 shrink-0",
-                  prevDone ? "text-emerald-500" : "text-muted-foreground/30",
+                  prevDone ? "text-success" : "text-muted-foreground/30",
                 )}
               />
             ) : null}
@@ -270,9 +266,7 @@ export function RunBadgeCompact({
 }) {
   if (!run.runId) {
     return (
-      <span className="text-xs text-muted-foreground">
-        等待运行 id 回填
-      </span>
+      <span className="text-xs text-muted-foreground">等待运行 id 回填</span>
     );
   }
   const matched = activity?.runs?.find((r) => r.id === run.runId);
