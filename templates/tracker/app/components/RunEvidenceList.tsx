@@ -79,6 +79,10 @@ function TranscriptLink({ runId }: { runId: string }) {
   );
 }
 
+// success/running (emerald/blue below) have no `--success`/`--info` token in
+// this template's app/global.css (only `--destructive` is defined) — kept
+// literal pending a real token; failed/cancelled uses the real `--destructive`
+// token since one exists.
 function NodeStatusIcon({ status }: { status: string }) {
   if (status === "done") {
     return <IconCircleCheck className="size-3.5 text-emerald-500" />;
@@ -87,7 +91,7 @@ function NodeStatusIcon({ status }: { status: string }) {
     return <IconLoader2 className="size-3.5 animate-spin text-blue-500" />;
   }
   if (status === "failed" || status === "cancelled") {
-    return <IconCircleX className="size-3.5 text-red-500" />;
+    return <IconCircleX className="size-3.5 text-destructive" />;
   }
   const dot = nodeStatusPresentation(status).dot;
   return <span className={cn("size-1.5 rounded-full", dot)} />;
@@ -160,9 +164,9 @@ export function FailureEvidence({ nodes }: { nodes: OrchestratorRunNode[] }) {
       {failing.map((n, i) => (
         <div
           key={`${n.nodeIdInDag}-${i}`}
-          className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/5 px-2.5 py-2"
+          className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2"
         >
-          <IconAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-red-500" />
+          <IconAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
           <div className="min-w-0 flex-1">
             <code className="block whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/90">
               {n.error}

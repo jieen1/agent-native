@@ -43,6 +43,9 @@ export interface InboxRow {
   timestamp: string;
   approvalId?: string;
   gateKey?: string;
+  /** Optional JSON `{runId, nodeId}` linking an escalation gate to the
+   *  orchestrator run/node it blocks (see actions/request-approval.ts). */
+  gateRef?: string | null;
   workItemId?: string;
   sprintId?: string | null;
   itemKey?: string;
@@ -177,6 +180,7 @@ export async function buildInboxGroups(db: Db = getDb()): Promise<{
       timestamp: a.createdAt,
       approvalId: a.id,
       gateKey: a.gateKey,
+      gateRef: a.gateRef,
       workItemId: a.workItemId ?? undefined,
       sprintId: a.sprintId,
       requestedBy: a.requestedBy,

@@ -1,29 +1,13 @@
-import { useState } from "react";
-import { useParams } from "react-router";
-import { Link } from "react-router";
-import {
-  useSprint,
-  useSprintArtifacts,
-  useApprovals,
-  useRequestApproval,
-  useApproveGate,
-  useRejectGate,
-} from "@/hooks/use-tracker";
-import type { ScaleEstimate, SprintDetail, TrackerWorkItem, Stage, SprintArtifact, Approval, GateKey } from "@shared/types";
+import type {
+  ScaleEstimate,
+  SprintDetail,
+  TrackerWorkItem,
+  Stage,
+  SprintArtifact,
+  Approval,
+  GateKey,
+} from "@shared/types";
 import { GATE_KEY_LABELS as gateLabels } from "@shared/types";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   IconAlertTriangle,
   IconArrowLeft,
@@ -37,6 +21,38 @@ import {
   IconX,
   IconShieldCheck,
 } from "@tabler/icons-react";
+import { useState } from "react";
+import { useParams } from "react-router";
+import { Link } from "react-router";
+
+import { ArtifactBadge, ArtifactViewDialog } from "@/components/ArtifactBadge";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  useSprint,
+  useSprintArtifacts,
+  useApprovals,
+  useRequestApproval,
+  useApproveGate,
+  useRejectGate,
+} from "@/hooks/use-tracker";
 import { cn } from "@/lib/utils";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -44,7 +60,9 @@ import { cn } from "@/lib/utils";
 // F5 (v25): get-sprint.ts returns raw DB rows — scale_estimate arrives as a
 // JSON string (or null); parse defensively (see shared/types.ts's
 // TrackerWorkItem.scaleEstimate docblock for why this isn't pre-parsed).
-function parseScaleEstimate(raw: string | null | undefined): ScaleEstimate | null {
+function parseScaleEstimate(
+  raw: string | null | undefined,
+): ScaleEstimate | null {
   if (!raw) return null;
   try {
     return JSON.parse(raw) as ScaleEstimate;
@@ -76,7 +94,9 @@ function ScaleBadgeCompact({ raw }: { raw: string | null | undefined }) {
   );
 }
 
-function sprintStatusVariant(status: string): "default" | "secondary" | "outline" {
+function sprintStatusVariant(
+  status: string,
+): "default" | "secondary" | "outline" {
   switch (status) {
     case "进行中":
       return "default";
@@ -105,23 +125,23 @@ function sprintStatusColor(status: string): string {
 }
 
 const SPRINT_PHASE_LABEL: Record<string, string> = {
-  planning: '规划',
-  executing: '执行中',
-  done: '已完成',
+  planning: "规划",
+  executing: "执行中",
+  done: "已完成",
 };
 function sprintPhaseLabel(phase: string): string {
   return SPRINT_PHASE_LABEL[phase] ?? phase;
 }
 function sprintPhaseColor(phase: string): string {
   switch (phase) {
-    case 'planning':
-      return 'bg-secondary text-secondary-foreground';
-    case 'executing':
-      return 'bg-blue-500 text-white';
-    case 'done':
-      return 'bg-emerald-500 text-white';
+    case "planning":
+      return "bg-secondary text-secondary-foreground";
+    case "executing":
+      return "bg-blue-500 text-white";
+    case "done":
+      return "bg-emerald-500 text-white";
     default:
-      return 'bg-muted text-muted-foreground';
+      return "bg-muted text-muted-foreground";
   }
 }
 
@@ -137,21 +157,31 @@ function fmtDateTime(d: string): string {
 
 function priorityLabel(p: number): string {
   switch (p) {
-    case 1: return "P0";
-    case 2: return "P1";
-    case 3: return "P2";
-    case 4: return "P3";
-    default: return "P?";
+    case 1:
+      return "P0";
+    case 2:
+      return "P1";
+    case 3:
+      return "P2";
+    case 4:
+      return "P3";
+    default:
+      return "P?";
   }
 }
 
 function priorityColor(p: number): string {
   switch (p) {
-    case 1: return "bg-red-500 text-white";
-    case 2: return "bg-orange-500 text-white";
-    case 3: return "bg-amber-500 text-white";
-    case 4: return "bg-blue-500 text-white";
-    default: return "bg-muted text-muted-foreground";
+    case 1:
+      return "bg-red-500 text-white";
+    case 2:
+      return "bg-orange-500 text-white";
+    case 3:
+      return "bg-amber-500 text-white";
+    case 4:
+      return "bg-blue-500 text-white";
+    default:
+      return "bg-muted text-muted-foreground";
   }
 }
 
@@ -174,25 +204,39 @@ function itemTypeColor(t: string): string {
 
 function stageColors(stageName: string): string {
   switch (stageName) {
-    case "待办": return "bg-gray-300 dark:bg-gray-600";
-    case "分析": return "bg-amber-400";
-    case "设计": return "bg-yellow-400";
-    case "实施": return "bg-blue-400";
-    case "测试": return "bg-purple-400";
-    case "验收": return "bg-indigo-400";
-    case "交付": return "bg-emerald-400";
-    default: return "bg-gray-300";
+    case "待办":
+      return "bg-gray-300 dark:bg-gray-600";
+    case "分析":
+      return "bg-amber-400";
+    case "设计":
+      return "bg-yellow-400";
+    case "实施":
+      return "bg-blue-400";
+    case "测试":
+      return "bg-purple-400";
+    case "验收":
+      return "bg-indigo-400";
+    case "交付":
+      return "bg-emerald-400";
+    default:
+      return "bg-gray-300";
   }
 }
 
 function stageStatusLabel(status: string): { label: string; color: string } {
   switch (status) {
-    case "待执行": return { label: "待执行", color: "text-gray-500" };
-    case "执行中": return { label: "执行中", color: "text-blue-500" };
-    case "已完成": return { label: "已完成", color: "text-emerald-500" };
-    case "已驳回": return { label: "已驳回", color: "text-red-500" };
-    case "跳过": return { label: "跳过", color: "text-gray-400" };
-    default: return { label: status, color: "text-muted-foreground" };
+    case "待执行":
+      return { label: "待执行", color: "text-gray-500" };
+    case "执行中":
+      return { label: "执行中", color: "text-blue-500" };
+    case "已完成":
+      return { label: "已完成", color: "text-emerald-500" };
+    case "已驳回":
+      return { label: "已驳回", color: "text-red-500" };
+    case "跳过":
+      return { label: "跳过", color: "text-gray-400" };
+    default:
+      return { label: status, color: "text-muted-foreground" };
   }
 }
 
@@ -220,12 +264,16 @@ function MetaRow({
 
 // ── Delivery progress card ───────────────────────────────────────────────────
 
-function DeliveryProgressCard({
-  items,
-}: {
-  items: TrackerWorkItem[];
-}) {
-  const stageOrder = ["待办", "分析", "设计", "实施", "测试", "验收", "交付"] as const;
+function DeliveryProgressCard({ items }: { items: TrackerWorkItem[] }) {
+  const stageOrder = [
+    "待办",
+    "分析",
+    "设计",
+    "实施",
+    "测试",
+    "验收",
+    "交付",
+  ] as const;
 
   // Count items per currentStageName
   const stageCounts: Record<string, number> = {};
@@ -247,7 +295,8 @@ function DeliveryProgressCard({
       <div className="space-y-3">
         {stageOrder.map((stageName) => {
           const count = stageCounts[stageName];
-          const pct = totalItems > 0 ? Math.round((count / totalItems) * 100) : 0;
+          const pct =
+            totalItems > 0 ? Math.round((count / totalItems) * 100) : 0;
           return (
             <div key={stageName} className="flex items-center gap-3">
               <span className="w-12 shrink-0 text-xs font-medium text-muted-foreground">
@@ -261,7 +310,10 @@ function DeliveryProgressCard({
               </Badge>
               <div className="flex-1 h-2 overflow-hidden rounded-full bg-secondary">
                 <div
-                  className={cn("h-full transition-all", stageColors(stageName))}
+                  className={cn(
+                    "h-full transition-all",
+                    stageColors(stageName),
+                  )}
                   style={{ width: `${pct}%` }}
                 />
               </div>
@@ -355,7 +407,10 @@ function SprintItemsCard({
               {/* Type badge */}
               <Badge
                 variant="outline"
-                className={cn("h-5 px-1.5 text-[11px]", itemTypeColor(item.type))}
+                className={cn(
+                  "h-5 px-1.5 text-[11px]",
+                  itemTypeColor(item.type),
+                )}
               >
                 {item.type}
               </Badge>
@@ -363,7 +418,10 @@ function SprintItemsCard({
               {/* Priority badge */}
               <Badge
                 variant="outline"
-                className={cn("h-5 px-1.5 text-[11px]", priorityColor(item.priority))}
+                className={cn(
+                  "h-5 px-1.5 text-[11px]",
+                  priorityColor(item.priority),
+                )}
               >
                 {priorityLabel(item.priority)}
               </Badge>
@@ -377,7 +435,12 @@ function SprintItemsCard({
                   <span className="font-medium text-foreground">
                     {currentStage.stageName}
                   </span>
-                  <span className={cn("text-muted-foreground", stageStatusLabel(currentStage.stageStatus).color)}>
+                  <span
+                    className={cn(
+                      "text-muted-foreground",
+                      stageStatusLabel(currentStage.stageStatus).color,
+                    )}
+                  >
                     · {stageStatusLabel(currentStage.stageStatus).label}
                   </span>
                 </span>
@@ -387,7 +450,9 @@ function SprintItemsCard({
 
               {/* Assignee avatar (small) */}
               <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-                {(item as { assigneeName?: string }).assigneeName ? (item as { assigneeName?: string }).assigneeName![0] : "?"}
+                {(item as { assigneeName?: string }).assigneeName
+                  ? (item as { assigneeName?: string }).assigneeName![0]
+                  : "?"}
               </div>
             </div>
           );
@@ -399,62 +464,10 @@ function SprintItemsCard({
 
 // ── Sprint Artifacts Section ──────────────────────────────────────────────────
 
-function ArtifactBadge({ kind }: { kind: string }) {
-  const isHuman = kind === "human";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold",
-        isHuman
-          ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
-          : "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-      )}
-    >
-      {isHuman ? "人工" : "智能体"}
-    </span>
-  );
-}
-
-function ArtifactViewDialog({
-  artifact,
-  open,
-  onClose,
-}: {
-  artifact: SprintArtifact | null;
-  open: boolean;
-  onClose: () => void;
-}) {
-  if (!artifact) return null;
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <IconFileText className="size-4 shrink-0 text-muted-foreground" />
-            {artifact.name}
-            <ArtifactBadge kind={artifact.producedByKind} />
-            <span className="ml-1 text-xs font-normal text-muted-foreground">
-              v{artifact.version}
-            </span>
-          </DialogTitle>
-        </DialogHeader>
-        <div className="max-h-96 overflow-y-auto p-1">
-          {artifact.content ? (
-            <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed">
-              {artifact.content}
-            </pre>
-          ) : (
-            <p className="text-sm italic text-muted-foreground">（内容为空）</p>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function SprintArtifactsSection({ sprintId }: { sprintId: string }) {
   const { data, isLoading } = useSprintArtifacts(sprintId);
-  const [selectedArtifact, setSelectedArtifact] = useState<SprintArtifact | null>(null);
+  const [selectedArtifact, setSelectedArtifact] =
+    useState<SprintArtifact | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const byDocKey = data?.byDocKey ?? {};
@@ -498,7 +511,9 @@ function SprintArtifactsSection({ sprintId }: { sprintId: string }) {
                 <span className="font-mono text-xs font-semibold text-foreground/80">
                   {docKey}
                 </span>
-                <span className="text-xs text-muted-foreground">{latest.kind}</span>
+                <span className="text-xs text-muted-foreground">
+                  {latest.kind}
+                </span>
                 <span className="ml-auto text-[11px] text-muted-foreground">
                   共 {versions.length} 版
                 </span>
@@ -555,14 +570,15 @@ function approvalStatusBadge(status: string) {
       );
     case "approved":
       return (
-        <Badge variant="secondary" className="bg-emerald-400/20 text-emerald-700">
+        <Badge
+          variant="secondary"
+          className="bg-emerald-400/20 text-emerald-700"
+        >
           已批准
         </Badge>
       );
     case "rejected":
-      return (
-        <Badge variant="destructive">已拒绝</Badge>
-      );
+      return <Badge variant="destructive">已拒绝</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }
@@ -611,9 +627,13 @@ function RequestApprovalDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.entries(gateLabels) as [string, string][]).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>{v}</SelectItem>
-                ))}
+                {(Object.entries(gateLabels) as [string, string][]).map(
+                  ([k, v]) => (
+                    <SelectItem key={k} value={k}>
+                      {v}
+                    </SelectItem>
+                  ),
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -655,7 +675,9 @@ function RejectDialog({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!reason.trim()) return;
-    void rejectGate.mutateAsync({ id: approvalId, reason: reason.trim() }).then(onClose);
+    void rejectGate
+      .mutateAsync({ id: approvalId, reason: reason.trim() })
+      .then(onClose);
   }
 
   return (
@@ -710,7 +732,10 @@ function SprintApprovalsSection({ sprintId }: { sprintId: string }) {
           <IconShieldCheck className="size-4 text-muted-foreground" />
           审批
           {pending.length > 0 ? (
-            <Badge variant="secondary" className="bg-amber-400/20 text-amber-700 ml-1">
+            <Badge
+              variant="secondary"
+              className="bg-amber-400/20 text-amber-700 ml-1"
+            >
               {pending.length} 待审
             </Badge>
           ) : null}
@@ -729,7 +754,9 @@ function SprintApprovalsSection({ sprintId }: { sprintId: string }) {
       {isLoading ? (
         <Skeleton className="h-16 w-full" />
       ) : approvals.length === 0 ? (
-        <p className="text-sm text-muted-foreground">本 Sprint 暂无审批记录。</p>
+        <p className="text-sm text-muted-foreground">
+          本 Sprint 暂无审批记录。
+        </p>
       ) : (
         <div className="space-y-3">
           {/* Pending approvals */}
@@ -889,7 +916,10 @@ export function SprintDetailPage() {
             {sprint.status}
           </Badge>
           <Badge
-            className={cn("px-2 text-[11px]", sprintPhaseColor(sprint.phase ?? "planning"))}
+            className={cn(
+              "px-2 text-[11px]",
+              sprintPhaseColor(sprint.phase ?? "planning"),
+            )}
           >
             {sprintPhaseLabel(sprint.phase ?? "planning")}
           </Badge>
@@ -900,9 +930,7 @@ export function SprintDetailPage() {
         </h1>
 
         {sprint.goal ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            {sprint.goal}
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">{sprint.goal}</p>
         ) : null}
 
         {/* Meta info */}
