@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { buildInboxGroups } from "../server/lib/inbox.js";
 import { readAppStateForCurrentTab } from "./_tab-state.js";
 
 const LIST_LIMIT = 25;
@@ -160,6 +161,16 @@ export default defineAction({
         );
 
         screen.queue = { stats, items: enrichedItems };
+      } catch {
+        // continue
+      }
+    }
+
+    // Inbox focus when viewing /inbox — counts only (list-inbox has the rows).
+    if (nav?.view === "inbox") {
+      try {
+        const { counts } = await buildInboxGroups(db);
+        screen.inbox = counts;
       } catch {
         // continue
       }

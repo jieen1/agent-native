@@ -33,6 +33,10 @@ describe("TRACKER_NAVIGATION_VIEWS", () => {
     expect(TRACKER_NAVIGATION_VIEWS).toContain("queue");
   });
 
+  it("adds the inbox view", () => {
+    expect(TRACKER_NAVIGATION_VIEWS).toContain("inbox");
+  });
+
   it("adds the new-item view", () => {
     expect(TRACKER_NAVIGATION_VIEWS).toContain("new-item");
   });
@@ -120,6 +124,12 @@ describe("trackerRoutePath — sprint (detail)", () => {
 describe("trackerRoutePath — queue", () => {
   it("resolves queue to /queue", () => {
     expect(trackerRoutePath({ view: "queue" })).toBe("/queue");
+  });
+});
+
+describe("trackerRoutePath — inbox", () => {
+  it("resolves inbox to /inbox", () => {
+    expect(trackerRoutePath({ view: "inbox" })).toBe("/inbox");
   });
 });
 

@@ -9,13 +9,15 @@ import {
   IconFolders,
   IconStack2,
   IconListDetails,
+  IconInbox,
 } from "@tabler/icons-react";
 import { OrgSwitcher } from "@agent-native/core/client/org";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { useProjects } from "@/hooks/use-tracker";
+import { useProjects, useInboxItems } from "@/hooks/use-tracker";
+import { formatBadgeCount } from "@/lib/inbox";
 import {
   DevDatabaseLink,
   FeedbackButton,
@@ -32,6 +34,8 @@ export function Sidebar() {
   const navigate = useNavigate();
   const { data: projectsData, isLoading } = useProjects();
   const projects = Array.isArray(projectsData) ? projectsData : [];
+  const { data: inboxData } = useInboxItems();
+  const inboxBadge = formatBadgeCount(inboxData?.counts.total ?? 0);
   const isMobile = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -47,6 +51,7 @@ export function Sidebar() {
     label: string,
     icon: React.ReactNode,
     active: boolean,
+    badge?: string,
   ) {
     return (
       <Link
@@ -61,6 +66,11 @@ export function Sidebar() {
       >
         {icon}
         <span className="min-w-0 flex-1 basis-0 truncate">{label}</span>
+        {badge ? (
+          <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums">
+            {badge}
+          </span>
+        ) : null}
       </Link>
     );
   }
@@ -129,6 +139,13 @@ export function Sidebar() {
             <span className="min-w-0 flex-1 basis-0 truncate">问 Tracker</span>
           </Link>
 
+          {navLink(
+            "/inbox",
+            "收件箱",
+            <IconInbox size={14} className="shrink-0" />,
+            location.pathname === "/inbox",
+            inboxBadge,
+          )}
           {navLink(
             "/board",
             "看板",

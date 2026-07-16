@@ -355,3 +355,56 @@ export interface AdvanceStageResult {
   stageName?: string;
   cascaded?: { workItemId: string; ok: boolean; error?: string }[];
 }
+
+// Inbox types (R3) — see server/lib/inbox.ts (single query source, shared by
+// list-inbox.ts and view-screen.ts) for which groups are backed by real data.
+export type InboxGroupKey =
+  | "signoff"
+  | "escalation"
+  | "reviewRequest"
+  | "failedRouting"
+  | "notifications";
+
+export interface InboxRow {
+  id: string;
+  group: InboxGroupKey;
+  /** gateKey for approval rows, "review-request" / "failed" for work-item rows. */
+  kind: string;
+  title: string;
+  summary: string;
+  status: string;
+  /** ISO timestamp — the UI derives "相对时间" from this. */
+  timestamp: string;
+  approvalId?: string;
+  gateKey?: GateKey | string;
+  workItemId?: string;
+  sprintId?: string | null;
+  itemKey?: string;
+  itemKeyDisplay?: string;
+  projectId?: string;
+  currentStageName?: string;
+  branch?: string | null;
+  requestedBy?: string;
+}
+
+export interface InboxGroups {
+  signoff: InboxRow[];
+  escalation: InboxRow[];
+  reviewRequest: InboxRow[];
+  failedRouting: InboxRow[];
+  notifications: InboxRow[];
+}
+
+export interface InboxCounts {
+  signoff: number;
+  escalation: number;
+  reviewRequest: number;
+  failedRouting: number;
+  notifications: number;
+  total: number;
+}
+
+export interface InboxResult {
+  groups: InboxGroups;
+  counts: InboxCounts;
+}
