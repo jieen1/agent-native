@@ -52,6 +52,7 @@ import {
   markdownModule,
   remarkGfmFn,
   markdownUrlTransform,
+  useSmoothStreamingText,
 } from "./markdown-renderer.js";
 import { resolveToolRenderer } from "./tool-render-registry.js";
 import {
@@ -67,11 +68,23 @@ export const ChatRunningContext = React.createContext(false);
  * Human-in-the-loop approval bridge. `AssistantChatInner` provides a value that
  * re-issues the turn approving a specific paused tool call (opt-in
  * `needsApproval` actions). When null, the Approve button is not rendered.
- * Deny is handled locally in the affordance, so it needs no bridge.
+ * Deny defaults to local-only (the action stays un-run) unless `onDeny` is
+ * provided, and "Always allow" only renders when `onAlwaysAllow` is provided
+ * — both are additive so existing action-approval consumers are unaffected.
  */
 export type ApprovalContextValue = {
   /** Re-issue the turn so the server runs the approved call. */
   onApprove: (approvalKey: string) => void;
+  /**
+   * Optional host hook invoked in addition to the local "denied" state, e.g.
+   * so a Code session can also resolve its own pending approval as denied.
+   */
+  onDeny?: (approvalKey: string) => void;
+  /**
+   * Optional host hook that persists this exact call so future occurrences
+   * skip the approval gate. When absent, no "Always allow" button renders.
+   */
+  onAlwaysAllow?: (approvalKey: string) => void;
 };
 export const ApprovalContext = React.createContext<ApprovalContextValue | null>(
   null,
@@ -385,52 +398,23 @@ function ToolOutputPopover({
 
 // ─── Collapsible height animation ─────────────────────────────────────────────
 
-function AnimatedCollapse({
+export function AnimatedCollapse({
   open,
   children,
 }: {
   open: boolean;
   children: React.ReactNode;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState<number | "auto">(open ? "auto" : 0);
   const [mounted, setMounted] = useState(open);
-  const reduceMotionRef = useRef(false);
-
-  useEffect(() => {
-    reduceMotionRef.current =
-      typeof window !== "undefined" &&
-      !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  }, []);
 
   useLayoutEffect(() => {
     if (open) setMounted(true);
   }, [open]);
 
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el || !mounted) return;
-    if (reduceMotionRef.current) {
-      setHeight(open ? "auto" : 0);
-      if (!open) setMounted(false);
-      return;
-    }
-    if (open) {
-      const full = el.scrollHeight;
-      setHeight(0);
-      const frame = requestAnimationFrame(() => setHeight(full));
-      return () => cancelAnimationFrame(frame);
-    }
-    setHeight(el.scrollHeight);
-    const frame = requestAnimationFrame(() => setHeight(0));
-    return () => cancelAnimationFrame(frame);
-  }, [open, mounted]);
-
   const onTransitionEnd = useCallback(
     (event: React.TransitionEvent<HTMLDivElement>) => {
-      if (event.propertyName !== "height") return;
-      if (open) setHeight("auto");
-      else setMounted(false);
+      if (event.propertyName !== "grid-template-rows" || open) return;
+      setMounted(false);
     },
     [open],
   );
@@ -439,12 +423,12 @@ function AnimatedCollapse({
 
   return (
     <div
-      ref={ref}
-      className="overflow-hidden transition-[height] duration-200 ease-out"
-      style={{ height: height === "auto" ? "auto" : `${height}px` }}
+      className="agent-chat-collapse"
+      data-state={open ? "open" : "closed"}
+      aria-hidden={!open}
       onTransitionEnd={onTransitionEnd}
     >
-      {children}
+      <div className="agent-chat-collapse__content">{children}</div>
     </div>
   );
 }
@@ -476,7 +460,9 @@ function ApprovalAffordance({
       </div>
     );
   }
-  // Deny is local-only: the action simply stays un-run.
+  // Deny defaults to local-only (the action simply stays un-run). When the
+  // host also provided `onDeny` (e.g. a Code session resolving its own
+  // pending approval), it fires alongside the local state.
   if (denied) {
     return (
       <div className="mt-1.5 text-xs text-muted-foreground">
@@ -506,9 +492,29 @@ function ApprovalAffordance({
           Approve
         </button>
       )}
+      {ctx?.onAlwaysAllow && (
+        <button
+          type="button"
+          onClick={() => {
+            setApproved(true);
+            ctx.onAlwaysAllow?.(approval.approvalKey);
+          }}
+          title="Approve and always allow this exact command"
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium transition-colors",
+            "text-foreground hover:bg-muted",
+          )}
+        >
+          <IconShieldCheck className="h-3.5 w-3.5" />
+          Always allow
+        </button>
+      )}
       <button
         type="button"
-        onClick={() => setDenied(true)}
+        onClick={() => {
+          setDenied(true);
+          ctx?.onDeny?.(approval.approvalKey);
+        }}
         className={cn(
           "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium transition-colors",
           "text-foreground hover:bg-muted",
@@ -770,7 +776,7 @@ function ToolCallDisplayGeneric({
               {canExpand && (
                 <IconChevronRight
                   className={cn(
-                    "absolute size-3.5 opacity-0 transition-all group-hover/tool:opacity-100",
+                    "absolute size-3.5 opacity-0 transition-[opacity,transform] group-hover/tool:opacity-100",
                     isExpanded && "rotate-90",
                   )}
                 />
@@ -892,6 +898,11 @@ export function ReconnectStreamMessage({
   content: ContentPart[];
 }) {
   const chatRunning = React.useContext(ChatRunningContext);
+  const latestReasoningPartIndex = content.reduce(
+    (latestIndex, part, index) =>
+      part.type === "reasoning" ? index : latestIndex,
+    -1,
+  );
   const streamingTextPartIndex =
     content.at(-1)?.type === "text" ? content.length - 1 : -1;
   const streamingReasoningPartIndex =
@@ -919,6 +930,9 @@ export function ReconnectStreamMessage({
                 key={`reconnect-reasoning-${i}`}
                 text={part.text}
                 isStreaming={chatRunning && i === streamingReasoningPartIndex}
+                resetKey={`reconnect-reasoning-${i}`}
+                defaultOpen={i === latestReasoningPartIndex}
+                collapseWhenReplaced={i < latestReasoningPartIndex}
               />
             );
           }
@@ -951,18 +965,82 @@ export function ReconnectStreamMessage({
 
 // ─── Reasoning / Thinking cell ────────────────────────────────────────────────
 
+/**
+ * Completed reasoning and tool calls share one outer "Worked for…"
+ * disclosure. Reasoning cells inside it render their prose directly so
+ * opening that summary never reveals a redundant second disclosure.
+ */
+const WorkSummaryContentContext = React.createContext(false);
+
 export function ReasoningCell({
   text,
   isStreaming = false,
+  resetKey,
   defaultOpen,
+  autoCollapse = false,
+  collapseWhenReplaced = false,
+  durationMs,
 }: {
   text: string;
   isStreaming?: boolean;
+  /** Stable identity used to restart the reveal when a new reasoning part mounts. */
+  resetKey?: string;
   defaultOpen?: boolean;
+  /** Animate closed when a live reasoning segment finishes during a run. */
+  autoCollapse?: boolean;
+  /** Animate closed when a newer reasoning segment replaces this one. */
+  collapseWhenReplaced?: boolean;
+  /**
+   * Elapsed thinking time in ms, once known. Only meaningful once streaming
+   * has finished — callers that track live timing (see ReasoningMessagePart)
+   * pass this so the label can read "Thought for Xs" instead of "Thought".
+   * Historical messages with no live timing simply omit it.
+   */
+  durationMs?: number | null;
 }) {
-  const [open, setOpen] = useState(defaultOpen ?? isStreaming);
+  const embeddedInWorkSummary = React.useContext(WorkSummaryContentContext);
+  const [open, setOpen] = useState(defaultOpen ?? true);
+  const wasStreamingRef = useRef(isStreaming);
+  const wasReplacedRef = useRef(collapseWhenReplaced);
   const trimmed = text.trim();
+  const visibleText = useSmoothStreamingText(
+    trimmed,
+    isStreaming,
+    resetKey ?? "reasoning",
+  );
+
+  useEffect(() => {
+    if (autoCollapse && wasStreamingRef.current && !isStreaming) {
+      setOpen(false);
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [autoCollapse, isStreaming]);
+
+  useEffect(() => {
+    if (collapseWhenReplaced && !wasReplacedRef.current) {
+      setOpen(false);
+    }
+    wasReplacedRef.current = collapseWhenReplaced;
+  }, [collapseWhenReplaced]);
+
   if (!trimmed && !isStreaming) return null;
+
+  if (embeddedInWorkSummary) {
+    return (
+      <div className="pb-1 pl-5 text-[13px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
+        {visibleText || (isStreaming ? "…" : "")}
+      </div>
+    );
+  }
+
+  const label = isStreaming
+    ? "Thinking"
+    : durationMs != null
+      ? `Thought for ${formatWorkedDuration(durationMs)}`
+      : "Thought";
+  // Only clamp to a scroll-free "tail" view while actively streaming and
+  // expanded — once the run finishes the full text is shown, unclamped.
+  const showTail = isStreaming && open;
 
   return (
     <div className="my-0.5 w-full">
@@ -978,11 +1056,17 @@ export function ReasoningCell({
             open && "rotate-90",
           )}
         />
-        <span>{isStreaming ? "Thinking" : "Thought"}</span>
+        {isStreaming ? (
+          <span className="agent-thinking-indicator__text">{label}</span>
+        ) : (
+          <span>{label}</span>
+        )}
       </button>
       <AnimatedCollapse open={open}>
-        <div className="pl-5 pb-1 text-[13px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
-          {trimmed || (isStreaming ? "…" : "")}
+        <div className={cn("pl-5 pb-1", showTail && "reasoning-cell-tail")}>
+          <div className="text-[13px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
+            {visibleText || (isStreaming ? "…" : "")}
+          </div>
         </div>
       </AnimatedCollapse>
     </div>
@@ -1014,20 +1098,17 @@ export function WorkedForSummary({
   children,
 }: {
   durationMs?: number | null;
-  /** When true, start open then animate closed (post-run collapse). */
+  /** When true, close the summary after a run has completed. */
   autoCollapse?: boolean;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(autoCollapse);
-  const didAutoCollapseRef = useRef(false);
+  // Start closed so a remounted completed message never flashes its work
+  // details open while auto-collapse settles. If the summary was already
+  // open when autoCollapse changes, AnimatedCollapse still animates it shut.
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!autoCollapse || didAutoCollapseRef.current) return;
-    didAutoCollapseRef.current = true;
-    const frame = requestAnimationFrame(() => {
-      setOpen(false);
-    });
-    return () => cancelAnimationFrame(frame);
+    if (autoCollapse) setOpen(false);
   }, [autoCollapse]);
 
   const label =
@@ -1052,7 +1133,9 @@ export function WorkedForSummary({
         />
       </button>
       <AnimatedCollapse open={open}>
-        <div className="pt-1">{children}</div>
+        <WorkSummaryContentContext.Provider value>
+          <div className="pt-1">{children}</div>
+        </WorkSummaryContentContext.Provider>
       </AnimatedCollapse>
     </div>
   );

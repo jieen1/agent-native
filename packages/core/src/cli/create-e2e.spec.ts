@@ -33,6 +33,8 @@ import {
   _getToolkitDependencyVersion,
   _getGitHubTemplateRef,
   _getGitHubTemplateRefCandidates,
+  _githubTarballUrl,
+  _findLocalTemplateFrom,
   _shouldSkipScaffoldEntry,
   _tarExtractArgs,
 } from "./create.js";
@@ -243,6 +245,24 @@ describe("standalone scaffold — chat template", { timeout: 60000 }, () => {
     await createApp("test-app", { template: "chat" });
     const pkg = readPkg(path.join(tmpDir, "test-app"));
     expect(pkg.dependencies?.postgres).toBeDefined();
+  });
+});
+
+describe("installed package template discovery", () => {
+  it("finds source templates included in an installed core package", () => {
+    const packageRoot = path.join(
+      tmpDir,
+      "node_modules",
+      "@agent-native",
+      "core",
+    );
+    const sourceTemplate = path.join(packageRoot, "src", "templates", "chat");
+    const compiledCli = path.join(packageRoot, "dist", "cli");
+    fs.mkdirSync(sourceTemplate, { recursive: true });
+    fs.mkdirSync(compiledCli, { recursive: true });
+    fs.writeFileSync(path.join(sourceTemplate, "package.json"), "{}\n");
+
+    expect(_findLocalTemplateFrom(compiledCli, "chat")).toBe(sourceTemplate);
   });
 });
 
@@ -586,6 +606,8 @@ describe("workspace scaffold — required packages", { timeout: 60000 }, () => {
       expect(workspaceYaml).toContain("overrides:");
       expect(workspaceYaml).toContain('"@agent-native/toolkit": "file://');
       expect(workspaceYaml).toContain("/packages/toolkit");
+      expect(workspaceYaml).toContain('"@agent-native/recap-cli": "file://');
+      expect(workspaceYaml).toContain("/packages/recap-cli");
       expect(workspaceYaml).not.toContain("packages:");
     } finally {
       if (previous === undefined) {
@@ -617,6 +639,8 @@ describe("workspace scaffold — required packages", { timeout: 60000 }, () => {
       expect(workspaceYaml).toContain("overrides:");
       expect(workspaceYaml).toContain('"@agent-native/toolkit": "file://');
       expect(workspaceYaml).toContain("/packages/toolkit");
+      expect(workspaceYaml).toContain('"@agent-native/recap-cli": "file://');
+      expect(workspaceYaml).toContain("/packages/recap-cli");
     } finally {
       if (previous === undefined) {
         delete process.env.AGENT_NATIVE_CREATE_USE_LOCAL_CORE;
@@ -801,6 +825,31 @@ describe("workspace scaffold — required packages", { timeout: 60000 }, () => {
 });
 
 describe("workspace add-app scaffold", { timeout: 60000 }, () => {
+  it("adds local package overrides when adding to an existing workspace", async () => {
+    const previous = process.env.AGENT_NATIVE_CREATE_USE_LOCAL_CORE;
+    try {
+      const wsDir = path.join(tmpDir, "my-ws");
+      await _scaffoldWorkspaceRoot(wsDir, "my-ws");
+      process.env.AGENT_NATIVE_CREATE_USE_LOCAL_CORE = "1";
+
+      process.chdir(wsDir);
+      await addAppToWorkspace("dispatch", { template: "dispatch" });
+
+      const wsYaml = fs.readFileSync(
+        path.join(wsDir, "pnpm-workspace.yaml"),
+        "utf-8",
+      );
+      expect(wsYaml).toContain('"@agent-native/toolkit": "file://');
+      expect(wsYaml).toContain('"@agent-native/recap-cli": "file://');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGENT_NATIVE_CREATE_USE_LOCAL_CORE;
+      } else {
+        process.env.AGENT_NATIVE_CREATE_USE_LOCAL_CORE = previous;
+      }
+    }
+  });
+
   it("allows Dispatch to be added later as the canonical workspace app", async () => {
     const wsDir = path.join(tmpDir, "my-ws");
     await _scaffoldWorkspaceRoot(wsDir, "my-ws");
@@ -910,8 +959,21 @@ describe("template/core version compatibility", () => {
     // Legacy `v<version>` tag stays as a fallback so any older release that
     // only has the repo-wide tag (≤ 0.7.83) keeps working when re-run.
     expect(candidates).toContain(`v${candidates[0].split("@").slice(-1)[0]}`);
-    // `main` is the last-resort fallback for unreleased dev builds.
-    expect(candidates[candidates.length - 1]).toBe("main");
+    // Never fall back to mutable `main`: it can be newer than the installed
+    // core package and produce a scaffold that fails during SSR startup.
+    expect(candidates).not.toContain("main");
+  });
+
+  it("downloads GitHub tarballs from codeload instead of the GitHub API", () => {
+    expect(
+      _githubTarballUrl(
+        "BuilderIO/agent-native",
+        "@agent-native/core@0.101.13",
+        "tag",
+      ),
+    ).toBe(
+      "https://codeload.github.com/BuilderIO/agent-native/tar.gz/refs/tags/%40agent-native%2Fcore%400.101.13",
+    );
   });
 });
 
@@ -1002,8 +1064,7 @@ describe("workspace scaffold defaults", () => {
     await _scaffoldWorkspaceRoot(wsDir, "my-ws");
 
     const generated = readAllTextFiles(wsDir);
-    expect(generated).not.toMatch(/builder\.io/i);
-    expect(generated).not.toMatch(/steve@builder\.io/i);
+    expect(generated).not.toMatch(/[a-z0-9._%+-]+@builder\.io/i);
   });
 
   it("keeps the generic workspace scaffold free of provider-specific deploy config", async () => {
@@ -1048,6 +1109,30 @@ describe("workspace scaffold defaults", () => {
 
   it("does not copy local agent-native runtime state", () => {
     expect(_shouldSkipScaffoldEntry(".agent-native")).toBe(true);
+    expect(_shouldSkipScaffoldEntry("app.db")).toBe(true);
+    expect(_shouldSkipScaffoldEntry("app.db-shm")).toBe(true);
+    expect(_shouldSkipScaffoldEntry("app.db-wal")).toBe(true);
+  });
+
+  it("does not copy generated visual plan previews", () => {
+    expect(
+      _shouldSkipScaffoldEntry(
+        "plans",
+        path.join("templates", "plan", "plans"),
+      ),
+    ).toBe(true);
+    expect(
+      _shouldSkipScaffoldEntry(
+        "preview.html",
+        path.join("plans", "plan_123", "preview.html"),
+      ),
+    ).toBe(true);
+    expect(
+      _shouldSkipScaffoldEntry(
+        "preview.html",
+        path.join("public", "preview.html"),
+      ),
+    ).toBe(false);
   });
 
   it("can skip first-party agent symlinks while extracting GitHub tarballs", () => {
@@ -1292,7 +1377,10 @@ describe("build artifacts", () => {
   });
 
   it("core package.json only uses workspace:* for publishable package deps", () => {
-    const publishableWorkspaceDeps = new Set(["@agent-native/toolkit"]);
+    const publishableWorkspaceDeps = new Set([
+      "@agent-native/recap-cli",
+      "@agent-native/toolkit",
+    ]);
     const corePkg = readPkg(coreRoot);
     const deps = corePkg.dependencies ?? {};
     for (const [key, val] of Object.entries(deps)) {

@@ -126,6 +126,7 @@ function hydratedEditorChromeBridgeScriptWithTextEditing(): string {
 function hydratedEmbeddedCanvasGestureBridgeScript(options?: {
   wheel?: boolean;
   forwardSpaceKey?: boolean;
+  editingSafety?: boolean;
 }): string {
   return embeddedWheelBridgeScript
     .replace(
@@ -135,6 +136,10 @@ function hydratedEmbeddedCanvasGestureBridgeScript(options?: {
     .replace(
       "__EMBEDDED_SPACE_KEY_FORWARDING_ENABLED__",
       options?.forwardSpaceKey ? "true" : "false",
+    )
+    .replace(
+      "__EDITING_SAFETY_ENABLED__",
+      options?.editingSafety ? "true" : "false",
     );
 }
 
@@ -2210,6 +2215,118 @@ it(
   },
 );
 
+it(
+  "editor chrome bridge previews localhost interaction states by selector and clears temporary styles without touching base inline styles",
+  { timeout: 30_000 },
+  async () => {
+    const browser = await chromium.launch({ headless: true });
+    const pageErrors: string[] = [];
+
+    try {
+      const page = await browser.newPage({
+        viewport: { width: 900, height: 700 },
+      });
+      page.on("pageerror", (err) => pageErrors.push(err.message));
+      await page.setContent(`<!doctype html>
+<html>
+  <body>
+    <button id="runtime-button" style="color: rgb(0, 0, 255); opacity: 1">Runtime</button>
+    <button id="escaped-target">Escaped</button>
+  </body>
+</html>`);
+      await page.addScriptTag({ content: hydratedEditorChromeBridgeScript() });
+      await page.waitForSelector('[data-agent-native-edit-overlay="shield"]');
+
+      await page.evaluate(() => {
+        window.postMessage(
+          {
+            type: "state-preview",
+            selector: "#runtime-button",
+            selectorCandidates: ["#runtime-button"],
+            nodeId: "runtime-only-source-id",
+            state: "focus-visible",
+            previewStyles: {
+              color: "rgb(255, 0, 0)",
+              opacity: "0.4",
+            },
+          },
+          "*",
+        );
+      });
+      await page.waitForTimeout(50);
+      expect(
+        await page.locator("#runtime-button").evaluate((el) => ({
+          color: getComputedStyle(el).color,
+          opacity: getComputedStyle(el).opacity,
+          previewKey: el.getAttribute("data-an-state-preview-key"),
+        })),
+      ).toMatchObject({ color: "rgb(255, 0, 0)", opacity: "0.4" });
+      expect(
+        await page
+          .locator("#runtime-button")
+          .getAttribute("data-an-state-preview"),
+      ).toBe("focus-visible");
+
+      // A discard/undo sends empty values for the state-scoped properties.
+      // The bridge removes only its temporary CSSOM rule; the app's authored
+      // inline styles remain byte-for-byte untouched.
+      await page.evaluate(() => {
+        window.postMessage(
+          {
+            type: "interaction-state-style-preview",
+            selector: "#runtime-button",
+            state: "focus-visible",
+            styles: { color: "", opacity: "" },
+          },
+          "*",
+        );
+      });
+      await page.waitForTimeout(50);
+      expect(
+        await page.locator("#runtime-button").evaluate((el) => ({
+          color: getComputedStyle(el).color,
+          opacity: getComputedStyle(el).opacity,
+        })),
+      ).toEqual({ color: "rgb(0, 0, 255)", opacity: "1" });
+      expect(
+        await page.locator("#runtime-button").getAttribute("style"),
+      ).toContain("color: rgb(0, 0, 255)");
+
+      // Runtime ids are arbitrary source strings. Backslashes and quotes must
+      // be escaped as CSS attribute-selector data, never parsed as selector
+      // syntax or allowed to make the exact target silently unreachable.
+      await page.evaluate(() => {
+        document
+          .querySelector("#escaped-target")!
+          .setAttribute("data-agent-native-node-id", 'runtime\\"quoted');
+        window.postMessage(
+          {
+            type: "state-preview",
+            nodeId: 'runtime\\"quoted',
+            state: "hover",
+            previewStyles: { opacity: "0.25" },
+          },
+          "*",
+        );
+      });
+      await page.waitForTimeout(50);
+      expect(
+        await page
+          .locator("#escaped-target")
+          .evaluate((el) => getComputedStyle(el).opacity),
+      ).toBe("0.25");
+      expect(
+        await page
+          .locator("#escaped-target")
+          .getAttribute("data-an-state-preview"),
+      ).toBe("hover");
+      expect(pageErrors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  },
+);
+
 // ── padding-handle hit-area / hover-hatch / value-box (Steve test batch 3,
 // item 6) and the restored drop-insertion line (item 4) ────────────────────
 
@@ -3798,6 +3915,144 @@ describe("editor chrome bridge — text editing session", () => {
     },
   );
 });
+
+// ── Rotation preserves computed transform (any-element rotation) ─────────────
+//
+// When an element has its transform supplied by a stylesheet class (not inline
+// style), startRotate must read the computed value as the baseline so the delta
+// is applied correctly and the original class-authored transform is not wiped.
+
+it(
+  "editor chrome bridge rotation drag preserves computed transform from a class rule",
+  { timeout: 30_000 },
+  async () => {
+    const browser = await chromium.launch({ headless: true });
+    const pageErrors: string[] = [];
+
+    try {
+      const page = await browser.newPage({
+        viewport: { width: 900, height: 700 },
+      });
+      page.on("pageerror", (err) => pageErrors.push(err.message));
+
+      await page.setContent(`<!doctype html>
+<html>
+  <head>
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; }
+      /* Transform lives ONLY in a class rule — no inline style on the element. */
+      .rotated-box {
+        position: absolute;
+        left: 200px; top: 200px;
+        width: 100px; height: 100px;
+        background: #e0e;
+        transform: rotate(30deg);
+        transform-origin: center center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="rotated-box" data-agent-native-node-id="rotated">Rotated</div>
+  </body>
+</html>`);
+      await page.addScriptTag({ content: hydratedEditorChromeBridgeScript() });
+      await page.waitForSelector('[data-agent-native-edit-overlay="shield"]');
+
+      // Click the element to select it.
+      await page.mouse.click(250, 250);
+      await page.waitForFunction(() => {
+        const overlay = document.querySelector<HTMLElement>(
+          '[data-agent-native-edit-overlay="selection"]',
+        );
+        return !!overlay && overlay.style.display === "block";
+      });
+
+      const rotationChrome = await page.evaluate(() => {
+        const overlay = document.querySelector<HTMLElement>(
+          '[data-agent-native-edit-overlay="selection"]',
+        )!;
+        const button = overlay.querySelector<HTMLElement>(
+          '[data-agent-native-rotate-handle="top-center"]',
+        )!;
+        return {
+          buttonSize: parseFloat(button.style.width),
+          left: parseFloat(overlay.style.left),
+          top: parseFloat(overlay.style.top),
+          width: parseFloat(overlay.style.width),
+          height: parseFloat(overlay.style.height),
+        };
+      });
+      expect(rotationChrome).toEqual({
+        buttonSize: 16,
+        left: 200,
+        top: 200,
+        width: 100,
+        height: 100,
+      });
+
+      await collectBridgeMessages(page);
+
+      // Use the nw rotate handle bounding box to drive the drag from Playwright
+      // so mouse.down/move/up are all in the same event stream (mirrors the
+      // resize-handle tests above).
+      const nwHandle = page
+        .locator('[data-agent-native-rotate-handle="nw"]')
+        .first();
+      const handleBox = await nwHandle.boundingBox();
+      if (!handleBox) throw new Error("nw rotate handle not visible");
+
+      const overlayCenter = await page.evaluate(() => {
+        const overlay = document.querySelector<HTMLElement>(
+          '[data-agent-native-edit-overlay="selection"]',
+        )!;
+        const r = overlay.getBoundingClientRect();
+        return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+      });
+
+      const hx = handleBox.x + handleBox.width / 2;
+      const hy = handleBox.y + handleBox.height / 2;
+      const { cx, cy } = overlayCenter;
+      const startAngle = Math.atan2(hy - cy, hx - cx);
+      const endAngle = startAngle + (15 * Math.PI) / 180;
+      const r = Math.hypot(hx - cx, hy - cy) || 60;
+      const endX = cx + r * Math.cos(endAngle);
+      const endY = cy + r * Math.sin(endAngle);
+
+      await page.mouse.move(hx, hy);
+      await page.mouse.down();
+      await page.mouse.move(endX, endY, { steps: 4 });
+      await page.mouse.up();
+
+      await page.waitForTimeout(100);
+
+      const messages = await readBridgeMessages(page);
+      const styleChange = messages.find(
+        (m) => m.type === "visual-style-change",
+      ) as { styles?: { transform?: string } } | undefined;
+
+      // Must have posted a visual-style-change with a transform.
+      expect(styleChange).toBeTruthy();
+      expect(styleChange!.styles?.transform).toBeTruthy();
+
+      // The committed transform must include a rotate() function — it must not
+      // be empty or "none".
+      const transform = styleChange!.styles!.transform!;
+      expect(transform).toMatch(/rotate\(/i);
+
+      // The resulting rotation must be ~45deg (30 base + 15 drag delta),
+      // confirming the computed class-rule rotation was preserved as the base.
+      const match = transform.match(/rotate\((-?\d+(?:\.\d+)?)deg\)/i);
+      expect(match).toBeTruthy();
+      const deg = parseFloat(match![1]);
+      expect(deg).toBeGreaterThanOrEqual(40);
+      expect(deg).toBeLessThanOrEqual(50);
+
+      expect(pageErrors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  },
+);
 
 // ── Nest-on-drop into plain rectangles (Figma "drop into a frame" parity) ───
 //
@@ -5546,6 +5801,15 @@ it(
   <body><h1 id="react-heading">How can I help?</h1></body>
 </html>`);
       await page.locator("#react-heading").evaluate((element) => {
+        element.setAttribute("onerror", "window.__snapshotAttack=1");
+        element.setAttribute("srcdoc", "<script>bad()</script>");
+        element.setAttribute("formaction", "javascript:bad()");
+        const iframe = document.createElement("iframe");
+        iframe.id = "malicious-snapshot-frame";
+        iframe.srcdoc = "<p>frame</p>";
+        element.appendChild(iframe);
+      });
+      await page.locator("#react-heading").evaluate((element) => {
         Object.defineProperty(element, "__reactFiber$bridgeguard", {
           configurable: true,
           enumerable: true,
@@ -5578,9 +5842,13 @@ it(
           )?.payload,
       );
       expect(runtimeSnapshot.nodeCount).toBeGreaterThan(0);
+      expect(runtimeSnapshot.documentId).toMatch(/^runtime-/);
       expect(runtimeSnapshot.html).toContain("How can I help?");
       expect(runtimeSnapshot.html).toContain(
         'data-source-file="app/routes/_index.tsx"',
+      );
+      expect(runtimeSnapshot.html).not.toMatch(
+        /<iframe|\sonerror=|\ssrcdoc=|javascript:/i,
       );
       const runtimeIdentity = await page.evaluate((snapshotHtml) => {
         const live = document.querySelector("#react-heading");
@@ -6561,6 +6829,89 @@ it(
 function hydratedHitTestBridgeScript(): string {
   return hitTestBridgeScript;
 }
+
+it(
+  "hit-test bridge exposes review anchor, rect, and focus messages for opaque preview frames",
+  { timeout: 30_000 },
+  async () => {
+    const browser = await chromium.launch({ headless: true });
+    const pageErrors: string[] = [];
+    try {
+      const page = await browser.newPage({
+        viewport: { width: 900, height: 700 },
+      });
+      page.on("pageerror", (error) => pageErrors.push(error.message));
+      await page.setContent(`<!doctype html>
+<html>
+  <body style="margin:0">
+    <h1 data-agent-native-node-id="hero-title" data-agent-native-layer-name="Hero title" style="margin:40px;width:320px;height:80px">Hello</h1>
+  </body>
+</html>`);
+      await page.addScriptTag({ content: hydratedHitTestBridgeScript() });
+
+      const result = await page.evaluate(async () => {
+        const request = (data: Record<string, unknown>, responseType: string) =>
+          new Promise<Record<string, unknown>>((resolve) => {
+            const onMessage = (event: MessageEvent) => {
+              if (
+                event.data?.type !== responseType ||
+                event.data?.correlationId !== data.correlationId
+              ) {
+                return;
+              }
+              window.removeEventListener("message", onMessage);
+              resolve(event.data);
+            };
+            window.addEventListener("message", onMessage);
+            window.postMessage(data, "*");
+          });
+        const anchor = await request(
+          {
+            type: "agent-native:review-anchor-at-point",
+            correlationId: "review-point",
+            x: 100,
+            y: 70,
+          },
+          "agent-native:review-anchor-at-point-result",
+        );
+        const rects = await request(
+          {
+            type: "agent-native:review-node-rects",
+            correlationId: "review-rects",
+            nodeIds: ["hero-title"],
+          },
+          "agent-native:review-node-rects-result",
+        );
+        const focus = await request(
+          {
+            type: "agent-native:review-focus",
+            correlationId: "review-focus",
+            nodeId: "hero-title",
+          },
+          "agent-native:review-focus-result",
+        );
+        return { anchor, rects, focus };
+      });
+
+      expect(result.anchor).toMatchObject({
+        nodeId: "hero-title",
+        layerName: "Hero title",
+        tagName: "h1",
+      });
+      expect(result.rects).toMatchObject({
+        rects: {
+          "hero-title": { left: 40, top: 40, width: 320, height: 80 },
+        },
+        viewportWidth: 900,
+        viewportHeight: 700,
+      });
+      expect(result.focus).toMatchObject({ focused: true });
+      expect(pageErrors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  },
+);
 
 it(
   "hit-test bridge mints a stable pendingNodeId for an anchor with no stable id, without spamming re-mints across repeated hovers",

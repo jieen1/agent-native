@@ -103,6 +103,7 @@ const messages = {
     searchImagesPlaceholder: "Buscar imagens...",
     searchForLogosImagesIcons: "Buscar logos, imagens, ícones...",
     search: "खोजें",
+    searchFailed: "खोज विफल",
     logoSearchTitle: "लोगो खोज",
     searchCompanyLogo: "Busque uma empresa para encontrar seu logo",
     searchCompanyPlaceholder: "Buscar nome da empresa (ex.: Intuit)",
@@ -327,6 +328,8 @@ const messages = {
     hideResolved: "हल किए गए छिपाएं",
     showResolved: "{{count}} हल किए गए दिखाएं",
     noCommentsYet: "अभी कोई टिप्पणी नहीं",
+    loadFailed: "टिप्पणियाँ लोड नहीं हो सकीं",
+    retry: "फिर कोशिश करें",
     clickToAddComment: "टिप्पणी जोड़ने के लिए क्लिक करें",
     selectSlideToAdd: "एक टिप्पणी जोड़ने के लिए स्लाइड चुनें",
   },
@@ -539,6 +542,10 @@ const messages = {
     chooseAnotherFile: "दूसरी फ़ाइल चुनें",
   },
   home: {
+    loadFailed: "आपका कॉन्टेंट लोड नहीं हो सका",
+    loadFailedDescription:
+      "आपका सहेजा गया कॉन्टेंट अभी भी उपलब्ध है। कनेक्शन जाँचें और फिर कोशिश करें।",
+    retry: "फिर कोशिश करें",
     decksTitle: "डेक",
     newDeck: "नया डेक",
     deckLengthQuestion: "यह डेक कितना लंबा होना चाहिए?",

@@ -1,5 +1,9 @@
 import { useT } from "@agent-native/core/client";
 import {
+  injectSessionReplayIframeBootstrap,
+  SESSION_REPLAY_IFRAME_ATTRIBUTE,
+} from "@agent-native/core/client";
+import {
   DEFAULT_CANVAS_MAX_ZOOM,
   DEFAULT_CANVAS_MIN_ZOOM,
   DEFAULT_SNAP_THRESHOLD_SCREEN_PX,
@@ -42,9 +46,10 @@ import {
   type PenPath,
 } from "@shared/pen-path";
 import {
+  IconArrowsMaximize,
   IconCopy,
   IconDots,
-  IconMaximize,
+  IconHandClick,
   IconPlus,
 } from "@tabler/icons-react";
 import {
@@ -131,8 +136,9 @@ const DRAG_THRESHOLD = 3;
  *  live zoom) to count as "equal" for the smart-spacing guides (CV11). */
 const EQUAL_GAP_TOLERANCE_SCREEN_PX = 2;
 const FRAME_LABEL_HEIGHT = 28;
-const FRAME_HEADER_BUTTON_OUTSIDE_WIDTH = 260;
+const FRAME_HEADER_BUTTON_COMPACT_WIDTH = 260;
 const FRAME_HEADER_BUTTON_RESERVE = 116;
+const FRAME_HEADER_COMPACT_BUTTON_RESERVE = 32;
 const TRANSFORM_BADGE_OFFSET = 12;
 const TRANSFORM_BADGE_EDGE_PADDING = 8;
 const TRANSFORM_BADGE_HEIGHT = 28;
@@ -207,6 +213,7 @@ import {
   getBoardSurfaceStaticPreviewViewport,
   isLineupShrinkOnlyChange,
   OVERVIEW_FRAME_WIDTH,
+  shouldDeferLineupRecenterToCameraCommand,
   shouldRenderBoardSurfaceStaticPreview,
   shouldSuppressLineupRecenter,
   SURFACE_PADDING,
@@ -295,6 +302,7 @@ import {
   getLayerSelectableBounds,
   getOutsideFrameDraftFallback,
   getPreviewDeviceFrameGeometry,
+  getResponsiveScreenCullGeometry,
   getScreenPreviewViewport,
   getSelectableBounds,
   rectContainsPoint,
@@ -390,6 +398,7 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
   hiddenScreenIds = EMPTY_SCREEN_IDS,
   lockedScreenIds = EMPTY_SCREEN_IDS,
   fullViewScreenIds,
+  interactMode = false,
   activeScreenHasHoveredChild = false,
   hoveredChildScreenId,
   directlyHoveredScreenId,
@@ -412,6 +421,7 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
   onDeleteSelection,
   onZoomChange,
   renderScreenContent,
+  renderBreakpointContent,
   onScreenSelectionChange,
   selectAllRequest,
   clearSelectionRequest,
@@ -1289,6 +1299,8 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
       screens: screens.map((screen) => ({
         id: screen.id,
         metadata: getResolvedMetadata(screen),
+        breakpointWidths: screen.breakpointWidths,
+        layoutGroupId: screen.layoutGroupId,
       })),
       currentGeometryById: frameGeometryRef.current,
       persistedGeometryById: geometryById,
@@ -1401,6 +1413,14 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
         previousCount,
         screenCount: screens.length,
         deviceFrameChanged,
+      })
+    ) {
+      return;
+    }
+    if (
+      shouldDeferLineupRecenterToCameraCommand({
+        cameraCommandNonce: cameraCommand?.nonce,
+        lastHandledCameraCommandNonce: lastCameraCommandNonceRef.current,
       })
     ) {
       return;
@@ -6455,23 +6475,76 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
   useEffect(() => {
     if (!cameraCommand) return;
     if (lastCameraCommandNonceRef.current === cameraCommand.nonce) return;
-    lastCameraCommandNonceRef.current = cameraCommand.nonce;
-    const rect = surfaceRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return;
-    const camera = getCameraForBounds(
-      cameraCommand.fitBounds,
-      { width: rect.width, height: rect.height },
-      {
-        paddingScreenPx: cameraCommand.paddingScreenPx ?? 64,
-        minZoom: MIN_ZOOM,
-        maxZoom: MAX_ZOOM,
-        fallbackZoom: zoomRef.current,
-      },
-    );
-    zoomRef.current = camera.zoom;
-    panRef.current = { x: camera.x, y: camera.y };
-    applyViewToDom();
-    scheduleViewCommit();
+
+    let cancelled = false;
+    let retryFrame: number | null = null;
+    let retryCount = 0;
+    let resizeObserver: ResizeObserver | null = null;
+    const maxMeasureRetries = 30;
+
+    const applyPendingCameraCommand = () => {
+      if (
+        cancelled ||
+        lastCameraCommandNonceRef.current === cameraCommand.nonce
+      ) {
+        return true;
+      }
+      const rect = surfaceRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      const camera = getCameraForBounds(
+        cameraCommand.fitBounds,
+        { width: rect.width, height: rect.height },
+        {
+          paddingScreenPx: cameraCommand.paddingScreenPx ?? 64,
+          // Frame geometry is canvas-space, while every frame DOM node lives
+          // inside the padded world. Include that shared origin so fitting a
+          // small drawn/preset frame actually centers its painted card.
+          canvasPadding: SURFACE_PADDING,
+          minZoom: MIN_ZOOM,
+          maxZoom: MAX_ZOOM,
+          fallbackZoom: zoomRef.current,
+        },
+      );
+      zoomRef.current = camera.zoom;
+      panRef.current = { x: camera.x, y: camera.y };
+      applyViewToDom();
+      scheduleViewCommit();
+      // A nonce is acknowledged only after a measurable surface accepted the
+      // imperative camera commit. Consuming it before this point loses the
+      // command during the brief zero-size overview remount caused by active
+      // screen URL synchronization.
+      lastCameraCommandNonceRef.current = cameraCommand.nonce;
+      resizeObserver?.disconnect();
+      return true;
+    };
+
+    const scheduleMeasureRetry = () => {
+      if (cancelled || retryFrame !== null || retryCount >= maxMeasureRetries) {
+        return;
+      }
+      retryFrame = window.requestAnimationFrame(() => {
+        retryFrame = null;
+        retryCount += 1;
+        if (!applyPendingCameraCommand()) scheduleMeasureRetry();
+      });
+    };
+
+    if (!applyPendingCameraCommand()) {
+      scheduleMeasureRetry();
+      const surface = surfaceRef.current;
+      if (surface && typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver(() => {
+          if (!applyPendingCameraCommand()) scheduleMeasureRetry();
+        });
+        resizeObserver.observe(surface);
+      }
+    }
+
+    return () => {
+      cancelled = true;
+      if (retryFrame !== null) window.cancelAnimationFrame(retryFrame);
+      resizeObserver?.disconnect();
+    };
   }, [cameraCommand, applyViewToDom, scheduleViewCommit]);
 
   // PERF9-WHEEL: the first flush that actually moves the camera mutes
@@ -7156,7 +7229,7 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
     const next = computeBoundedScreenCullState({
       candidates: canvasFrames.map(({ screen, geometry }) => ({
         id: screen.id,
-        geometry,
+        geometry: getResponsiveScreenCullGeometry(screen, geometry),
         iframeCount: 1 + (screen.breakpointWidths?.length ?? 0),
       })),
       viewport,
@@ -7453,6 +7526,7 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
                   deviceFrame="none"
                   boardSurface
                   embeddedFrameBackground={BOARD_SURFACE_BACKGROUND}
+                  transparentBackground
                   embeddedFrame={{
                     viewportWidth: Math.max(1, Math.round(boardW)),
                     viewportHeight: Math.max(1, Math.round(boardH)),
@@ -7464,8 +7538,8 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
                   }}
                   editorChromeScaleX={canvasZoom / 100}
                   editorChromeScaleY={canvasZoom / 100}
-                  editMode={boardEditMode}
-                  interactMode={false}
+                  editMode={boardEditMode && !interactMode}
+                  interactMode={interactMode}
                   scaleMode={boardIsActive && effectiveTool === "scale"}
                   clearSelectionRequest={boardClearSelectionRequest}
                   selectedSelector={
@@ -7522,6 +7596,7 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
               geometry={geometry}
               locked={lockedScreenIdSet.has(screen.id)}
               screenContent={screenContentById.get(screen.id)}
+              renderBreakpointContent={renderBreakpointContent}
               cullTier={screenCullTierById.get(screen.id) ?? "visible"}
               isActive={screen.id === activeId}
               isTopScreen={screen.id === topScreenId}
@@ -7534,6 +7609,7 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
                 !isBreakpointSelectionTarget(screen)
               }
               showFullView={fullViewIdSet.has(screen.id)}
+              interactMode={interactMode}
               isDirectlyHovered={screen.id === directlyHoveredScreenId}
               isFileDragOver={
                 fileDragOverFrameId !== null &&
@@ -7741,7 +7817,7 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
           )),
         )}
 
-        {/* Figma-parity alt-hover measurement: red edge-to-edge distance
+        {/* Figma-parity alt-hover measurement: orange edge-to-edge distance
             lines between the current selection and whatever frame/draft is
             under the cursor while Alt is held (pure hover, no drag). */}
         {[altHoverMeasurement?.horizontal, altHoverMeasurement?.vertical]
@@ -7751,7 +7827,7 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
           .map((line) => (
             <span
               key={`alt-hover-${line.orientation}`}
-              className="pointer-events-none absolute z-40 bg-destructive"
+              className="pointer-events-none absolute z-40 bg-[var(--design-editor-measure-color)]"
               style={
                 line.orientation === "vertical"
                   ? {
@@ -7786,7 +7862,7 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
           return (
             <span
               key={`alt-hover-label-${line.orientation}`}
-              className="pointer-events-none absolute z-40 -translate-x-1/2 -translate-y-1/2 rounded bg-destructive px-1 py-0.5 text-[10px] font-medium leading-none text-destructive-foreground shadow-sm"
+              className="pointer-events-none absolute z-40 -translate-x-1/2 -translate-y-1/2 rounded bg-[var(--design-editor-measure-color)] px-1 py-0.5 text-[10px] font-medium leading-none text-white shadow-sm"
               style={{
                 left: pan.x + (SURFACE_PADDING + labelCanvasPoint.x) * scale,
                 top: pan.y + (SURFACE_PADDING + labelCanvasPoint.y) * scale,
@@ -7796,6 +7872,37 @@ export const MultiScreenCanvas = memo(function MultiScreenCanvas({
             </span>
           );
         })}
+
+      {/* Live width × height readout while drawing, pinned below the draft box.
+          Rendered outside the transformed world so it stays a fixed size.
+          Skipped for line/arrow/pen and the pre-drag zero-size state. */}
+      {creationPreview &&
+      creationPreview.tool !== "line" &&
+      creationPreview.tool !== "arrow" &&
+      creationPreview.tool !== "pen" &&
+      creationPreview.geometry.width > 0 &&
+      creationPreview.geometry.height > 0 ? (
+        <span
+          className="pointer-events-none absolute z-40 -translate-x-1/2 translate-y-1 rounded bg-[var(--design-editor-accent-color)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--design-editor-accent-contrast-color)] shadow-sm"
+          style={{
+            left:
+              pan.x +
+              (SURFACE_PADDING +
+                creationPreview.geometry.x +
+                creationPreview.geometry.width / 2) *
+                scale,
+            top:
+              pan.y +
+              (SURFACE_PADDING +
+                creationPreview.geometry.y +
+                creationPreview.geometry.height) *
+                scale,
+          }}
+        >
+          {Math.round(creationPreview.geometry.width)} ×{" "}
+          {Math.round(creationPreview.geometry.height)}
+        </span>
+      ) : null}
 
       {/* Equal-gap distance labels render outside the pan/scale-transformed
           world container (same reasoning as the marquee/duplicate-preview
@@ -8791,6 +8898,7 @@ interface ScreenProps {
   isSelected: boolean;
   isTopScreen: boolean;
   showFullView: boolean;
+  interactMode: boolean;
   isDirectlyHovered: boolean;
   /** True while a native OS file drag is hovering this frame (Figma parity §1). */
   isFileDragOver: boolean;
@@ -8803,6 +8911,7 @@ interface ScreenProps {
   chromeScale: number;
   chromeSettling: boolean;
   screenContent?: ReactNode;
+  renderBreakpointContent?: MultiScreenCanvasProps["renderBreakpointContent"];
   /** Overview viewport culling tier (PF22) — see computeScreenCullTier.
    *  "visible": render screenContent normally. "culled": screenContent (if
    *  any) stays mounted but is hidden from paint (visibility/
@@ -8857,6 +8966,7 @@ const Screen = memo(function Screen({
   isSelected,
   isTopScreen,
   showFullView,
+  interactMode,
   isDirectlyHovered,
   isFileDragOver,
   hasHoveredChild,
@@ -8874,6 +8984,7 @@ const Screen = memo(function Screen({
   onStartRotate,
   onStartDuplicateGesture,
   screenContent,
+  renderBreakpointContent,
   cullTier,
   onAddBreakpoint,
   onActiveBreakpointChange,
@@ -8941,7 +9052,10 @@ const Screen = memo(function Screen({
   // rebuild the string every render (that would reload the iframe).
   // Keyed only on screen.content; the hit-test script itself is constant.
   const srcdocWithHitTest = useMemo(
-    () => appendHitTestResponder(screen.content),
+    () =>
+      injectSessionReplayIframeBootstrap(
+        appendHitTestResponder(screen.content),
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [screen.content],
   );
@@ -8951,21 +9065,22 @@ const Screen = memo(function Screen({
   }, []);
   const frameLabelHeight = FRAME_LABEL_HEIGHT * chromeScale;
   const frameScreenWidth = geometry.width / Math.max(chromeScale, 0.001);
-  // BP-DEEP v2 item 1: the narrow-frame fallback that floats the Full-view
-  // pill OUTSIDE the frame's right edge (left-full) lands exactly where the
-  // breakpoint preview row starts, covering the first breakpoint frame's
-  // label/corner (the pill is z-40 over the row). When this screen has
-  // breakpoint frames, always keep the pill INSIDE the frame header —
-  // labelInfoMaxWidth already reserves room for the inside placement.
-  const fullViewOutsideFrame =
-    frameScreenWidth < FRAME_HEADER_BUTTON_OUTSIDE_WIDTH &&
-    !(screen.breakpointWidths && screen.breakpointWidths.length > 0);
+  // Keep frame actions inside their own frame so closely spaced screens cannot
+  // cover one another. Narrow frames collapse the action to its familiar icon;
+  // the accessible name and native tooltip preserve the action's meaning.
+  const compactFullView = frameScreenWidth < FRAME_HEADER_BUTTON_COMPACT_WIDTH;
+  const frameActionLabel = interactMode
+    ? t("multiScreenCanvas.fullView")
+    : t("designEditor.modes.interact");
   const labelInfoMaxWidth = Math.max(
     64,
-    frameScreenWidth - (fullViewOutsideFrame ? 8 : FRAME_HEADER_BUTTON_RESERVE),
+    frameScreenWidth -
+      (compactFullView
+        ? FRAME_HEADER_COMPACT_BUTTON_RESERVE
+        : FRAME_HEADER_BUTTON_RESERVE),
   );
-  const fullViewMaxWidth = fullViewOutsideFrame
-    ? 120
+  const fullViewMaxWidth = compactFullView
+    ? 20
     : Math.max(84, Math.min(180, frameScreenWidth * 0.46));
 
   return (
@@ -9076,22 +9191,21 @@ const Screen = memo(function Screen({
         <button
           type="button"
           data-frame-full-view
+          data-compact={compactFullView || undefined}
           className={cn(
-            "absolute top-1/2 z-40 flex h-5 shrink-0 items-center gap-1 overflow-hidden rounded-md border border-border bg-background/95 px-1.5 text-[10px] font-medium text-foreground opacity-0 shadow-sm transition-opacity",
+            "absolute right-1 top-1/2 z-40 flex h-5 shrink-0 items-center overflow-hidden rounded-md border border-border bg-background/95 text-[10px] font-medium text-foreground opacity-0 shadow-sm transition-opacity",
+            compactFullView ? "w-5 justify-center px-0" : "gap-1 px-1.5",
             "hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             fullViewVisible && "opacity-100",
-            fullViewOutsideFrame ? "left-full" : "right-1",
           )}
           style={{
             maxWidth: fullViewMaxWidth,
             transform: `translateY(-50%) scale(${chromeScale})`,
-            transformOrigin: fullViewOutsideFrame
-              ? "left center"
-              : "right center",
+            transformOrigin: "right center",
             transition: getChromeLabelTransition(chromeSettling),
           }}
-          aria-label={t("multiScreenCanvas.fullView")}
-          title={t("multiScreenCanvas.fullView")}
+          aria-label={frameActionLabel}
+          title={frameActionLabel}
           onClick={(event) => onEdit(screen.id, event)}
           onMouseDown={(event) => {
             event.preventDefault();
@@ -9100,8 +9214,14 @@ const Screen = memo(function Screen({
           onMouseEnter={() => updateDirectHover(true)}
           onMouseLeave={() => updateDirectHover(false)}
         >
-          <IconMaximize className="size-3 shrink-0" />
-          <span className="truncate">{t("multiScreenCanvas.fullView")}</span>
+          {interactMode ? (
+            <IconArrowsMaximize className="size-3 shrink-0" />
+          ) : (
+            <IconHandClick className="size-3 shrink-0" />
+          )}
+          <span className={cn("truncate", compactFullView && "sr-only")}>
+            {frameActionLabel}
+          </span>
         </button>
       </div>
       <div
@@ -9218,6 +9338,11 @@ const Screen = memo(function Screen({
           ) : (
             (screenContent ?? (
               <iframe
+                {...{
+                  [SESSION_REPLAY_IFRAME_ATTRIBUTE]: previewUrl
+                    ? undefined
+                    : "",
+                }}
                 data-screen-iframe-id={screen.id}
                 src={previewUrl}
                 srcDoc={previewUrl ? undefined : srcdocWithHitTest}
@@ -9321,8 +9446,11 @@ const Screen = memo(function Screen({
           naturalAspect={metadata.height / Math.max(1, metadata.width)}
           previewUrl={previewUrl}
           srcdocWithHitTest={srcdocWithHitTest}
+          metadata={metadata}
+          renderBreakpointContent={renderBreakpointContent}
           activeBreakpointWidth={screen.activeBreakpointWidth}
           isScreenSelected={isSelected}
+          interactMode={interactMode}
           penActive={penActive}
           creationToolActive={creationToolActive}
           cullTier={cullTier}
@@ -9369,6 +9497,7 @@ function areScreenPropsEqual(prev: ScreenProps, next: ScreenProps) {
   return (
     prev.screen === next.screen &&
     prev.screenContent === next.screenContent &&
+    prev.renderBreakpointContent === next.renderBreakpointContent &&
     prev.cullTier === next.cullTier &&
     sameResolvedMetadata(prev.metadata, next.metadata) &&
     sameFrameGeometry(prev.geometry, next.geometry) &&
@@ -9442,8 +9571,11 @@ function BreakpointPreviewRow({
   naturalAspect,
   previewUrl,
   srcdocWithHitTest,
+  metadata,
+  renderBreakpointContent,
   activeBreakpointWidth,
   isScreenSelected,
+  interactMode,
   penActive,
   creationToolActive,
   cullTier,
@@ -9478,11 +9610,14 @@ function BreakpointPreviewRow({
    * the active edit scope (see getActiveScreenIframeId).
    */
   srcdocWithHitTest: string;
+  metadata: ResolvedScreenMetadata;
+  renderBreakpointContent?: MultiScreenCanvasProps["renderBreakpointContent"];
   activeBreakpointWidth: number | undefined;
   /** Whether the OWNING screen (base frame) is the current selection —
    *  mirrors `Screen`'s own `isSelected`, used so a breakpoint frame's chrome
    *  reads as "part of a selected group" the same way the base frame does. */
   isScreenSelected: boolean;
+  interactMode: boolean;
   penActive: boolean;
   creationToolActive: boolean;
   /** Uses the owning screen's exact culling lifecycle: never-seen/evicted
@@ -9510,15 +9645,18 @@ function BreakpointPreviewRow({
   /** Item 8b — "…" menu "Change width" for one breakpoint frame. */
   onChangeBreakpointWidth?: (widthPx: number, nextWidthPx: number) => void;
   /** Item 8b — full-view entry for one breakpoint frame (double-click or its
-   *  own full-view button), mirroring the base frame's onEdit/full-view
+   *  own Interact button), mirroring the base frame's onEdit/full-view
    *  affordance. */
   onEditBreakpoint?: (widthPx: number) => void;
   /** Gates the "…" menu's mutating items (Remove / Change width) — mirrors
    *  BreakpointBar's own canEdit. Full-view entry is never gated by this,
-   *  same as the base frame's own full-view button. */
+   *  same as the base frame's own Interact button. */
   canEdit?: boolean;
 }) {
   const t = useT();
+  const frameActionLabel = interactMode
+    ? t("multiScreenCanvas.fullView")
+    : t("designEditor.modes.interact");
   const breakpointWidths = screen.breakpointWidths ?? [];
   // Place additional frames to the right of the primary, starting after the gap
   let offsetX = primaryGeometry.width + BREAKPOINT_FRAME_GAP;
@@ -9540,6 +9678,13 @@ function BreakpointPreviewRow({
         const { frameWidth, frameHeight, naturalHeight, scale } =
           getBreakpointFrameGeometry({ widthPx, naturalAspect, primaryScale });
         const isActive = activeBreakpointWidth === widthPx;
+        const editableContent = renderBreakpointContent?.(screen, metadata, {
+          widthPx,
+          viewportHeight: naturalHeight,
+          displayWidth: frameWidth,
+          displayHeight: frameHeight,
+          active: isActive,
+        });
         const currentOffsetX = offsetX;
         offsetX += frameWidth + BREAKPOINT_FRAME_GAP;
         // BP-DEEP item 5 — clicking a frame in the group always SELECTS it
@@ -9801,8 +9946,8 @@ function BreakpointPreviewRow({
                     transform: `scale(${chromeScale})`,
                     transformOrigin: "right center",
                   }}
-                  aria-label={t("multiScreenCanvas.fullView")}
-                  title={t("multiScreenCanvas.fullView")}
+                  aria-label={frameActionLabel}
+                  title={frameActionLabel}
                   onClick={(e) => {
                     e.stopPropagation();
                     activateThisFrame(e);
@@ -9813,7 +9958,11 @@ function BreakpointPreviewRow({
                     e.stopPropagation();
                   }}
                 >
-                  <IconMaximize className="size-3" />
+                  {interactMode ? (
+                    <IconArrowsMaximize className="size-3" />
+                  ) : (
+                    <IconHandClick className="size-3" />
+                  )}
                 </button>
               ) : null}
               <span
@@ -9835,6 +9984,8 @@ function BreakpointPreviewRow({
                       {breakpointLabel(widthPx)}
                     </span>
                   </div>
+                ) : editableContent ? (
+                  editableContent
                 ) : (
                   <iframe
                     // Distinct id per breakpoint sub-frame — the primary iframe
@@ -9850,6 +10001,11 @@ function BreakpointPreviewRow({
                       screen.id,
                       widthPx,
                     )}
+                    {...{
+                      [SESSION_REPLAY_IFRAME_ATTRIBUTE]: previewUrl
+                        ? undefined
+                        : "",
+                    }}
                     src={previewUrl}
                     srcDoc={previewUrl ? undefined : srcdocWithHitTest}
                     sandbox="allow-scripts"

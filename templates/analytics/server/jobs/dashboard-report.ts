@@ -3,6 +3,7 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { sendDashboardReportSubscription } from "../lib/dashboard-report";
 import {
   claimDueDashboardReportSubscriptions,
+  dashboardReportRetryAt,
   markDashboardReportResult,
 } from "../lib/dashboard-report-subscriptions";
 
@@ -41,26 +42,49 @@ export async function runDashboardReportsOnce(): Promise<{
     for (const sub of batch) {
       processed++;
       try {
+        const retryAt = dashboardReportRetryAt(sub);
         const result = await runWithRequestContext(
           {
             userEmail: sub.ownerEmail,
             orgId: sub.orgId ?? undefined,
           },
           () =>
-            sendDashboardReportSubscription(sub, { requireScreenshot: true }),
+            sendDashboardReportSubscription(sub, {
+              skipEmailWithoutScreenshot: retryAt !== null,
+              allowLimitedFallback: retryAt === null,
+            }),
         );
-        if (result.screenshotAttached) {
-          await markDashboardReportResult(sub, "success");
-        } else {
-          failed++;
+        if (!result.screenshotAttached) {
           const message = result.screenshotError
             ? `Dashboard screenshot unavailable: ${result.screenshotError}`
             : "Dashboard screenshot unavailable";
+          if (retryAt && !result.emailsSent) {
+            console.error(
+              `[dashboard-report] Subscription ${sub.id} skipped sending without a screenshot, will retry:`,
+              message,
+            );
+            await markDashboardReportResult(
+              sub,
+              "error",
+              `${message} (retry scheduled)`,
+              { nextRunAt: retryAt },
+            );
+            continue;
+          }
+          failed++;
           console.error(
             `[dashboard-report] Subscription ${sub.id} sent without a screenshot:`,
             message,
           );
           await markDashboardReportResult(sub, "error", message);
+          continue;
+        }
+        if (result.screenshotMode !== "full" && result.screenshotError) {
+          const detail = `sent with ${result.screenshotMode} screenshot; earlier attempts failed: ${result.screenshotError}`;
+          console.warn(`[dashboard-report] Subscription ${sub.id} ${detail}`);
+          await markDashboardReportResult(sub, "success", detail);
+        } else {
+          await markDashboardReportResult(sub, "success");
         }
       } catch (err: any) {
         failed++;

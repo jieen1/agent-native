@@ -90,6 +90,7 @@ export type CanvasContextMenuAction =
   | "ungroup"
   | "frame-selection"
   | "add-auto-layout"
+  | "suggest-auto-layout"
   | "create-component"
   | "go-to-main-component"
   | "swap-instance"
@@ -155,6 +156,7 @@ export interface CanvasContextMenuLabels {
   ungroup: string;
   frameSelection: string;
   addAutoLayout: string;
+  suggestAutoLayout: string;
   createComponent: string;
   goToMainComponent: string;
   swapInstance: string;
@@ -257,6 +259,7 @@ export interface CanvasContextMenuProps {
   canUngroup?: boolean;
   canFrameSelection?: boolean;
   canAddAutoLayout?: boolean;
+  canSuggestAutoLayout?: boolean;
   canCreateComponent?: boolean;
   // Whether the current selection IS a component instance — gates the
   // whole Go to main component / Swap instance / Detach instance cluster on
@@ -325,6 +328,7 @@ export interface CanvasContextMenuProps {
   onUngroup?: CanvasContextMenuActionHandler;
   onFrameSelection?: CanvasContextMenuActionHandler;
   onAddAutoLayout?: CanvasContextMenuActionHandler;
+  onSuggestAutoLayout?: CanvasContextMenuActionHandler;
   onCreateComponent?: CanvasContextMenuActionHandler;
   onGoToMainComponent?: CanvasContextMenuActionHandler;
   onSwapInstance?: CanvasContextMenuActionHandler;
@@ -378,6 +382,7 @@ const DEFAULT_LABELS: CanvasContextMenuLabels = {
   ungroup: "Ungroup",
   frameSelection: "Frame selection",
   addAutoLayout: "Add auto layout",
+  suggestAutoLayout: "Suggest auto layout…",
   createComponent: "Create component",
   goToMainComponent: "Go to main component",
   swapInstance: "Swap instance",
@@ -450,7 +455,7 @@ type ActionCallbackMap = Partial<
 
 // design-editor menu chrome: compact, dark-border, subtle shadow, no animation jitter
 const MENU_CONTENT_CLASS =
-  "w-52 min-w-[200px] rounded-[6px] border border-[var(--design-editor-control-border)] bg-[var(--design-editor-panel-bg)] py-[3px] px-[3px] text-[12px] text-foreground shadow-[0_4px_16px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.08)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[0.97] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 duration-100";
+  "w-52 min-w-[200px] rounded-[6px] border border-[var(--design-editor-control-border)] bg-[var(--design-editor-panel-bg)] py-[3px] px-[3px] text-[12px] text-foreground shadow-[0_4px_16px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.08)] outline-none";
 // design row height ~28px, full-width highlight on hover, no icon gap waste
 const MENU_ITEM_CLASS =
   "flex h-7 cursor-default select-none items-center rounded-[4px] px-2 py-0 text-[12px] leading-none gap-0 focus:bg-[var(--design-editor-selection-color)] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-35";
@@ -493,6 +498,7 @@ export const CanvasContextMenu = forwardRef<
     canUngroup = false,
     canFrameSelection = selectedCount > 0,
     canAddAutoLayout = selectedCount > 0,
+    canSuggestAutoLayout = false,
     canCreateComponent = selectedCount > 0,
     isComponentInstance = false,
     canGoToMainComponent = isComponentInstance,
@@ -532,6 +538,7 @@ export const CanvasContextMenu = forwardRef<
     onUngroup,
     onFrameSelection,
     onAddAutoLayout,
+    onSuggestAutoLayout,
     onCreateComponent,
     onGoToMainComponent,
     onSwapInstance,
@@ -615,6 +622,7 @@ export const CanvasContextMenu = forwardRef<
       ungroup: onUngroup,
       "frame-selection": onFrameSelection,
       "add-auto-layout": onAddAutoLayout,
+      "suggest-auto-layout": onSuggestAutoLayout,
       "create-component": onCreateComponent,
       "go-to-main-component": onGoToMainComponent,
       "swap-instance": onSwapInstance,
@@ -636,6 +644,7 @@ export const CanvasContextMenu = forwardRef<
     }),
     [
       onAddAutoLayout,
+      onSuggestAutoLayout,
       onBringForward,
       onBringToFront,
       onCopy,
@@ -919,6 +928,17 @@ export const CanvasContextMenu = forwardRef<
                 shortcut={shortcuts.addAutoLayout}
                 onSelect={(event) => runAction("add-auto-layout", event)}
               />
+              {onSuggestAutoLayout ? (
+                <CanvasMenuItem
+                  hidden={isHiddenAction("suggest-auto-layout")}
+                  disabled={
+                    !canRun("suggest-auto-layout", canSuggestAutoLayout)
+                  }
+                  label={labels.suggestAutoLayout}
+                  shortcut=""
+                  onSelect={(event) => runAction("suggest-auto-layout", event)}
+                />
+              ) : null}
               <CanvasMenuItem
                 hidden={isHiddenAction("create-component")}
                 disabled={!canRun("create-component", canCreateComponent)}

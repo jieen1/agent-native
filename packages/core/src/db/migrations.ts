@@ -4,10 +4,23 @@ import {
   isPostgres,
   getDialect,
   getMigrationDatabaseUrl,
+  getCloudflareD1Binding,
   retrySqliteBusy,
   isPgCatalogRace,
   type DbExec,
 } from "./client.js";
+
+interface D1PreparedStatementLike {
+  bind(...values: unknown[]): D1PreparedStatementLike;
+  all(): Promise<{ results: Record<string, unknown>[] }>;
+  first<T = Record<string, unknown>>(): Promise<T | null>;
+  run(): Promise<unknown>;
+}
+
+interface D1DatabaseLike {
+  prepare(query: string): D1PreparedStatementLike;
+  batch(statements: D1PreparedStatementLike[]): Promise<unknown>;
+}
 
 // ---------------------------------------------------------------------------
 // Shared direct-endpoint exec across concurrent migration runners per boot.
@@ -321,7 +334,10 @@ export function runMigrations(
   return async () => {
     try {
       // Check for Cloudflare D1 binding (only if DATABASE_URL not set)
-      const d1 = getDialect() === "d1" ? globalThis.__cf_env?.DB : null;
+      const d1 =
+        getDialect() === "d1"
+          ? (getCloudflareD1Binding() as D1DatabaseLike | undefined)
+          : null;
       if (d1) {
         await d1
           .prepare(

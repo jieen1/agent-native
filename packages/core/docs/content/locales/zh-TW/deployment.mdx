@@ -333,12 +333,14 @@ export default defineConfig({
 
 ### 建置/執行時 {#env-runtime}
 
-| 變數                        | 描述                                                                                                                                 |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `PORT`                      | 伺服器連接埠（僅限Node.js）                                                                                                          |
-| `NITRO_PRESET`              | 在建置時覆蓋建置預設                                                                                                                 |
-| `APP_BASE_PATH`             | 將應用程式安裝在前綴下（例如 `/mail`）。由`npx @agent-native/core@latest deploy`自動設定；保持未設定為獨立。                         |
-| `AGENT_PROD_CODE_EXECUTION` | 可選的正式環境程式碼執行模式：`off`（預設）、`sandboxed` 或 `trusted`。參見[Production Code Execution](#production-code-execution)。 |
+| 變數                                        | 描述                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                                      | 伺服器連接埠（僅限Node.js）                                                                                                                                                                                                                                                               |
+| `NITRO_PRESET`                              | 在建置時覆蓋建置預設                                                                                                                                                                                                                                                                      |
+| `APP_BASE_PATH`                             | 將應用程式安裝在前綴下（例如 `/mail`）。由`npx @agent-native/core@latest deploy`自動設定；保持未設定為獨立。                                                                                                                                                                              |
+| `AGENT_PROD_CODE_EXECUTION`                 | 可選的正式環境程式碼執行模式：`off`（預設）、`sandboxed` 或 `trusted`。參見[Production Code Execution](#production-code-execution)。                                                                                                                                                      |
+| `AGENT_NATIVE_BUILDER_RELAY_SECRET`         | 用於預覽安全的 Builder 授權中繼的專用 32+ 字元共用 HMAC 金鑰。只有當授權結果必須寫入隔離的預覽資料庫時，才在核准的企業回呼部署和預覽部署上設定相同的值。                                                                                                                                  |
+| `AGENT_NATIVE_BUILDER_RELAY_TARGET_ORIGINS` | 僅供企業回呼使用、以逗號分隔的精確可信預覽來源允許清單（例如 `https://0123456789abcdef01234567--content.netlify.app`）。僅在企業回呼部署中設定。Netlify 來源必須使用包含 24 位十六進位 ID、不可變且特定於部署的永久連結；可變的 `deploy-preview-*` 別名、萬用字元和網域尾碼都會遭到拒絕。 |
 
 資料庫連線變數（`DATABASE_URL`、`DATABASE_AUTH_TOKEN`、每個應用程式 `<APP_NAME>_DATABASE_URL`）位於 [Database](/docs/database#production) 中。
 
@@ -373,7 +375,7 @@ OAuth 提供者憑證（Google、GitHub）、靜態 MCP 承載後備（`ACCESS_T
 
 ### 生成強大的秘密 {#env-generate-secrets}
 
-對於任何標記為“32+ char random”的金鑰（`BETTER_AUTH_SECRET`、`OAUTH_STATE_SECRET`、`A2A_SECRET`、`SECRETS_ENCRYPTION_KEY`），請使用以下指令生成新值：
+對於任何標記為“32+ char random”的金鑰（`BETTER_AUTH_SECRET`、`OAUTH_STATE_SECRET`、`A2A_SECRET`、`SECRETS_ENCRYPTION_KEY`、`AGENT_NATIVE_BUILDER_RELAY_SECRET`），請使用以下指令生成新值：
 
 ```bash
 openssl rand -hex 32
@@ -451,3 +453,11 @@ agent-native 的核心功能之一是代理可以修改應用程式的來源程�
 ## 多執行個體部署 {#multi-instance}
 
 Agent-Native 應用程式透過 Drizzle 將所有狀態儲存在 SQL 中，並透過 [polling](/docs/key-concepts#polling-sync) 與資料庫同步 UI — 無檔案系統狀態、無置頂工作階段、無記憶快取。這意味著多執行個體和無伺服器部署開箱即用：將每個執行個體指向同一個 `DATABASE_URL`，它們會自動聚合。請參閱 [Key Concepts — Data in SQL](/docs/key-concepts#data-in-sql) 和 [Portability](/docs/key-concepts#hosting-agnostic)。
+
+## 下一步
+
+- [**Database**](/docs/database#production) — 在首次生產部署前選擇持久化 SQL 後端
+- [**Security**](/docs/security) — 本頁提到的生產檢查清單和選用旗標
+- [**Authentication**](/docs/authentication) — 所選驗證模式的 OAuth 憑證和環境變數
+- [**Multi-App Workspace**](/docs/multi-app-workspace) — `deploy` 單一來源建置背後的工作區模型
+- [**Frames**](/docs/frames) — 用於生產 UI 編輯的嵌入式代理面板與 Builder.io 雲端框架

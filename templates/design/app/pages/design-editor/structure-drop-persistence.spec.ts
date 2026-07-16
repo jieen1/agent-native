@@ -6,6 +6,14 @@ const editorSource = readFileSync(
   new URL("../DesignEditor.tsx", import.meta.url),
   "utf8",
 );
+// setFlowPositioningOverrideForNodeInHtml/setAbsolutePositioningForNodeInHtml
+// live in html-layer-positioning.ts (extracted from DesignEditor.tsx as a
+// pure, non-closure module-scope helper module); the second test below
+// inspects that helper's own definition text.
+const htmlLayerPositioningSource = readFileSync(
+  new URL("./html-layer-positioning.ts", import.meta.url),
+  "utf8",
+);
 
 describe("flow-to-absolute structure drop persistence", () => {
   it("persists absolute-container positioning even when the source node began in flow", () => {
@@ -45,14 +53,14 @@ describe("flow-to-absolute structure drop persistence", () => {
   });
 
   it("persists an important static override only for the explicit stylesheet fallback signal", () => {
-    const helperStart = editorSource.indexOf(
+    const helperStart = htmlLayerPositioningSource.indexOf(
       "function setFlowPositioningOverrideForNodeInHtml",
     );
-    const helperEnd = editorSource.indexOf(
+    const helperEnd = htmlLayerPositioningSource.indexOf(
       "function setAbsolutePositioningForNodeInHtml",
       helperStart,
     );
-    const helper = editorSource.slice(helperStart, helperEnd);
+    const helper = htmlLayerPositioningSource.slice(helperStart, helperEnd);
     expect(helperStart).toBeGreaterThanOrEqual(0);
     expect(helper).toContain(
       'element.style.setProperty("position", "static", "important")',
@@ -63,12 +71,13 @@ describe("flow-to-absolute structure drop persistence", () => {
   it("keeps the source update on the existing local history/optimistic-preview path", () => {
     const start = editorSource.indexOf("const handleVisualStructureChange");
     const end = editorSource.indexOf(
-      "const handleScreenVisualStructureChange",
+      "const handleVisualDuplicateChange",
       start,
     );
     const section = editorSource.slice(start, end);
 
     expect(section).toContain("applyLocalContentUpdate(");
+    expect(section.match(/applyLocalContentUpdate\(/g)).toHaveLength(1);
     expect(section).toContain("{ skipPreview: true }");
     expect(section).not.toContain("recordHistory: false");
   });

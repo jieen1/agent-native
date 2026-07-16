@@ -13,6 +13,7 @@ const messages = {
   root: {
     commandActions: "操作",
     commandSearch: "搜尋",
+    openAgent: "開啟代理",
     commandAppearance: "外觀",
     toggleTheme: "切換主題",
     extensionSignedInTitle: "已登入",
@@ -46,11 +47,13 @@ const messages = {
   navigation: {
     brand: "剪輯",
     library: "資料庫",
+    sharedWithMe: "與我共用",
     spaces: "空間",
     meetings: "會議",
     dictate: "聽寫",
     archive: "封存",
     trash: "廢紙簍",
+    agent: "代理",
     settings: "設定",
     notifications: "通知",
     insights: "洞察",
@@ -79,6 +82,10 @@ const messages = {
       title: "你的資料庫還是空的",
       body: "錄製第一個螢幕影片後，它會出現在這裡，隨時可以分享。",
       cta: "錄製第一個 Clip",
+    },
+    shared: {
+      title: "目前沒有與你共用的剪輯",
+      body: "團隊成員與你共用的剪輯會顯示在這裡。",
     },
     folder: {
       title: "這個資料夾是空的",
@@ -283,6 +290,7 @@ const messages = {
     insights: "洞察",
     downloadForMac: "下載 Mac",
     downloadForWindows: "下載 Windows",
+    downloadForLinux: "下載 Linux",
     downloadDesktopApp: "下載桌面應用程式",
     agentNativeClips: "Agent-Native Clips",
     agentNativeClipsIntro: "是一款免費的",
@@ -416,6 +424,7 @@ const messages = {
     invite: "邀請",
     embed: "嵌入",
     shareLink: "分享連結",
+    shareWithHumans: "與人分享",
     shareWithAgents: "與 Agent 分享",
     copyAgentPrompt: "複製 Agent 提示",
     agentPrompt:
@@ -426,6 +435,8 @@ const messages = {
     retryAgentLink: "重試",
     gifPreview: "GIF 預覽",
     openPlayer: "開啟播放器",
+    chooseFile: "選取檔案",
+    remove: "消除",
     downloadMp4: "下載 MP4",
     embedsNeedPublic: "嵌入需要公開剪輯",
     embedPublicDescription:
@@ -524,7 +535,8 @@ const messages = {
   },
   downloadRoute: {
     pageTitle: "下載 Clips Desktop",
-    description: "從選單欄錄製螢幕。自動更新 macOS 和 Windows 的桌面應用程式。",
+    description:
+      "從系統匣錄製螢幕。適用於 macOS、Windows 和 Linux 的自動更新桌面應用程式。",
     macSublabel: "通用（Apple Silicon + Intel）",
     windowsSublabel: "64 位 MSI 安裝程式",
     downloadFor: "下載 {{platform}}",
@@ -832,13 +844,6 @@ const messages = {
     removeDescription:
       "{{email}} 將失去對此組織的存取權限。你隨時可以重新邀請他們。",
     remove: "移除",
-  },
-  slackShareHint: {
-    playsInline: "可在 Slack 中行內播放",
-    connectedDescription: "將此連結貼上到任何已連線工作區即可行內播放。",
-    makeInline: "讓它在 Slack 中行內播放",
-    connectDescription: "連線一個工作區，讓此連結展開為影片。",
-    connect: "連線",
   },
   commentsPanel: {
     disabled: "此錄製已停用評論。",

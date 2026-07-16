@@ -5,7 +5,7 @@ description: "skills 如何在 Agent-Native 中工作：框架 skills、域 skil
 
 # Skills指南
 
-Skills 是 Markdown 檔案，可讓代理深入了解特定模式和工作流程。
+Skills 是為代理提供特定模式與工作流程深度知識的 Markdown 檔案。與其將每條規則都塞進一個系統提示詞，不如把知識拆分成專門的檔案，僅在工作確實需要時由代理載入——既保持預設內容精簡，又讓代理能夠按需深入。
 
 ## skills是什麼 {#what-are-skills}
 
@@ -120,9 +120,11 @@ Skills 位於 `.agents/skills/<name>/SKILL.md`，包含針對代理的詳細指�
 
 目前應用支援的 skills 包括 Plan 的 `visual-plan`、`visual-recap` 和 `visualize-repo`，Design 的 `visual-edit`，Assets 的 `assets`，以及用於 repository 支援的 docs/blog/MDX 編輯的 `content`。
 
-應用程式支援的 skills 將 Agent-Native 應用程式打包為技能市場工件。該捆綁包可以包含代理指令、匯出的 skills、MCP 連線器中繼資料、託管/本機啟動指令和 UI 表面（例如 MCP 應用程式）。
+<Callout tone="info">
 
-> **完整詳細資訊如下：** [App-backed skills — full details](#app-backed-skills-full) 中介紹了應用程式支援的 skills 的機制（清單格式、CLI 指令、市場轉接器、自動更新哈希）。
+**完整詳細資訊如下：** [App-backed skills — full details](#app-backed-skills-full) 中介紹了應用程式支援的 skills 的機制（清單格式、CLI 指令、市場轉接器、自動更新哈希）。
+
+</Callout>
 
 ## 建立自訂 skills {#creating-skills}
 
@@ -177,7 +179,11 @@ frontmatter `name` 和 `description` 由代理的工具系統用於技能發現�
 
 將檔案儲存在 `.agents/skills/my-skill/SKILL.md`。目錄名稱應與 frontmatter 中的 `name` 匹配。
 
-> **另請參閱：** [Writing Agent Instructions](/docs/writing-agent-instructions) 了解如何措辭技能描述、應用漸進式披露以及保持 `AGENTS.md` 的精簡。兩個頁面均使用 `project-imports` 技能作為執行範例。
+<Callout tone="info">
+
+**另請參閱：** [Writing Agent Instructions](/docs/writing-agent-instructions) 了解如何措辭技能描述、應用漸進式披露以及保持 `AGENTS.md` 的精簡。兩個頁面均使用 `project-imports` 技能作為執行範例。
+
+</Callout>
 
 ## 技能範圍：執行時與開發 {#skill-scope}
 
@@ -267,33 +273,37 @@ Agent-Native 執行時從 `.agents/skills/` 讀取 skills。 Claude 程式碼獨
 
 </Diagram>
 
-> **另請參閱：** [Writing Agent Instructions](/docs/writing-agent-instructions) 了解如何措辭技能描述、應用漸進式披露以及保持 `AGENTS.md` 精簡。
-
 ## Skills vs AGENTS.md {#skills-vs-agents-md}
 
-> **AGENTS.md** — 概述。列出所有指令碼，描述資料模型，解釋應用程式架構。代理首先閱讀此內容以了解應用程式。
->
-> **Skills** — 深入研究。每項技能都側重於一種模式，並包含詳細規則、程式碼範例和“注意事項”清單。當代理需要遵循特定模式時，它會讀取這些內容。
+<Callout tone="info">
+
+**AGENTS.md** — 概述。列出所有指令碼，描述資料模型，解釋應用程式架構。代理首先閱讀此內容以了解應用程式。
+
+**Skills** — 深入研究。每項技能都側重於一種模式，並包含詳細規則、程式碼範例和“注意事項”清單。當代理需要遵循特定模式時，它會讀取這些內容。
+
+</Callout>
 
 `AGENTS.md` 告訴代理應用程式的用途。 Skills 告訴代理*如何*正確地做特定的事情。兩者都是必需的 - `AGENTS.md` 用於定向，skills 用於執行。
 
 ## Skills 與記憶 {#skills-vs-memory}
 
-> **Skills** — 編寫的、可重複使用的操作指南。適用於每個使用者，在工作匹配時按需呼叫。
->
-> **記憶 (`LEARNINGS.md` / `memory/MEMORY.md`)** — 共用專案學習和每輪都會載入的個人結構化記憶。
+<Callout tone="info">
+
+**Skills** — 編寫的、可重複使用的操作指南。適用於每個使用者，在工作匹配時按需呼叫。
+
+**記憶 (`LEARNINGS.md` / `memory/MEMORY.md`)** — 共用專案學習和每輪都會載入的個人結構化記憶。
+
+</Callout>
 
 如果這些知識適用於在應用程式中工作的*每個人*（“總是更喜歡 CTE 而不是子查詢”），那麼它就是一項技能或共用的 `LEARNINGS.md`。如果它是關於*這個特定使用者*（“史蒂夫喜歡簡潔的答案”），它就屬於 `memory/MEMORY.md`。完整治療請參見[Workspace Memory](/docs/workspace#memory)。
 
----
+## Skills 與 SQL 資源 {#skills-vs-resources}
 
-# 進階
+本頁將 skill 描述為 `.agents/skills/<name>/SKILL.md` 中的檔案。[Workspace](/docs/workspace#skills) 則將同一個 skill 描述為路徑為 `skills/<slug>/SKILL.md`、範圍為 workspace/shared/personal 的 SQL 資源。兩者是從不同角度描述同一概念：Code 模式直接讀寫檔案；App 模式將其儲存為資源列，因此無需檔案系統也能運作。無論採用哪種方式，都請依本頁格式編寫內容。
 
 ## 應用程式支援的 skills — 完整詳細資訊 {#app-backed-skills-full}
 
-應用程式支援的 skills 將 Agent-Native 應用程式打包為技能市場工件。
-捆綁包可以包含代理指令、匯出的 skills、MCP 連線器
-中繼資料、託管/本機啟動說明和 UI 介面，例如 MCP 應用程式。
+以下完整介紹[應用程式支援的 skills](#app-backed-skills) 背後的清單格式、CLI 指令、市場轉接器和自動更新雜湊：
 
 每個應用程式支援的技能都以應用程式根目錄中的 `agent-native.app-skill.json` 開頭：
 
@@ -303,7 +313,7 @@ Agent-Native 執行時從 `.agents/skills/` 讀取 skills。 Claude 程式碼獨
   "id": "assets",
   "hosted": {
     "url": "https://assets.agent-native.com",
-    "mcpUrl": "https://assets.agent-native.com/_agent-native/mcp"
+    "mcpUrl": "https://assets.agent-native.com/mcp"
   },
   "mcp": { "serverName": "agent-native-assets" },
   "skills": [
@@ -410,3 +420,10 @@ npx @agent-native/core@latest skills update scaffold --project
 `AGENTS.md` 和 `.agents/skills` 保持規範。更新指令還可以修復
 Claude 相容性連結（`CLAUDE.md` 和 `.claude/skills`），因此 Claude 程式碼可見
 相同的說明，無需維護第二個副本。
+
+## 接下來 {#whats-next}
+
+- [**編寫代理指令**](/docs/writing-agent-instructions) — 編寫 skill 描述，並在 AGENTS.md、skills 和記憶之間拆分指引
+- [**Workspace**](/docs/workspace#skills) — App 模式下 skills 作為 SQL 資源儲存的位置
+- [**代理提及**](/docs/agent-mentions) — 在聊天中呼叫 skill 的 `/` 指令觸發器
+- [**Plan 外掛與市場**](/docs/plan-plugin) — 真實應用程式支援的 skill 的端對端安裝和自動更新流程

@@ -4,6 +4,8 @@ import type {
   AddDatabaseItemRequest,
   AttachContentDatabaseSourceRequest,
   BuilderCmsModelsResponse,
+  CancelPreparedBuilderSourceUpdateRequest,
+  CancelPreparedBuilderSourceUpdateResponse,
   ChangeContentDatabaseSourceRoleRequest,
   ContentDatabaseResponse,
   ContentDatabasePersonalViewResponse,
@@ -25,6 +27,7 @@ import type {
   ExecuteBuilderSourceExecutionRequest,
   MoveDatabaseItemRequest,
   PrepareBuilderSourceExecutionRequest,
+  PreviewBuilderSourceReviewResponse,
   PrepareBuilderSourceReviewRequest,
   PrepareBuilderSourceReviewResponse,
   ProcessBuilderBodyHydrationRequest,
@@ -35,6 +38,8 @@ import type {
   StageBuilderSourceBulkUpdateRequest,
   StageBuilderSourceBulkUpdateResponse,
   StageBuilderRevisionRequest,
+  SubmitContentDatabaseFormRequest,
+  SubmitContentDatabaseFormResponse,
   SuggestSourceJoinKeyResponse,
   UpdateContentDatabasePersonalViewRequest,
   UpdateContentDatabaseViewRequest,
@@ -583,6 +588,26 @@ export function useAddDatabaseItem(documentId: string) {
   );
 }
 
+export function useSubmitContentDatabaseForm(documentId: string) {
+  const queryClient = useQueryClient();
+  return useActionMutation<
+    SubmitContentDatabaseFormResponse,
+    SubmitContentDatabaseFormRequest
+  >("submit-content-database-form", {
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["action", "get-content-database"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: contentDatabaseQueryKey(documentId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["action", "list-documents"],
+      });
+    },
+  });
+}
+
 export function useDuplicateDatabaseItem(documentId: string) {
   const queryClient = useQueryClient();
   return useActionMutation<
@@ -793,6 +818,27 @@ export function useAddContentDatabaseSourceFieldProperty(documentId: string) {
   });
 }
 
+export function useMaterializeBuilderRequiredFields(documentId: string) {
+  const queryClient = useQueryClient();
+  return useActionMutation<
+    ContentDatabaseResponse,
+    { documentId: string; sourceId: string }
+  >("materialize-builder-required-fields", {
+    onSuccess: (data) => {
+      writeContentDatabaseResponseToCache(queryClient, documentId, data);
+      queryClient.invalidateQueries({
+        queryKey: contentDatabaseQueryKey(documentId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["action", "get-content-database-source", { documentId }],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["action", "list-document-properties", { documentId }],
+      });
+    },
+  });
+}
+
 export function useBuilderCmsModels(enabled: boolean) {
   return useActionQuery<BuilderCmsModelsResponse>(
     "list-builder-cms-models",
@@ -804,6 +850,19 @@ export function useBuilderCmsModels(enabled: boolean) {
       staleTime: 5 * 60 * 1000,
       gcTime: 30 * 60 * 1000,
       refetchOnWindowFocus: false,
+    },
+  );
+}
+
+export function useNotionDatabaseSources(enabled: boolean) {
+  return useActionQuery(
+    "list-notion-database-sources",
+    enabled ? { limit: 50 } : undefined,
+    {
+      enabled,
+      retry: false,
+      placeholderData: (previous) => previous,
+      staleTime: 60_000,
     },
   );
 }
@@ -827,7 +886,11 @@ export function useContentDatabases(args: {
 
 export function useSuggestSourceJoinKey(args: {
   documentId: string;
-  candidateSourceType: "mock-local" | "builder-cms" | "local-table";
+  candidateSourceType:
+    | "mock-local"
+    | "builder-cms"
+    | "local-table"
+    | "notion-database";
   candidateSourceTable: string;
   enabled: boolean;
 }) {
@@ -975,6 +1038,23 @@ export function usePrepareBuilderSourceExecution(documentId: string) {
   });
 }
 
+export function useCancelPreparedBuilderSourceUpdate(documentId: string) {
+  const queryClient = useQueryClient();
+  return useActionMutation<
+    CancelPreparedBuilderSourceUpdateResponse,
+    CancelPreparedBuilderSourceUpdateRequest
+  >("cancel-prepared-builder-source-update", {
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: contentDatabaseQueryKey(documentId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["action", "get-content-database-source", { documentId }],
+      });
+    },
+  });
+}
+
 export function useValidateBuilderSourceExecution(documentId: string) {
   const queryClient = useQueryClient();
   return useActionMutation<
@@ -1058,6 +1138,33 @@ export function usePrepareBuilderSourceReview(documentId: string) {
       });
     },
   });
+}
+
+export function usePreviewBuilderSourceReview(args: {
+  documentId: string;
+  sourceId: string | null;
+  scope: "selected" | "all";
+  documentIds?: string[];
+  enabled: boolean;
+}) {
+  return useActionQuery<PreviewBuilderSourceReviewResponse>(
+    "preview-builder-source-review",
+    args.enabled && args.sourceId
+      ? {
+          documentId: args.documentId,
+          sourceId: args.sourceId,
+          scope: args.scope,
+          documentIds: args.documentIds,
+        }
+      : undefined,
+    {
+      enabled: args.enabled && !!args.sourceId,
+      retry: false,
+      staleTime: 0,
+      gcTime: 0,
+      refetchOnWindowFocus: false,
+    },
+  );
 }
 
 export function useStageBuilderSourceBulkUpdate(documentId: string) {

@@ -197,6 +197,28 @@ describe("extensions/actions", () => {
     });
   });
 
+  it("declares serialization-safe result caps for extension source reads", async () => {
+    mockExtensionModules();
+
+    const { createExtensionActionEntries } = await import("./actions.js");
+    const actions = createExtensionActionEntries();
+    const jsonSensitiveSource = '"\\\n'
+      .repeat(Math.ceil(200_000 / 3))
+      .slice(0, 200_000);
+    const serializedSourceChars = JSON.stringify(jsonSensitiveSource).length;
+
+    expect(actions["get-extension"].maxResultChars).toBe(500_000);
+    expect(actions["get-extension"].maxResultChars).toBeGreaterThanOrEqual(
+      serializedSourceChars + 50_000,
+    );
+    expect(actions["get-extension-history-version"].maxResultChars).toBe(
+      2_000_000,
+    );
+    expect(
+      actions["get-extension-history-version"].maxResultChars,
+    ).toBeGreaterThanOrEqual(serializedSourceChars * 4 + 100_000);
+  });
+
   it("omits repeated unchanged extension content within one agent run", async () => {
     const getExtension = vi.fn(async () => ({
       ...extensionRow,
@@ -907,6 +929,101 @@ describe("extensions/actions", () => {
     );
     expect(createExtension).toHaveBeenCalledWith(
       expect.objectContaining({ content: "<div>inline</div>" }),
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Hosting a workspace/shared resource file by reference
+  // (contentFromWorkspaceFile). This is the path for cloning a large extension
+  // body that already exists as a workspace resource — the model must NOT
+  // re-read it into context, paste it inline (it gets cut off mid-stream), or
+  // route it through run-code (mutating actions are blocked there).
+  // ---------------------------------------------------------------------------
+
+  it("create-extension hosts a workspace resource file by reference", async () => {
+    const bigHtml = `<div x-data="dashboard()">${"<p>row</p>".repeat(6000)}</div>`;
+    const createExtension = vi.fn(async (data: any) => ({
+      ...extensionRow,
+      id: "ext-new",
+      name: data.name,
+      content: data.content,
+    }));
+    const findRecentDuplicateExtension = vi.fn(async () => null);
+    mockExtensionModules({
+      store: { createExtension, findRecentDuplicateExtension },
+    });
+    const readResource = vi.fn(async () => bigHtml);
+    vi.doMock("../resources/script-helpers.js", () => ({ readResource }));
+
+    const { createExtensionActionEntries } = await import("./actions.js");
+    const actions = createExtensionActionEntries();
+    const result = (await actions["create-extension"].run(
+      {
+        name: "Intuit Usage",
+        contentFromWorkspaceFile: "intuit-analytics-extension.html",
+      },
+      { caller: "tool" } as any,
+    )) as any;
+
+    expect(result.ok).toBe(true);
+    // Full file body is hosted verbatim — never a re-typed copy.
+    expect(createExtension).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Intuit Usage", content: bigHtml }),
+    );
+    // The result must NOT echo the full body back — only a compact summary.
+    expect(result.extension).not.toHaveProperty("content");
+    expect(result.extension.contentLength).toBe(bigHtml.length);
+    expect(result.extension.contentHash).toBeTruthy();
+    // Resolved across scopes (personal precedence first).
+    expect(readResource).toHaveBeenCalledWith(
+      "intuit-analytics-extension.html",
+      expect.objectContaining({ scope: "personal" }),
+    );
+  });
+
+  it("create-extension errors (creates nothing) when contentFromWorkspaceFile is not found", async () => {
+    const createExtension = vi.fn();
+    mockExtensionModules({ store: { createExtension } });
+    vi.doMock("../resources/script-helpers.js", () => ({
+      readResource: vi.fn(async () => null),
+    }));
+
+    const { createExtensionActionEntries } = await import("./actions.js");
+    const actions = createExtensionActionEntries();
+    const result = (await actions["create-extension"].run(
+      { name: "Missing", contentFromWorkspaceFile: "does-not-exist.html" },
+      { caller: "tool" } as any,
+    )) as any;
+
+    expect(typeof result).toBe("string");
+    expect(result).toContain("did not match any readable");
+    expect(createExtension).not.toHaveBeenCalled();
+  });
+
+  it("update-extension replaces full content from a workspace resource file", async () => {
+    const updateExtensionContent = vi.fn(async () => ({
+      ...extensionRow,
+      content: "<div>from workspace</div>",
+      updatedAt: "2026-05-06T03:00:00.000Z",
+    }));
+    mockExtensionModules({
+      store: { updateExtensionContent },
+      resolveAccessRole: "editor",
+    });
+    vi.doMock("../resources/script-helpers.js", () => ({
+      readResource: vi.fn(async () => "<div>from workspace</div>"),
+    }));
+
+    const { createExtensionActionEntries } = await import("./actions.js");
+    const actions = createExtensionActionEntries();
+    await actions["update-extension"].run(
+      { id: "ext-zoom", contentFromWorkspaceFile: "roku-analytics.html" },
+      { caller: "tool" } as any,
+    );
+
+    expect(updateExtensionContent).toHaveBeenCalledWith(
+      "ext-zoom",
+      expect.objectContaining({ content: "<div>from workspace</div>" }),
     );
   });
 

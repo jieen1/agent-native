@@ -2,6 +2,7 @@ import * as jose from "jose";
 
 import { ssrfSafeFetch } from "../extensions/url-safety.js";
 import type {
+  A2AApprovedAction,
   AgentCard,
   JsonRpcRequest,
   JsonRpcResponse,
@@ -227,6 +228,7 @@ export class A2AClient {
     opts?: {
       contextId?: string;
       metadata?: Record<string, unknown>;
+      approvedActions?: A2AApprovedAction[];
       /**
        * If true, ask the server to return the task immediately in `working`
        * state and process the handler in the background. The caller should
@@ -242,6 +244,9 @@ export class A2AClient {
       message,
       contextId: opts?.contextId,
       metadata: opts?.metadata,
+      ...(opts?.approvedActions?.length
+        ? { approvedActions: opts.approvedActions }
+        : {}),
       ...(opts?.async ? { async: true } : {}),
     });
 
@@ -281,6 +286,7 @@ export class A2AClient {
     opts?: {
       contextId?: string;
       metadata?: Record<string, unknown>;
+      approvedActions?: A2AApprovedAction[];
       /** Total time to wait for completion. Default 5 min. */
       timeoutMs?: number;
       /** Poll interval. Default 2s. */
@@ -292,10 +298,18 @@ export class A2AClient {
     const submitted = await this.send(message, {
       contextId: opts?.contextId,
       metadata: opts?.metadata,
+      ...(opts?.approvedActions?.length
+        ? { approvedActions: opts.approvedActions }
+        : {}),
       async: true,
     });
 
-    const terminalStates = new Set(["completed", "failed", "canceled"]);
+    const terminalStates = new Set([
+      "completed",
+      "failed",
+      "canceled",
+      "input-required",
+    ]);
     if (terminalStates.has(submitted.status.state)) return submitted;
 
     const timeoutMs = opts?.timeoutMs ?? 5 * 60_000;
@@ -540,6 +554,10 @@ export async function callAgent(
     userEmail?: string;
     orgDomain?: string;
     orgSecret?: string;
+    /** Origin used to build links back to the receiving app. */
+    requestOrigin?: string;
+    /** Exact downstream actions explicitly authorized in the caller's chat. */
+    approvedActions?: A2AApprovedAction[];
     /**
      * Use async/poll instead of a single blocking POST. Recommended for
      * cross-app calls that may exceed a synchronous serverless request budget.
@@ -550,11 +568,28 @@ export async function callAgent(
     timeoutMs?: number;
     /** Poll interval for async calls. Primarily useful for tests/retries. */
     pollIntervalMs?: number;
+    /**
+     * Return receiver-verified artifact text from the last polled task when
+     * the call times out. Defaults to true for backwards compatibility.
+     * Callers that can continue polling the remote task separately should set
+     * this to false so the A2ATaskTimeoutError (and its taskId) is preserved.
+     */
+    returnRecoverableArtifactsOnTimeout?: boolean;
+    /**
+     * Called with each successfully polled task while an async call is still
+     * in flight (see `A2AClient.sendAndWait`). Fires once per real poll
+     * round-trip that returns a task — including the terminal poll — so
+     * callers can surface genuine remote liveness/progress. Not called when a
+     * poll fetch throws (remote unresponsive) or when the task completes
+     * synchronously on submit. Only threaded through for async calls.
+     */
+    onUpdate?: (task: Task) => void;
   },
 ): Promise<string> {
   const metadata: Record<string, unknown> = {};
   if (opts?.userEmail) metadata.userEmail = opts.userEmail;
   if (opts?.orgDomain) metadata.orgDomain = opts.orgDomain;
+  if (opts?.requestOrigin) metadata.requestOrigin = opts.requestOrigin;
 
   // Default to async + poll. The receiving A2A server's `_process-task` route
   // runs the handler in a fresh function execution (cross-platform queue
@@ -583,13 +618,20 @@ export async function callAgent(
         task = await client.sendAndWait(message, {
           contextId: opts?.contextId,
           metadata,
+          ...(opts?.approvedActions?.length
+            ? { approvedActions: opts.approvedActions }
+            : {}),
           timeoutMs: opts?.timeoutMs,
           pollIntervalMs: opts?.pollIntervalMs,
+          onUpdate: opts?.onUpdate,
         });
       } else {
         task = await client.send(message, {
           contextId: opts?.contextId,
           metadata,
+          ...(opts?.approvedActions?.length
+            ? { approvedActions: opts.approvedActions }
+            : {}),
         });
       }
 
@@ -604,7 +646,10 @@ export async function callAgent(
 
       return "";
     } catch (err) {
-      if (err instanceof A2ATaskTimeoutError) {
+      if (
+        opts?.returnRecoverableArtifactsOnTimeout !== false &&
+        err instanceof A2ATaskTimeoutError
+      ) {
         const recoverableText = extractRecoverableArtifactText(err.lastTask);
         if (recoverableText) return recoverableText;
       }

@@ -16,17 +16,29 @@ patterns live in `.agents/skills/`.
 - Never hardcode API keys, tokens, webhook URLs, signing secrets, private Builder/internal data, customer data, or credential-looking literals. Use secrets/OAuth/runtime configuration and obvious placeholders in examples.
 - Use the app actions for designs, files, versions, design systems, variants,
   export, and sharing. Do not write design rows directly with SQL.
-- Treat repository import actions as shortcuts, not capability limits. When the
-  exact GitHub endpoint, search query, request body, pagination mode, metadata
-  field, or API version matters, use `provider-api-catalog`,
-  `provider-api-docs`, and `provider-api-request` against the real GitHub API.
-  The provider API resolves auth from the saved `GITHUB_TOKEN` secret and never
-  exposes the token value. For large scans, stage results with `stageAs` and
-  analyze them with `query-staged-dataset`.
+- When a user wants an established public system as a starting point, call
+  `create-design-system` with `templateId: material-3`, `carbon-white`, or
+  `primer-light`. These are source-linked, versioned token snapshots with
+  system-specific generation guidance; preserve that data instead of
+  reconstructing a lookalike palette.
+- Treat provider-specific actions as shortcuts, not capability limits. Use
+  `provider-api-catalog`, `provider-api-docs`, and `provider-api-request` for
+  open-ended GitHub and Figma API questions. Auth resolves from the saved,
+  user-scoped `GITHUB_TOKEN` or `FIGMA_ACCESS_TOKEN` and never exposes secret
+  values. Stage large reads with `stageAs` and analyze them through
+  `query-staged-dataset`. Figma REST can read files, nodes, components, styles,
+  images, comments, versions, and Enterprise variables, but it cannot create
+  arbitrary canvas layers; non-read Figma requests require human approval.
 - In dev, call actions with `pnpm action <name>`; in production, call the native
   tool. The action schema is the source of truth for parameters.
 - Call `view-screen` before editing a specific design if the current design or
   selected file is not already clear from context.
+- For shared prototype feedback, use the persisted review actions
+  (`list-review-comments`, `get-review-feedback`, `create-review-comment`,
+  `reply-review-comment`, `resolve-review-thread`, `consume-review-feedback`,
+  `send-review-thread-to-agent`, and `set-review-status`). Work one thread at a time, prefer its stable node
+  anchor, verify saved edits before resolving, and read
+  `.agents/skills/design-review-feedback/SKILL.md` for the full loop.
 - Generated files must be complete, standalone HTML unless the user asks for a
   different export format. They should render in the iframe without a build step.
 - For design generation, ground the work in a concrete audience, primary job,
@@ -64,20 +76,53 @@ patterns live in `.agents/skills/`.
   `insert-figma-library-asset`, preserving `fileKey`, `nodeId`, `componentKey`,
   `sourceUrl`, and the rendered URL. This path requires the saved
   `FIGMA_ACCESS_TOKEN` secret; never ask the user to paste that token into chat
-  or pass it as an action parameter. Figma styles and variables are design-system
-  inputs, not draggable media assets; route full file/design-system extraction
-  through Builder-backed indexing.
+  or pass it as an action parameter. Token setup needs `current_user:read` for
+  validation and `file_content:read` for frame/node import; add library or
+  Enterprise variable scopes only when needed. Figma styles and variables are
+  design-system inputs, not draggable media assets; route reusable system
+  extraction through Builder-backed indexing.
 - To import a Figma frame/screen as a real, editable Design screen (not a
   rendered image), use `import-figma-frame` with a `figmaUrl` (or
-  `fileKey`/`nodeId`) — it maps position, auto-layout, text, fills/gradients,
-  strokes, corner radii, effects, opacity, and blend modes pixel-accurately,
-  falling back to an exact PNG only for vector networks/boolean ops/unsupported
-  node types, and saves the result as a new screen. Read the returned
+  `fileKey`/`nodeId`) — it maps supported position, auto-layout, text,
+  fills/gradients, strokes, corner radii, effects, opacity, and blend modes,
+  falling back to a rendered PNG for masks, vector/boolean geometry,
+  lines/arcs, advanced strokes/text, transformed image crops, and unsupported
+  node types, then saves the result as a new screen. Read the returned
   `fidelityReport` (`approximated`, `imageFallbacks`) back to the user when
   non-trivial. Use `get-figma-styles` for a file's published style names (not
   the Enterprise Variables API; full token extraction still routes through
-  Builder-backed indexing). See the `design-systems` skill's "Import from
-  Figma" section.
+  Builder-backed indexing). Never claim universal lossless import/export:
+  consult `FIGMA_INTEROPERABILITY.md` for the feature-level fidelity contract,
+  fallback rules, scale limits, and real-file golden corpus. See the
+  `design-systems` skill's "Import from Figma" section.
+- Uploading a raw `.fig` file in the Design editor's Import panel decodes the
+  container/Kiwi document locally into editable screens — no Builder
+  connection needed — and is scoped to screens only; it never creates or
+  updates a design system. This is separate from uploading `.fig` on the
+  Design System Setup page, which still indexes tokens/brand-kit data through
+  Builder and does not parse `.fig` locally. See the `design-systems` skill
+  for both paths.
+- A current Figma Cmd+C clipboard includes exact selected node ids in
+  `figmeta.selectedNodeData`; `import-figma-clipboard` uses those before any
+  heuristic matching and supports multi-selection. Clipboard metadata is not a
+  public Figma contract, so a copied frame link remains the stable exact path
+  if Figma changes that field. Without a token, current Figma's binary-only
+  clipboard has no browser-readable HTML fallback; give setup guidance instead
+  of claiming a successful import.
+- For "what's in this Figma file/frame?" or "show me a screenshot of this
+  frame" without importing anything, use `get-figma-design-context` — no
+  `nodeId` lists pages/top-level frames (like the official Figma MCP's
+  `get_metadata`), a `nodeId`/node-id link returns a depth-limited structural
+  summary (box, fills/strokes/effects, auto-layout, text/style,
+  component/instance identity) plus a rendered screenshot URL. It never
+  creates a screen; use `import-figma-frame` for that. It also surfaces local,
+  unpublished components/instances that `list-figma-library-assets` cannot see
+  (that action's REST source only returns library-published components). For
+  variables, `get-figma-design-context` and `get-figma-styles` are honest
+  fallbacks, not the Enterprise Variables API — say so plainly rather than
+  guessing when no connected Figma MCP/Enterprise access is available. See the
+  `design-systems` skill's "Reading a Figma file/frame without importing"
+  section.
 - Use Alpine.js and Tailwind CDN for interactive prototypes. Prefer Alpine
   directives over raw inline event handlers.
 - Navigate between prototype screens with Alpine state (`x-show`), a
@@ -88,6 +133,17 @@ patterns live in `.agents/skills/`.
   `generate-design` for new files. For broad rewrites of an existing selected
   file, use `edit-design` with `mode: "replace-file"` and the exact `fileId`;
   never resend files you aren't changing.
+- For reusable starting points, call `list-design-templates`. Use
+  `save-design-as-template` to snapshot an editable inline design, including
+  its screens, canvas dimensions, defaults, and locked layers. Use
+  `create-design-from-template` to instantiate a normal design. If the user
+  supplies a prompt, call `get-design-snapshot` once and refine the copied
+  files with `edit-design`; never regenerate the template from scratch.
+- Treat `data-agent-native-locked="true"` as an authoritative template
+  boundary. Locked backgrounds, logos, and their descendants must remain
+  byte-for-byte unchanged during agent edits. The server rejects attempts to
+  change or remove them; ask the user to unlock the layer in the Layers panel
+  if they explicitly want it changed.
 - When the user asks to add tweak controls, preserve existing useful tweaks,
   add or update the requested `tweaks` definitions, and make sure each control
   is backed by a CSS custom property the rendered file actually uses. If source
@@ -110,7 +166,8 @@ patterns live in `.agents/skills/`.
   explicit user instructions in the current turn still win.
 - For reusable design-system setup from Figma, connected code/GitHub, local
   code/design files, or optional `design.md`, use Builder-backed DSI indexing
-  through `index-design-system-with-builder` or `import-file --format fig`.
+  through `index-design-system-with-builder` or the Design System Setup `.fig`
+  upload.
   Pass readable `design.md` content as `designMd`, use the returned local design
   system id in Design flows, and call `get-design-system` before generation to
   hydrate Builder docs/tokens when available. Do not create a duplicate local
@@ -140,7 +197,7 @@ patterns live in `.agents/skills/`.
   the work involves multiple screens or artboard placement. Overview is the
   primary editing surface: users can select screens, move/resize/drop static
   frames and canvas primitives, edit layers in place, and use the frame's
-  full-view button to enter focused editing.
+  Interact button to enter focused editing.
 - To move the user's editor, call `navigate` with `view: "editor"` and
   `editorView: "overview"` for the screen overview, or `editorView: "single"`
   plus `fileId`, `filename`, or `screen` to focus one screen.
@@ -233,6 +290,14 @@ patterns live in `.agents/skills/`.
   layers: text, classes, styles, attributes, source order, and small structural
   changes. Use it for selected-element edits before falling back to full
   `update-design` / `generate-design` rewrites.
+- For localhost JSX/TSX, `apply-visual-edit` also supports a narrow deterministic
+  slice: single-instance leaf text, literal `className`/`class`, and flat literal
+  `style={{ ... }}` properties. Pass `source.kind: "local-file"`, `designId`,
+  `connectionId`, the verified project-relative `path`, and
+  `intent.target.sourceAnchor`. Call once without `persist` and inspect
+  `proposedDiff`; call again with `persist: true` only when it is exact. The
+  action reads the current bridge version and writes through `write-local-file`,
+  so human consent and compare-and-swap remain mandatory.
 - For localhost React/TSX screens, treat compiler/debug metadata (project-relative
   source file, line, column, component, and runtime multiplicity) as evidence
   for locating source, not as permission to run a generic AST transform.
@@ -252,8 +317,10 @@ patterns live in `.agents/skills/`.
   persist by updating that attribute.
 - Inline/Alpine screens continue to use deterministic HTML code-layer edits.
   Localhost React/TSX screens use the semantic coding-agent handoff above;
-  deterministic direct React writes remain intentionally limited to narrowly
-  proven literal edits and never include generic structural transforms.
+  deterministic direct React writes remain intentionally limited to the leaf
+  literal slice above and never include generic structural transforms,
+  breakpoint writes, dynamic expressions, repeated renders, shared component
+  definitions, generated/out-of-root paths, or remote URLs.
 
 ## Code Workspace
 
@@ -321,6 +388,8 @@ patterns live in `.agents/skills/`.
   frame new edits target. Breakpoint frames are one document with a
   Framer-style cascade (base = widest frame; narrower-frame edits persist as
   width-scoped overrides via `apply-visual-edit` + `activeFrameWidthPx`).
+  `set-active-breakpoint.editScope` is `cascade-smaller` by default; use
+  `only` when the user explicitly wants a bounded, breakpoint-only override.
   Read the `responsive-breakpoints` skill before responsive edits.
 - **Design states**: `create-design-state`, `apply-design-state`,
   `capture-design-state`, `list-design-states`, and `delete-design-state`
@@ -338,6 +407,14 @@ patterns live in `.agents/skills/`.
   `detach-component-instance` to turn an instance into plain editable markup.
   See the `design-generation` skill's "Component reuse" section — promote a
   3+ times repeated pattern instead of inventing another near-duplicate.
+- **Suggested auto layout**: for an absolute/freeform container, first measure
+  its direct children and present the proposed direction, visual order, gap,
+  four-side padding, alignment, and sizing. Do not mutate source until the user
+  applies the preview. Inline HTML/Alpine applies the reviewed proposal through
+  one `apply-visual-edit`-backed content transaction so undo restores the exact
+  prior structure. Local React uses the semantic source handoff (never generic
+  AST rewriting), preserves nested absolute descendants and responsive logic,
+  and applies the approved proposal as one reversible source edit.
 
 ## Full App Building
 

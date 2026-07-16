@@ -10,9 +10,10 @@ export interface NavigationState {
   view: string;
   designId?: string;
   designSystemId?: string;
+  templateId?: string;
   editorView?: "single" | "overview";
-  inspectorTab?: "design" | "tweaks" | "extensions";
-  inspector?: "design" | "tweaks" | "extensions";
+  inspectorTab?: "design" | "comments" | "tweaks" | "extensions";
+  inspector?: "design" | "comments" | "tweaks" | "extensions";
   leftPanel?:
     | "file"
     | "agent"
@@ -53,8 +54,8 @@ export interface DesignEditorCommand {
   designId: string;
   editorView?: "single" | "overview";
   viewMode?: "single" | "overview";
-  inspectorTab?: "design" | "tweaks" | "extensions";
-  inspector?: "design" | "tweaks" | "extensions";
+  inspectorTab?: "design" | "comments" | "tweaks" | "extensions";
+  inspector?: "design" | "comments" | "tweaks" | "extensions";
   leftPanel?:
     | "file"
     | "agent"
@@ -117,8 +118,11 @@ function normalizeEditorView(
 
 function normalizeInspectorTab(
   value: unknown,
-): "design" | "tweaks" | "extensions" | undefined {
-  return value === "design" || value === "tweaks" || value === "extensions"
+): "design" | "comments" | "tweaks" | "extensions" | undefined {
+  return value === "design" ||
+    value === "comments" ||
+    value === "tweaks" ||
+    value === "extensions"
     ? value
     : undefined;
 }
@@ -261,6 +265,10 @@ export function useNavigationState(enabled = true) {
         state.view = "design-systems";
         const designSystemId = searchParams.get("designSystemId");
         if (designSystemId) state.designSystemId = designSystemId;
+      } else if (pathname.startsWith("/templates")) {
+        state.view = "templates";
+        const templateId = searchParams.get("templateId");
+        if (templateId) state.templateId = templateId;
       } else if (pathname.startsWith("/present/")) {
         state.view = "present";
         state.designId = params.id;
@@ -277,6 +285,11 @@ export function useNavigationState(enabled = true) {
         return cmd.designSystemId
           ? `/design-systems?designSystemId=${encodeURIComponent(cmd.designSystemId)}`
           : "/design-systems";
+      }
+      if (cmd.view === "templates") {
+        return cmd.templateId
+          ? `/templates?templateId=${encodeURIComponent(cmd.templateId)}`
+          : "/templates";
       }
       if (cmd.view === "present" && cmd.designId)
         return `/present/${cmd.designId}`;

@@ -13,6 +13,7 @@ const messages = {
   root: {
     commandActions: "Aktionen",
     commandSearch: "Suchen",
+    openAgent: "Agent öffnen",
     commandAppearance: "Darstellung",
     toggleTheme: "Design wechseln",
     extensionSignedInTitle: "Angemeldet",
@@ -48,11 +49,13 @@ const messages = {
   navigation: {
     brand: "Clips",
     library: "Bibliothek",
+    sharedWithMe: "Mit mir geteilt",
     spaces: "Bereiche",
     meetings: "Treffen",
     dictate: "Diktieren",
     archive: "Archiv",
     trash: "Papierkorb",
+    agent: "Agent",
     settings: "Einstellungen",
     notifications: "Benachrichtigungen",
     insights: "Einblicke",
@@ -82,6 +85,10 @@ const messages = {
       title: "Deine Bibliothek ist leer",
       body: "Nimm deine erste Bildschirmaufnahme auf; sie erscheint hier und ist bereit zum Teilen.",
       cta: "Ersten Clip aufnehmen",
+    },
+    shared: {
+      title: "Noch keine Clips mit dir geteilt",
+      body: "Clips, die Teammitglieder mit dir teilen, erscheinen hier.",
     },
     folder: {
       title: "Dieser Ordner ist leer",
@@ -307,6 +314,7 @@ const messages = {
     insights: "Einblicke",
     downloadForMac: "Herunterladen für Mac",
     downloadForWindows: "Herunterladen für Windows",
+    downloadForLinux: "Für Linux herunterladen",
     downloadDesktopApp: "Laden Sie die Desktop-App herunter",
     agentNativeClips: "Agent-Native Clips",
     agentNativeClipsIntro: "ist eine kostenlose,",
@@ -449,6 +457,7 @@ const messages = {
     invite: "Einladen",
     embed: "Einbetten",
     shareLink: "Teillink",
+    shareWithHumans: "Mit Menschen teilen",
     shareWithAgents: "Mit Agenten teilen",
     copyAgentPrompt: "Agent-Prompt kopieren",
     agentPrompt:
@@ -459,6 +468,8 @@ const messages = {
     retryAgentLink: "Erneut versuchen",
     gifPreview: "GIF-Vorschau",
     openPlayer: "Spieler öffnen",
+    chooseFile: "Datei auswählen",
+    remove: "Entfernen",
     downloadMp4: "Laden Sie MP4 herunter",
     embedsNeedPublic: "Für Einbettungen ist ein öffentlicher Clip erforderlich",
     embedPublicDescription:
@@ -562,7 +573,7 @@ const messages = {
   downloadRoute: {
     pageTitle: "Laden Sie Clips Desktop herunter",
     description:
-      "Zeichnen Sie Ihren Bildschirm über die Menüleiste auf. Automatisch aktualisierende Desktop-App für macOS und Windows.",
+      "Zeichnen Sie Ihren Bildschirm über die Systemleiste auf. Automatisch aktualisierende Desktop-App für macOS, Windows und Linux.",
     macSublabel: "Universell (Apple Silicon + Intel)",
     windowsSublabel: "64-Bit-MSI-Installationsprogramm",
     downloadFor: "Herunterladen für {{platform}}",
@@ -902,15 +913,6 @@ Alle sichtbaren Änderungen für Clips-Nutzer werden hier dokumentiert. Du kanns
     removeDescription:
       "{{email}} verliert den Zugriff auf diese Organisation. Du kannst die Person jederzeit erneut einladen.",
     remove: "Entfernen",
-  },
-  slackShareHint: {
-    playsInline: "Wird inline in Slack abgespielt",
-    connectedDescription:
-      "Füge diesen Link in einem verbundenen Workspace ein, um ihn inline abzuspielen.",
-    makeInline: "Inline-Wiedergabe in Slack aktivieren",
-    connectDescription:
-      "Verbinde einen Workspace, damit dieser Link als Video angezeigt wird.",
-    connect: "Verbinden",
   },
   commentsPanel: {
     disabled: "Kommentare sind für diese Aufzeichnung deaktiviert.",

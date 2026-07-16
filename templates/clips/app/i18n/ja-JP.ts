@@ -13,6 +13,7 @@ const messages = {
   root: {
     commandActions: "アクション",
     commandSearch: "検索",
+    openAgent: "エージェントを開く",
     commandAppearance: "表示",
     toggleTheme: "テーマを切り替え",
     extensionSignedInTitle: "サインインしました",
@@ -48,11 +49,13 @@ const messages = {
   navigation: {
     brand: "クリップ",
     library: "ライブラリ",
+    sharedWithMe: "自分と共有",
     spaces: "スペース",
     meetings: "ミーティング",
     dictate: "ディクテーション",
     archive: "アーカイブ",
     trash: "ゴミ箱",
+    agent: "エージェント",
     settings: "設定",
     notifications: "通知",
     insights: "インサイト",
@@ -82,6 +85,10 @@ const messages = {
       title: "ライブラリは空です",
       body: "最初の画面録画を作成すると、共有できる状態でここに表示されます。",
       cta: "最初の Clip を録画",
+    },
+    shared: {
+      title: "共有されたクリップはまだありません",
+      body: "チームメンバーがあなたと共有したクリップがここに表示されます。",
     },
     folder: {
       title: "このフォルダは空です",
@@ -300,6 +307,7 @@ const messages = {
     insights: "インサイト",
     downloadForMac: "Mac 用のダウンロード",
     downloadForWindows: "Windows 用のダウンロード",
+    downloadForLinux: "Linux 用のダウンロード",
     downloadDesktopApp: "デスクトップアプリをダウンロード",
     agentNativeClips: "Agent-Native Clips",
     agentNativeClipsIntro: "は無料の",
@@ -441,6 +449,7 @@ const messages = {
     invite: "招待",
     embed: "埋め込み",
     shareLink: "共有リンク",
+    shareWithHumans: "人と共有する",
     shareWithAgents: "エージェントと共有する",
     copyAgentPrompt: "エージェント用プロンプトをコピー",
     agentPrompt:
@@ -451,6 +460,8 @@ const messages = {
     retryAgentLink: "再試行",
     gifPreview: "GIF プレビュー",
     openPlayer: "プレーヤーを開く",
+    chooseFile: "ファイルを選択してください",
+    remove: "取り除く",
     downloadMp4: "ダウンロード",
     embedsNeedPublic: "埋め込みにはパブリッククリップが必要です",
     embedPublicDescription:
@@ -554,7 +565,7 @@ const messages = {
   downloadRoute: {
     pageTitle: "ダウンロード",
     description:
-      "メニューバーから画面を録画します。 macOS および Windows のデスクトップ アプリを自動更新します。",
+      "システムトレイから画面を録画します。macOS、Windows、Linux 向けの自動更新デスクトップアプリです。",
     macSublabel: "ユニバーサル (Apple Silicon + Intel)",
     windowsSublabel: "64 ビット MSI インストーラー",
     downloadFor: "翻訳済み: Download for {{platform}}",
@@ -884,15 +895,6 @@ Clips のユーザー向けの主な変更はここに記録されます。コ�
     removeDescription:
       "{{email}} はこの組織へのアクセスを失います。いつでも再招待できます。",
     remove: "削除",
-  },
-  slackShareHint: {
-    playsInline: "Slack 内でインライン再生",
-    connectedDescription:
-      "このリンクを接続済みワークスペースに貼り付けるとインライン再生されます。",
-    makeInline: "Slack でインライン再生する",
-    connectDescription:
-      "ワークスペースを接続すると、このリンクが動画として展開されます。",
-    connect: "接続",
   },
   commentsPanel: {
     disabled: "この録画ではコメントが無効です。",

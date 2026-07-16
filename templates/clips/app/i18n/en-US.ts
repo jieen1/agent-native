@@ -13,6 +13,7 @@ const messages = {
   root: {
     commandActions: "Actions",
     commandSearch: "Search",
+    openAgent: "Open Agent",
     commandAppearance: "Appearance",
     toggleTheme: "Toggle theme",
     extensionSignedInTitle: "Signed in",
@@ -48,11 +49,13 @@ const messages = {
   navigation: {
     brand: "Clips",
     library: "Library",
+    sharedWithMe: "Shared with me",
     spaces: "Spaces",
     meetings: "Meetings",
     dictate: "Dictate",
     archive: "Archive",
     trash: "Trash",
+    agent: "Agent",
     settings: "Settings",
     notifications: "Notifications",
     insights: "Insights",
@@ -81,6 +84,10 @@ const messages = {
       title: "Your library is empty",
       body: "Capture your first screen recording and it'll land here, ready to share.",
       cta: "Record your first Clip",
+    },
+    shared: {
+      title: "No clips shared with you yet",
+      body: "Clips that teammates share with you will appear here.",
     },
     folder: {
       title: "This folder is empty",
@@ -293,6 +300,7 @@ const messages = {
     insights: "Insights",
     downloadForMac: "Download for Mac",
     downloadForWindows: "Download for Windows",
+    downloadForLinux: "Download for Linux",
     downloadDesktopApp: "Download desktop app",
     agentNativeClips: "Agent-Native Clips",
     agentNativeClipsIntro: "is a free,",
@@ -432,6 +440,7 @@ const messages = {
     invite: "Invite",
     embed: "Embed",
     shareLink: "Share link",
+    shareWithHumans: "Share with humans",
     shareWithAgents: "Share with agents",
     copyAgentPrompt: "Copy agent prompt",
     agentPrompt:
@@ -442,6 +451,8 @@ const messages = {
     retryAgentLink: "Retry",
     gifPreview: "GIF preview",
     openPlayer: "Open player",
+    chooseFile: "Choose file",
+    remove: "Remove",
     downloadMp4: "Download MP4",
     embedsNeedPublic: "Embeds need a public clip",
     embedPublicDescription:
@@ -543,7 +554,7 @@ const messages = {
   downloadRoute: {
     pageTitle: "Download Clips Desktop",
     description:
-      "Record your screen from the menu bar. Auto-updating desktop app for macOS and Windows.",
+      "Record your screen from the system tray. Auto-updating desktop app for macOS, Windows, and Linux.",
     macSublabel: "Universal (Apple Silicon + Intel)",
     windowsSublabel: "64-bit MSI installer",
     downloadFor: "Download for {{platform}}",
@@ -873,14 +884,6 @@ All notable user-facing changes to Clips are documented here. Open it any time f
     removeDescription:
       "{{email}} will lose access to this organization. You can always invite them back.",
     remove: "Remove",
-  },
-  slackShareHint: {
-    playsInline: "Plays inline in Slack",
-    connectedDescription:
-      "Paste this link in any connected workspace to play it inline.",
-    makeInline: "Make it play inline in Slack",
-    connectDescription: "Connect a workspace so this link unfurls as a video.",
-    connect: "Connect",
   },
   commentsPanel: {
     disabled: "Comments are disabled for this recording.",

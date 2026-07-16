@@ -15,6 +15,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { isDirectPillClick, type ScreenPoint } from "../lib/pill-interaction";
 import { speakerFor } from "../lib/transcription-engine";
 import { LiveTranscript, type FinalLine } from "./live-transcript";
 import { PillLogo } from "./pill-logo";
@@ -83,6 +84,7 @@ export function RecordingPill() {
   const sysCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const stopFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragStartScreenPointRef = useRef<ScreenPoint | null>(null);
 
   useEffect(() => {
     const unlistens: Array<() => void> = [];
@@ -106,11 +108,22 @@ export function RecordingPill() {
           meetingId: ev.payload?.meetingId ?? null,
           mode: ev.payload?.mode ?? "clip",
         };
+        const prev = ctxRef.current;
+        const isSameSession =
+          prev.meetingId === next.meetingId && prev.mode === next.mode;
         ctxRef.current = next;
         setCtx(next);
+        // The Rust side re-shows (and re-emits this event for) the same pill
+        // window whenever the tray icon re-triggers `recording_pill_show`
+        // (e.g. toggling the popover) while a meeting is already in progress.
+        // Only reset session state below when the meeting/mode actually
+        // changed — otherwise an in-progress meeting's timer, transcript, and
+        // notes would wipe out on every tray click.
+        if (isSameSession) return;
         // Reset timer on new context.
         startedAtRef.current = Date.now();
         setElapsed(0);
+        setPaused(false);
         // The Rust side reuses the pill window across recordings, so the
         // component never unmounts. Reset stop state explicitly when a
         // new recording session begins, otherwise the Stop button stays
@@ -137,6 +150,21 @@ export function RecordingPill() {
           stopFallbackRef.current = null;
         }
       }),
+    );
+    trackListen(
+      listen<{ paused: boolean; elapsedMs: number }>(
+        "clips:recorder-state",
+        (ev) => {
+          // Meeting capture has its own optimistic pause state. Ordinary clips
+          // follow the recorder's authoritative broadcast so this reused pill
+          // cannot drift or emit an inverted command.
+          if (ctxRef.current.mode !== "clip") return;
+          setPaused(!!ev.payload.paused);
+          setElapsed(
+            Math.max(0, Math.floor((ev.payload.elapsedMs ?? 0) / 1000)),
+          );
+        },
+      ),
     );
     trackListen(
       listen<{ meetingId: string; initialNotes: string }>(
@@ -240,7 +268,9 @@ export function RecordingPill() {
 
   // Elapsed timer.
   useEffect(() => {
-    if (paused) return;
+    // Clip recordings already broadcast their pause-aware elapsed time every
+    // 500ms. Keep the local wall clock only for meeting mode.
+    if (paused || ctx.mode === "clip") return;
     tickRef.current = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
     }, 500);
@@ -248,7 +278,7 @@ export function RecordingPill() {
       if (tickRef.current) clearInterval(tickRef.current);
       tickRef.current = null;
     };
-  }, [paused]);
+  }, [ctx.mode, paused]);
 
   // Dual-stream "dancing bars" meter — one discrete vertical-bar group per
   // source (Granola/Wispr-style VU meter, not a continuous waveform line).
@@ -332,9 +362,18 @@ export function RecordingPill() {
     );
 
     const startMs = Date.now();
+    let lastDrawMs = 0;
+    // A bar meter reads the same to the eye well below display refresh rate
+    // (60-120Hz); cap the actual draw work to ~20fps while still scheduling
+    // via rAF every frame so the loop still pauses when the pill is hidden.
+    const FRAME_INTERVAL_MS = 1000 / 20;
     const tick = () => {
+      rafRef.current = requestAnimationFrame(tick);
+      const nowMs = Date.now();
+      if (nowMs - lastDrawMs < FRAME_INTERVAL_MS) return;
+      lastDrawMs = nowMs;
       // Modulo prevents float precision loss on long recordings.
-      const t = (Date.now() - startMs) % 1_000_000;
+      const t = (nowMs - startMs) % 1_000_000;
       for (const s of setups) {
         const target = Math.min(1, s.levelRef.current * s.gain);
 
@@ -365,7 +404,6 @@ export function RecordingPill() {
         }
         s.ctx2d.shadowBlur = 0;
       }
-      rafRef.current = requestAnimationFrame(tick);
     };
     tick();
     return () => {
@@ -389,7 +427,7 @@ export function RecordingPill() {
 
   async function onPauseClick() {
     const nextPaused = !paused;
-    setPaused(nextPaused);
+    if (ctxRef.current.mode === "meeting") setPaused(nextPaused);
     emit(nextPaused ? "clips:recorder-pause" : "clips:recorder-resume").catch(
       () => {},
     );
@@ -460,11 +498,19 @@ export function RecordingPill() {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest("[data-no-drag]")) return;
+    dragStartScreenPointRef.current = { x: e.screenX, y: e.screenY };
     getCurrentWindow()
       .startDragging()
       .catch((err) => {
         console.warn("[clips-pill] startDragging failed", err);
       });
+  };
+
+  const handlePillMediaClick = (e: React.MouseEvent) => {
+    const start = dragStartScreenPointRef.current;
+    dragStartScreenPointRef.current = null;
+    if (!isDirectPillClick(start, { x: e.screenX, y: e.screenY })) return;
+    void toggleExpanded();
   };
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
@@ -491,9 +537,7 @@ export function RecordingPill() {
         >
           <div
             className="pill-media"
-            onClick={
-              !expanded && !detached ? () => void toggleExpanded() : undefined
-            }
+            onClick={!expanded && !detached ? handlePillMediaClick : undefined}
           >
             <PillLogo className="pill-logo" />
             {hasSystemAudio ? (

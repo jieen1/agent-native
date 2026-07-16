@@ -5,7 +5,7 @@ description: "エージェント ネイティブでの skills の動作: フレ�
 
 # Skills ガイド
 
-Skills は、エージェントに特定のパターンとワークフローに関する深い知識を提供する Markdown ファイルです。
+Skills は、特定のパターンやワークフローに関する深い知識をエージェントに与える Markdown ファイルです。すべてのルールを 1 つのシステムプロンプトに詰め込むのではなく、実際に必要なタスクでのみエージェントが読み込む、目的別のファイルに知識を分割します。これにより、デフォルトのコンテキストを小さく保ちながら、必要に応じて深く掘り下げられます。
 
 ## skills とは {#what-are-skills}
 
@@ -120,9 +120,11 @@ Skills は `.agents/skills/<name>/SKILL.md` にあり、エージェント向け
 
 現在の app-backed skills には、Plan の `visual-plan`、`visual-recap`、`visualize-repo`、Design の `visual-edit`、Assets の `assets`、repo-backed docs/blog/MDX editing 用の `content` が含まれます。
 
-アプリベースの skills は、エージェント ネイティブ アプリをスキル マーケットプレイス アーティファクトとしてパッケージ化します。バンドルには、エージェントの指示、エクスポートされた skills、MCP コネクタ メタデータ、ホスト/ローカルの起動指示、MCP アプリなどの UI サーフェスを含めることができます。
+<Callout tone="info">
 
-> **詳細は以下の通り:** アプリベースの skills の仕組み (マニフェスト形式、CLI コマンド、マーケットプレイス アダプター、自動更新ハッシュ) は、[App-backed skills — full details](#app-backed-skills-full) で説明されています。
+**詳細は以下の通り:** アプリベースの skills の仕組み (マニフェスト形式、CLI コマンド、マーケットプレイス アダプター、自動更新ハッシュ) は、[App-backed skills — full details](#app-backed-skills-full) で説明されています。
+
+</Callout>
 
 ## カスタム skills の作成 {#creating-skills}
 
@@ -177,7 +179,11 @@ Skills は `.agents/skills/<name>/SKILL.md` にあり、エージェント向け
 
 ファイルを `.agents/skills/my-skill/SKILL.md` に保存します。ディレクトリ名は、frontmatter の `name` と一致する必要があります。
 
-> **こちらも参照:** スキルの説明を言葉で表現する方法、段階的な開示を適用する方法、`AGENTS.md` をスリムに保つ方法については、[Writing Agent Instructions](/docs/writing-agent-instructions) を参照してください。どちらのページでも、実行例として `project-imports` スキルを使用しています。
+<Callout tone="info">
+
+**こちらも参照:** スキルの説明を言葉で表現する方法、段階的な開示を適用する方法、`AGENTS.md` をスリムに保つ方法については、[Writing Agent Instructions](/docs/writing-agent-instructions) を参照してください。どちらのページでも、実行例として `project-imports` スキルを使用しています。
+
+</Callout>
 
 ## スキルの範囲: ランタイム vs 開発 {#skill-scope}
 
@@ -267,33 +273,37 @@ scope: dev
 
 </Diagram>
 
-> **こちらも参照:** スキルの説明を言葉で表現する方法、段階的な開示を適用する方法、`AGENTS.md` を無駄のないものに保つ方法については、[Writing Agent Instructions](/docs/writing-agent-instructions) を参照してください。
-
 ## Skills 対 AGENTS.md {#skills-vs-agents-md}
 
-> **AGENTS.md** — 概要。すべてのスクリプトをリストし、データ モデルを説明し、アプリのアーキテクチャを説明します。エージェントはアプリを理解するために最初にこれを読みます。
->
-> **Skills** — 詳細。各スキルは、詳細なルール、コード例、実行/禁止リストを備えた 1 つのパターンに焦点を当てています。エージェントは、特定のパターンに従う必要があるときにこれらを読み取ります。
+<Callout tone="info">
+
+**AGENTS.md** — 概要。すべてのスクリプトをリストし、データ モデルを説明し、アプリのアーキテクチャを説明します。エージェントはアプリを理解するために最初にこれを読みます。
+
+**Skills** — 詳細。各スキルは、詳細なルール、コード例、実行/禁止リストを備えた 1 つのパターンに焦点を当てています。エージェントは、特定のパターンに従う必要があるときにこれらを読み取ります。
+
+</Callout>
 
 `AGENTS.md` は、アプリが「何をする」かをエージェントに伝えます。 Skills は、エージェントに特定のことを正しく実行する方法を指示します。両方が必要です。方向指定には `AGENTS.md`、実行には skills です。
 
 ## Skills とメモリ {#skills-vs-memory}
 
-> **Skills** — 作成された再利用可能なハウツー ガイド。すべてのユーザーに適用され、タスクが一致したときにオンデマンドで呼び出されます。
->
-> **メモリ (`LEARNINGS.md` / `memory/MEMORY.md`)** — プロジェクトの共有学習と個人の構造化メモリが毎ターン読み込まれます。
+<Callout tone="info">
+
+**Skills** — 作成された再利用可能なハウツー ガイド。すべてのユーザーに適用され、タスクが一致したときにオンデマンドで呼び出されます。
+
+**メモリ (`LEARNINGS.md` / `memory/MEMORY.md`)** — プロジェクトの共有学習と個人の構造化メモリが毎ターン読み込まれます。
+
+</Callout>
 
 その知識がアプリで作業しているすべての人に当てはまる場合 (「サブクエリよりも常に CTE を優先する」)、それはスキルまたは共有 `LEARNINGS.md` です。 _この特定のユーザー_ (「スティーブは簡潔な回答が好きです」) に関するものであれば、`memory/MEMORY.md` に属します。完全な治療法については、[Workspace Memory](/docs/workspace#memory) を参照してください。
 
----
+## Skills と SQL リソース {#skills-vs-resources}
 
-# 上級
+このページでは、skill を `.agents/skills/<name>/SKILL.md` にあるファイルとして説明します。[Workspace](/docs/workspace#skills) では、同じ skill を `skills/<slug>/SKILL.md` パスにある workspace／shared／personal スコープの SQL リソースとして説明します。これは、同じ概念を別の角度から見たものです。Code モードはファイルを直接読み書きし、App モードはファイルシステムがなくても動作するようにリソース行として保存します。どちらの場合も、このページの形式で内容を作成してください。
 
 ## アプリによる skills — 詳細 {#app-backed-skills-full}
 
-App-backed skills は、エージェント ネイティブ アプリをスキル マーケットプレイス アーティファクトとしてパッケージ化します。
-バンドルには、エージェントの指示、エクスポートされた skills、MCP コネクタを含めることができます
-メタデータ、ホスト/ローカルの起動手順、MCP アプリなどの UI サーフェス。
+[アプリベースの skills](#app-backed-skills) を支えるマニフェスト形式、CLI コマンド、マーケットプレイスアダプター、自動更新ハッシュの詳細:
 
 アプリでサポートされる各スキルは、アプリ ルートの `agent-native.app-skill.json` で始まります:
 
@@ -303,7 +313,7 @@ App-backed skills は、エージェント ネイティブ アプリをスキル
   "id": "assets",
   "hosted": {
     "url": "https://assets.agent-native.com",
-    "mcpUrl": "https://assets.agent-native.com/_agent-native/mcp"
+    "mcpUrl": "https://assets.agent-native.com/mcp"
   },
   "mcp": { "serverName": "agent-native-assets" },
   "skills": [
@@ -410,3 +420,10 @@ npx @agent-native/core@latest skills update scaffold --project
 `AGENTS.md` と `.agents/skills` は正規のままです。 update コマンドは修復も行います
 Claude コードが認識するための Claude 互換性リンク (`CLAUDE.md` および `.claude/skills`)
 2 番目のコピーを維持せずに同じ手順を実行します。
+
+## 次のステップ {#whats-next}
+
+- [**エージェント指示の作成**](/docs/writing-agent-instructions) — skill の説明を記述し、AGENTS.md、skills、メモリにガイダンスを分割する
+- [**Workspace**](/docs/workspace#skills) — App モードで skills が SQL リソースとして保存される場所
+- [**エージェントメンション**](/docs/agent-mentions) — チャットで skill を呼び出す `/` コマンドトリガー
+- [**Plan プラグインとマーケットプレイス**](/docs/plan-plugin) — 実際のアプリベース skill のインストールと自動更新の全体フロー

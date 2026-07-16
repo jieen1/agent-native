@@ -3,6 +3,13 @@ export {
   type CreateServerOptions,
   type EnvKeyConfig,
 } from "./create-server.js";
+export {
+  AGENT_BACKGROUND_PROCESSOR_FIELD,
+  AGENT_BACKGROUND_PROCESSOR_ROUTE,
+  AGENT_BACKGROUND_PROCESSOR_ROUTE_FIELD,
+  dispatchPathTargetsNetlifyBackgroundFunction,
+  resolveDurableBackgroundDispatchPath,
+} from "../agent/durable-background.js";
 
 export {
   readBody,
@@ -107,9 +114,25 @@ export {
 } from "../agent/index.js";
 export {
   actionsToEngineTools,
+  executeAgentToolCall,
   getOwnerActiveApiKey,
   runAgentLoop,
+  type AgentToolCallExecutionResult,
+  type ExecuteAgentToolCallOptions,
 } from "../agent/production-agent.js";
+export {
+  mountRealtimeVoiceRoutes,
+  realtimeVoiceSafetyIdentifier,
+  REALTIME_VOICE_MAX_SDP_BYTES,
+  REALTIME_VOICE_MAX_TOOL_BODY_BYTES,
+  REALTIME_VOICE_MAX_TOOL_OUTPUT_CHARS,
+  REALTIME_VOICE_SESSION_PATH,
+  REALTIME_VOICE_TOOL_PATH,
+  type MountRealtimeVoiceRoutesOptions,
+  type RealtimeVoiceRequestContext,
+  type RealtimeVoiceToolExecutionRequest,
+  type RealtimeVoiceToolExecutionResult,
+} from "./realtime-voice.js";
 export {
   getStoredModelForEngine,
   resolveEngine,
@@ -218,6 +241,7 @@ export {
   renderAgentNativeOgImageSvg,
   type AgentNativeOgImageInput,
 } from "./social-og-image.js";
+export { resolveOgFontFiles } from "./og-fonts.js";
 export {
   createBrowserSessionActionEntries,
   type CreateBrowserSessionActionEntriesOptions,
@@ -297,7 +321,14 @@ export {
 export {
   mountActionRoutes,
   type MountActionRoutesOptions,
+  type ActionRouteAuthAdapter,
+  type ActionRouteResolvedCaller,
 } from "./action-routes.js";
+export {
+  AGENT_RUN_OWNER_CONTEXT_KEY,
+  seedAgentRunOwnerContext,
+  type AgentRunOwnerContext,
+} from "./agent-run-context.js";
 export {
   runWithRequestContext,
   hasRequestContext,
@@ -339,12 +370,31 @@ export {
   slackAdapter,
   telegramAdapter,
   whatsappAdapter,
+  discordAdapter,
+  microsoftTeamsAdapter,
   emailAdapter,
+  assertPlatformCapability,
   type PlatformAdapter,
   type IncomingMessage,
   type OutgoingMessage,
+  type PlatformAdapterCapabilities,
+  type ImmediateWebhookResponse,
   type IntegrationStatus,
   type IntegrationsPluginOptions,
+  type IntegrationExecutionContext,
+  BUILT_IN_INTEGRATION_CATALOG,
+  INTEGRATION_CATEGORIES,
+  getIntegrationCatalogEntry,
+  listBuiltInChannelIntegrations,
+  listIntegrationCatalog,
+  type BuiltInChannelId,
+  type ChannelCapabilities,
+  type IntegrationAvailability,
+  type IntegrationCatalogEntry,
+  type IntegrationCategory,
+  type IntegrationCredentialRequirement,
+  type IntegrationIconKey,
+  type IntegrationSupportMaturity,
 } from "../integrations/index.js";
 
 export {

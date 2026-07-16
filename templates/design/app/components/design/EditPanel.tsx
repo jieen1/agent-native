@@ -24,10 +24,11 @@ import {
 import { propNameToDataAttribute } from "@shared/component-model";
 import {
   listInteractionStates,
-  readStateStyles,
+  readResolvedStateStyles,
   type InteractionState,
 } from "@shared/interaction-states";
 import {
+  IconAdjustmentsHorizontal,
   IconAlignCenter,
   IconAlignJustified,
   IconAlignLeft,
@@ -73,6 +74,7 @@ import {
   IconLink,
   IconLinkOff,
   IconMinus,
+  IconMessageCircle,
   IconPerspective,
   IconPhoto,
   IconPlus,
@@ -131,6 +133,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -186,7 +189,7 @@ import {
 } from "./edit-panel/element-classification";
 import {
   deriveLockedAspectSize,
-  elementIdentityKey,
+  interactionStateSelectionKey,
   useAspectRatioLock,
 } from "./edit-panel/element-identity";
 import {
@@ -227,6 +230,7 @@ import {
 } from "./edit-panel/inspector-controls";
 import {
   authoredStyleValue,
+  elementWithInteractionStateStyles,
   resolveInteractionStateValue,
 } from "./edit-panel/interaction-state-helpers";
 import {
@@ -334,6 +338,10 @@ import {
   GlslShaderEffectSection,
   type GlslShaderPanelContext,
 } from "./inspector/GlslShaderPanel";
+import {
+  ReviewCommentsPanel,
+  type ReviewCommentsPanelProps,
+} from "./ReviewCommentsPanel";
 import { ReviewPanel } from "./ReviewPanel";
 import type { ReviewPanelProps } from "./ReviewPanel";
 import type { StatesPanelProps } from "./StatesPanel";
@@ -383,7 +391,15 @@ export { ComponentSection };
 export { extractDocumentColorPalette, type DocumentColorSourceFile };
 export type { StyleChangeHandler, StyleChangeMeta, StylesChangeHandler };
 
-export type InspectorTab = "design" | "tweaks";
+export function mergeOptimisticInteractionStateStyles(
+  persisted: Record<string, string> | undefined,
+  pending: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!persisted && !pending) return undefined;
+  return { ...(persisted ?? {}), ...(pending ?? {}) };
+}
+
+export type InspectorTab = "design" | "tweaks" | "comments";
 
 interface EditPanelProps {
   selectedElement: ElementInfo | null;
@@ -407,6 +423,10 @@ interface EditPanelProps {
   fileId?: string;
   /** Latest active file HTML, used to compose rapid sequential source edits. */
   activeContent?: string;
+  /** Optimistic localhost state styles that are not persisted into activeContent. */
+  pendingInteractionStateStyles?: Partial<
+    Record<InteractionState, Record<string, string>>
+  >;
   /** Server revision for activeContent. */
   activeFileUpdatedAt?: string | null;
   /**
@@ -442,6 +462,10 @@ interface EditPanelProps {
   statesPanelProps?: Omit<StatesPanelProps, "designId">;
   /** Props forwarded to the ReviewPanel (§6.5). */
   reviewPanelProps?: Omit<ReviewPanelProps, "className">;
+  /** Persisted design review comments and feedback queue. */
+  reviewCommentsPanelProps?: ReviewCommentsPanelProps;
+  /** Open review-thread count shown on the inspector tab. */
+  reviewCommentsCount?: number;
   // -------------------------------------------------------------------------
   // Component section (§6.1)
   // When a component instance is selected, pass its node id here to unlock
@@ -1077,31 +1101,82 @@ function InspectorTabsHeader({
   activeTab,
   onActiveTabChange,
   trailing,
+  commentsCount = 0,
+  compact = false,
 }: {
   activeTab: InspectorTab;
   onActiveTabChange: (tab: InspectorTab) => void;
   trailing?: ReactNode;
+  commentsCount?: number;
+  compact?: boolean;
 }) {
   const t = useT();
 
   return (
-    <div className="flex min-h-8 shrink-0 items-center justify-between gap-1 border-b border-border/90 px-2 py-1">
+    <div className="flex min-h-8 min-w-0 shrink-0 items-center justify-between gap-1 border-b border-border/90 px-2 py-1">
       <Tabs
         value={activeTab}
         onValueChange={(value) => onActiveTabChange(value as InspectorTab)}
+        className="min-w-0"
       >
-        <TabsList className="h-7 justify-start gap-0.5 rounded-none bg-transparent p-0">
+        <TabsList className="h-7 max-w-full justify-start gap-0.5 overflow-hidden rounded-none bg-transparent p-0">
           <TabsTrigger
             value="design"
-            className="h-6 rounded-md px-1.5 !text-[11px] font-semibold text-muted-foreground shadow-none transition-colors hover:text-foreground data-[state=active]:bg-[var(--design-editor-panel-raised-bg)] data-[state=active]:text-foreground data-[state=active]:shadow-none"
+            aria-label={t("navigation.brand")}
+            className={cn(
+              "h-6 rounded-md !text-[11px] font-semibold text-muted-foreground shadow-none transition-colors hover:text-foreground data-[state=active]:bg-[var(--design-editor-panel-raised-bg)] data-[state=active]:text-foreground data-[state=active]:shadow-none",
+              compact ? "w-7 px-0" : "px-1.5",
+            )}
           >
-            {"Design" /* i18n-ignore design inspector tab */}
+            {compact ? (
+              <IconBrush className="size-3.5" />
+            ) : (
+              t("navigation.brand")
+            )}
+          </TabsTrigger>
+          <TabsTrigger
+            value="comments"
+            aria-label={
+              commentsCount > 0
+                ? t("review.commentsTab", { count: commentsCount })
+                : t("review.comments")
+            }
+            className={cn(
+              "group h-6 min-w-0 rounded-md !text-[11px] font-semibold text-muted-foreground shadow-none transition-colors hover:text-foreground data-[state=active]:bg-[var(--design-editor-panel-raised-bg)] data-[state=active]:text-foreground data-[state=active]:shadow-none",
+              compact ? "w-auto gap-0.5 px-1" : "gap-1 px-1.5",
+            )}
+          >
+            {compact ? (
+              <IconMessageCircle className="size-3.5" />
+            ) : (
+              <span className="truncate">{t("review.comments")}</span>
+            )}
+            {commentsCount > 0 ? (
+              <span
+                className={cn(
+                  "flex shrink-0 items-center justify-center rounded-full bg-muted tabular-nums text-muted-foreground group-data-[state=active]:bg-background",
+                  compact
+                    ? "h-3.5 min-w-3.5 px-0.5 text-[8px]"
+                    : "h-4 min-w-4 px-1 text-[9px]",
+                )}
+              >
+                {commentsCount > 99 ? "99+" : commentsCount}
+              </span>
+            ) : null}
           </TabsTrigger>
           <TabsTrigger
             value="tweaks"
-            className="h-6 rounded-md px-1.5 !text-[11px] font-semibold text-muted-foreground shadow-none transition-colors hover:text-foreground data-[state=active]:bg-[var(--design-editor-panel-raised-bg)] data-[state=active]:text-foreground data-[state=active]:shadow-none"
+            aria-label={t("designEditor.tweaks")}
+            className={cn(
+              "h-6 rounded-md !text-[11px] font-semibold text-muted-foreground shadow-none transition-colors hover:text-foreground data-[state=active]:bg-[var(--design-editor-panel-raised-bg)] data-[state=active]:text-foreground data-[state=active]:shadow-none",
+              compact ? "w-7 px-0" : "px-1.5",
+            )}
           >
-            {t("designEditor.tweaks")}
+            {compact ? (
+              <IconAdjustmentsHorizontal className="size-3.5" />
+            ) : (
+              t("designEditor.tweaks")
+            )}
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -1347,11 +1422,14 @@ export const EditPanel = memo(function EditPanel({
   exporting = false,
   fileId,
   activeContent,
+  pendingInteractionStateStyles,
   activeFileUpdatedAt,
   files,
   designId,
   onComponentPropApplied,
   reviewPanelProps,
+  reviewCommentsPanelProps,
+  reviewCommentsCount = 0,
   componentNodeId,
   componentSwapPickerRequest,
   sourceCapabilities = [],
@@ -1384,6 +1462,14 @@ export const EditPanel = memo(function EditPanel({
   // silently active (matches the export-settings reset effect below).
   const [interactionState, setInteractionState] =
     useState<ActiveInteractionState>(null);
+  // Own the Radix menu state above InteractionStatePanel's conditional
+  // element subtree. A source commit can briefly remove/recreate that subtree
+  // while the selected runtime element is reconciled; panel-local uncontrolled
+  // state interpreted that refresh as an outside close immediately after the
+  // user's click. This state survives the transient remount and is reset only
+  // when the stable selection identity genuinely changes.
+  const [interactionStateMenuOpen, setInteractionStateMenuOpen] =
+    useState(false);
 
   const effectiveSelectedElements = useMemo(
     () =>
@@ -1450,8 +1536,25 @@ export const EditPanel = memo(function EditPanel({
     !selectionAlreadyComponent,
   );
   const selectedElementKey = inspectorElement
-    ? `${selectedCount}:${elementIdentityKey(inspectorElement)}`
+    ? interactionStateSelectionKey(inspectorElement, fileId, selectedCount)
     : "none";
+  // A committed source update can make the projected inspector element
+  // disappear for one render before the iframe's refreshed element-select
+  // payload restores the exact same stable selection. Keep the state picker
+  // mounted through that gap while a non-default state or its menu is active;
+  // unmounting Radix's root synchronously reports onOpenChange(false), which
+  // otherwise closes a menu the user opened during the refresh. A genuine
+  // selection change still resets both values in the selectedElementKey
+  // effect below, so this cache cannot carry a picker to another element.
+  const lastInteractionStateSourceIdRef = useRef<string | null>(null);
+  if (selectedCount <= 1 && inspectorElement?.sourceId) {
+    lastInteractionStateSourceIdRef.current = inspectorElement.sourceId;
+  }
+  const shouldRenderInteractionStatePanel = Boolean(
+    (selectedCount <= 1 && inspectorElement?.sourceId) ||
+    ((interactionState !== null || interactionStateMenuOpen) &&
+      lastInteractionStateSourceIdRef.current),
+  );
   const selectionHasTextElement = effectiveSelectedElements.some((element) =>
     isTextElement(element),
   );
@@ -1493,6 +1596,7 @@ export const EditPanel = memo(function EditPanel({
   // "multi-selection", both of which the state selector doesn't support.
   useEffect(() => {
     setInteractionState(null);
+    setInteractionStateMenuOpen(false);
     onInteractionStateChange?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omits onInteractionStateChange: this only needs to fire when the SELECTION changes, not when the parent passes a new callback identity.
   }, [selectedElementKey]);
@@ -1518,8 +1622,17 @@ export const EditPanel = memo(function EditPanel({
     const nodeId = inspectorElement?.sourceId;
     if (!nodeId) return undefined;
     const states = listInteractionStates(activeContent, nodeId);
-    return states.length > 0 ? new Set(states) : undefined;
-  }, [activeContent, selectedCount, inspectorElement?.sourceId]);
+    const pendingStates = Object.entries(pendingInteractionStateStyles ?? {})
+      .filter(([, styles]) => styles && Object.keys(styles).length > 0)
+      .map(([state]) => state as InteractionState);
+    const combined = [...states, ...pendingStates];
+    return combined.length > 0 ? new Set(combined) : undefined;
+  }, [
+    activeContent,
+    pendingInteractionStateStyles,
+    selectedCount,
+    inspectorElement?.sourceId,
+  ]);
 
   // The active state's declared property/value overrides for the selected
   // element, used below to resolve each style-section field's displayed
@@ -1533,13 +1646,34 @@ export const EditPanel = memo(function EditPanel({
     }
     const nodeId = inspectorElement?.sourceId;
     if (!nodeId) return undefined;
-    return readStateStyles(activeContent, nodeId, interactionState);
+    return mergeOptimisticInteractionStateStyles(
+      readResolvedStateStyles(
+        activeContent,
+        nodeId,
+        interactionState,
+        breakpointContext?.activeWidthPx,
+      ),
+      pendingInteractionStateStyles?.[interactionState],
+    );
   }, [
     activeContent,
     interactionState,
     selectedCount,
     inspectorElement?.sourceId,
+    breakpointContext?.activeWidthPx,
+    pendingInteractionStateStyles,
   ]);
+
+  const stateResolvedInspectorElement = useMemo(
+    () =>
+      inspectorElement
+        ? elementWithInteractionStateStyles(
+            inspectorElement,
+            activeInteractionStateStyles,
+          )
+        : null,
+    [activeInteractionStateStyles, inspectorElement],
+  );
 
   // Motion keyframe diamonds (Figma Motion parity) — see `motionKeyframeState`
   // on EditPanelProps. `undefined` (feature off, or a multi-selection, which
@@ -1636,353 +1770,367 @@ export const EditPanel = memo(function EditPanel({
   const userScrollIntentRef = useRef(false);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Figma replaces the entire right panel with the size-preset list while the
-  // Frame tool is armed — regardless of which inspector tab (Design/Tweaks)
-  // was showing beforehand — so this takes priority over `activeTab` below.
+  // Frame presets belong to the Design inspector. Keep Comments and Tweaks
+  // visible when the Frame tool remains armed while another tab is active.
   const showFramePresets =
-    activeTool === "frame" && Boolean(onCreateScreenFromPreset);
+    activeTab === "design" &&
+    activeTool === "frame" &&
+    Boolean(onCreateScreenFromPreset);
 
   return (
-    <div
-      className={cn(
-        "shrink-0 bg-[var(--design-editor-panel-bg)]",
-        "flex h-full min-h-0 flex-col overflow-hidden",
-      )}
-      style={{ width }}
-    >
-      <InspectorTabsHeader
-        activeTab={activeTab}
-        onActiveTabChange={handleActiveTabChange}
-        trailing={headerTrailing}
-      />
-
-      {showFramePresets ? (
-        <FramePresetsPanel
-          onPick={(preset) => onCreateScreenFromPreset?.(preset)}
+    <TooltipProvider delayDuration={300} skipDelayDuration={400}>
+      <div
+        className={cn(
+          "shrink-0 bg-[var(--design-editor-panel-bg)]",
+          "flex h-full min-h-0 flex-col overflow-hidden",
+        )}
+        style={{ width }}
+      >
+        <InspectorTabsHeader
+          activeTab={activeTab}
+          onActiveTabChange={handleActiveTabChange}
+          trailing={headerTrailing}
+          commentsCount={reviewCommentsCount}
+          compact={width < 280}
         />
-      ) : activeTab === "design" ? (
-        <>
-          <SelectionHeader
-            element={inspectorElement}
-            selectedCount={selectedCount}
-            onCreateComponent={
-              canCreateComponent ? onCreateComponent : undefined
-            }
-            createComponentOpen={createComponentOpen}
-            onCreateComponentOpenChange={setCreateComponentOpen}
-            showCreateComponentAction={!selectionAlreadyComponent}
-            defaultComponentName={defaultComponentName}
-            inspectCode={
-              inspectCode && selectedElement && selectedCount <= 1
-                ? inspectCode
-                : undefined
-            }
-          />
-          {!inspectorElement && selectedScreenGeometry ? (
-            <ScreenSelectionHeader screen={selectedScreenGeometry} />
-          ) : null}
 
-          <div
-            className="design-inspector-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain"
-            onWheelCapture={() => {
-              userScrollIntentRef.current = true;
-            }}
-            onTouchMoveCapture={() => {
-              userScrollIntentRef.current = true;
-            }}
-            onScroll={() => {
-              if (!userScrollIntentRef.current) return;
-              // Mark that a scroll just happened so the click that some
-              // browsers fire at the end of a scroll gesture (or after an
-              // overscroll/rubber-band bounce) is suppressed. Crucially this
-              // runs on the scroll event — NOT on pointerdown — so it never
-              // triggers Radix's DismissableLayer "outside pointerdown"
-              // detection, which would close open inspector popovers and, once
-              // the shield is removed, allow a stray canvas pointer event to
-              // deselect the selected element (the R3 overscroll regression).
-              scrolledRecentlyRef.current = true;
-              if (scrollTimerRef.current !== null) {
-                clearTimeout(scrollTimerRef.current);
+        {showFramePresets ? (
+          <FramePresetsPanel
+            onPick={(preset) => onCreateScreenFromPreset?.(preset)}
+          />
+        ) : activeTab === "design" ? (
+          <>
+            <SelectionHeader
+              element={inspectorElement}
+              selectedCount={selectedCount}
+              onCreateComponent={
+                canCreateComponent ? onCreateComponent : undefined
               }
-              scrollTimerRef.current = setTimeout(() => {
+              createComponentOpen={createComponentOpen}
+              onCreateComponentOpenChange={setCreateComponentOpen}
+              showCreateComponentAction={!selectionAlreadyComponent}
+              defaultComponentName={defaultComponentName}
+              inspectCode={
+                inspectCode && selectedElement && selectedCount <= 1
+                  ? inspectCode
+                  : undefined
+              }
+            />
+            {!inspectorElement && selectedScreenGeometry ? (
+              <ScreenSelectionHeader screen={selectedScreenGeometry} />
+            ) : null}
+
+            <div
+              className="design-inspector-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain"
+              onWheelCapture={() => {
+                userScrollIntentRef.current = true;
+              }}
+              onTouchMoveCapture={() => {
+                userScrollIntentRef.current = true;
+              }}
+              onScroll={() => {
+                if (!userScrollIntentRef.current) return;
+                // Mark that a scroll just happened so the click that some
+                // browsers fire at the end of a scroll gesture (or after an
+                // overscroll/rubber-band bounce) is suppressed. Crucially this
+                // runs on the scroll event — NOT on pointerdown — so it never
+                // triggers Radix's DismissableLayer "outside pointerdown"
+                // detection, which would close open inspector popovers and, once
+                // the shield is removed, allow a stray canvas pointer event to
+                // deselect the selected element (the R3 overscroll regression).
+                scrolledRecentlyRef.current = true;
+                if (scrollTimerRef.current !== null) {
+                  clearTimeout(scrollTimerRef.current);
+                }
+                scrollTimerRef.current = setTimeout(() => {
+                  scrolledRecentlyRef.current = false;
+                  userScrollIntentRef.current = false;
+                  scrollTimerRef.current = null;
+                }, 300);
+              }}
+              onClickCapture={(e) => {
+                // Suppress spurious clicks (e.g. color-picker opening) that
+                // fire immediately after a scroll gesture ends. The 300ms
+                // window from the last scroll event covers both the synchronous
+                // scroll-end click and the delayed synthetic click that mobile
+                // browsers generate after a touch-scroll ends.
+                if (!scrolledRecentlyRef.current) return;
                 scrolledRecentlyRef.current = false;
                 userScrollIntentRef.current = false;
-                scrollTimerRef.current = null;
-              }, 300);
-            }}
-            onClickCapture={(e) => {
-              // Suppress spurious clicks (e.g. color-picker opening) that
-              // fire immediately after a scroll gesture ends. The 300ms
-              // window from the last scroll event covers both the synchronous
-              // scroll-end click and the delayed synthetic click that mobile
-              // browsers generate after a touch-scroll ends.
-              if (!scrolledRecentlyRef.current) return;
-              scrolledRecentlyRef.current = false;
-              userScrollIntentRef.current = false;
-              if (scrollTimerRef.current !== null) {
-                clearTimeout(scrollTimerRef.current);
-                scrollTimerRef.current = null;
-              }
-              e.stopPropagation();
-              e.preventDefault();
-            }}
-            onKeyDown={(e) => {
-              // Trap Tab within the inspector panel so it never focuses the
-              // canvas iframe. When the canvas iframe gains focus it forwards
-              // a synthetic Tab keydown to the parent window, which is picked
-              // up by the design-editor hotkey handler as "cycle file" and
-              // causes apparent deselection / overview-mode switch (bug: Tab
-              // in a numeric field deselected the canvas element).
-              if (e.key !== "Tab") return;
-              const panel = e.currentTarget;
-              const focusable = Array.from(
-                panel.querySelectorAll<HTMLElement>(
-                  'input, button, select, textarea, [tabindex]:not([tabindex="-1"])',
-                ),
-              ).filter(
-                (el) =>
-                  !el.hasAttribute("disabled") &&
-                  el.tabIndex !== -1 &&
-                  !el.closest('[aria-hidden="true"]'),
-              );
-              if (focusable.length === 0) return;
-              e.preventDefault();
-              const current = document.activeElement as HTMLElement | null;
-              const idx = current ? focusable.indexOf(current) : -1;
-              const next = e.shiftKey
-                ? focusable[(idx - 1 + focusable.length) % focusable.length]
-                : focusable[(idx + 1) % focusable.length];
-              next?.focus();
-            }}
-          >
-            {/* §6.1 Component section — shown at the top when a component
-                instance is selected. Requires designId + componentNodeId. */}
-            {designId && componentNodeId && selectedCount <= 1 && (
-              <ComponentSection
-                designId={designId}
-                fileId={fileId}
-                activeContent={activeContent}
-                activeFileUpdatedAt={activeFileUpdatedAt}
-                nodeId={componentNodeId}
-                swapPickerRequest={componentSwapPickerRequest}
-                onComponentPropApplied={onComponentPropApplied}
-                sourceCapabilities={sourceCapabilities}
-              />
-            )}
-
-            {aiActions ? (
-              <div className="border-b border-[var(--design-editor-control-border)] px-2 py-1.5">
-                {aiActions}
-              </div>
-            ) : null}
-
-            {!inspectorElement && selectedScreenGeometry ? (
-              <ScreenGeometryProperties screen={selectedScreenGeometry} />
-            ) : null}
-
-            {!inspectorElement && !selectedScreenGeometry && (
-              <PageProperties
-                styles={pageStyles}
-                onStyleChange={onStyleChange}
-                onStylesChange={onStylesChange}
-              />
-            )}
-
-            {inspectorElement && (
-              <>
-                {/* Element interaction-state selector (Default / Hover /
-                    Focus / Focus-visible / Pressed / Disabled) — Webflow-
-                    style state picker for THIS element's pseudo-class
-                    styling. Distinct from the app-level Design states in
-                    StatesPanel (Loading/Empty/Error/fixtures/captures),
-                    which apply to the whole screen, not one element. Only
-                    offered for a single, source-backed selection (needs a
-                    stable node id — see shared/interaction-states.ts). */}
-                {selectedCount <= 1 && inspectorElement.sourceId && (
-                  <InteractionStatePanel
-                    activeState={interactionState}
-                    onActiveStateChange={handleInteractionStateChange}
-                    availableStates={availableInteractionStates}
-                    statesWithOverrides={interactionStatesWithOverrides}
-                  />
-                )}
-                <PositionLayoutProperties
-                  element={inspectorElement}
-                  onStyleChange={onStyleChange}
-                  onStylesChange={onStylesChange}
-                  onAlignSelection={onAlignSelection}
-                  motionKeyframeContext={motionKeyframeFieldContext}
-                  breakpointOverrideContext={breakpointOverrideFieldContext}
-                />
-                <LayoutContextProperties
-                  element={inspectorElement}
-                  onStyleChange={onStyleChange}
-                  onStylesChange={onStylesChange}
-                  motionKeyframeContext={motionKeyframeFieldContext}
-                  breakpointOverrideContext={breakpointOverrideFieldContext}
-                />
-                <AppearanceProperties
-                  element={inspectorElement}
-                  onStyleChange={onStyleChange}
-                  motionKeyframeContext={motionKeyframeFieldContext}
-                  breakpointOverrideContext={breakpointOverrideFieldContext}
-                />
-                {selectionHasTextElement ? (
-                  <TypographyProperties
-                    element={inspectorElement}
-                    onStyleChange={onStyleChange}
-                  />
-                ) : null}
-                <FillProperties
-                  element={inspectorElement}
-                  onStyleChange={onStyleChange}
-                  onStylesChange={onStylesChange}
-                  documentColorPalette={documentColorPalette}
-                  glslShaderContext={glslShaderContext}
-                  motionKeyframeContext={motionKeyframeFieldContext}
-                  breakpointOverrideContext={breakpointOverrideFieldContext}
-                />
-                <StrokeProperties
-                  element={inspectorElement}
-                  onStyleChange={onStyleChange}
-                  onStylesChange={onStylesChange}
-                  motionKeyframeContext={motionKeyframeFieldContext}
-                  breakpointOverrideContext={breakpointOverrideFieldContext}
-                />
-                <EffectsProperties
-                  element={inspectorElement}
-                  onStyleChange={onStyleChange}
-                  onStylesChange={onStylesChange}
-                  glslShaderContext={glslShaderContext}
-                  motionKeyframeContext={motionKeyframeFieldContext}
-                />
-                <SelectionColorsProperties
-                  element={inspectorElement}
-                  onStyleChange={onStyleChange}
-                />
-                {selectionHasContainerElement ? (
-                  <LayoutGuideProperties
-                    element={inspectorElement}
-                    onStyleChange={onStyleChange}
-                  />
-                ) : null}
-              </>
-            )}
-            {onExport ? (
-              <PanelSection
-                title={t("editPanel.sections.export")}
-                actions={
-                  <SectionIconToggle
-                    label={
-                      showExportPreview
-                        ? "Hide preview" /* i18n-ignore design inspector action */
-                        : "Show preview" /* i18n-ignore design inspector action */
-                    }
-                    active={showExportPreview}
-                    onClick={() => setShowExportPreview((shown) => !shown)}
-                  >
-                    <IconPhoto className="size-3.5" />
-                  </SectionIconToggle>
+                if (scrollTimerRef.current !== null) {
+                  clearTimeout(scrollTimerRef.current);
+                  scrollTimerRef.current = null;
                 }
-              >
-                <ExportSettingsPanel
-                  key={selectedElementKey}
-                  value={exportSettings}
-                  formats={["png", "svg"]}
-                  exporting={exporting}
-                  onChange={(patch) =>
-                    setExportSettings((current) => ({ ...current, ...patch }))
-                  }
-                  onExport={onExport}
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+              onKeyDown={(e) => {
+                // Trap Tab within the inspector panel so it never focuses the
+                // canvas iframe. When the canvas iframe gains focus it forwards
+                // a synthetic Tab keydown to the parent window, which is picked
+                // up by the design-editor hotkey handler as "cycle file" and
+                // causes apparent deselection / overview-mode switch (bug: Tab
+                // in a numeric field deselected the canvas element).
+                if (e.key !== "Tab") return;
+                const panel = e.currentTarget;
+                const focusable = Array.from(
+                  panel.querySelectorAll<HTMLElement>(
+                    'input, button, select, textarea, [tabindex]:not([tabindex="-1"])',
+                  ),
+                ).filter(
+                  (el) =>
+                    !el.hasAttribute("disabled") &&
+                    el.tabIndex !== -1 &&
+                    !el.closest('[aria-hidden="true"]'),
+                );
+                if (focusable.length === 0) return;
+                e.preventDefault();
+                const current = document.activeElement as HTMLElement | null;
+                const idx = current ? focusable.indexOf(current) : -1;
+                const next = e.shiftKey
+                  ? focusable[(idx - 1 + focusable.length) % focusable.length]
+                  : focusable[(idx + 1) % focusable.length];
+                next?.focus();
+              }}
+            >
+              {/* §6.1 Component section — shown at the top when a component
+                instance is selected. Requires designId + componentNodeId. */}
+              {designId && componentNodeId && selectedCount <= 1 && (
+                <ComponentSection
+                  designId={designId}
+                  fileId={fileId}
+                  activeContent={activeContent}
+                  activeFileUpdatedAt={activeFileUpdatedAt}
+                  nodeId={componentNodeId}
+                  swapPickerRequest={componentSwapPickerRequest}
+                  onComponentPropApplied={onComponentPropApplied}
+                  sourceCapabilities={sourceCapabilities}
                 />
-                {showExportPreview ? (
-                  <ExportPreview element={inspectorElement} />
-                ) : null}
-              </PanelSection>
-            ) : null}
+              )}
 
-            {/* §6.5 Review — contextual section in Design tab.
+              {aiActions ? (
+                <div className="border-b border-[var(--design-editor-control-border)] px-2 py-1.5">
+                  {aiActions}
+                </div>
+              ) : null}
+
+              {!inspectorElement && selectedScreenGeometry ? (
+                <ScreenGeometryProperties screen={selectedScreenGeometry} />
+              ) : null}
+
+              {!inspectorElement && !selectedScreenGeometry && (
+                <PageProperties
+                  styles={pageStyles}
+                  onStyleChange={onStyleChange}
+                  onStylesChange={onStylesChange}
+                />
+              )}
+
+              {shouldRenderInteractionStatePanel ? (
+                <InteractionStatePanel
+                  activeState={interactionState}
+                  onActiveStateChange={handleInteractionStateChange}
+                  open={interactionStateMenuOpen}
+                  onOpenChange={setInteractionStateMenuOpen}
+                  availableStates={availableInteractionStates}
+                  statesWithOverrides={interactionStatesWithOverrides}
+                />
+              ) : null}
+
+              {inspectorElement && (
+                <>
+                  <PositionLayoutProperties
+                    element={stateResolvedInspectorElement ?? inspectorElement}
+                    onStyleChange={onStyleChange}
+                    onStylesChange={onStylesChange}
+                    onAlignSelection={onAlignSelection}
+                    motionKeyframeContext={motionKeyframeFieldContext}
+                    breakpointOverrideContext={breakpointOverrideFieldContext}
+                  />
+                  <LayoutContextProperties
+                    element={stateResolvedInspectorElement ?? inspectorElement}
+                    onStyleChange={onStyleChange}
+                    onStylesChange={onStylesChange}
+                    motionKeyframeContext={motionKeyframeFieldContext}
+                    breakpointOverrideContext={breakpointOverrideFieldContext}
+                  />
+                  <AppearanceProperties
+                    element={stateResolvedInspectorElement ?? inspectorElement}
+                    onStyleChange={onStyleChange}
+                    motionKeyframeContext={motionKeyframeFieldContext}
+                    breakpointOverrideContext={breakpointOverrideFieldContext}
+                  />
+                  {selectionHasTextElement ? (
+                    <TypographyProperties
+                      element={
+                        stateResolvedInspectorElement ?? inspectorElement
+                      }
+                      onStyleChange={onStyleChange}
+                    />
+                  ) : null}
+                  <FillProperties
+                    element={stateResolvedInspectorElement ?? inspectorElement}
+                    onStyleChange={onStyleChange}
+                    onStylesChange={onStylesChange}
+                    documentColorPalette={documentColorPalette}
+                    glslShaderContext={glslShaderContext}
+                    motionKeyframeContext={motionKeyframeFieldContext}
+                    breakpointOverrideContext={breakpointOverrideFieldContext}
+                  />
+                  <StrokeProperties
+                    element={stateResolvedInspectorElement ?? inspectorElement}
+                    onStyleChange={onStyleChange}
+                    onStylesChange={onStylesChange}
+                    motionKeyframeContext={motionKeyframeFieldContext}
+                    breakpointOverrideContext={breakpointOverrideFieldContext}
+                  />
+                  <EffectsProperties
+                    element={stateResolvedInspectorElement ?? inspectorElement}
+                    onStyleChange={onStyleChange}
+                    onStylesChange={onStylesChange}
+                    glslShaderContext={glslShaderContext}
+                    motionKeyframeContext={motionKeyframeFieldContext}
+                  />
+                  <SelectionColorsProperties
+                    element={stateResolvedInspectorElement ?? inspectorElement}
+                    onStyleChange={onStyleChange}
+                  />
+                  {selectionHasContainerElement ? (
+                    <LayoutGuideProperties
+                      element={
+                        stateResolvedInspectorElement ?? inspectorElement
+                      }
+                      onStyleChange={onStyleChange}
+                    />
+                  ) : null}
+                </>
+              )}
+              {onExport ? (
+                <PanelSection
+                  title={t("editPanel.sections.export")}
+                  actions={
+                    <SectionIconToggle
+                      label={
+                        showExportPreview
+                          ? "Hide preview" /* i18n-ignore design inspector action */
+                          : "Show preview" /* i18n-ignore design inspector action */
+                      }
+                      active={showExportPreview}
+                      onClick={() => setShowExportPreview((shown) => !shown)}
+                    >
+                      <IconPhoto className="size-3.5" />
+                    </SectionIconToggle>
+                  }
+                >
+                  <ExportSettingsPanel
+                    key={selectedElementKey}
+                    value={exportSettings}
+                    // "pdf" was previously missing here even though the format
+                    // dropdown's type, the default format list, and
+                    // handleDownloadPdf/createSinglePageRasterPdf were already
+                    // fully implemented — Download PDF was unreachable from any
+                    // UI surface (this panel and the "More" export menu are the
+                    // only two, and the menu has no PDF item either). Users had
+                    // no way to trigger it at all, let alone hit a pagination
+                    // or clipping bug in it.
+                    formats={["png", "svg", "pdf"]}
+                    exporting={exporting}
+                    onChange={(patch) =>
+                      setExportSettings((current) => ({ ...current, ...patch }))
+                    }
+                    onExport={onExport}
+                  />
+                  {showExportPreview ? (
+                    <ExportPreview element={inspectorElement} />
+                  ) : null}
+                </PanelSection>
+              ) : null}
+
+              {/* §6.5 Review — contextual section in Design tab.
                 Collapsed by default. Renders when reviewPanelProps is provided,
                 no designId check needed since ReviewPanel is statically fed. */}
-            {reviewPanelProps ? (
-              <PanelSection
-                title={"Review" /* i18n-ignore design inspector section */}
-                defaultCollapsed
-                actions={
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-6 rounded-md text-muted-foreground hover:text-foreground"
-                        disabled={reviewPanelProps.auditLoading}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          reviewPanelProps.onRunAudit?.();
-                        }}
-                        aria-label={
-                          "Run audit" /* i18n-ignore design inspector action */
-                        }
-                      >
-                        <IconRefresh
-                          className={cn(
-                            "size-3.5",
-                            reviewPanelProps.auditLoading && "animate-spin",
-                          )}
-                        />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {"Run audit" /* i18n-ignore design inspector action */}
-                    </TooltipContent>
-                  </Tooltip>
-                }
-              >
-                {/* ReviewPanel manages its own scroll; no extra wrapper needed. */}
-                <ReviewPanel {...reviewPanelProps} />
-              </PanelSection>
-            ) : null}
-          </div>
-        </>
-      ) : activeTab === "tweaks" ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/90 px-3">
-            <h3 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-              {t("designEditor.tweaks")}
-            </h3>
-            {onRequestTweaks ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                    aria-label={t("designEditor.addTweaks")}
-                    onClick={(event) =>
-                      handleRequestTweaks(event.currentTarget)
-                    }
-                  >
-                    <IconPlus className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("designEditor.addTweaks")}</TooltipContent>
-              </Tooltip>
-            ) : null}
-          </div>
+              {reviewPanelProps ? (
+                <PanelSection
+                  title={"Review" /* i18n-ignore design inspector section */}
+                  defaultCollapsed
+                  actions={
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-6 rounded-md text-muted-foreground hover:text-foreground"
+                          disabled={reviewPanelProps.auditLoading}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            reviewPanelProps.onRunAudit?.();
+                          }}
+                          aria-label={
+                            "Run audit" /* i18n-ignore design inspector action */
+                          }
+                        >
+                          <IconRefresh
+                            className={cn(
+                              "size-3.5",
+                              reviewPanelProps.auditLoading && "animate-spin",
+                            )}
+                          />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {"Run audit" /* i18n-ignore design inspector action */}
+                      </TooltipContent>
+                    </Tooltip>
+                  }
+                >
+                  {/* ReviewPanel manages its own scroll; no extra wrapper needed. */}
+                  <ReviewPanel {...reviewPanelProps} />
+                </PanelSection>
+              ) : null}
+            </div>
+          </>
+        ) : activeTab === "tweaks" ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/90 px-3">
+              <h3 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
+                {t("designEditor.tweaks")}
+              </h3>
+              {onRequestTweaks ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                      aria-label={t("designEditor.addTweaks")}
+                      onClick={(event) =>
+                        handleRequestTweaks(event.currentTarget)
+                      }
+                    >
+                      <IconPlus className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("designEditor.addTweaks")}</TooltipContent>
+                </Tooltip>
+              ) : null}
+            </div>
 
-          <div className="design-inspector-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <TweaksPanelContent
-              tweaks={tweaks}
-              values={tweakValues}
-              onChange={handleTweakChange}
-              onRequestTweaks={handleRequestTweaks}
-              className="px-3 py-3"
-            />
+            <div className="design-inspector-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              <TweaksPanelContent
+                tweaks={tweaks}
+                values={tweakValues}
+                onChange={handleTweakChange}
+                onRequestTweaks={handleRequestTweaks}
+                className="px-3 py-3"
+              />
+            </div>
           </div>
-        </div>
-      ) : null}
-    </div>
+        ) : activeTab === "comments" && reviewCommentsPanelProps ? (
+          <ReviewCommentsPanel {...reviewCommentsPanelProps} />
+        ) : null}
+      </div>
+    </TooltipProvider>
   );
 });

@@ -13,6 +13,7 @@ const messages = {
   root: {
     commandActions: "작업",
     commandSearch: "검색",
+    openAgent: "에이전트 열기",
     commandAppearance: "화면 표시",
     toggleTheme: "테마 전환",
     extensionSignedInTitle: "로그인됨",
@@ -48,11 +49,13 @@ const messages = {
   navigation: {
     brand: "클립",
     library: "라이브러리",
+    sharedWithMe: "나와 공유됨",
     spaces: "스페이스",
     meetings: "회의",
     dictate: "받아쓰기",
     archive: "보관함",
     trash: "휴지통",
+    agent: "에이전트",
     settings: "설정",
     notifications: "알림",
     insights: "인사이트",
@@ -81,6 +84,10 @@ const messages = {
       title: "라이브러리가 비어 있습니다",
       body: "첫 화면 녹화를 만들면 공유할 준비가 된 상태로 여기에 표시됩니다.",
       cta: "첫 Clip 녹화하기",
+    },
+    shared: {
+      title: "아직 공유된 클립이 없습니다",
+      body: "팀원이 나와 공유한 클립이 여기에 표시됩니다.",
     },
     folder: {
       title: "이 폴더는 비어 있습니다",
@@ -296,6 +303,7 @@ const messages = {
     insights: "인사이트",
     downloadForMac: "Mac용 다운로드",
     downloadForWindows: "Windows용 다운로드",
+    downloadForLinux: "Linux용 다운로드",
     downloadDesktopApp: "데스크톱 앱 다운로드",
     agentNativeClips: "Agent-Native Clips",
     agentNativeClipsIntro: "는 무료",
@@ -434,6 +442,7 @@ const messages = {
     invite: "초대",
     embed: "임베드",
     shareLink: "공유 링크",
+    shareWithHumans: "사람과 공유",
     shareWithAgents: "상담원과 공유",
     copyAgentPrompt: "에이전트 프롬프트 복사",
     agentPrompt:
@@ -444,6 +453,8 @@ const messages = {
     retryAgentLink: "다시 시도",
     gifPreview: "GIF 미리보기",
     openPlayer: "플레이어 열기",
+    chooseFile: "파일 선택",
+    remove: "제거",
     downloadMp4: "MP4 다운로드",
     embedsNeedPublic: "퍼가기에는 공개 클립이 필요합니다",
     embedPublicDescription:
@@ -546,7 +557,7 @@ const messages = {
   downloadRoute: {
     pageTitle: "Clips Desktop 다운로드",
     description:
-      "메뉴 표시줄에서 화면을 녹화하세요. macOS 및 Windows용 데스크톱 앱 자동 업데이트.",
+      "시스템 트레이에서 화면을 녹화하세요. macOS, Windows 및 Linux용 자동 업데이트 데스크톱 앱입니다.",
     macSublabel: "범용(Apple Silicon + Intel)",
     windowsSublabel: "64비트 MSI 설치 프로그램",
     downloadFor: "{{platform}}용 다운로드",
@@ -874,15 +885,6 @@ Clips의 모든 사용자 대상 변경 사항은 여기에 기록됩니다. 명
     removeDescription:
       "{{email}}은 이 조직에 대한 액세스 권한을 잃습니다. 언제든 다시 초대할 수 있습니다.",
     remove: "제거",
-  },
-  slackShareHint: {
-    playsInline: "Slack에서 인라인 재생",
-    connectedDescription:
-      "이 링크를 연결된 워크스페이스에 붙여넣으면 인라인으로 재생됩니다.",
-    makeInline: "Slack에서 인라인 재생하기",
-    connectDescription:
-      "워크스페이스를 연결하면 이 링크가 동영상으로 펼쳐집니다.",
-    connect: "연결",
   },
   commentsPanel: {
     disabled: "이 녹화에서는 댓글이 비활성화되어 있습니다.",

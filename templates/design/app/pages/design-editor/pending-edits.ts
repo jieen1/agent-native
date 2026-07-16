@@ -1,3 +1,4 @@
+import { removeBreakpointMediaDeclaration } from "@shared/breakpoint-media";
 import {
   applyVisualEdit,
   type ApplyVisualEditResult,
@@ -5,9 +6,11 @@ import {
 import {
   duplicateStatePreviewRules,
   type InteractionState,
+  upsertResponsiveStateStyles,
   upsertStateStyles,
 } from "@shared/interaction-states";
 import {
+  normalizeCssPropertyName,
   planBreakpointStyleWrite,
   utilityStem,
 } from "@shared/responsive-classes";
@@ -37,6 +40,18 @@ export interface PendingVisualStyleEdit {
   classes: string[];
   styles: Record<string, string>;
   /**
+   * Element pseudo-class being authored. Omitted for ordinary/base styles.
+   * Localhost screens cannot persist the editor's managed HTML block because
+   * their DesignFile content is the route URL, so interaction-state edits use
+   * the same guarded coding-agent handoff as other live visual edits while the
+   * iframe bridge keeps a temporary state-scoped preview.
+   */
+  interactionState?: InteractionState;
+  /** Base computed values used only to restore inspector fields after the
+   * first pending state override is undone. Runtime preview cleanup still
+   * uses `originalStyles` (empty values remove the temporary CSSOM rule). */
+  baseStyles?: Record<string, string>;
+  /**
    * Inline style values to replay when the user discards the live preview.
    * Missing authored inline values are stored as "" so the bridge removes the
    * temporary inline style and lets the app's real CSS win again.
@@ -53,6 +68,7 @@ export interface PendingVisualStyleEdit {
   breakpoint?: {
     activeWidthPx: number;
     upperBoundPx: number | null;
+    editScope?: "cascade-smaller" | "only";
   };
 }
 
@@ -133,6 +149,13 @@ export interface PendingLiveStructureEdit {
   anchorSourceId?: string | null;
   anchorSourceAnchor?: ReactSourceAnchor;
   placement: "before" | "after" | "inside";
+  /** Runtime layout semantics captured at drop time. These are required for
+   * the coding agent to distinguish a flow/auto-layout insertion from an
+   * absolute child whose visual offset must be rebased into its new parent. */
+  dropMode?: "flow-insert" | "absolute-container";
+  forceFlowPositionOverride?: boolean;
+  sourceRect?: { x: number; y: number; width: number; height: number };
+  anchorRect?: { x: number; y: number; width: number; height: number };
   requestId?: string;
   updatedAt: number;
 }
@@ -297,10 +320,28 @@ export type PendingLiveNonStyleUndoEntry =
   | PendingLiveTextUndoEntry
   | PendingLiveStructureUndoEntry;
 
+export function pendingLiveStructureEditsMatch(
+  left: PendingLiveStructureEdit,
+  right: PendingLiveStructureEdit,
+): boolean {
+  return (
+    left.screenId === right.screenId &&
+    left.selector === right.selector &&
+    (left.sourceId ?? "") === (right.sourceId ?? "") &&
+    left.anchorSelector === right.anchorSelector &&
+    (left.anchorSourceId ?? "") === (right.anchorSourceId ?? "") &&
+    left.placement === right.placement &&
+    left.dropMode === right.dropMode &&
+    Boolean(left.forceFlowPositionOverride) ===
+      Boolean(right.forceFlowPositionOverride)
+  );
+}
+
 function pendingVisualStyleEditKey(edit: PendingVisualStyleEdit): string {
   return [
     edit.screenId,
     edit.sourceId?.trim() || edit.selector.trim() || "unknown",
+    edit.interactionState ?? "default",
   ].join("::");
 }
 
@@ -322,6 +363,7 @@ export function mergePendingVisualStyleEdit(
         ...nextEdit.originalStyles,
         ...edit.originalStyles,
       },
+      baseStyles: edit.baseStyles ?? nextEdit.baseStyles,
     };
   });
   return merged ? next : [...edits, nextEdit];
@@ -392,6 +434,7 @@ export function buildPendingVisualStyleRevertPatches(
   selector: string;
   sourceId?: string | null;
   styles: Record<string, string>;
+  interactionState?: InteractionState;
 }> {
   return edits
     .map((edit) => ({
@@ -399,6 +442,9 @@ export function buildPendingVisualStyleRevertPatches(
       selector: edit.selector,
       sourceId: edit.sourceId,
       styles: edit.originalStyles,
+      ...(edit.interactionState
+        ? { interactionState: edit.interactionState }
+        : {}),
     }))
     .filter((patch) => Object.keys(patch.styles).length > 0);
 }
@@ -428,6 +474,7 @@ export function formatPendingVisualStylePrompt(args: {
   designTitle?: string | null;
   activeFileId?: string | null;
   activeFilename?: string | null;
+  localhostConnectionId?: string | null;
   edits: readonly PendingVisualStyleEdit[];
   liveEdits?: readonly PendingLiveNonStyleEdit[];
 }): string {
@@ -442,6 +489,9 @@ export function formatPendingVisualStylePrompt(args: {
     tagName: edit.tagName ?? null,
     classes: edit.classes,
     styles: edit.styles,
+    ...(edit.interactionState
+      ? { interactionState: edit.interactionState }
+      : {}),
     ...(edit.breakpoint ? { breakpoint: edit.breakpoint } : {}),
   }));
   const hasBreakpointScopedEdits = args.edits.some(
@@ -488,7 +538,14 @@ export function formatPendingVisualStylePrompt(args: {
       subjectAnchor && targetAnchor
         ? buildReactSemanticHandoff({
             operation: edit.placement === "inside" ? "reparent" : "move",
-            desiredChange: `Move the selected runtime element ${edit.placement} the target runtime element.`,
+            desiredChange: [
+              `Move the selected runtime element ${edit.placement} the target runtime element.`,
+              edit.dropMode === "flow-insert"
+                ? `The drop is a flow/auto-layout insertion${edit.forceFlowPositionOverride ? "; remove authored absolute positioning so the moved element participates in the target container's layout" : "; preserve normal flow participation"}.`
+                : edit.dropMode === "absolute-container"
+                  ? "The target is an absolute-positioning container; preserve absolute positioning and rebase the moved element's visual offset from sourceRect into the target anchorRect coordinate space."
+                  : "Preserve the runtime layout behavior observed in the preview.",
+            ].join(" "),
             sourceAnchors: [subjectAnchor, targetAnchor],
             runtimeRelationship: {
               kind: edit.placement,
@@ -521,6 +578,12 @@ export function formatPendingVisualStylePrompt(args: {
       anchorSourceId: edit.anchorSourceId ?? null,
       anchorSourceAnchor: redactReactSourceAnchor(edit.anchorSourceAnchor),
       placement: edit.placement,
+      ...(edit.dropMode ? { dropMode: edit.dropMode } : {}),
+      ...(edit.forceFlowPositionOverride
+        ? { forceFlowPositionOverride: true }
+        : {}),
+      ...(edit.sourceRect ? { sourceRect: edit.sourceRect } : {}),
+      ...(edit.anchorRect ? { anchorRect: edit.anchorRect } : {}),
       ...(semanticHandoff.ok
         ? { semanticHandoff: semanticHandoff.handoff }
         : { semanticHandoffFailure: semanticHandoff.rejection }),
@@ -533,16 +596,22 @@ export function formatPendingVisualStylePrompt(args: {
     args.activeFileId
       ? `Active screen: "${args.activeFilename ?? args.activeFileId}" (${args.activeFileId}).`
       : "",
+    args.localhostConnectionId
+      ? `Active localhost connection id: "${args.localhostConnectionId}".`
+      : "",
     "",
     "Use the Design source tools to make the source match the current live canvas preview. Read each target screen, resolve source ids/selectors through the code-layer projection, then apply the style, text, and structure changes with focused source edits. Preserve layout, behavior, and unrelated styling.",
     hasReactSourceAnchors
-      ? "React sourceAnchor fields are source provenance; runtime source ids and selectors are correlation hints only. Verify every project-relative file, line, column, component, and surrounding control flow before editing. Never use a generic AST reparent, group, wrapper, or other structural transform. For semantic structure edits, follow the embedded semanticHandoff packet and use this exact guarded sequence: read-local-file, capture its versionHash, obtain human write consent, write-local-file with expectedVersionHash and requireExpectedVersionHash: true, then keep the preview pending until HMR proves the intended runtime relationship. On a version conflict, re-read and re-plan; never overwrite blindly."
+      ? "React sourceAnchor fields are source provenance; runtime source ids and selectors are correlation hints only. For a single-instance leaf text, literal className/class, or flat literal style-object edit, call apply-visual-edit with source.kind=local-file plus designId, connectionId, the verified project-relative path, and target.sourceAnchor. First omit persist and inspect proposedDiff; then retry with persist=true only when the diff matches the preview. That write still requires human localhost consent and exact version-hash concurrency. Verify every file, line, column, component, and surrounding control flow before editing. Never use a generic AST reparent, group, wrapper, breakpoint, dynamic expression, repeated render, or shared component transform through this path. For semantic structure edits, follow the embedded semanticHandoff packet and use this exact guarded sequence: read-local-file, capture its versionHash, obtain human write consent, write-local-file with expectedVersionHash and requireExpectedVersionHash: true, then keep the preview pending until HMR proves the intended runtime relationship. On a version conflict, re-read and re-plan; never overwrite blindly."
       : "",
     hasRepeatedOrSharedReactScope
       ? "At least one React anchor is repeated at runtime or resolves to a shared component definition. Inspect map/conditional/component call sites and confirm whether the change should affect one instance or every instance before writing source."
       : "",
     hasBreakpointScopedEdits
-      ? "Edits that carry a `breakpoint` field were made while a narrower breakpoint frame was active: apply them as width-scoped overrides (apply-visual-edit with `activeFrameWidthPx` set to breakpoint.activeWidthPx), NOT as base writes — base values must keep rendering at wider viewports."
+      ? "Edits that carry a `breakpoint` field were made while a narrower breakpoint frame was active: apply them as width-scoped overrides (apply-visual-edit with `activeFrameWidthPx` set to breakpoint.activeWidthPx), NOT as base writes — base values must keep rendering at wider viewports. When breakpoint.editScope is `only`, confine the override to breakpoint.activeWidthPx through breakpoint.upperBoundPx; otherwise use the normal desktop-down cascade."
+      : "",
+    args.edits.some((edit) => edit.interactionState)
+      ? "Edits that carry an `interactionState` field are pseudo-class overrides, not base styles. Apply each property only to that exact state (`hover`, `focus`, `focus-visible`, `active`, or `disabled`) while preserving the element's default styling and its other states."
       : "",
     "",
     "Pending style edits:",
@@ -646,11 +715,55 @@ export function applyScopedVisualStyleEdit(args: {
   property: string;
   value: string;
   upperBoundPx: number | null;
+  /** Inclusive lower bound for an exact-range edit. Omit for the normal
+   * desktop-down “this breakpoint and smaller” cascade. */
+  lowerBoundPx?: number | null;
 }): ApplyVisualEditResult {
-  const { content, target, property, value, upperBoundPx } = args;
+  const { content, target, property, value, upperBoundPx, lowerBoundPx } = args;
+  const normalizedProperty = normalizeCssPropertyName(property);
+  if (
+    lowerBoundPx != null &&
+    upperBoundPx != null &&
+    "nodeId" in target &&
+    Number.isFinite(lowerBoundPx) &&
+    lowerBoundPx > 0 &&
+    upperBoundPx >= lowerBoundPx
+  ) {
+    const maxPatch = applyVisualEdit(content, {
+      kind: "breakpoint-style",
+      target,
+      maxWidthPx: upperBoundPx,
+      property: normalizedProperty,
+      value,
+      operation: "set",
+    });
+    if (maxPatch.result.status !== "applied") return maxPatch;
+    const withoutCascade = removeBreakpointMediaDeclaration(maxPatch.content, {
+      nodeId: target.nodeId,
+      maxWidthPx: upperBoundPx,
+      property: normalizedProperty,
+    });
+    return {
+      ...maxPatch,
+      content: setExactBreakpointDeclaration(withoutCascade, {
+        nodeId: target.nodeId,
+        property: normalizedProperty,
+        value,
+        minWidthPx: Math.round(lowerBoundPx),
+        maxWidthPx: Math.round(upperBoundPx),
+      }),
+    };
+  }
+  const cleanedContent =
+    "nodeId" in target
+      ? removeExactBreakpointDeclarations(content, {
+          nodeId: target.nodeId,
+          property: normalizedProperty,
+        })
+      : content;
   const plan = planBreakpointStyleWrite({ property, value, upperBoundPx });
   if (plan.mode === "class") {
-    const rcPatch = applyVisualEdit(content, {
+    const rcPatch = applyVisualEdit(cleanedContent, {
       kind: "responsive-class",
       target,
       // `prefix` is ignored when maxWidthPx is set (desktop-down scope).
@@ -668,7 +781,7 @@ export function applyScopedVisualStyleEdit(args: {
     upperBoundPx !== null &&
     upperBoundPx !== undefined
   ) {
-    return applyVisualEdit(content, {
+    return applyVisualEdit(cleanedContent, {
       kind: "breakpoint-style",
       target,
       maxWidthPx: upperBoundPx,
@@ -677,7 +790,84 @@ export function applyScopedVisualStyleEdit(args: {
       operation: "set",
     });
   }
-  return applyVisualEdit(content, { kind: "style", target, property, value });
+  return applyVisualEdit(cleanedContent, {
+    kind: "style",
+    target,
+    property,
+    value,
+  });
+}
+
+const EXACT_BREAKPOINT_ATTR = "data-agent-native-breakpoint-range";
+
+function exactBreakpointMarker(
+  nodeId: string,
+  property: string,
+  bounds?: { minWidthPx: number; maxWidthPx: number },
+): string {
+  const base = `${encodeURIComponent(nodeId)}::${encodeURIComponent(property)}`;
+  return bounds ? `${base}::${bounds.minWidthPx}-${bounds.maxWidthPx}` : base;
+}
+
+function escapeCssAttribute(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function removeExactBreakpointDeclarations(
+  content: string,
+  args: {
+    nodeId: string;
+    property: string;
+    minWidthPx?: number;
+    maxWidthPx?: number;
+  },
+): string {
+  const marker = exactBreakpointMarker(
+    args.nodeId,
+    args.property,
+    args.minWidthPx != null && args.maxWidthPx != null
+      ? { minWidthPx: args.minWidthPx, maxWidthPx: args.maxWidthPx }
+      : undefined,
+  );
+  const markerPattern =
+    args.minWidthPx != null && args.maxWidthPx != null
+      ? escapeRegExp(marker)
+      : `${escapeRegExp(marker)}::[^\"]+`;
+  const styleRe = new RegExp(
+    `<style\\b[^>]*\\b${EXACT_BREAKPOINT_ATTR}="${markerPattern}"[^>]*>.*?<\\/style>\\n?`,
+    "gis",
+  );
+  return content.replace(styleRe, "");
+}
+
+function setExactBreakpointDeclaration(
+  content: string,
+  args: {
+    nodeId: string;
+    property: string;
+    value: string;
+    minWidthPx: number;
+    maxWidthPx: number;
+  },
+): string {
+  const cleaned = removeExactBreakpointDeclarations(content, args);
+  const marker = exactBreakpointMarker(args.nodeId, args.property, args);
+  const selectorId = escapeCssAttribute(args.nodeId);
+  const block = `<style ${EXACT_BREAKPOINT_ATTR}="${marker}">
+@media (min-width: ${args.minWidthPx}px) and (max-width: ${args.maxWidthPx}px) {
+  [data-agent-native-node-id="${selectorId}"][data-agent-native-node-id="${selectorId}"] {
+    ${args.property}: ${args.value.trim()};
+  }
+}
+</style>`;
+  const headClose = cleaned.lastIndexOf("</head>");
+  return headClose >= 0
+    ? `${cleaned.slice(0, headClose)}${block}\n${cleaned.slice(headClose)}`
+    : `${block}\n${cleaned}`;
 }
 
 /**
@@ -728,7 +918,17 @@ export function applyInteractionStateStyleCommit(
   nodeId: string,
   state: InteractionState,
   styles: Record<string, string>,
+  maxWidthPx?: number | null,
 ): string {
+  if (maxWidthPx != null) {
+    return upsertResponsiveStateStyles(
+      content,
+      nodeId,
+      state,
+      maxWidthPx,
+      styles,
+    );
+  }
   const withStateStyles = upsertStateStyles(content, nodeId, state, styles);
   return duplicateStatePreviewRules(withStateStyles);
 }

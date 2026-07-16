@@ -13,6 +13,7 @@ const messages = {
   root: {
     commandActions: "कार्रवाइयाँ",
     commandSearch: "खोजें",
+    openAgent: "एजेंट खोलें",
     commandAppearance: "दिखावट",
     toggleTheme: "थीम बदलें",
     extensionSignedInTitle: "साइन इन हो गया",
@@ -48,11 +49,13 @@ const messages = {
   navigation: {
     brand: "क्लिप",
     library: "लाइब्रेरी",
+    sharedWithMe: "मेरे साथ साझा",
     spaces: "स्पेस",
     meetings: "मीटिंग्स",
     dictate: "डिक्टेट",
     archive: "आर्काइव",
     trash: "ट्रैश",
+    agent: "एजेंट",
     settings: "सेटिंग्स",
     notifications: "सूचनाएँ",
     insights: "इनसाइट्स",
@@ -81,6 +84,10 @@ const messages = {
       title: "आपकी लाइब्रेरी खाली है",
       body: "अपनी पहली स्क्रीन रिकॉर्डिंग कैप्चर करें और वह यहाँ शेयर करने के लिए तैयार मिलेगी।",
       cta: "अपना पहला Clip रिकॉर्ड करें",
+    },
+    shared: {
+      title: "अभी आपके साथ कोई क्लिप साझा नहीं की गई",
+      body: "टीम के सदस्य जो क्लिप आपके साथ साझा करेंगे, वे यहाँ दिखाई देंगी।",
     },
     folder: {
       title: "यह फ़ोल्डर खाली है",
@@ -291,6 +298,7 @@ const messages = {
     insights: "इनसाइट्स",
     downloadForMac: "Mac के लिए डाउनलोड करें",
     downloadForWindows: "Windows के लिए डाउनलोड करें",
+    downloadForLinux: "Linux के लिए डाउनलोड करें",
     downloadDesktopApp: "डेस्कटॉप ऐप डाउनलोड करें",
     agentNativeClips: "Agent-Native Clips",
     agentNativeClipsIntro: "एक मुफ्त,",
@@ -429,6 +437,7 @@ const messages = {
     invite: "आमंत्रित करें",
     embed: "एम्बेड",
     shareLink: "शेयर लिंक",
+    shareWithHumans: "लोगों के साथ साझा करें",
     shareWithAgents: "एजेंटों के साथ साझा करें",
     copyAgentPrompt: "एजेंट प्रॉम्प्ट कॉपी करें",
     agentPrompt:
@@ -439,6 +448,8 @@ const messages = {
     retryAgentLink: "फिर से प्रयास करें",
     gifPreview: "GIF पूर्वावलोकन",
     openPlayer: "खुला खिलाड़ी",
+    chooseFile: "फ़ाइल चुनें",
+    remove: "हटाएं",
     downloadMp4: "MP4 डाउनलोड करें",
     embedsNeedPublic: "एंबेड को एक सार्वजनिक क्लिप की आवश्यकता है",
     embedPublicDescription:
@@ -539,7 +550,7 @@ const messages = {
   downloadRoute: {
     pageTitle: "Clips Desktop डाउनलोड करें",
     description:
-      "मेनू बार से अपनी स्क्रीन रिकॉर्ड करें. macOS और Windows के लिए डेस्कटॉप ऐप को ऑटो-अपडेट करना।",
+      "सिस्टम ट्रे से अपनी स्क्रीन रिकॉर्ड करें। macOS, Windows और Linux के लिए ऑटो-अपडेटिंग डेस्कटॉप ऐप।",
     macSublabel: "यूनिवर्सल (Apple Silicon + Intel)",
     windowsSublabel: "64-बिट MSI इंस्टॉलर",
     downloadFor: "{{platform}} के लिए डाउनलोड करें",
@@ -867,14 +878,6 @@ Clips में उपयोगकर्ताओं को दिखने व�
     removeDescription:
       "{{email}} इस संगठन तक पहुंच खो देगा। आप उन्हें हमेशा वापस आमंत्रित कर सकते हैं।",
     remove: "हटाएं",
-  },
-  slackShareHint: {
-    playsInline: "Slack में इनलाइन चलता है",
-    connectedDescription:
-      "इसे इनलाइन चलाने के लिए यह लिंक किसी भी जुड़े हुए वर्कस्पेस में पेस्ट करें।",
-    makeInline: "इसे Slack में इनलाइन चलाएं",
-    connectDescription: "एक वर्कस्पेस कनेक्ट करें ताकि यह लिंक वीडियो के रूप में खुले।",
-    connect: "कनेक्ट करें",
   },
   commentsPanel: {
     disabled: "इस रिकॉर्डिंग के लिए टिप्पणियां बंद हैं।",

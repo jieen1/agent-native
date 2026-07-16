@@ -96,8 +96,7 @@ server/routes/
 
 各ルートは `defineEventHandler` をエクスポートします。
 
-```ts
-// server/routes/api/health.get.ts
+```ts filename="server/routes/api/health.get.ts"
 import { defineEventHandler } from "h3";
 
 export default defineEventHandler(() => ({
@@ -137,8 +136,7 @@ UI とエージェントの両方が何かを行う必要がある場合は、�
 
 読み取り専用の status endpoint は action として保持します:
 
-```ts
-// actions/get-status.ts
+```ts filename="actions/get-status.ts"
 import { defineAction } from "@agent-native/core/action";
 import { z } from "zod";
 
@@ -171,8 +169,7 @@ GET /_agent-native/actions/get-status?service=billing
 ツール、チャット履歴、または実行状態では、明示的なエスケープとして `completeText()` を使用します
 孵化します。
 
-```ts
-// actions/classify-message.ts
+```ts filename="actions/classify-message.ts"
 import { defineAction } from "@agent-native/core/action";
 import { completeText } from "@agent-native/core/server";
 import { z } from "zod";
@@ -237,8 +234,7 @@ export default defineAction({
 
 プラグインは `server/plugins/` に存在し、起動時に実行されます。これらは、移行、プロバイダーのセットアップ、定期的なジョブ、統合アダプター、フレームワーク プラグインの構成に使用します。
 
-```ts
-// server/plugins/db.ts
+```ts filename="server/plugins/db.ts"
 import { runMigrations } from "@agent-native/core/db";
 
 export default runMigrations(
@@ -273,7 +269,7 @@ export default runMigrations(
 | `/_agent-native/extensions/*`    | ランタイム拡張機能と拡張プロキシ (従来のエイリアス: `/_agent-native/tools/*`) |
 | `/_agent-native/integrations/*`  | メッセージング/Webhook の統合                                                 |
 | `/_agent-native/a2a`             | エージェント間 JSON-RPC                                                       |
-| `/_agent-native/mcp`             | MCP エンドポイント                                                            |
+| `/mcp`                           | MCP エンドポイント                                                            |
 | `/_agent-native/onboarding/*`    | セットアップチェックリスト                                                    |
 | `/_agent-native/observability/*` | トレース、フィードバック、評価、実験                                          |
 | `/_agent-native/file-upload`     | ファイル アップロード プロバイダー エンドポイント                             |
@@ -414,8 +410,11 @@ export default runMigrations(
 
 </Diagram>
 
-> [!WARNING]
-> 応答を返した後は、待機していない Promise に依存しないでください。サーバーレス ホストは実行をフリーズします。正規統合キューについては、[Messaging](/docs/messaging) を参照してください。
+<Callout tone="warning">
+  応答を返した後は、待機していない Promise に依存しないでください。サーバーレス
+  ホストは実行をフリーズします。正規統合キューについては、[Messaging](/docs/messaging)
+  を参照してください。
+</Callout>
 
 ## 上級: 脱出ハッチ {#advanced-escape-hatches}
 
@@ -457,3 +456,11 @@ const handler = createProductionAgentHandler({
   systemPrompt: "You are the app agent...",
 });
 ```
+
+## 次のステップ
+
+- [**Actions**](/docs/actions) — デフォルトの操作サーフェス。適合しない場合にのみカスタムルートを使用します
+- [**Database**](/docs/database) — カスタムルートと Actions の両方がインポートする `getDb()`/`schema` パターン
+- [**Security**](/docs/security#access-guards) — `accessFilter`/`assertAccess` と完全なデータスコープモデル
+- [**Messaging**](/docs/messaging) — 受信 Webhook の標準的な統合キューパターン
+- [**MCP Protocol**](/docs/mcp-protocol) — このサーバーが自動的にマウントする `/mcp` エンドポイント

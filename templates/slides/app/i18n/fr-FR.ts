@@ -106,6 +106,7 @@ const messages = {
     searchImagesPlaceholder: "Rechercher des images...",
     searchForLogosImagesIcons: "Rechercher des logos, images, icônes...",
     search: "Rechercher",
+    searchFailed: "Échec de la recherche",
     logoSearchTitle: "Recherche de logo",
     searchCompanyLogo: "Recherchez une entreprise pour trouver son logo",
     searchCompanyPlaceholder: "Rechercher un nom d’entreprise (ex. Intuit)",
@@ -340,6 +341,8 @@ const messages = {
     hideResolved: "Masquer les résolus",
     showResolved: "Afficher {{count}} résolus",
     noCommentsYet: "Aucun commentaire pour le moment",
+    loadFailed: "Impossible de charger les commentaires",
+    retry: "Réessayer",
     clickToAddComment: "Cliquez pour ajouter un commentaire",
     selectSlideToAdd: "Sélectionnez une diapositive pour en ajouter un",
   },
@@ -565,6 +568,10 @@ const messages = {
     chooseAnotherFile: "Choisir un autre fichier",
   },
   home: {
+    loadFailed: "Impossible de charger votre contenu",
+    loadFailedDescription:
+      "Votre contenu enregistré est toujours disponible. Vérifiez la connexion et réessayez.",
+    retry: "Réessayer",
     decksTitle: "Decks",
     newDeck: "Nouveau deck",
     deckLengthQuestion: "Quelle longueur doit faire ce deck ?",

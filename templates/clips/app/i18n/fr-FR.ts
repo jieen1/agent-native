@@ -13,6 +13,7 @@ const messages = {
   root: {
     commandActions: "Opérations",
     commandSearch: "Rechercher",
+    openAgent: "Ouvrir l’agent",
     commandAppearance: "Apparence",
     toggleTheme: "Changer de thème",
     extensionSignedInTitle: "Connecté",
@@ -48,11 +49,13 @@ const messages = {
   navigation: {
     brand: "Clips",
     library: "Bibliothèque",
+    sharedWithMe: "Partagés avec moi",
     spaces: "Espaces",
     meetings: "Réunions",
     dictate: "Dicter",
     archive: "Archiver",
     trash: "Corbeille",
+    agent: "Agent",
     settings: "Paramètres",
     notifications: "Alertes",
     insights: "Analyses",
@@ -82,6 +85,10 @@ const messages = {
       title: "Votre bibliothèque est vide",
       body: "Capturez votre premier enregistrement d’écran et il apparaîtra ici, prêt à partager.",
       cta: "Enregistrer votre premier Clip",
+    },
+    shared: {
+      title: "Aucun clip partagé avec vous",
+      body: "Les clips que vos collègues partagent avec vous apparaîtront ici.",
     },
     folder: {
       title: "Ce dossier est vide",
@@ -304,6 +311,7 @@ const messages = {
     insights: "Connaissances",
     downloadForMac: "Télécharger pour Mac",
     downloadForWindows: "Télécharger pour Windows",
+    downloadForLinux: "Télécharger pour Linux",
     downloadDesktopApp: "Téléchargez l'application de bureau",
     agentNativeClips: "Agent-Native Clips",
     agentNativeClipsIntro: "est une alternative gratuite,",
@@ -446,6 +454,7 @@ const messages = {
     invite: "Inviter",
     embed: "Intégrer",
     shareLink: "Lien de partage",
+    shareWithHumans: "Partager avec des personnes",
     shareWithAgents: "Partager avec les agents",
     copyAgentPrompt: "Copier le prompt pour agent",
     agentPrompt:
@@ -456,6 +465,8 @@ const messages = {
     retryAgentLink: "Réessayer",
     gifPreview: "aperçu de GIF",
     openPlayer: "Joueur ouvert",
+    chooseFile: "Choisir un fichier",
+    remove: "Retirer",
     downloadMp4: "Télécharger MP4",
     embedsNeedPublic: "Les intégrations nécessitent un clip public",
     embedPublicDescription:
@@ -559,7 +570,7 @@ const messages = {
   downloadRoute: {
     pageTitle: "Télécharger Clips Desktop",
     description:
-      "Enregistrez votre écran à partir de la barre de menu. Application de bureau à mise à jour automatique pour macOS et Windows.",
+      "Enregistrez votre écran depuis la barre d’état système. Application de bureau à mise à jour automatique pour macOS, Windows et Linux.",
     macSublabel: "Universel (Apple Silicon + Intel)",
     windowsSublabel: "Programme d'installation de MSI 64 bits",
     downloadFor: "Télécharger pour {{platform}}",
@@ -897,15 +908,6 @@ Tous les changements visibles par les utilisateurs de Clips sont documentés ici
     removeDescription:
       "{{email}} perdra l’accès à cette organisation. Vous pourrez toujours l’inviter à nouveau.",
     remove: "Retirer",
-  },
-  slackShareHint: {
-    playsInline: "Lecture inline dans Slack",
-    connectedDescription:
-      "Collez ce lien dans n’importe quel espace connecté pour le lire inline.",
-    makeInline: "Le lire inline dans Slack",
-    connectDescription:
-      "Connectez un espace pour que ce lien se déplie en vidéo.",
-    connect: "Connecter",
   },
   commentsPanel: {
     disabled: "Les commentaires sont désactivés pour cet enregistrement.",

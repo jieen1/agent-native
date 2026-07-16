@@ -58,6 +58,23 @@ once — do not switch to db-patch or raw SQL.
 
 Do not use `app-db` as a dashboard source. For first-party events collected through `/track`, use `source: "first-party"` or the `query-agent-native-analytics` action rather than raw internal `db-query`.
 
+AI-generated first-party panels are dashboard-time-bound by default. Set
+`config.timeScope` to `"dashboard"` and include the matching dashboard time
+filter in the SQL. The allowed values are:
+
+- `dashboard`: use the dashboard-selected time range; the default for ordinary metrics.
+- `fixed-window`: use an explicit bounded window independent of the dashboard filter.
+- `cohort-history`: use the bounded history of an explicitly defined cohort.
+- `all-time`: scan all available history; use only when the user requests it and
+  put `all-time`, `lifetime`, or `historical` in the title or description.
+
+`{{timeRange}}` requires an explicit matching `filters` entry with
+`id: "timeRange"` and `type: "select"`. `{{<id>Start}}` and `{{<id>End}}`
+require a matching `filters` entry with that id and `type: "date-range"`.
+Do not rely on undeclared time variables. Server validation rejects unbound
+first-party SQL, so declare the filter or choose an explicit non-dashboard
+scope before saving.
+
 ## Creating A Dashboard
 
 When the user asks for a dashboard:
@@ -126,6 +143,65 @@ Notes:
   "extension unavailable" message instead of the content. Share the extension to
   the same audience as the dashboard so all viewers can see it.
 
+## Cloning An Extension-Backed Dashboard (e.g. per-customer copies)
+
+When the user asks for a copy of an existing extension-backed dashboard for a
+different customer/org (for example "make an Intuit version of the Roku usage
+dashboard"), follow this playbook. Extension bodies are frequently tens of
+thousands of characters. The reliable path is to read+transform+write the body
+INSIDE `run-code` (where `workspaceRead` returns the full file) and then create
+from that written file — never by pulling the body into chat context first or
+re-typing it as a `content` argument.
+
+1. `get-sql-dashboard` with `includeConfig: true` on the source dashboard and
+   confirm the target panel is `chartType: "extension"`; grab its
+   `config.extensionId`.
+2. `get-extension` for that id with `forceContent: true` **exactly once**. Reuse
+   that body for the rest of the turn — a second same-run read intentionally
+   omits `content` and returns `contentOmitted` instead. That is not the content
+   disappearing; use the copy you already have. Do NOT try to re-fetch the body
+   with `run-code` (`appAction('get-extension')`) to page past a display
+   truncation — the same-run omit makes it return empty `content`, wasting turns.
+   If you need the full body again, read the workspace resource file (step 5) or
+   set `forceContent: true` on a single native `get-extension`.
+3. Change ONLY the small customer-specific static config (e.g. the
+   `ACCOUNT_USAGE_STATIC` block: company name, title, org-discovery filters,
+   messaging). Prefer a focused `update-extension` edit/patch over regenerating
+   the entire HTML.
+4. **Call `create-extension` / `update-extension` as native tools.** They are
+   mutating actions and are NOT callable from `run-code` / `appAction` (the
+   sandbox bridge only exposes read-only actions). Do not try to create or update
+   an extension from inside `run-code`.
+5. **If the source body already exists as a workspace/shared resource file**
+   (e.g. a pre-built `intuit-analytics-extension.html`), do the read AND the
+   customer swap in ONE `run-code` call, then create from the written file:
+   - Inside `run-code`: `const src = await workspaceRead('<source>.html')`
+     returns the WHOLE file (it auto-pages; there is no 50k cap here), do the
+     small string-replace on the static config block, then
+     `await workspaceWrite('<target>.html', modified)`.
+   - Then call `create-extension` (native) with
+     `contentFromWorkspaceFile: '<target>.html'` and leave `content` empty — the
+     server reads the full file verbatim.
+   Do NOT read the source body with the `resources` read tool (or `get-extension`)
+   first just to transform it: that display is capped and wastes a turn. And do
+   NOT re-emit an 80k+ char body as the `content` argument — it gets cut off
+   mid-stream. `contentFromAttachment` only sees files the user pasted into chat,
+   not workspace resources. `create-extension`/`update-extension` are mutating and
+   cannot run from `run-code`, so only the read+write+transform happens there.
+6. Finally `update-dashboard` to save a new dashboard embedding the new
+   extension panel (`chartType: "extension"`, `config.extensionId`), then
+   `navigate` to it.
+
+### Display truncation is cosmetic — do not chase the "missing" tail
+
+A tool result ending in `...[truncated — full result was N chars; only first
+50,000 shown]` (from the `resources` read tool or `get-extension`) means only the
+DISPLAYED text was capped. The file is intact. `run-code`'s `workspaceRead`
+returns the full N chars, and `contentFromWorkspaceFile` hosts the full file.
+Never read the same file twice or try to "page the rest" to recover the tail —
+that is the single biggest source of wasted turns on clone requests. Decide to
+clone, then go straight to the `run-code` read+transform+write path in step 5.
+
 ## Config Shape
 
 ```jsonc
@@ -154,7 +230,8 @@ Notes:
       "source": "first-party",
       "chartType": "metric",
       "width": 1,
-      "sql": "SELECT COUNT(*) AS value FROM analytics_events WHERE event_name = 'click'",
+      "config": { "timeScope": "dashboard" },
+      "sql": "SELECT COUNT(*) AS value FROM analytics_events WHERE event_name = 'click' AND event_date >= '{{dateStart}}' AND event_date < '{{dateEnd}}'",
     },
     {
       "id": "kpi-signups",
@@ -162,7 +239,8 @@ Notes:
       "source": "first-party",
       "chartType": "metric",
       "width": 1,
-      "sql": "SELECT COUNT(*) AS value FROM analytics_events WHERE event_name = 'signup'",
+      "config": { "timeScope": "dashboard" },
+      "sql": "SELECT COUNT(*) AS value FROM analytics_events WHERE event_name = 'signup' AND event_date >= '{{dateStart}}' AND event_date < '{{dateEnd}}'",
     },
     {
       "id": "kpi-active",
@@ -170,7 +248,8 @@ Notes:
       "source": "first-party",
       "chartType": "metric",
       "width": 1,
-      "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM analytics_events",
+      "config": { "timeScope": "dashboard" },
+      "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM analytics_events WHERE event_date >= '{{dateStart}}' AND event_date < '{{dateEnd}}'",
     },
     // Section header switches the grid to 2 columns for the panels below it.
     {
@@ -186,7 +265,8 @@ Notes:
       "source": "first-party",
       "chartType": "line",
       "width": 2,
-      "sql": "SELECT DATE(timestamp) AS date, COUNT(*) AS value FROM analytics_events WHERE timestamp >= '{{dateStart}}' AND timestamp < '{{dateEnd}}' GROUP BY 1 ORDER BY 1",
+      "config": { "timeScope": "dashboard" },
+      "sql": "SELECT event_date AS date, COUNT(*) AS value FROM analytics_events WHERE event_date >= '{{dateStart}}' AND event_date < '{{dateEnd}}' GROUP BY 1 ORDER BY 1",
     },
   ],
 }
@@ -195,6 +275,13 @@ Notes:
 ## Filters And Variables
 
 `filters[]` defines dashboard-wide controls. Filter values are available in panel SQL through `{{var}}` interpolation. Date ranges emit `{{<id>Start}}` and `{{<id>End}}`.
+
+For dashboard-time-bound first-party SQL, use `config.timeScope: "dashboard"`
+and a predicate that consumes the declared filter, such as
+`event_date >= '{{dateStart}}' AND event_date < '{{dateEnd}}'`. A
+`{{timeRange}}` token must have a matching select filter and SQL branches for
+its options; date variables must have a matching date-range filter. The server
+rejects unbound first-party SQL during dashboard validation.
 
 **Filter ids must be unique.** Two filters with the same `id` collide on the same URL param, so changing one visibly updates the other in the UI. The dashboard save endpoint rejects duplicates with a 400.
 
@@ -244,6 +331,17 @@ type DashboardPatch = {
   variables?: Record<string, string>;
 };
 
+type PanelTimeScope =
+  | "dashboard"
+  | "fixed-window"
+  | "cohort-history"
+  | "all-time";
+
+type PanelConfig = Record<string, unknown> & {
+  // Use "dashboard" for AI-generated first-party panels by default.
+  timeScope?: PanelTimeScope;
+};
+
 type PanelPatch = {
   title?: string;
   sql?: string;
@@ -268,7 +366,7 @@ type PanelPatch = {
   width?: number;
   columns?: number;
   tab?: string;
-  config?: Record<string, unknown>;
+  config?: PanelConfig;
   description?: string;
 };
 
@@ -346,7 +444,9 @@ dashboard
     source: "first-party",
     chartType: "metric",
     width: 1,
-    sql: "SELECT COUNT(*) AS value FROM analytics_events",
+    config: { timeScope: "dashboard" },
+    // Assumes filters includes { id: "date", type: "date-range", default: "30d" }.
+    sql: "SELECT COUNT(*) AS value FROM analytics_events WHERE event_date >= '{{dateStart}}' AND event_date < '{{dateEnd}}'",
   })
   .atTop();
 ```
@@ -441,7 +541,7 @@ For a **first-party analytics** dashboard, prefer `compose-dashboard` over hand-
 - **Never hand-author large first-party configs panel-by-panel.** Call `compose-dashboard` with the metric keys instead.
 - Unknown metric keys are skipped and reported in `unknownMetrics` (not fatal). Each panel's SQL is validated independently — valid panels save, invalid ones are reported in `invalidMetrics`.
 - By default (no `overwrite`), composing into an existing dashboard APPENDS the new panels and skips ids already present. `overwrite: true` replaces the whole config.
-- Each metric accepts an optional per-metric `window` of `'30d' | '90d' | 'all'` (only affects windowed virality/time metrics) and `title` / `chartType` / `width` overrides.
+- Each metric accepts an optional per-metric `window` of `'30d' | '90d' | 'all'` (only affects windowed virality/time metrics) and `title` / `chartType` / `width` overrides. Request `'all'` only when the user asks for all-time coverage, and describe it as full available history.
 - Returns `{ dashboardId, panelCount, createdMetrics, unknownMetrics, invalidMetrics, skippedExistingIds }` — report `panelCount` as proof-of-done.
 
 Available metric keys: `total-signups`, `signups-over-time`, `signups-by-template`, `sessions-by-app`, `sessions-over-time`, `replay-sessions`, `replay-chunks-over-time`, `recent-replay-sessions`, `signed-in-vs-anon`, `total-template-clicks`, `total-demo-clicks`, `total-cli-copies`, `template-interest-over-time`, `clicks-by-template`, `demo-clicks-by-template`, `cli-copies-by-template`, `cli-copies-over-time`, `pageviews-over-time`, `top-referrer-domains`, `referred-signups-30d`, `viral-signup-share-30d`, `clip-share-signups-30d`, `signups-by-referral-source`, `referred-signups-over-time`, `top-referrers`, `share-funnel-30d`, `viral-participation-rate-90d`, `viral-coefficient-90d`, `activated-referrers-90d`.

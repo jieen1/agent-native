@@ -578,6 +578,103 @@ async function drain(iterable: AsyncIterable<unknown>) {
   return results;
 }
 
+describe("SSE replay render pacing", () => {
+  it("yields to the browser event loop during a dense replay burst", async () => {
+    const textEvents = Array.from({ length: 60 }, (_, index) => ({
+      type: "text",
+      text: `${index}|`,
+    }));
+    const results: any[] = [];
+    let eventLoopAdvanced = false;
+    let firstResultAfterEventLoopAdvance: number | null = null;
+    const eventLoopTurn = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        eventLoopAdvanced = true;
+        resolve();
+      }, 0);
+    });
+
+    for await (const result of readSSEStream(
+      eventStream([...textEvents, { type: "done" }]),
+      [],
+      { value: 0 },
+      undefined,
+    )) {
+      results.push(result);
+      if (eventLoopAdvanced && firstResultAfterEventLoopAdvance === null) {
+        firstResultAfterEventLoopAdvance = results.length - 1;
+      }
+    }
+    await eventLoopTurn;
+
+    expect(firstResultAfterEventLoopAdvance).not.toBeNull();
+    expect(firstResultAfterEventLoopAdvance!).toBeLessThan(textEvents.length);
+    expect(results).toHaveLength(textEvents.length + 1);
+    expect(results.at(-1)?.content).toEqual([
+      {
+        type: "text",
+        text: textEvents.map((event) => event.text).join(""),
+      },
+    ]);
+  });
+
+  it("preserves event order and tool content across cooperative yields", async () => {
+    const before = Array.from({ length: 24 }, (_, index) => ({
+      type: "text",
+      text: `before-${index}|`,
+    }));
+    const after = Array.from({ length: 24 }, (_, index) => ({
+      type: "text",
+      text: `after-${index}|`,
+    }));
+    const events = [
+      ...before,
+      {
+        type: "tool_start",
+        id: "tool-1",
+        tool: "query-data",
+        input: { query: "select 1" },
+      },
+      {
+        type: "tool_done",
+        id: "tool-1",
+        tool: "query-data",
+        result: "one row",
+      },
+      ...after,
+      { type: "done" },
+    ].map((event, seq) => ({ ...event, seq }));
+    const seenSeq: number[] = [];
+
+    const results = (await drain(
+      readSSEStream(eventStream(events), [], { value: 0 }, undefined, (seq) =>
+        seenSeq.push(seq),
+      ),
+    )) as any[];
+
+    expect(seenSeq).toEqual(events.map((event) => event.seq));
+    expect(results).toHaveLength(events.length);
+    expect(results.at(-1)?.content).toEqual([
+      {
+        type: "text",
+        text: before.map((event) => event.text).join(""),
+      },
+      {
+        type: "tool-call",
+        toolCallId: "tool-1",
+        toolName: "query-data",
+        argsText: JSON.stringify({ query: "select 1" }),
+        args: { query: "select 1" },
+        result: "one row",
+      },
+      {
+        type: "text",
+        text: after.map((event) => event.text).join(""),
+      },
+    ]);
+  });
+});
+
 describe("SSE event processor no-progress recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -1808,7 +1905,7 @@ describe("SSE event processor error classification", () => {
     );
   });
 
-  it("includes streamed tool-input size in visible preparation activity", async () => {
+  it("uses a calm writing label for streamed tool-input progress", async () => {
     const dispatchEvent = vi.fn();
     vi.stubGlobal("window", { dispatchEvent });
     vi.stubGlobal(
@@ -1866,7 +1963,7 @@ describe("SSE event processor error classification", () => {
       expect.objectContaining({
         type: "agent-chat:activity",
         detail: {
-          label: "Writing create document... (1.5 KB prepared)",
+          label: "Writing create document...",
           tool: "create-document",
           tabId: "tab-activity-progress",
         },
@@ -2009,6 +2106,284 @@ describe("SSE event processor error classification", () => {
         toolName: "generate-design",
         result: '{"saved":true}',
       }),
+    ]);
+  });
+
+  it("preserves an activity call id across repeated progress and tool completion", async () => {
+    const results = await drain(
+      readSSEStream(
+        eventStream([
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            id: "activity-call-1",
+            progressBytes: 0,
+          },
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            id: "activity-call-1",
+            progressBytes: 128,
+          },
+          {
+            type: "tool_start",
+            tool: "generate-design",
+            id: "activity-call-1",
+            input: { designId: "design-1" },
+          },
+          {
+            type: "tool_done",
+            tool: "generate-design",
+            id: "activity-call-1",
+            result: '{"saved":true}',
+          },
+          { type: "done" },
+        ]),
+        [],
+        { value: 0 },
+        "tab-tool-activity-id",
+      ),
+    );
+
+    expect(results[0].content).toEqual([
+      expect.objectContaining({
+        type: "tool-call",
+        toolCallId: "activity-call-1",
+        toolName: "generate-design",
+        activity: true,
+      }),
+    ]);
+    expect(
+      results[1].content.filter((part) => part.type === "tool-call"),
+    ).toHaveLength(1);
+    expect(
+      results.at(-1)?.content.filter((part) => part.type === "tool-call"),
+    ).toEqual([
+      expect.objectContaining({
+        type: "tool-call",
+        toolCallId: "activity-call-1",
+        toolName: "generate-design",
+        result: '{"saved":true}',
+      }),
+    ]);
+  });
+
+  it("upgrades one id-less activity placeholder when a later progress event gains an id", async () => {
+    const results = await drain(
+      readSSEStream(
+        eventStream([
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            progressBytes: 0,
+          },
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            id: "activity-call-1",
+            progressBytes: 128,
+          },
+          {
+            type: "tool_start",
+            tool: "generate-design",
+            id: "activity-call-1",
+            input: { designId: "design-1" },
+          },
+          {
+            type: "tool_done",
+            tool: "generate-design",
+            id: "activity-call-1",
+            result: '{"saved":true}',
+          },
+          { type: "done" },
+        ]),
+        [],
+        { value: 0 },
+        "tab-tool-activity-id-convergence",
+      ),
+    );
+
+    expect(
+      results[1].content.filter((part) => part.type === "tool-call"),
+    ).toEqual([
+      expect.objectContaining({
+        toolCallId: "activity-call-1",
+        activity: true,
+      }),
+    ]);
+    expect(
+      results.at(-1)?.content.filter((part) => part.type === "tool-call"),
+    ).toEqual([
+      expect.objectContaining({
+        toolCallId: "activity-call-1",
+        result: '{"saved":true}',
+      }),
+    ]);
+  });
+
+  it("keeps parallel same-name activity calls separate by id", async () => {
+    const results = await drain(
+      readSSEStream(
+        eventStream([
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            id: "activity-call-1",
+          },
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            id: "activity-call-2",
+          },
+          {
+            type: "tool_start",
+            tool: "generate-design",
+            id: "activity-call-1",
+            input: { designId: "design-1" },
+          },
+          {
+            type: "tool_start",
+            tool: "generate-design",
+            id: "activity-call-2",
+            input: { designId: "design-2" },
+          },
+          {
+            type: "tool_done",
+            tool: "generate-design",
+            id: "activity-call-1",
+            result: '{"saved":"design-1"}',
+          },
+          {
+            type: "tool_done",
+            tool: "generate-design",
+            id: "activity-call-2",
+            result: '{"saved":"design-2"}',
+          },
+          { type: "done" },
+        ]),
+        [],
+        { value: 0 },
+        "tab-parallel-tool-activity-ids",
+      ),
+    );
+
+    expect(
+      results[1].content
+        .filter((part) => part.type === "tool-call")
+        .map((part) => part.toolCallId),
+    ).toEqual(["activity-call-1", "activity-call-2"]);
+    expect(
+      results
+        .at(-1)
+        ?.content.filter((part) => part.type === "tool-call")
+        .map((part) => ({ id: part.toolCallId, result: part.result })),
+    ).toEqual([
+      { id: "activity-call-1", result: '{"saved":"design-1"}' },
+      { id: "activity-call-2", result: '{"saved":"design-2"}' },
+    ]);
+  });
+
+  it("adopts parallel same-name activity placeholders in order for id-less starts", async () => {
+    const results = await drain(
+      readSSEStream(
+        eventStream([
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            id: "activity-call-1",
+          },
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            id: "activity-call-2",
+          },
+          {
+            type: "tool_start",
+            tool: "generate-design",
+            input: { designId: "design-1" },
+          },
+          {
+            type: "tool_start",
+            tool: "generate-design",
+            input: { designId: "design-2" },
+          },
+          { type: "done" },
+        ]),
+        [],
+        { value: 0 },
+        "tab-parallel-id-less-starts",
+      ),
+    );
+
+    expect(
+      results[3].content
+        .filter((part) => part.type === "tool-call")
+        .map((part) => ({ id: part.toolCallId, args: part.args })),
+    ).toEqual([
+      { id: "activity-call-1", args: { designId: "design-1" } },
+      { id: "activity-call-2", args: { designId: "design-2" } },
+    ]);
+  });
+
+  it("shows a later same-tool activity when it has a new stable id", async () => {
+    const results = await drain(
+      readSSEStream(
+        eventStream([
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            id: "activity-call-1",
+          },
+          {
+            type: "tool_start",
+            tool: "generate-design",
+            id: "activity-call-1",
+            input: { designId: "design-1" },
+          },
+          {
+            type: "tool_done",
+            tool: "generate-design",
+            id: "activity-call-1",
+            result: '{"saved":"design-1"}',
+          },
+          {
+            type: "activity",
+            label: "Preparing generate-design action",
+            tool: "generate-design",
+            id: "activity-call-2",
+          },
+          { type: "done" },
+        ]),
+        [],
+        { value: 0 },
+        "tab-sequential-tool-activity-ids",
+      ),
+    );
+
+    expect(
+      results[3].content
+        .filter((part) => part.type === "tool-call")
+        .map((part) => ({
+          id: part.toolCallId,
+          result: part.result,
+          activity: part.activity,
+        })),
+    ).toEqual([
+      {
+        id: "activity-call-1",
+        result: '{"saved":"design-1"}',
+        activity: undefined,
+      },
+      { id: "activity-call-2", result: undefined, activity: true },
     ]);
   });
 
@@ -2986,6 +3361,111 @@ describe("SSE event processor activity-label clearing", () => {
         detail: { tabId: "tab-clear-text" },
       }),
     );
+  });
+});
+
+describe("SSE event processor stream-progress signaling", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const stubWindow = () => {
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent });
+    vi.stubGlobal(
+      "CustomEvent",
+      class CustomEvent {
+        type: string;
+        detail: unknown;
+        constructor(type: string, init?: { detail?: unknown }) {
+          this.type = type;
+          this.detail = init?.detail;
+        }
+      },
+    );
+    return dispatchEvent;
+  };
+
+  function streamProgressCalls(dispatchEvent: ReturnType<typeof vi.fn>) {
+    return dispatchEvent.mock.calls.filter(
+      (call) => (call[0] as CustomEvent).type === "agent-chat:stream-progress",
+    );
+  }
+
+  it("dispatches stream-progress once per chunk even across multiple text deltas", async () => {
+    const dispatchEvent = stubWindow();
+    await drain(
+      readSSEStream(
+        eventStream([
+          { type: "text", text: "Hello" },
+          { type: "text", text: " there" },
+          { type: "text", text: "!" },
+          { type: "done" },
+        ]),
+        [],
+        { value: 0 },
+        "tab-progress",
+      ),
+    );
+
+    expect(streamProgressCalls(dispatchEvent)).toHaveLength(1);
+    expect(dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "agent-chat:stream-progress",
+        detail: { tabId: "tab-progress" },
+      }),
+    );
+  });
+
+  it("re-arms stream-progress after a server clear retries the draft", async () => {
+    const dispatchEvent = stubWindow();
+    await drain(
+      readSSEStream(
+        eventStream([
+          { type: "text", text: "Rejected draft" },
+          { type: "clear" },
+          { type: "text", text: "Corrected answer" },
+          { type: "done" },
+        ]),
+        [],
+        { value: 0 },
+        "tab-rearm",
+      ),
+    );
+
+    expect(streamProgressCalls(dispatchEvent)).toHaveLength(2);
+  });
+
+  it("dispatches stream-progress once per chunk for reasoning deltas too", async () => {
+    const dispatchEvent = stubWindow();
+    await drain(
+      readSSEStream(
+        eventStream([
+          { type: "thinking", text: "Let me consider" },
+          { type: "thinking", text: " this further." },
+          { type: "done" },
+        ]),
+        [],
+        { value: 0 },
+        "tab-reasoning-progress",
+      ),
+    );
+
+    expect(streamProgressCalls(dispatchEvent)).toHaveLength(1);
+  });
+
+  it("does not dispatch stream-progress for an empty text delta", async () => {
+    const dispatchEvent = stubWindow();
+    await drain(
+      readSSEStream(
+        eventStream([{ type: "text", text: "" }, { type: "done" }]),
+        [],
+        { value: 0 },
+        "tab-empty",
+      ),
+    );
+
+    expect(streamProgressCalls(dispatchEvent)).toHaveLength(0);
   });
 });
 

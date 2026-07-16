@@ -67,6 +67,10 @@ import {
   inferWindowTitleFromDisplayStream,
 } from "@/lib/recording-title";
 import {
+  decideRecordingVisibilityAction,
+  isMobileRecorderRuntime,
+} from "@/lib/recording-visibility";
+import {
   captureVideoThumbnailBlob,
   uploadRecordingThumbnail,
 } from "@/lib/thumbnail-capture";
@@ -838,7 +842,7 @@ export default function RecordRoute() {
   const [uiState, setUiState] = useState<UiState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
-  const [elapsedMs, setElapsedMs] = useState(0);
+  const visibilityAutoPausedRef = useRef(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraSize, setCameraSize] = useState<CameraBubbleSize>(
     () => loadRecorderPreferences().cameraSize ?? "md",
@@ -980,35 +984,15 @@ export default function RecordRoute() {
     micDeviceLabel?: string | null;
     cameraDeviceId: string | null;
   } | null>(null);
-  const tickRef = useRef<number | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
   const fileUploadAbortRef = useRef<AbortController | null>(null);
   const browserDiagnosticsRef = useRef<BrowserDiagnosticsCapture | null>(null);
   // Bumped by doCancel() to invalidate any in-flight startFlow().
   const startSessionRef = useRef(0);
 
-  // -------------------------------------------------------------------------
-  // Timer
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (uiState !== "recording") {
-      if (tickRef.current !== null) {
-        window.clearInterval(tickRef.current);
-        tickRef.current = null;
-      }
-      return;
-    }
-    tickRef.current = window.setInterval(() => {
-      const e = engineRef.current?.getElapsedMs() ?? 0;
-      setElapsedMs(e);
-    }, 250);
-    return () => {
-      if (tickRef.current !== null) {
-        window.clearInterval(tickRef.current);
-        tickRef.current = null;
-      }
-    };
-  }, [uiState]);
+  // Elapsed-time display now ticks inside RecordingToolbar itself (via
+  // `active` + `getElapsedMs`) so the ~4x/sec poll doesn't re-render this
+  // whole route — see the `active`/`getElapsedMs` props passed below.
 
   // -------------------------------------------------------------------------
   // Wire preview stream into its video element.
@@ -2291,6 +2275,10 @@ export default function RecordRoute() {
   const togglePause = useCallback(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    // A direct user gesture owns the paused state from this point forward.
+    // In particular, returning to the foreground must not auto-resume a clip
+    // that the user deliberately left paused.
+    visibilityAutoPausedRef.current = false;
     if (engine.getState() === "paused") {
       engine.resume();
       liveTranscription.resume();
@@ -2301,6 +2289,59 @@ export default function RecordRoute() {
       setIsPaused(true);
     }
   }, [liveTranscription]);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    if (!isMobileRecorderRuntime(navigator)) return;
+    if (recordingMode !== "camera" || !cameraStream) {
+      visibilityAutoPausedRef.current = false;
+      return;
+    }
+
+    const videoTracks = cameraStream.getVideoTracks();
+    const syncCaptureSuspension = () => {
+      const engine = engineRef.current;
+      if (!engine) {
+        visibilityAutoPausedRef.current = false;
+        return;
+      }
+
+      const decision = decideRecordingVisibilityAction({
+        mode: recordingMode,
+        mobileRuntime: true,
+        documentHidden: document.hidden,
+        cameraTrackMuted: videoTracks.some((track) => track.muted),
+        recorderState: engine.getState(),
+        autoPaused: visibilityAutoPausedRef.current,
+      });
+      visibilityAutoPausedRef.current = decision.autoPaused;
+
+      if (decision.action === "pause") {
+        engine.pause();
+        liveTranscription.pause();
+        setIsPaused(true);
+      } else if (decision.action === "resume") {
+        engine.resume();
+        liveTranscription.resume();
+        setIsPaused(false);
+      }
+    };
+
+    document.addEventListener("visibilitychange", syncCaptureSuspension);
+    for (const track of videoTracks) {
+      track.addEventListener("mute", syncCaptureSuspension);
+      track.addEventListener("unmute", syncCaptureSuspension);
+    }
+    syncCaptureSuspension();
+
+    return () => {
+      document.removeEventListener("visibilitychange", syncCaptureSuspension);
+      for (const track of videoTracks) {
+        track.removeEventListener("mute", syncCaptureSuspension);
+        track.removeEventListener("unmute", syncCaptureSuspension);
+      }
+    };
+  }, [cameraStream, liveTranscription, recordingMode]);
 
   const restart = useCallback(async () => {
     await doCancel();
@@ -2609,7 +2650,8 @@ export default function RecordRoute() {
       {/* Floating toolbar */}
       {showRecordingUi && (
         <RecordingToolbar
-          elapsedMs={elapsedMs}
+          active={uiState === "recording"}
+          getElapsedMs={() => engineRef.current?.getElapsedMs() ?? 0}
           isPaused={isPaused}
           onTogglePause={togglePause}
           onStop={() => void doStop()}

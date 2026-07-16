@@ -18,6 +18,7 @@ import {
   createLocalFileDocument,
   isContentLocalFileMode,
 } from "./_local-file-documents.js";
+import { documentsPositionScope, withPositionLock } from "./_position-utils.js";
 
 function nanoid(size = 12): string {
   const chars =
@@ -44,6 +45,12 @@ export default defineAction({
       .describe("Pre-generated document ID (for optimistic UI)"),
     title: z.string().describe("Document title"),
     content: z.string().optional().describe("Markdown content"),
+    description: z
+      .string()
+      .optional()
+      .describe(
+        "Stable guidance describing why this page exists and what belongs in it",
+      ),
     parentId: z.string().nullish().describe("Parent document ID for nesting"),
     icon: z.string().optional().describe("Emoji icon"),
   }),
@@ -77,6 +84,7 @@ export default defineAction({
     const title = args.title;
 
     let content = args.content || "";
+    const description = args.description?.trim() ?? "";
     // Strip leading H1 that duplicates the title
     if (title && content) {
       const h1Match = content.match(/^#\s+(.+?)(\r?\n|$)/);
@@ -122,41 +130,48 @@ export default defineAction({
         .where(eq(schema.documentShares.resourceId, parentId));
     }
 
-    // Get max position among siblings
-    const maxPos = await db
-      .select({ max: sql<number>`COALESCE(MAX(position), -1)` })
-      .from(schema.documents)
-      .where(
-        parentId
-          ? and(
-              eq(schema.documents.ownerEmail, ownerEmail),
-              eq(schema.documents.parentId, parentId),
-            )
-          : and(
-              eq(schema.documents.ownerEmail, ownerEmail),
-              sql`parent_id IS NULL`,
-            ),
-      );
-
-    const position = (maxPos[0]?.max ?? -1) + 1;
     const now = new Date().toISOString();
     const id = args.id || nanoid();
 
-    await db.insert(schema.documents).values({
-      id,
-      ownerEmail,
-      orgId,
-      parentId,
-      title,
-      content,
-      icon,
-      position,
-      isFavorite: 0,
-      hideFromSearch,
-      visibility,
-      createdAt: now,
-      updatedAt: now,
-    });
+    await withPositionLock(
+      documentsPositionScope(ownerEmail, parentId),
+      async () => {
+        // Get max position among siblings
+        const maxPos = await db
+          .select({ max: sql<number>`COALESCE(MAX(position), -1)` })
+          .from(schema.documents)
+          .where(
+            parentId
+              ? and(
+                  eq(schema.documents.ownerEmail, ownerEmail),
+                  eq(schema.documents.parentId, parentId),
+                )
+              : and(
+                  eq(schema.documents.ownerEmail, ownerEmail),
+                  sql`parent_id IS NULL`,
+                ),
+          );
+
+        const position = (maxPos[0]?.max ?? -1) + 1;
+
+        await db.insert(schema.documents).values({
+          id,
+          ownerEmail,
+          orgId,
+          parentId,
+          title,
+          content,
+          description,
+          icon,
+          position,
+          isFavorite: 0,
+          hideFromSearch,
+          visibility,
+          createdAt: now,
+          updatedAt: now,
+        });
+      },
+    );
 
     if (inheritedShares.length > 0) {
       await db.insert(schema.documentShares).values(
@@ -195,6 +210,7 @@ export default defineAction({
       parentId: doc.parentId,
       title: doc.title,
       content: doc.content,
+      description: doc.description,
       icon: doc.icon,
       position: doc.position,
       isFavorite: parseDocumentFavorite(doc.isFavorite),

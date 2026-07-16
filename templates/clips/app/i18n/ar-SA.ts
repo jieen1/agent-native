@@ -13,6 +13,7 @@ const messages = {
   root: {
     commandActions: "الإجراءات",
     commandSearch: "بحث",
+    openAgent: "فتح الوكيل",
     commandAppearance: "المظهر",
     toggleTheme: "تبديل السمة",
     extensionSignedInTitle: "تم تسجيل الدخول",
@@ -47,11 +48,13 @@ const messages = {
   navigation: {
     brand: "المقاطع",
     library: "المكتبة",
+    sharedWithMe: "تمت مشاركته معي",
     spaces: "المساحات",
     meetings: "الاجتماعات",
     dictate: "إملاء",
     archive: "الأرشيف",
     trash: "المهملات",
+    agent: "الوكيل",
     settings: "الإعدادات",
     notifications: "الإشعارات",
     insights: "الرؤى",
@@ -80,6 +83,10 @@ const messages = {
       title: "مكتبتك فارغة",
       body: "التقط أول تسجيل شاشة وسيظهر هنا جاهزًا للمشاركة.",
       cta: "سجّل أول Clip لك",
+    },
+    shared: {
+      title: "لم تتم مشاركة أي مقاطع معك بعد",
+      body: "ستظهر هنا المقاطع التي يشاركها زملاؤك معك.",
     },
     folder: {
       title: "هذا المجلد فارغ",
@@ -291,6 +298,7 @@ const messages = {
     insights: "الرؤى",
     downloadForMac: "تحميل Mac",
     downloadForWindows: "تحميل Windows",
+    downloadForLinux: "تحميل Linux",
     downloadDesktopApp: "تنزيل تطبيق سطح المكتب",
     agentNativeClips: "Agent-Native Clips",
     agentNativeClipsIntro: "هو بديل مجاني،",
@@ -436,6 +444,7 @@ const messages = {
     invite: "دعوة",
     embed: "تضمين",
     shareLink: "رابط المشاركة",
+    shareWithHumans: "مشاركة مع الأشخاص",
     shareWithAgents: "شارك مع الوكلاء",
     copyAgentPrompt: "نسخ مطالبة الوكيل",
     agentPrompt:
@@ -446,6 +455,8 @@ const messages = {
     retryAgentLink: "إعادة المحاولة",
     gifPreview: "معاينة GIF",
     openPlayer: "مشغل مفتوح",
+    chooseFile: "اختيار ملف",
+    remove: "إزالة",
     downloadMp4: "تحميل MP4",
     embedsNeedPublic: "التضمينات تحتاج إلى مقطع عام",
     embedPublicDescription:
@@ -547,7 +558,7 @@ const messages = {
   downloadRoute: {
     pageTitle: "تحميل Clips Desktop",
     description:
-      "سجل شاشتك من شريط القائمة. التحديث التلقائي لتطبيق سطح المكتب لـ macOS وWindows.",
+      "سجل شاشتك من شريط النظام. تطبيق سطح مكتب بتحديث تلقائي لأنظمة macOS وWindows وLinux.",
     macSublabel: "عالمي (Apple Silicon + Intel)",
     windowsSublabel: "المثبت 64 بت MSI",
     downloadFor: "تحميل {{platform}}",
@@ -878,14 +889,6 @@ const messages = {
     removeDescription:
       "سيفقد {{email}} الوصول إلى هذه المؤسسة. يمكنك دائمًا دعوته مرة أخرى.",
     remove: "إزالة",
-  },
-  slackShareHint: {
-    playsInline: "يعمل داخل Slack",
-    connectedDescription:
-      "الصق هذا الرابط في أي مساحة عمل متصلة لتشغيله داخلها.",
-    makeInline: "اجعله يعمل داخل Slack",
-    connectDescription: "قم بتوصيل مساحة عمل حتى يظهر هذا الرابط كفيديو.",
-    connect: "اتصال",
   },
   commentsPanel: {
     disabled: "تم تعطيل التعليقات لهذا التسجيل.",

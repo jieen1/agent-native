@@ -1,8 +1,6 @@
-import { stripAuthRedirectParamFromUrl } from "./auth-redirect-url.js";
 import { installRouteChunkRecovery } from "./route-chunk-recovery.js";
 
 installRouteChunkRecovery();
-stripAuthRedirectParamFromUrl();
 
 export { getBrowserTabId } from "./browser-tab-id.js";
 
@@ -87,6 +85,7 @@ export {
 } from "./embed-auth.js";
 export {
   codeAgentTranscriptEventsToContent,
+  codeAgentTranscriptHasPendingApproval,
   createCodeAgentChatAdapter,
   type CodeAgentChatController,
   type CodeAgentChatControlResult,
@@ -107,6 +106,10 @@ export {
   type CodeAgentRunStateLike,
   type CodeAgentTranscriptOrderEvent,
 } from "../code-agents/transcript-order.js";
+export {
+  CREDENTIAL_GAP_SIGNAL,
+  isCredentialGapCodeAgentEvent,
+} from "../code-agents/transcript-normalizer.js";
 export { useSendToAgentChat } from "./use-send-to-agent-chat.js";
 export {
   useChatModels,
@@ -189,6 +192,10 @@ export {
   getChangeVersion,
   bumpChangeVersion,
 } from "./use-change-version.js";
+export {
+  useDemoModeStatus,
+  type DemoModeStatus,
+} from "./use-demo-mode-status.js";
 export { useReconciledState } from "./use-external-value.js";
 export {
   buildDynamicAgentSuggestions,
@@ -381,6 +388,13 @@ export {
   type BuildAgentNativeExtensionHtmlOptions,
   type CreateHttpAgentNativeExtensionStorageOptions,
 } from "./extensions/portable-extension.js";
+export { injectSessionReplayIframeBootstrap } from "../extensions/session-replay-iframe.js";
+export {
+  SESSION_REPLAY_IFRAME_ATTRIBUTE,
+  SESSION_REPLAY_IFRAME_PROBE,
+  SESSION_REPLAY_IFRAME_START,
+  SESSION_REPLAY_IFRAME_STOP,
+} from "../session-replay-iframe-protocol.js";
 export {
   AGENT_NATIVE_HOST_BRIDGE_VERSION,
   AGENT_NATIVE_HOST_MESSAGE_TYPES,
@@ -487,6 +501,10 @@ export {
   AgentComposerFrame,
   type AgentComposerFrameProps,
   PromptComposer,
+  RealtimeVoiceModeBoundary,
+  RealtimeVoiceModeProvider,
+  RealtimeVoiceModeDock,
+  RealtimeVoiceModeEntry,
   TiptapComposer,
   AGENT_PROMPT_MAX_INLINE_IMAGE_BYTES,
   AGENT_PROMPT_MAX_INLINE_TEXT_CHARS,
@@ -494,9 +512,28 @@ export {
   formatPromptWithAttachments,
   isInlineableAgentPromptFile,
   readAgentPromptAttachment,
+  createRealtimeVoiceSession,
+  createRealtimeVoiceSessionWithCapability,
+  executeRealtimeVoiceTool,
+  extractRealtimeVoiceFunctionCalls,
+  readRealtimeVoiceContext,
+  useRealtimeVoiceMode,
+  useRealtimeVoiceModeCopy,
+  useRealtimeVoiceModeOptional,
   type PromptComposerProps,
   type PromptComposerFile,
   type PromptComposerSubmitOptions,
+  type RealtimeVoiceModeCopy,
+  type RealtimeVoiceModeDockProps,
+  type RealtimeVoiceModeEntryProps,
+  type RealtimeVoiceSessionAnswer,
+  type RealtimeVoiceModeInlineSettings,
+  type RealtimeVoiceModeSelectSetting,
+  type RealtimeVoiceModeSettingOption,
+  type RealtimeVoiceModeState,
+  type RealtimeVoiceModeApi,
+  type RealtimeVoiceModeProviderProps,
+  type RealtimeVoiceToolResult,
   type ComposerSubmitIntent,
   type AgentPromptAttachment,
   type ReadAgentPromptAttachmentOptions,
@@ -539,6 +576,12 @@ export {
   type ChatThreadShareState,
   type UseChatThreadsOptions,
 } from "./use-chat-threads.js";
+export {
+  ChatHistoryList,
+  type ChatHistoryItem,
+  type ChatHistorySection,
+  type ChatHistoryListProps,
+} from "./chat/ChatHistoryList.js";
 export { AgentChatHome, type AgentChatHomeProps } from "./AgentChatHome.js";
 export {
   AgentChatSurface,
@@ -551,6 +594,11 @@ export {
   type AgentPanelProps,
   type AgentSidebarProps,
 } from "./AgentPanel.js";
+export {
+  AgentTabsPage,
+  type AgentTabsPageProps,
+} from "./agent-page/AgentTabsPage.js";
+export type { AgentPageScope, AgentPageTabProps } from "./agent-page/types.js";
 export {
   AGENT_CHAT_HOME_HANDOFF_TTL_MS,
   AGENT_CHAT_VIEW_TRANSITION_CLASS,
@@ -645,6 +693,7 @@ export {
   SettingsPanel,
   SettingsTabsPage,
   SecretsSection,
+  getAgentSettingsSearchTabs,
   openBuilderConnectPopup,
   useAgentSettingsTabs,
   useBuilderConnectFlow,
@@ -654,6 +703,7 @@ export {
   type BuilderConnectFlowOptions,
   type BuilderConnectStartOptions,
   type BuilderStatus,
+  type AgentSettingsSearchTab,
   type OpenBuilderConnectPopupOptions,
   type SecretsSectionProps,
   type SettingsPanelProps,
@@ -661,17 +711,6 @@ export {
   type SettingsTabItem,
   type SettingsTabsPageProps,
 } from "./settings/index.js";
-// Deprecated — use AgentSidebar + AgentToggleButton instead
-export {
-  ProductionAgentPanel,
-  type ProductionAgentPanelProps,
-} from "./ProductionAgentPanel.js";
-export {
-  useProductionAgent,
-  type ProductionAgentMessage,
-  type UseProductionAgentOptions,
-  type UseProductionAgentResult,
-} from "./useProductionAgent.js";
 export { Turnstile, type TurnstileProps } from "./Turnstile.js";
 export {
   OpenSourceBadge,
@@ -730,6 +769,7 @@ export {
   trackEvent,
   trackSessionStatus,
   configureTracking,
+  setTrackingContentCaptureEnabled,
   maybeStartSessionReplay,
   startSessionReplay,
   stopSessionReplay,
@@ -803,6 +843,7 @@ export {
   type ResourceTreeProps,
   type ResourceEditorProps,
 } from "./resources/index.js";
+export type { ResourcesPanelProps } from "./resources/ResourcesPanel.js";
 export {
   HistoryTimeline,
   VersionHistoryPanel,
@@ -823,6 +864,7 @@ export {
   type VersionHistoryPanelProps,
 } from "./history/index.js";
 export {
+  ReviewCommentComposer,
   ReviewStatusBadge,
   ReviewThreadPanel,
   buildReviewThreads,
@@ -833,6 +875,7 @@ export {
   useResolveReviewThread,
   useReviewComments,
   useReviewFeedback,
+  useSendReviewThreadToAgent,
   useSetReviewStatus,
   type ConsumeReviewFeedbackInput,
   type CreateReviewCommentInput,
@@ -844,9 +887,11 @@ export {
   type ReplyReviewCommentInput,
   type ResolveReviewThreadInput,
   type ReviewStatusBadgeProps,
+  type ReviewCommentComposerProps,
   type ReviewThread,
   type ReviewThreadPanelProps,
   type SetReviewStatusInput,
+  type SendReviewThreadToAgentInput,
 } from "./review/index.js";
 export type {
   AppToFrameMessage,
@@ -895,6 +940,36 @@ export {
   type ProviderReadinessBadgeProps,
   type SetupConnectionsPageProps,
 } from "./setup-connections/index.js";
+export {
+  listIntegrationEnvStatuses,
+  listIntegrationStatuses,
+  saveIntegrationEnvVars,
+  setIntegrationEnabled,
+  setupIntegration,
+  disconnectManagedIntegrationInstallation,
+  listManagedIntegrationInstallations,
+  managedIntegrationOAuthUrl,
+  managedSlackAgentManifestUrl,
+  listManagedIntegrationScopes,
+  saveManagedIntegrationScope,
+  listManagedIntegrationBudgets,
+  listManagedIntegrationMemory,
+  forgetManagedIntegrationMemory,
+  saveManagedIntegrationBudget,
+  testManagedIntegrationInstallation,
+  IntegrationClientError,
+  type ClientIntegrationInstallation,
+  type ClientIntegrationScope,
+  type ClientIntegrationUsageBudget,
+  type ClientIntegrationMemory,
+  type ClientIntegrationStatus,
+  type IntegrationEnvStatus,
+  type SavedEnvVarsResult,
+} from "./integrations/index.js";
+export {
+  invokeConfiguredAutomationWorkflow,
+  type InvokeConfiguredAutomationWorkflowInput,
+} from "./automation.js";
 export {
   ChangelogDialog,
   ChangelogSettingsCard,

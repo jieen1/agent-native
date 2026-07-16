@@ -63,13 +63,22 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     Number(__DESIGN_CANVAS_CONTENT_OFFSET_Y__) || 0;
   var runtimeLayerSnapshotEnabled = !!__RUNTIME_LAYER_SNAPSHOT_ENABLED__;
   var scaleToolEnabled = false;
+
   // Interaction-state forced preview (phase 2 — see shared/interaction-states.ts's
-  // "Forced-preview mechanism" doc comment). Tracks which single node id
-  // currently carries the `data-an-state-preview` attribute so a later
-  // `state-preview` message for a DIFFERENT node clears the previous one
-  // first — only one element can be force-previewing a state at a time,
-  // matching the inspector's single-selection InteractionStatePanel.
-  var statePreviewNodeId: string | null = null;
+  // "Forced-preview mechanism" doc comment). Keep the actual element rather
+  // than only its node id: localhost React layers can resolve through runtime
+  // selectors/provenance without carrying data-agent-native-node-id, and a
+  // DOM replacement may retire the old element between preview messages.
+  var statePreviewElement: HTMLElement | null = null;
+  type RuntimeInteractionStatePreview = {
+    element: HTMLElement;
+    key: string;
+    state: string;
+    styles: Record<string, string>;
+  };
+  var runtimeInteractionStatePreviews: RuntimeInteractionStatePreview[] = [];
+  var runtimeInteractionStatePreviewSequence = 0;
+  var runtimeInteractionStatePreviewStyle: HTMLStyleElement | null = null;
   var editorChromeScaleX = Math.max(
     0.05,
     Number(__EDITOR_CHROME_SCALE_X__) || 1,
@@ -92,6 +101,7 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       "",
     );
     chromeTransitionStyle.textContent =
+      "html{overflow:clip}" /* prevent negative-offset handles from expanding the iframe */ +
       '[data-agent-native-edit-overlay="selection"]{transition:border-width 150ms ease-out}' +
       '[data-agent-native-empty-text-editing="true"] [data-agent-native-edit-overlay="selection"]{display:none!important}' +
       "[data-agent-native-text-editing]{outline:none!important;outline-offset:0!important}" +
@@ -107,11 +117,142 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
 
   ensureEditorChromeStyle();
 
+  function isSupportedInteractionState(value: string): boolean {
+    return (
+      value === "hover" ||
+      value === "focus" ||
+      value === "focus-visible" ||
+      value === "active" ||
+      value === "disabled"
+    );
+  }
+
+  function normalizeInteractionStateProperty(property: string): string {
+    return String(property || "")
+      .trim()
+      .replace(/[A-Z]/g, function (match) {
+        return "-" + match.toLowerCase();
+      });
+  }
+
+  function isSafeInteractionStatePreviewValue(value: string): boolean {
+    return (
+      value.trim().length > 0 &&
+      !/[;{}<>]|\/\*|\*\/|\burl\s*\(/i.test(value) &&
+      !/[\u0000-\u001f\u007f]/.test(value)
+    );
+  }
+
+  function renderRuntimeInteractionStatePreviews(): void {
+    runtimeInteractionStatePreviews = runtimeInteractionStatePreviews.filter(
+      function (entry) {
+        return (
+          entry.element.isConnected && Object.keys(entry.styles).length > 0
+        );
+      },
+    );
+    if (runtimeInteractionStatePreviewStyle?.isConnected) {
+      runtimeInteractionStatePreviewStyle.remove();
+    }
+    runtimeInteractionStatePreviewStyle = null;
+    if (runtimeInteractionStatePreviews.length === 0) return;
+
+    var style = document.createElement("style");
+    style.setAttribute("data-agent-native-runtime-state-previews", "");
+    (document.head || document.documentElement).appendChild(style);
+    runtimeInteractionStatePreviewStyle = style;
+    var sheet = style.sheet;
+    if (!sheet) return;
+    runtimeInteractionStatePreviews.forEach(function (entry) {
+      var selector =
+        '[data-an-state-preview-key="' +
+        entry.key +
+        '"][data-an-state-preview="' +
+        entry.state +
+        '"]';
+      try {
+        var index = sheet.insertRule(selector + "{}", sheet.cssRules.length);
+        var rule = sheet.cssRules[index] as CSSStyleRule;
+        Object.keys(entry.styles).forEach(function (rawProperty) {
+          var property = normalizeInteractionStateProperty(rawProperty);
+          var value = String(entry.styles[rawProperty] || "").trim();
+          if (!/^-?[a-z][a-z0-9-]*$/i.test(property) || !value) return;
+          rule.style.setProperty(property, value, "important");
+        });
+      } catch (_err) {}
+    });
+  }
+
+  function updateRuntimeInteractionStatePreview(
+    element: HTMLElement,
+    state: string,
+    styles: Record<string, unknown> | null,
+    replace: boolean,
+  ): void {
+    if (!isSupportedInteractionState(state)) return;
+    var key = element.getAttribute("data-an-state-preview-key");
+    if (!key) {
+      runtimeInteractionStatePreviewSequence += 1;
+      key = String(runtimeInteractionStatePreviewSequence);
+      element.setAttribute("data-an-state-preview-key", key);
+    }
+    var existingIndex = runtimeInteractionStatePreviews.findIndex(
+      function (entry) {
+        return entry.element === element && entry.state === state;
+      },
+    );
+    var nextStyles: Record<string, string> =
+      !replace && existingIndex >= 0
+        ? { ...runtimeInteractionStatePreviews[existingIndex]!.styles }
+        : {};
+    if (styles && typeof styles === "object") {
+      Object.keys(styles).forEach(function (property) {
+        var value = styles[property];
+        if (typeof value !== "string" || value.trim() === "") {
+          delete nextStyles[property];
+        } else if (isSafeInteractionStatePreviewValue(value)) {
+          nextStyles[property] = value;
+        }
+      });
+    }
+    if (existingIndex >= 0) {
+      if (Object.keys(nextStyles).length === 0) {
+        runtimeInteractionStatePreviews.splice(existingIndex, 1);
+      } else {
+        runtimeInteractionStatePreviews[existingIndex] = {
+          element: element,
+          key: key,
+          state: state,
+          styles: nextStyles,
+        };
+      }
+    } else if (Object.keys(nextStyles).length > 0) {
+      runtimeInteractionStatePreviews.push({
+        element: element,
+        key: key,
+        state: state,
+        styles: nextStyles,
+      });
+    }
+    if (
+      !runtimeInteractionStatePreviews.some(function (entry) {
+        return entry.element === element;
+      })
+    ) {
+      element.removeAttribute("data-an-state-preview-key");
+    }
+    renderRuntimeInteractionStatePreviews();
+  }
+
   function runtimeHeadHtmlWithoutEditorChrome(): string {
     if (!document.head) return "";
     var clone = document.head.cloneNode(true) as HTMLElement;
     Array.prototype.slice
-      .call(clone.querySelectorAll("[data-agent-native-editor-chrome-style]"))
+      .call(
+        clone.querySelectorAll(
+          "[data-agent-native-editor-chrome-style], [data-agent-native-editing-safety-style]",
+        ),
+      )
       .forEach(function (node) {
         if (node.parentNode) node.parentNode.removeChild(node);
       });
@@ -294,6 +435,8 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
   var runtimeLayerSnapshotTimer: number | null = null;
   var runtimeLayerSnapshotMaxTimer: number | null = null;
   var lastRuntimeLayerSnapshotHtml = "";
+  var runtimeDocumentId =
+    "runtime-" + Date.now() + "-" + Math.random().toString(16).slice(2);
 
   function runtimeLayerHash(value: string): string {
     var hash = 0x811c9dc5;
@@ -374,6 +517,95 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     nodeCount: number;
   } | null {
     if (!document.body) return null;
+    // Keep this list export-focused and bounded. The runtime snapshot is also
+    // the hosted/cross-origin Design→Figma fallback: inlining the resolved
+    // paint/layout values lets the parent reconstruct the already-rendered
+    // frame without loading the app's CSS or running its scripts again.
+    var snapshotComputedProperties = [
+      "box-sizing",
+      "display",
+      "position",
+      "inset",
+      "top",
+      "right",
+      "bottom",
+      "left",
+      "width",
+      "height",
+      "min-width",
+      "min-height",
+      "max-width",
+      "max-height",
+      "margin",
+      "padding",
+      "flex",
+      "flex-flow",
+      "flex-grow",
+      "flex-shrink",
+      "flex-basis",
+      "align-items",
+      "align-self",
+      "align-content",
+      "justify-content",
+      "justify-items",
+      "justify-self",
+      "gap",
+      "grid-template-columns",
+      "grid-template-rows",
+      "grid-column",
+      "grid-row",
+      "order",
+      "overflow",
+      "overflow-x",
+      "overflow-y",
+      "background-color",
+      "background-image",
+      "background-position",
+      "background-size",
+      "background-repeat",
+      "border",
+      "border-top",
+      "border-right",
+      "border-bottom",
+      "border-left",
+      "border-radius",
+      "box-shadow",
+      "opacity",
+      "transform",
+      "transform-origin",
+      "color",
+      "font-family",
+      "font-size",
+      "font-style",
+      "font-weight",
+      "line-height",
+      "letter-spacing",
+      "text-align",
+      "text-decoration",
+      "text-transform",
+      "white-space",
+      "object-fit",
+      "object-position",
+      "clip-path",
+      "visibility",
+    ];
+    function inlineSnapshotComputedStyle(
+      sourceNode: Element,
+      cloneNode: Element,
+    ): void {
+      var computed = getComputedStyle(sourceNode);
+      var parts: string[] = [];
+      for (
+        var propertyIndex = 0;
+        propertyIndex < snapshotComputedProperties.length;
+        propertyIndex += 1
+      ) {
+        var property = snapshotComputedProperties[propertyIndex];
+        var value = computed.getPropertyValue(property);
+        if (value) parts.push(property + ":" + value);
+      }
+      cloneNode.setAttribute("style", parts.join(";"));
+    }
     var sourceNodes = Array.prototype.slice.call(
       document.body.querySelectorAll("*"),
     ) as Element[];
@@ -397,6 +629,7 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
         "data-agent-native-node-id",
         ensureRuntimeLayerNodeId(sourceNode),
       );
+      inlineSnapshotComputedStyle(sourceNode, cloneNode);
       var provenance = reactDebugProvenance(sourceNode);
       if (provenance) {
         cloneNode.setAttribute("data-source-file", provenance.sourceFile);
@@ -419,18 +652,52 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
         node.remove();
       });
     cloneBody
-      .querySelectorAll("script,style,template,noscript,link,meta,title")
+      .querySelectorAll(
+        "script,style,template,noscript,link,meta,title,iframe,object,embed,base,foreignObject,video,audio,source,track,animate,set",
+      )
       .forEach(function (node) {
         node.remove();
+      });
+    // Snapshots cross a trust boundary into parent-owned srcdoc. Strip active
+    // attributes here even though the receiver repeats the same policy and
+    // renders under a no-script sandbox + restrictive CSP.
+    [cloneBody]
+      .concat(
+        Array.prototype.slice.call(
+          cloneBody.querySelectorAll("*"),
+        ) as Element[],
+      )
+      .forEach(function (node: Element) {
+        Array.prototype.slice.call(node.attributes).forEach(function (
+          attribute: Attr,
+        ) {
+          var name = String(attribute.name || "").toLowerCase();
+          var value = String(attribute.value || "");
+          if (
+            name.indexOf("on") === 0 ||
+            name === "srcdoc" ||
+            name === "autofocus" ||
+            name === "action" ||
+            name === "formaction" ||
+            /javascript\s*:/i.test(value)
+          ) {
+            node.removeAttribute(attribute.name);
+          }
+        });
       });
     cloneBody.setAttribute(
       "data-agent-native-node-id",
       ensureRuntimeLayerNodeId(document.body),
     );
+    inlineSnapshotComputedStyle(document.body, cloneBody);
     cloneBody.setAttribute("data-an-runtime-layer-snapshot", "true");
     var html = "<!doctype html><html>" + cloneBody.outerHTML + "</html>"; // i18n-ignore serialized runtime-layer HTML payload, not visible UI copy
     if (html.length > 2_000_000) return null;
-    return { html: html, nodeCount: nodeCount };
+    return {
+      html: html,
+      nodeCount: nodeCount,
+      documentId: runtimeDocumentId,
+    };
   }
 
   function postRuntimeLayerSnapshot(): void {
@@ -645,10 +912,12 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
 
   function selectionTargetForHit(hit: Element | null): Element | null {
     if (!hit || isDocumentRootElement(hit)) return hit;
-    if (selectedEl && hit !== selectedEl && selectedEl.contains(hit))
-      return hit;
-    if (hasStableOwnSource(hit)) return hit;
-    return closestStableSourceElement(hit) || hit;
+    // Select the deepest element under the pointer on the first click. The
+    // bridge can mint a pending node id and build a source-equivalent selector
+    // for id-less descendants, so climbing to the nearest tagged ancestor is
+    // no longer necessary and makes ordinary list labels select their parent
+    // container instead.
+    return hit;
   }
 
   function freshRuntimeNodeId(prefix: string): string {
@@ -1577,17 +1846,46 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     }
     selectionOverlay.appendChild(handle);
   });
-  ["nw", "ne", "se", "sw"].forEach(function (pos) {
-    var rotate = document.createElement("span");
-    rotate.setAttribute("data-agent-native-rotate-handle", pos);
-    rotate.style.cssText =
-      "position:absolute;width:18px;height:18px;border-radius:999px;pointer-events:auto;cursor:grab;";
-    if (pos.indexOf("n") !== -1) rotate.style.top = "-26px";
-    if (pos.indexOf("s") !== -1) rotate.style.bottom = "-26px";
-    if (pos.indexOf("w") !== -1) rotate.style.left = "-26px";
-    if (pos.indexOf("e") !== -1) rotate.style.right = "-26px";
-    selectionOverlay.appendChild(rotate);
-  });
+  (function () {
+    var baseAngles = { nw: 270, ne: 0, se: 90, sw: 180 };
+    function rotateCursorUri(angleDeg) {
+      var svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">' +
+        '<g transform="rotate(' +
+        angleDeg +
+        ' 10 10)" fill="none" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M 4 8 A 7 7 0 0 1 16 8" stroke="white" stroke-width="3.5"/>' +
+        '<path d="M 4 8 A 7 7 0 0 1 16 8"/>' +
+        '<path d="M 12.5 3.5 L 16 8 L 11 8.5" fill="white" stroke="white" stroke-width="3.5" stroke-linejoin="round"/>' +
+        '<path d="M 12.5 3.5 L 16 8 L 11 8.5" fill="black"/>' +
+        "</g></svg>";
+      return (
+        'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 10 10, grab'
+      );
+    }
+    ["nw", "ne", "se", "sw"].forEach(function (pos) {
+      var handle = document.createElement("span");
+      handle.setAttribute("data-agent-native-rotate-handle", pos);
+      handle.style.cssText =
+        "position:absolute;width:28px;height:28px;border-radius:999px;pointer-events:auto;";
+      handle.style.cursor = rotateCursorUri(baseAngles[pos]);
+      if (pos.indexOf("n") !== -1) handle.style.top = "-34px";
+      if (pos.indexOf("s") !== -1) handle.style.bottom = "-34px";
+      if (pos.indexOf("w") !== -1) handle.style.left = "-34px";
+      if (pos.indexOf("e") !== -1) handle.style.right = "-34px";
+      selectionOverlay.appendChild(handle);
+    });
+    var button = document.createElement("span");
+    button.setAttribute("data-agent-native-rotate-handle", "top-center");
+    button.style.cssText =
+      "position:absolute;left:50%;transform:translateX(-50%);top:-22px;" +
+      "width:16px;height:16px;pointer-events:auto;" +
+      "display:flex;align-items:center;justify-content:center;" +
+      "border-radius:999px;background:white;box-shadow:0 1px 3px rgba(0,0,0,0.3);" +
+      "cursor:grab;user-select:none;font-size:10px;line-height:1;color:#333;";
+    button.textContent = "↻";
+    selectionOverlay.appendChild(button);
+  })();
   var spacingOverlay = document.createElement("div");
   spacingOverlay.setAttribute("data-agent-native-spacing-overlay", "");
   spacingOverlay.style.cssText =
@@ -1664,7 +1962,7 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
   var transformBadge = document.createElement("div");
   transformBadge.setAttribute("data-agent-native-transform-badge", "");
   transformBadge.style.cssText =
-    "position:fixed;z-index:100000;display:none;pointer-events:none;border:1px solid hsl(var(--border));border-radius:4px;background:hsl(var(--background) / 0.96);color:hsl(var(--foreground));font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;padding:3px 5px;box-shadow:0 8px 20px color-mix(in srgb, hsl(var(--foreground)) 16%, transparent);";
+    "position:fixed;z-index:100000;display:none;pointer-events:none;border:1px solid rgba(255,255,255,0.16);border-radius:4px;background:rgba(24,24,27,0.96);color:rgba(255,255,255,0.96);font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;padding:3px 5px;box-shadow:0 8px 20px rgba(0,0,0,0.28);";
   document.body.appendChild(transformBadge);
 
   var spacingBadge = document.createElement("div");
@@ -1700,6 +1998,12 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
 
   var measurementOverlay = document.createElement("div");
   measurementOverlay.setAttribute("data-agent-native-measurement-overlay", "");
+  // Tag as an edit overlay so the content-replacement path preserves it (only
+  // [data-agent-native-edit-overlay] nodes survive a body rebuild).
+  measurementOverlay.setAttribute(
+    "data-agent-native-edit-overlay",
+    "measurement",
+  );
   measurementOverlay.style.cssText =
     "position:fixed;inset:0;z-index:100001;display:none;pointer-events:none;color:var(--design-editor-measure-color);font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;";
   document.body.appendChild(measurementOverlay);
@@ -2290,6 +2594,7 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     preferredSelector: string,
     selectorCandidates: string[],
     forceFullDocument?: boolean,
+    preserveTextEditingSession?: boolean,
   ): void {
     if (typeof html !== "string") return;
     // T23: a session whose element was already detached (earlier patch,
@@ -2300,7 +2605,10 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     // finish() runs before we continue; this newer payload then supersedes
     // its result, preserving ordering.)
     exitStaleTextEditSession();
-    if (activeTextEditEl && !forceFullDocument) {
+    if (
+      activeTextEditEl &&
+      (!forceFullDocument || preserveTextEditingSession)
+    ) {
       // Don't yank a runtime content update out from under an in-progress
       // text edit — but don't silently lose it either (T13). Buffer only the
       // latest payload; it is applied once the edit session ends via
@@ -3574,50 +3882,44 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       .querySelectorAll("[data-agent-native-rotate-handle]")
       .forEach(function (handle) {
         var pos = handle.getAttribute("data-agent-native-rotate-handle") || "";
-        handle.style.width = 18 * sx + "px";
-        handle.style.height = 18 * sy + "px";
-        if (pos.indexOf("n") !== -1) handle.style.top = -26 * sy + "px";
-        if (pos.indexOf("s") !== -1) handle.style.bottom = -26 * sy + "px";
-        if (pos.indexOf("w") !== -1) handle.style.left = -26 * sx + "px";
-        if (pos.indexOf("e") !== -1) handle.style.right = -26 * sx + "px";
+        if (pos === "top-center") {
+          var buttonScale = Math.min(sx, sy);
+          handle.style.width = 16 * buttonScale + "px";
+          handle.style.height = 16 * buttonScale + "px";
+          handle.style.fontSize = 10 * buttonScale + "px";
+          handle.style.top = -22 * sy + "px";
+          return;
+        }
+        var size = Math.min(sx, sy);
+        handle.style.width = 28 * size + "px";
+        handle.style.height = 28 * size + "px";
+        if (pos.indexOf("n") !== -1) handle.style.top = -34 * sy + "px";
+        if (pos.indexOf("s") !== -1) handle.style.bottom = -34 * sy + "px";
+        if (pos.indexOf("w") !== -1) handle.style.left = -34 * sx + "px";
+        if (pos.indexOf("e") !== -1) handle.style.right = -34 * sx + "px";
       });
   }
 
-  // Rotation-aware local-box placement shared by selectionOverlay, the hover
-  // highlightOverlay, and the passive multi-selection overlays: prefer the CSS
-  // box + rotation transform so the outline hugs the rotated element rather
-  // than its inflated axis-aligned bounding box. Returns true when it placed
-  // the overlay (caller should skip the AABB fallback), false when the element
-  // has no usable local box (falls back to getBoundingClientRect).
+  // Returns true when the overlay was placed with the element's rotated CSS box.
   function positionOverlayForRotatedLocalBox(
     overlay: HTMLElement,
     el: Element,
   ): boolean {
     var elCs = window.getComputedStyle(el);
-    var elLeft = readFinitePx(el.style.left || elCs.left);
-    var elTop = readFinitePx(el.style.top || elCs.top);
-    var elW = readFinitePx(el.style.width || elCs.width);
-    var elH = readFinitePx(el.style.height || elCs.height);
+    var elW = readFinitePx((el as HTMLElement).style.width || elCs.width);
+    var elH = readFinitePx((el as HTMLElement).style.height || elCs.height);
     var elRot = currentRotation(el);
-    var canUseLocalBox =
-      Math.abs(elRot) > 0.01 &&
-      elLeft !== null &&
-      elTop !== null &&
-      elW !== null &&
-      elH !== null;
-    if (!canUseLocalBox) return false;
-    // Convert element-local left/top to viewport coords by walking to the
-    // nearest positioned ancestor (same reference frame as getBoundingClientRect).
-    var parentRect = (
-      (el as HTMLElement).offsetParent || document.documentElement
-    ).getBoundingClientRect();
+    if (Math.abs(elRot) < 0.01 || elW === null || elH === null) return false;
+    var rect = (el as HTMLElement).getBoundingClientRect();
+    var cx = rect.left + rect.width / 2;
+    var cy = rect.top + rect.height / 2;
     overlay.style.display = "block";
-    overlay.style.left = parentRect.left + elLeft + "px";
-    overlay.style.top = parentRect.top + elTop + "px";
+    overlay.style.left = cx - elW / 2 + "px";
+    overlay.style.top = cy - elH / 2 + "px";
     overlay.style.width = elW + "px";
     overlay.style.height = elH + "px";
     overlay.style.transform = "rotate(" + elRot + "deg)";
-    overlay.style.transformOrigin = "0 0";
+    overlay.style.transformOrigin = "50% 50%";
     return true;
   }
 
@@ -3941,6 +4243,11 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     }
     var selectedRect = a.getBoundingClientRect();
     var hoverRect = b.getBoundingClientRect();
+    // A content re-render can rebuild document.body and drop this overlay;
+    // re-attach it before drawing so the lines always render.
+    if (!measurementOverlay.isConnected) {
+      document.body.appendChild(measurementOverlay);
+    }
     measurementOverlay.innerHTML = "";
     measurementOverlay.style.display = "block";
 
@@ -5360,32 +5667,66 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     },
   );
 
-  function currentRotation(el) {
-    var transform =
-      el.style.transform || window.getComputedStyle(el).transform || "";
-    var match = transform.match(/rotate\((-?\d+(?:\.\d+)?)deg\)/);
+  function rotationFromTransform(transform) {
+    var match = transform.match(/rotate(?:Z)?\((-?\d+(?:\.\d+)?)deg\)/i);
     if (match) return parseFloat(match[1]) || 0;
     if (transform && transform !== "none" && window.DOMMatrixReadOnly) {
       try {
         var matrix = new DOMMatrixReadOnly(transform);
-        return Math.round((Math.atan2(matrix.b, matrix.a) * 180) / Math.PI);
+        return (Math.atan2(matrix.b, matrix.a) * 180) / Math.PI;
       } catch (err) {}
     }
     return 0;
   }
 
-  function mergeRotation(el, degrees) {
-    var inline = el.style.transform || "";
-    var next = inline.match(/rotate\((-?\d+(?:\.\d+)?)deg\)/)
-      ? inline.replace(
-          /rotate\((-?\d+(?:\.\d+)?)deg\)/,
-          "rotate(" + degrees + "deg)",
-        )
-      : (inline && inline !== "none" ? inline + " " : "") +
-        "rotate(" +
-        degrees +
-        "deg)";
-    return next.trim();
+  function independentRotation(rotate) {
+    var match = rotate.match(
+      /^(?:z\s+)?(-?\d+(?:\.\d+)?)(deg|grad|rad|turn)$/i,
+    );
+    if (!match) return 0;
+    var value = parseFloat(match[1]) || 0;
+    var unit = match[2].toLowerCase();
+    if (unit === "grad") return value * 0.9;
+    if (unit === "rad") return (value * 180) / Math.PI;
+    if (unit === "turn") return value * 360;
+    return value;
+  }
+
+  function currentRotation(el) {
+    var computed = window.getComputedStyle(el);
+    return (
+      rotationFromTransform(computed.transform || "") +
+      independentRotation(computed.rotate || "")
+    );
+  }
+
+  // Merge an ABSOLUTE rotation value (degrees) into a transform string.
+  // When the string already has a rotate/rotateZ(), replace it in place.
+  // When the transform is a matrix() (e.g. computed from a class rule), strip
+  // the rotation component and append the new absolute rotate() so the inline
+  // value only adds what the class doesn't already own as non-rotation parts.
+  // When the string has non-rotation functions (translate, scale, etc.) without
+  // an explicit rotate(), append rotate() so other transforms are preserved.
+  function mergeAbsoluteRotation(transform, degrees) {
+    var rotatePattern = /rotate(?:Z)?\((-?\d+(?:\.\d+)?)deg\)/i;
+    if (rotatePattern.test(transform)) {
+      return transform
+        .replace(rotatePattern, "rotate(" + degrees + "deg)")
+        .trim();
+    }
+    // matrix() is the computed form of a class-rule transform; writing it
+    // inline would hard-pin every property from that rule. Instead start fresh
+    // with just the target rotation so the class still owns everything else.
+    if (/^matrix(?:3d)?\(/i.test(transform.trim())) {
+      return "rotate(" + degrees + "deg)";
+    }
+    // transform string with other functions but no existing rotate: append.
+    return (
+      (transform && transform !== "none" ? transform + " " : "") +
+      "rotate(" +
+      degrees +
+      "deg)"
+    ).trim();
   }
 
   function ensurePositionable(el) {
@@ -6503,6 +6844,12 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     });
     if (!children.length) return null;
     var axis = parentFlowAxis(container);
+    var containerStyles = window.getComputedStyle(container);
+    var multiTrackGrid =
+      (containerStyles.display === "grid" ||
+        containerStyles.display === "inline-grid") &&
+      (containerStyles.gridTemplateColumns || "").split(" ").filter(Boolean)
+        .length > 1;
     var best: Element | null = null;
     var bestDistance = Infinity;
     var placement = "after";
@@ -6514,11 +6861,27 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       var center =
         axis === "x" ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
       var pointer = axis === "x" ? clientX : clientY;
-      var distance = Math.abs(pointer - center);
+      // A multi-column grid is two-dimensional. Comparing X alone ties cells
+      // in the same column across every row, so a drop beside row 2 used to
+      // anchor against row 1 and jump to the beginning of the grid. Resolve
+      // the nearest visual cell in both axes, then use X for row-major
+      // before/after placement. One-column grids retain the normal Y path.
+      var distance = multiTrackGrid
+        ? Math.hypot(
+            clientX - (rect.left + rect.width / 2),
+            clientY - (rect.top + rect.height / 2),
+          )
+        : Math.abs(pointer - center);
       if (distance < bestDistance) {
         bestDistance = distance;
         best = children[j];
-        placement = pointer < center ? "before" : "after";
+        placement = multiTrackGrid
+          ? clientX < rect.left + rect.width / 2
+            ? "before"
+            : "after"
+          : pointer < center
+            ? "before"
+            : "after";
       }
     }
     if (!best) return null;
@@ -7080,6 +7443,29 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     "right",
     "bottom",
   ];
+  // Flex/grid-item-only inline properties. A member leaving auto-layout flow
+  // for an absolute/freeform container (prepareFlowMembersForAbsoluteDrop)
+  // must lose these — they only affect how a flow child sizes/aligns itself
+  // among siblings inside an auto-layout parent, and are meaningless once the
+  // element is position:absolute. Left in place they silently keep
+  // controlling nothing today but would immediately re-activate (with a
+  // stale, source-parent-relative value) the moment the element was ever
+  // reparented BACK into flow — e.g. by an undo, or a later drag into another
+  // auto-layout container that doesn't explicitly reset every one of these.
+  var FLEX_ITEM_INLINE_PROPS = [
+    "flex",
+    "flex-grow",
+    "flex-shrink",
+    "flex-basis",
+    "align-self",
+    "order",
+  ];
+  function stripFlexItemInlineStyles(el: Element): void {
+    var htmlEl = el as HTMLElement;
+    for (var i = 0; i < FLEX_ITEM_INLINE_PROPS.length; i += 1) {
+      htmlEl.style.removeProperty(FLEX_ITEM_INLINE_PROPS[i]);
+    }
+  }
   // Snapshot of the inline position/left/top/right/bottom VALUES (not just
   // whether they existed) taken right before stripAbsolutePositioningForFlowInsert
   // runs, so a failed move-node round-trip can restore exactly what was
@@ -7313,13 +7699,87 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       htmlEl.style.top = Math.round(startRect.top + deltaY - originY) + "px";
       htmlEl.style.removeProperty("right");
       htmlEl.style.removeProperty("bottom");
+      stripFlexItemInlineStyles(htmlEl);
+      // Preserve the exact intended client-space release point for the
+      // post-reparent transform correction. Raw left/top are in the new
+      // containing block's local space; when that parent is rotated/scaled,
+      // subtracting bounding-box origins alone cannot keep this client point.
+      (
+        htmlEl as HTMLElement & {
+          __agentNativeDesiredDropPoint?: { left: number; top: number };
+        }
+      ).__agentNativeDesiredDropPoint = {
+        left: startRect.left + deltaX,
+        top: startRect.top + deltaY,
+      };
     });
     target.absoluteCoordinatesPrepared = true;
+  }
+
+  /**
+   * Correct an absolute member after it enters a transformed containing block.
+   * CSS transforms (including rotated/scaled ancestors) make client-space
+   * deltas differ from local left/top deltas. Measure the two local 1px basis
+   * vectors through the browser's actual layout engine, invert that 2x2 matrix,
+   * and apply the exact local correction. This also covers nested transforms
+   * without trying to reconstruct the browser's full transform-origin chain.
+   */
+  function correctAbsoluteMemberClientPosition(
+    el: Element,
+    desired: { left: number; top: number } | null,
+  ): void {
+    if (!desired) return;
+    var htmlEl = el as HTMLElement;
+    var cs = window.getComputedStyle(htmlEl);
+    if (cs.position !== "absolute" && cs.position !== "fixed") return;
+    var baseLeft = readPx(htmlEl.style.left || cs.left);
+    var baseTop = readPx(htmlEl.style.top || cs.top);
+    var baseRect = htmlEl.getBoundingClientRect();
+    var clientDx = desired.left - baseRect.left;
+    var clientDy = desired.top - baseRect.top;
+    if (Math.abs(clientDx) < 0.01 && Math.abs(clientDy) < 0.01) return;
+
+    htmlEl.style.left = baseLeft + 1 + "px";
+    var leftRect = htmlEl.getBoundingClientRect();
+    htmlEl.style.left = baseLeft + "px";
+    htmlEl.style.top = baseTop + 1 + "px";
+    var topRect = htmlEl.getBoundingClientRect();
+    htmlEl.style.top = baseTop + "px";
+
+    var xx = leftRect.left - baseRect.left;
+    var xy = leftRect.top - baseRect.top;
+    var yx = topRect.left - baseRect.left;
+    var yy = topRect.top - baseRect.top;
+    var determinant = xx * yy - yx * xy;
+    if (!Number.isFinite(determinant) || Math.abs(determinant) < 0.000001) {
+      return;
+    }
+    var localDx = (clientDx * yy - yx * clientDy) / determinant;
+    var localDy = (xx * clientDy - clientDx * xy) / determinant;
+    htmlEl.style.left = baseLeft + localDx + "px";
+    htmlEl.style.top = baseTop + localDy + "px";
   }
 
   function applyRuntimeReorder(el, target) {
     if (!el || !target || !target.anchor || !target.anchor.parentElement)
       return;
+    var desiredDropPoint =
+      target.dropMode === "absolute-container"
+        ? ((
+            el as HTMLElement & {
+              __agentNativeDesiredDropPoint?: { left: number; top: number };
+            }
+          ).__agentNativeDesiredDropPoint ??
+          (function () {
+            var rect = el.getBoundingClientRect();
+            return { left: rect.left, top: rect.top };
+          })())
+        : null;
+    delete (
+      el as HTMLElement & {
+        __agentNativeDesiredDropPoint?: { left: number; top: number };
+      }
+    ).__agentNativeDesiredDropPoint;
     stripAbsolutePositioningForFlowInsert(el, target);
     // Must run BEFORE the DOM move below: the delta math reads the member's
     // CURRENT containing block via offsetParent. Called here (the single
@@ -7330,14 +7790,15 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     rebaseAbsoluteMemberForContainerDrop(el, target);
     if (target.placement === "inside") {
       target.anchor.appendChild(el);
-      return;
-    }
-    var parent = target.anchor.parentElement;
-    if (target.placement === "before") {
-      parent.insertBefore(el, target.anchor);
     } else {
-      parent.insertBefore(el, target.anchor.nextSibling);
+      var parent = target.anchor.parentElement;
+      if (target.placement === "before") {
+        parent.insertBefore(el, target.anchor);
+      } else {
+        parent.insertBefore(el, target.anchor.nextSibling);
+      }
     }
+    correctAbsoluteMemberClientPosition(el, desiredDropPoint);
   }
 
   function postVisualStructureChange(el, target, origin) {
@@ -7752,6 +8213,20 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       var reorderGroupStartRects = groupEls.map(function (member) {
         return member.getBoundingClientRect();
       });
+      // Capture structural + inline positioning origins before any drop
+      // preparation. Control-dragging a flow child calls
+      // prepareFlowMembersForAbsoluteDrop on pointer-up, which writes
+      // position/left/top before the optimistic DOM move. Taking this snapshot
+      // afterward made a rejected persistence ack (and the equivalent undo
+      // boundary) "restore" those new absolute values instead of flow state.
+      var reorderOrigins = groupEls.map(function (member) {
+        return {
+          el: member,
+          prevParent: member.parentElement,
+          prevNextSibling: member.nextSibling,
+          prevInlinePositionStyles: snapshotInlinePositionStyles(member),
+        };
+      });
       var reorderGestureStartRect = reorderEl.getBoundingClientRect();
       var keepCurrentFlowParent = bridgeSpaceKeyPressed;
       var currentTarget = flowMoveTargetForPoint(
@@ -7958,19 +8433,39 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
             currentTarget,
           );
         } else if (isGroupDrag) {
-          applyGroupStructureDrop(groupEls, currentTarget, ev);
+          applyGroupStructureDrop(
+            groupEls,
+            currentTarget,
+            ev,
+            function (member) {
+              var origin = reorderOrigins.filter(function (candidate) {
+                return candidate.el === member;
+              })[0];
+              return origin
+                ? origin.prevInlinePositionStyles
+                : snapshotInlinePositionStyles(member);
+            },
+          );
         } else {
           // Capture the pre-drag DOM anchor so we can revert if the parent
           // reports applied===false on the structure-ack.
-          var prevParent = reorderEl.parentElement;
-          var prevNextSibling = reorderEl.nextSibling;
+          var reorderOrigin = reorderOrigins.filter(function (candidate) {
+            return candidate.el === reorderEl;
+          })[0];
+          var prevParent = reorderOrigin
+            ? reorderOrigin.prevParent
+            : reorderEl.parentElement;
+          var prevNextSibling = reorderOrigin
+            ? reorderOrigin.prevNextSibling
+            : reorderEl.nextSibling;
           // Usually a no-op here (flow-reorder drags a member that's
           // already in flow, so there's nothing to strip), but captured for
           // consistency so an absolute-positioned element reordered through
           // this gesture still rolls back its inline styles correctly on a
           // rejected move-node round-trip.
-          var prevInlinePositionStyles =
-            snapshotInlinePositionStyles(reorderEl);
+          var prevInlinePositionStyles = reorderOrigin
+            ? reorderOrigin.prevInlinePositionStyles
+            : snapshotInlinePositionStyles(reorderEl);
           adaptAutoTextColorForNest(
             reorderEl,
             dropContainerForTarget(currentTarget),
@@ -8690,6 +9185,11 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
     // null-deref in onMove/onUp.
     var rotateEl = selectedEl;
     var originalInlineTransform = rotateEl.style.transform;
+    var originalComputedTransform = window.getComputedStyle(rotateEl).transform;
+    var baseTransform =
+      originalInlineTransform && originalInlineTransform !== "none"
+        ? originalInlineTransform
+        : originalComputedTransform;
     function onMove(ev) {
       if (!rotateEl) return;
       var pointerAngle =
@@ -8698,7 +9198,7 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       var next = originRotation + pointerAngle - originAngle;
       if (ev.shiftKey) next = Math.round(next / 15) * 15;
       next = Math.round(next);
-      rotateEl.style.transform = mergeRotation(rotateEl, next);
+      rotateEl.style.transform = mergeAbsoluteRotation(baseTransform, next);
       showTransformBadge(next + "deg", ev.clientX, ev.clientY);
       refreshOverlays();
     }
@@ -9209,8 +9709,12 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
   );
 
   function hasFigmaClipboardPayload(value) {
-    return /<[^>]+\sdata-(metadata|buffer)=["'][^"']*\((figmeta|figma)\)[^"']*["']/i.test(
-      String(value || ""),
+    var content = String(value || "");
+    return (
+      /\((figmeta|figma)\)[\s\S]*?\(\/(figmeta|figma)\)/i.test(content) ||
+      /<[^>]+\sdata-(metadata|buffer)=["'][^"']*\((figmeta|figma)\)[^"']*["']/i.test(
+        content,
+      )
     );
   }
 
@@ -9524,7 +10028,9 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       // (or no) element host-side.
       if (
         target.isConnected &&
-        (next !== originalText || nextHtml !== originalHtml)
+        (next !== originalText ||
+          nextHtml !== originalHtml ||
+          (programmaticTextEdit && !hasTextCharacters(target)))
       ) {
         postTextContentChange(
           target,
@@ -9613,6 +10119,25 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       // normalizeNestedIdenticalSpans (T12) cleans up any span nesting
       // execCommand leaves behind when the session commits.
       var metaOrCtrl = ev.metaKey || ev.ctrlKey;
+      // A just-created text layer is one editor transaction, not an isolated
+      // native contenteditable history island. Chromium consumes Cmd/Ctrl+Z
+      // locally even when the empty editable has nothing to undo, so the host
+      // never sees the command and cannot remove the created layer. Cancel the
+      // uncommitted DOM session and forward the chord to Design's guarded
+      // content history; typing committed by blur/Escape is coalesced into the
+      // same creation entry host-side.
+      if (
+        programmaticTextEdit &&
+        metaOrCtrl &&
+        !ev.altKey &&
+        ev.key.toLowerCase() === "z"
+      ) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        finish(false);
+        postDesignHotkey(ev);
+        return;
+      }
       if (metaOrCtrl && !ev.altKey && ev.key.toLowerCase() === "b") {
         ev.preventDefault();
         document.execCommand("bold");
@@ -9853,7 +10378,11 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       } else {
         hideMeasurements();
       }
-      if (hoveredEl !== lastHoverInfoPostedEl) {
+      // While Alt is held (measurement mode) keep hover local: posting it would
+      // update the host's hoveredSelector, re-run replayIframeEditorState, and
+      // echo selection/hover back every move — a loop that jitters selection
+      // and flickers the measurement lines.
+      if (!e.altKey && hoveredEl !== lastHoverInfoPostedEl) {
         lastHoverInfoPostedEl = hoveredEl;
         var info = getLightElementInfo(hoveredEl);
         (window.parent as Window).postMessage(
@@ -9915,7 +10444,19 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
   window.addEventListener(
     "keyup",
     function (e) {
-      if (e.key === "Alt") hideMeasurements();
+      if (e.key === "Alt") {
+        hideMeasurements();
+        // Re-sync the hover suppressed during measurement so the host isn't
+        // left on a stale element until the next pointermove.
+        lastHoverInfoPostedEl = hoveredEl;
+        (window.parent as Window).postMessage(
+          {
+            type: "element-hover",
+            payload: hoveredEl ? getLightElementInfo(hoveredEl) : null,
+          },
+          "*",
+        );
+      }
     },
     true,
   );
@@ -10090,15 +10631,46 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       hideGradientOverlay();
       return;
     }
+    if (e.data.type === "interaction-state-style-preview") {
+      var interactionPreviewState =
+        typeof e.data.state === "string" ? e.data.state : "";
+      if (!isSupportedInteractionState(interactionPreviewState)) return;
+      var interactionPreviewCandidates = Array.isArray(
+        e.data.selectorCandidates,
+      )
+        ? e.data.selectorCandidates.slice()
+        : [];
+      if (e.data.nodeId) {
+        interactionPreviewCandidates.push(
+          '[data-agent-native-node-id="' +
+            escapeAttribute(e.data.nodeId) +
+            '"]',
+        );
+      }
+      var interactionPreviewElement = findRuntimeTarget(
+        String(e.data.selector || ""),
+        interactionPreviewCandidates,
+      ) as HTMLElement | null;
+      if (!interactionPreviewElement) return;
+      updateRuntimeInteractionStatePreview(
+        interactionPreviewElement,
+        interactionPreviewState,
+        e.data.styles && typeof e.data.styles === "object" ? e.data.styles : {},
+        false,
+      );
+      if (statePreviewElement === interactionPreviewElement) {
+        interactionPreviewElement.setAttribute(
+          "data-an-state-preview",
+          interactionPreviewState,
+        );
+      }
+      return;
+    }
     // state-preview: force-render one element's interaction-state styling by
-    // setting/removing the `data-an-state-preview="<state>"` attribute — see
-    // `shared/interaction-states.ts`'s "Forced-preview mechanism" doc comment
-    // for the full contract this implements. This bridge does ZERO CSS work:
-    // the twin `[data-agent-native-node-id="…"][data-an-state-preview="…"]`
-    // rule already lives in the persisted `<style data-agent-native-states>`
-    // block (written by `duplicateStatePreviewRules`), so setting the
-    // attribute is the entire preview mechanism. `state: null` (or a missing/
-    // empty `nodeId`) clears any currently-previewing element.
+    // setting/removing the `data-an-state-preview="<state>"` attribute. Inline
+    // HTML gets its styles from the persisted twin rule; localhost previews
+    // can carry `previewStyles`, held in a temporary CSSOM rule so no runtime
+    // source/URL content is rewritten before the guarded source handoff.
     if (e.data.type === "state-preview") {
       var statePreviewTargetNodeId =
         typeof e.data.nodeId === "string" ? e.data.nodeId : "";
@@ -10107,30 +10679,41 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       // Clear the PREVIOUS target first — only one element force-previews a
       // state at a time, and the new message may target a different node
       // (e.g. the selection changed) or clear entirely.
-      if (statePreviewNodeId) {
-        var previousStatePreviewEl = document.querySelector(
-          '[data-agent-native-node-id="' +
-            String(statePreviewNodeId)
-              .replace(/\\/g, "\\\\")
-              .replace(/"/g, '\\"') +
-            '"]',
-        ) as HTMLElement | null;
-        if (previousStatePreviewEl) {
-          previousStatePreviewEl.removeAttribute("data-an-state-preview");
-        }
-        statePreviewNodeId = null;
+      if (statePreviewElement) {
+        statePreviewElement.removeAttribute("data-an-state-preview");
+        statePreviewElement = null;
       }
-      if (!statePreviewTargetNodeId || !statePreviewState) return;
-      var statePreviewEl = document.querySelector(
-        '[data-agent-native-node-id="' +
-          String(statePreviewTargetNodeId)
-            .replace(/\\/g, "\\\\")
-            .replace(/"/g, '\\"') +
-          '"]',
+      if (!isSupportedInteractionState(statePreviewState)) return;
+      var statePreviewCandidates = Array.isArray(e.data.selectorCandidates)
+        ? e.data.selectorCandidates.slice()
+        : [];
+      if (statePreviewTargetNodeId) {
+        statePreviewCandidates.push(
+          '[data-agent-native-node-id="' +
+            escapeAttribute(statePreviewTargetNodeId) +
+            '"]',
+        );
+      }
+      var nextStatePreviewElement = findRuntimeTarget(
+        String(e.data.selector || ""),
+        statePreviewCandidates,
       ) as HTMLElement | null;
-      if (!statePreviewEl) return;
-      statePreviewEl.setAttribute("data-an-state-preview", statePreviewState);
-      statePreviewNodeId = statePreviewTargetNodeId;
+      if (!nextStatePreviewElement) return;
+      if (Object.prototype.hasOwnProperty.call(e.data, "previewStyles")) {
+        updateRuntimeInteractionStatePreview(
+          nextStatePreviewElement,
+          statePreviewState,
+          e.data.previewStyles && typeof e.data.previewStyles === "object"
+            ? e.data.previewStyles
+            : {},
+          true,
+        );
+      }
+      nextStatePreviewElement.setAttribute(
+        "data-an-state-preview",
+        statePreviewState,
+      );
+      statePreviewElement = nextStatePreviewElement;
       return;
     }
     if (e.data.type === "agent-native:cancel-active-drag") {
@@ -10314,7 +10897,9 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
       // changes only — the `selectionChangedByHost` guard above already
       // keeps this a no-op on the ~1-2s poll-tick replay so it can't turn
       // into a message-spam loop.
-      if (selectionChangedByHost) postElementSelect(target);
+      if (selectionChangedByHost) {
+        postElementSelect(target);
+      }
       return;
     }
     if (e.data.type === "hover-element") {
@@ -10490,6 +11075,7 @@ declare var __RUNTIME_LAYER_SNAPSHOT_ENABLED__: boolean;
         e.data.forceFullDocument ? "" : e.data.selectedSelector,
         e.data.forceFullDocument ? [] : e.data.selectorCandidates,
         Boolean(e.data.forceFullDocument),
+        Boolean(e.data.preserveTextEditingSession),
       );
       return;
     }

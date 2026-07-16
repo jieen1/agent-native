@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { LLM_MISSING_CREDENTIALS_MESSAGE } from "./engine/credential-errors.js";
+import {
+  LLM_MISSING_CREDENTIALS_ERROR_CODE,
+  LLM_MISSING_CREDENTIALS_MESSAGE,
+} from "./engine/credential-errors.js";
 import { EngineError } from "./engine/types.js";
 import type { AgentChatEvent } from "./types.js";
 
@@ -22,6 +25,7 @@ vi.mock("./run-store.js", () => ({
   cleanupOldRuns: vi.fn(() => Promise.resolve()),
   updateRunHeartbeat: vi.fn(() => Promise.resolve()),
   bumpRunProgress: vi.fn(() => Promise.resolve()),
+  setRunInFlightMarker: vi.fn(() => Promise.resolve()),
   reapIfStale: vi.fn(() => Promise.resolve(null)),
   reapUnclaimedBackgroundRun: vi.fn(() => Promise.resolve(false)),
   // Faithful copy of the real pure predicate (5-min redispatch bound) so the
@@ -79,6 +83,7 @@ import { registerErrorCaptureProvider } from "../server/capture-error.js";
 import { isInBackgroundFunctionRuntime } from "./durable-background.js";
 import {
   abortRun,
+  abortRunDurably,
   BACKGROUND_SOFT_TIMEOUT_CEILING_MS,
   DEFAULT_BACKGROUND_NO_PROGRESS_TIMEOUT_MS,
   DEFAULT_BACKGROUND_RUN_SOFT_TIMEOUT_MS,
@@ -632,6 +637,90 @@ describe("run manager soft timeout", () => {
     });
   });
 
+  it("persists missing credential terminal events as errored runs", async () => {
+    const events: AgentChatEvent[] = [];
+    const onComplete = vi.fn(async () => {});
+    const run = startRun(
+      "run-missing-credential-terminal",
+      "thread-missing-credential-terminal",
+      async (send) => {
+        send({ type: "missing_api_key" });
+      },
+      onComplete,
+      { softTimeoutMs: 0 },
+    );
+    run.subscribers.add((event) => events.push(event.event));
+
+    await vi.waitFor(() =>
+      expect(updateRunStatusIfRunning).toHaveBeenCalledWith(
+        "run-missing-credential-terminal",
+        "errored",
+      ),
+    );
+
+    expect(updateRunStatusIfRunning).not.toHaveBeenCalledWith(
+      "run-missing-credential-terminal",
+      "completed",
+    );
+    expect(insertRunEvent).toHaveBeenCalledWith(
+      "run-missing-credential-terminal",
+      0,
+      JSON.stringify({ type: "missing_api_key" }),
+    );
+    expect(setRunTerminalReason).toHaveBeenCalledWith(
+      "run-missing-credential-terminal",
+      "missing_api_key",
+    );
+    expect(setRunError).toHaveBeenCalledWith(
+      "run-missing-credential-terminal",
+      LLM_MISSING_CREDENTIALS_ERROR_CODE,
+      LLM_MISSING_CREDENTIALS_MESSAGE,
+    );
+    expect(events).toContainEqual({ type: "missing_api_key" });
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "errored",
+        events: [
+          expect.objectContaining({ event: { type: "missing_api_key" } }),
+        ],
+      }),
+    );
+  });
+
+  it("passes an emitted terminal error to completion callbacks as errored", async () => {
+    const onComplete = vi.fn(async () => {});
+
+    startRun(
+      "run-error-terminal-callback",
+      "thread-error-terminal-callback",
+      async (send) => {
+        send({
+          type: "error",
+          error: "Provider failed",
+          errorCode: "provider_failed",
+          recoverable: true,
+        });
+      },
+      onComplete,
+      { softTimeoutMs: 0 },
+    );
+
+    await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "errored",
+        events: [
+          expect.objectContaining({
+            event: expect.objectContaining({
+              type: "error",
+              errorCode: "provider_failed",
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
   it("maps exhausted provider 429s to a terminal rate-limit error code", async () => {
     const events: AgentChatEvent[] = [];
 
@@ -685,6 +774,78 @@ describe("run manager soft timeout", () => {
     expect(terminalEvents).toContainEqual({ type: "done" });
     await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
     expect(markRunAborted).toHaveBeenCalledWith("run-explicit-abort", "user");
+  });
+
+  it("waits for a cross-isolate abort to become durable before resolving", async () => {
+    let persistAbort: (() => void) | undefined;
+    vi.mocked(markRunAborted).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          persistAbort = resolve;
+        }),
+    );
+
+    let resolved = false;
+    const abortPromise = abortRunDurably(
+      "run-cross-isolate",
+      "user_stuck_retry",
+    ).then((abortedInMemory) => {
+      resolved = true;
+      return abortedInMemory;
+    });
+
+    await Promise.resolve();
+    expect(markRunAborted).toHaveBeenCalledWith(
+      "run-cross-isolate",
+      "user_stuck_retry",
+    );
+    expect(resolved).toBe(false);
+
+    persistAbort?.();
+    await expect(abortPromise).resolves.toBe(false);
+    expect(resolved).toBe(true);
+  });
+
+  it("keeps an in-memory abort successful when durable cleanup fails", async () => {
+    const persistenceError = new Error("abort persistence unavailable");
+    vi.mocked(markRunAborted).mockRejectedValueOnce(persistenceError);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    let abortReason: unknown;
+    const run = startRun(
+      "run-durable-abort-failure",
+      "thread-durable-abort-failure",
+      async (_send, signal) => {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              abortReason = signal.reason;
+              resolve();
+            },
+            { once: true },
+          );
+        });
+      },
+      undefined,
+      { softTimeoutMs: 0 },
+    );
+
+    try {
+      await expect(
+        abortRunDurably("run-durable-abort-failure", "user_stuck_retry"),
+      ).resolves.toBe(true);
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(abortReason).toBe("user_stuck_retry");
+    expect(run.status).toBe("aborted");
+    expect(markRunAborted).toHaveBeenCalledWith(
+      "run-durable-abort-failure",
+      "user_stuck_retry",
+    );
   });
 
   it("skips completion callbacks for no-progress recovery aborts", async () => {
@@ -1837,6 +1998,124 @@ describe("run manager soft timeout", () => {
     abortRun(run.runId, "test");
   });
 
+  // ─── FIX 1: stale in-memory terminal chunk vs a live SQL successor ──────────
+  // A chunk-terminal in-memory run (soft-timeout auto_continue) never clears
+  // `threadToRun` — see `abortInMemoryRun` vs the direct `abort.abort(...)`
+  // soft-timeout path in `startRun`. Without this fix, every poll landing on
+  // the isolate that produced chunk 0 would keep returning its stale
+  // "completed" snapshot forever, even after a newer successor run for the
+  // SAME turn already exists and is running in SQL.
+  it("FIX 1: prefers a newer running successor over a stale in-memory chunk-terminal run for the same turn", async () => {
+    const run = startRun(
+      "run-fix1-chunk0",
+      "thread-fix1-successor",
+      async (_send, signal) => {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      },
+      undefined,
+      { softTimeoutMs: 10, turnId: "turn-fix1" },
+    );
+
+    await vi.advanceTimersByTimeAsync(11);
+    // Chunk-terminal in-memory, but `threadToRun` still points at this run —
+    // exactly the stale-candidate state this fix must see through.
+    expect(run.status).toBe("completed");
+
+    // A same-turn successor already exists and is running in SQL (e.g. via
+    // chainServerDrivenContinuation, or FIX 3's stale-run recovery).
+    vi.mocked(getRunByThread).mockResolvedValue({
+      id: "run-fix1-successor",
+      threadId: "thread-fix1-successor",
+      turnId: "turn-fix1",
+      status: "running",
+      startedAt: run.startedAt + 1_000,
+      heartbeatAt: Date.now(),
+      completedAt: null,
+      lastProgressAt: Date.now(),
+      dispatchMode: "background",
+      terminalReason: null,
+      diagStage: null,
+    });
+
+    const result = await getActiveRunForThreadAsync("thread-fix1-successor");
+
+    expect(result).toMatchObject({
+      runId: "run-fix1-successor",
+      status: "running",
+      dispatchMode: "background",
+      awaitingRedispatch: false,
+    });
+  });
+
+  it("FIX 1: falls back to the stale in-memory terminal status when no successor exists yet", async () => {
+    const run = startRun(
+      "run-fix1-nosucc",
+      "thread-fix1-nosucc",
+      async (_send, signal) => {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      },
+      undefined,
+      { softTimeoutMs: 10, turnId: "turn-fix1-nosucc" },
+    );
+    await vi.advanceTimersByTimeAsync(11);
+    expect(run.status).toBe("completed");
+
+    // No successor has been inserted yet — must still fall back to the
+    // stale-but-honest in-memory status exactly as before this fix (the
+    // reconnect-window / replay behavior for a genuinely finished run is
+    // unchanged).
+    vi.mocked(getRunByThread).mockResolvedValue(null);
+
+    const result = await getActiveRunForThreadAsync("thread-fix1-nosucc");
+    expect(result).toMatchObject({
+      runId: "run-fix1-nosucc",
+      status: "completed",
+    });
+  });
+
+  it("FIX 1: does not adopt a newer run on the same thread that belongs to a DIFFERENT turn", async () => {
+    const run = startRun(
+      "run-fix1-diffturn",
+      "thread-fix1-diffturn",
+      async (_send, signal) => {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      },
+      undefined,
+      { softTimeoutMs: 10, turnId: "turn-fix1-A" },
+    );
+    await vi.advanceTimersByTimeAsync(11);
+    expect(run.status).toBe("completed");
+
+    // A later, unrelated user turn already started on the same thread — this
+    // must never be mistaken for a continuation successor of the terminal
+    // chunk above.
+    vi.mocked(getRunByThread).mockResolvedValue({
+      id: "run-fix1-unrelated",
+      threadId: "thread-fix1-diffturn",
+      turnId: "turn-fix1-B",
+      status: "running",
+      startedAt: run.startedAt + 1_000,
+      heartbeatAt: Date.now(),
+      completedAt: null,
+      lastProgressAt: Date.now(),
+      dispatchMode: null,
+      terminalReason: null,
+      diagStage: null,
+    });
+
+    const result = await getActiveRunForThreadAsync("thread-fix1-diffturn");
+    expect(result).toMatchObject({
+      runId: "run-fix1-diffturn",
+      status: "completed",
+    });
+  });
+
   // ─── FALLBACK HARDENING: unclaimed background run recovery ──────────────────
   it("reaps an unclaimed-stale background run PAST the redispatch bound (202 acked, worker never started, no recovery left)", async () => {
     // dispatch_mode still 'background' (never flipped to 'background-processing')
@@ -1894,11 +2173,16 @@ describe("run manager soft timeout", () => {
     // The unclaimed reap was skipped — the sweep owns recovery inside the bound.
     expect(reapUnclaimedBackgroundRun).not.toHaveBeenCalled();
     // The run is still surfaced as an active background run (client keeps
-    // following; no premature manual-retry error).
+    // following; no premature manual-retry error). `awaitingRedispatch: true`
+    // is the wire signal `/runs/active` (agent-chat-plugin.ts) forwards
+    // as-is so the client's follow loop (agent-chat-adapter.ts) can tell
+    // this apart from a dead run and stop counting it against its idle
+    // timeout — see the THREE-SITE INVARIANT comment above this function.
     expect(result).toMatchObject({
       runId: "run-deferred",
       status: "running",
       dispatchMode: "background",
+      awaitingRedispatch: true,
     });
   });
 
@@ -1925,6 +2209,87 @@ describe("run manager soft timeout", () => {
       status: "running",
       dispatchMode: "background-processing",
       diagStage: '{"stage":"worker_started","at":1}',
+      // A CLAIMED worker is not the "unclaimed, awaiting sweep redispatch"
+      // state — this must stay false so the client's idle-timeout tolerance
+      // only applies to the actually-deferred case.
+      awaitingRedispatch: false,
+    });
+  });
+
+  // ─── hasInFlightWork wire signal (server-authoritative in-flight marker) ──
+  it("surfaces hasInFlightWork: true from the SQL fallback path when in_flight_since is set", async () => {
+    // Same shape as the "claimed, heartbeating worker" case above, but with
+    // an open tool call / A2A agent_call — the exact scenario that triggered
+    // the false stale_run reap: reapIfStale (called just above this in the
+    // real implementation) reads the SAME in_flight_since column and did NOT
+    // reap this row, so the wire signal here must agree.
+    vi.mocked(getRunByThread).mockResolvedValue({
+      id: "run-in-flight",
+      threadId: "thread-in-flight",
+      status: "running",
+      startedAt: Date.now() - 5_000,
+      heartbeatAt: Date.now() - 95_000, // stale heartbeat, exactly the bug scenario
+      completedAt: null,
+      lastProgressAt: Date.now() - 95_000,
+      dispatchMode: "background-processing",
+      diagStage: null,
+      inFlightSince: Date.now() - 5_000,
+    } as any);
+    vi.mocked(reapIfStale).mockResolvedValueOnce(false);
+
+    const result = await getActiveRunForThreadAsync("thread-in-flight");
+
+    expect(result).toMatchObject({
+      runId: "run-in-flight",
+      status: "running",
+      hasInFlightWork: true,
+    });
+  });
+
+  it("surfaces hasInFlightWork: false from the SQL fallback path when in_flight_since is not set", async () => {
+    vi.mocked(getRunByThread).mockResolvedValue({
+      id: "run-idle",
+      threadId: "thread-idle",
+      status: "running",
+      startedAt: Date.now() - 5_000,
+      heartbeatAt: Date.now() - 1_000,
+      completedAt: null,
+      lastProgressAt: Date.now() - 1_000,
+      dispatchMode: "background-processing",
+      diagStage: null,
+      inFlightSince: null,
+    } as any);
+    vi.mocked(reapIfStale).mockResolvedValueOnce(false);
+
+    const result = await getActiveRunForThreadAsync("thread-idle");
+
+    expect(result).toMatchObject({
+      runId: "run-idle",
+      status: "running",
+      hasInFlightWork: false,
+    });
+  });
+
+  it("surfaces hasInFlightWork: false for a terminal run — no live work can still be in flight", async () => {
+    vi.mocked(getRunByThread).mockResolvedValue({
+      id: "run-terminal",
+      threadId: "thread-terminal",
+      status: "completed",
+      startedAt: Date.now() - 10_000,
+      heartbeatAt: Date.now() - 2_000,
+      completedAt: Date.now() - 1_000,
+      lastProgressAt: Date.now() - 2_000,
+      dispatchMode: null,
+      diagStage: null,
+      inFlightSince: Date.now() - 2_000, // stale marker from before completion
+    } as any);
+
+    const result = await getActiveRunForThreadAsync("thread-terminal");
+
+    expect(result).toMatchObject({
+      runId: "run-terminal",
+      status: "completed",
+      hasInFlightWork: false,
     });
   });
 

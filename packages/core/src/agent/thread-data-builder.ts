@@ -1,5 +1,6 @@
 import type { ActionChatUIConfig } from "../action-ui.js";
 import {
+  isCredentialGapCodeAgentEvent,
   normalizeCodeAgentTranscript,
   type CodeAgentTranscriptEvent as CoreCodeAgentTranscriptEvent,
   type NormalizedCodeAgentStatusEvent,
@@ -152,9 +153,9 @@ export function buildAssistantMessage(
 
     if (event.type === "tool_start") {
       toolCallCounter += 1;
-      const toolCallId = runId
-        ? `${runId}:tc_${toolCallCounter}`
-        : `tc_${toolCallCounter}`;
+      const toolCallId =
+        event.id?.trim() ||
+        (runId ? `${runId}:tc_${toolCallCounter}` : `tc_${toolCallCounter}`);
       const args = (event.input ?? {}) as Record<string, string>;
       content.push({
         type: "tool-call",
@@ -167,22 +168,46 @@ export function buildAssistantMessage(
     }
 
     if (event.type === "tool_done") {
-      for (let i = content.length - 1; i >= 0; i--) {
-        const part = content[i];
-        if (
-          part.type === "tool-call" &&
-          part.toolName === event.tool &&
-          part.result === undefined
-        ) {
-          part.result = event.result ?? "";
-          if (event.isError !== undefined) part.isError = event.isError;
-          if (event.completedSideEffect !== undefined) {
-            part.completedSideEffect = event.completedSideEffect;
+      const eventToolCallId = event.id?.trim();
+      let matchingIndex = -1;
+
+      if (eventToolCallId) {
+        for (let i = content.length - 1; i >= 0; i--) {
+          const part = content[i];
+          if (
+            part.type === "tool-call" &&
+            part.toolCallId === eventToolCallId &&
+            part.result === undefined
+          ) {
+            matchingIndex = i;
+            break;
           }
-          if (event.mcpApp) part.mcpApp = event.mcpApp;
-          if (event.chatUI) part.chatUI = event.chatUI;
-          break;
         }
+      }
+
+      if (matchingIndex === -1) {
+        for (let i = content.length - 1; i >= 0; i--) {
+          const part = content[i];
+          if (
+            part.type === "tool-call" &&
+            part.toolName === event.tool &&
+            part.result === undefined
+          ) {
+            matchingIndex = i;
+            break;
+          }
+        }
+      }
+
+      const part = content[matchingIndex];
+      if (part?.type === "tool-call") {
+        part.result = event.result ?? "";
+        if (event.isError !== undefined) part.isError = event.isError;
+        if (event.completedSideEffect !== undefined) {
+          part.completedSideEffect = event.completedSideEffect;
+        }
+        if (event.mcpApp) part.mcpApp = event.mcpApp;
+        if (event.chatUI) part.chatUI = event.chatUI;
       }
       continue;
     }
@@ -612,21 +637,94 @@ export function threadDataToEngineMessages(
   for (const entry of data.messages) {
     const m = entry?.message ?? entry;
     if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
-    const text =
-      typeof m.content === "string"
-        ? m.content
-        : Array.isArray(m.content)
-          ? m.content
-              .filter(
-                (c: any) => c?.type === "text" && typeof c.text === "string",
-              )
-              .map((c: any) => c.text)
-              .join("\n")
-          : "";
+    const text = threadMessageTextForEngine(m);
     if (!text.trim()) continue;
     messages.push({ role: m.role, content: [{ type: "text", text }] });
   }
   return messages;
+}
+
+const MAX_INTEGRATION_ARTIFACTS_IN_CONTEXT = 12;
+const MAX_INTEGRATION_ARTIFACT_FIELD_CHARS = 500;
+
+function boundedString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed
+    ? trimmed.slice(0, MAX_INTEGRATION_ARTIFACT_FIELD_CHARS)
+    : undefined;
+}
+
+function promptSafeJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replaceAll("&", "\\u0026")
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e");
+}
+
+function messageTextContent(message: any): string {
+  if (typeof message?.content === "string") return message.content;
+  if (!Array.isArray(message?.content)) return "";
+  return message.content
+    .filter(
+      (part: any) => part?.type === "text" && typeof part.text === "string",
+    )
+    .map((part: any) => part.text)
+    .join("\n");
+}
+
+/**
+ * Select the participant-visible delivery for integration turns while keeping
+ * a compact, trusted resource ledger available to the agent. Raw tool results
+ * remain in thread_data for UI/audit use but are not replayed into the prompt.
+ */
+export function threadMessageTextForEngine(message: any): string {
+  const delivery = message?.metadata?.integrationDelivery;
+  const deliveryAttempted =
+    message?.metadata?.integrationDeliveryAttempted === true;
+  const deliveredText =
+    message?.role === "assistant" &&
+    delivery?.status === "delivered" &&
+    typeof delivery.text === "string" &&
+    delivery.text.trim()
+      ? delivery.text
+      : undefined;
+  let text =
+    deliveredText ??
+    (message?.role === "assistant" && deliveryAttempted
+      ? ""
+      : messageTextContent(message));
+
+  if (message?.role !== "assistant") return text;
+  const storedArtifacts = message?.metadata?.integrationArtifacts;
+  if (!Array.isArray(storedArtifacts)) return text;
+
+  const artifacts = storedArtifacts
+    .slice(0, MAX_INTEGRATION_ARTIFACTS_IN_CONTEXT)
+    .map((artifact: any) => ({
+      resourceType: boundedString(artifact?.resourceType),
+      id: boundedString(artifact?.id),
+      sourceAction: boundedString(artifact?.sourceAction),
+      titleAtAction: boundedString(artifact?.titleAtAction),
+      url: boundedString(artifact?.url),
+    }))
+    .filter(
+      (artifact: {
+        resourceType?: string;
+        id?: string;
+        sourceAction?: string;
+      }) => artifact.resourceType && artifact.id && artifact.sourceAction,
+    );
+  if (artifacts.length === 0) return text;
+
+  const context = [
+    "<integration_artifact_context>",
+    "Trusted action history for this conversation. Resource IDs remain stable if participants rename the resource. Use these IDs when a follow-up refers to an earlier artifact, while still deciding from the request whether to update, add, supersede, or create.",
+    promptSafeJson(artifacts),
+    "</integration_artifact_context>",
+  ].join("\n");
+  text = text.trim() ? `${text.trim()}\n\n${context}` : context;
+  return text;
 }
 
 export interface CodeAgentThreadTranscriptEvent {
@@ -640,6 +738,7 @@ export interface CodeAgentThreadTranscriptEvent {
   metadata?: Record<string, unknown>;
   artifactPath?: string;
   artifactUrl?: string;
+  signal?: CoreCodeAgentTranscriptEvent["signal"];
 }
 
 export interface BuildRepositoryFromCodeAgentTranscriptOptions {
@@ -1070,6 +1169,7 @@ function toCoreCodeAgentTranscriptEvent(
       ...(event.artifactPath ? { artifactPath: event.artifactPath } : {}),
       ...(event.artifactUrl ? { artifactUrl: event.artifactUrl } : {}),
     },
+    ...(event.signal ? { signal: event.signal } : {}),
   };
 }
 
@@ -1113,6 +1213,9 @@ function toolContentPartForCodeAgentTranscriptItem(
       ? { result: previewCodeAgentTranscriptValue(item.result) ?? "" }
       : {}),
     ...(item.structuredMeta ? { structuredMeta: item.structuredMeta } : {}),
+    ...(item.pendingApprovalKey
+      ? { approval: { approvalKey: item.pendingApprovalKey } }
+      : {}),
   };
 }
 
@@ -1120,7 +1223,7 @@ function statusTextForCodeAgentTranscriptItem(
   item: NormalizedCodeAgentStatusEvent,
   options: BuildRepositoryFromCodeAgentTranscriptOptions,
 ): string | null {
-  if (options.hideCredentialMessages && isCredentialCodeAgentText(item.text)) {
+  if (options.hideCredentialMessages && isCredentialGapCodeAgentEvent(item)) {
     return null;
   }
   if (item.statusKind === "artifact") {
@@ -1193,10 +1296,6 @@ function stringRecordValue(
 ): string | undefined {
   const value = record?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function isCredentialCodeAgentText(value: string): boolean {
-  return /No LLM provider key was found|Missing credentials/i.test(value);
 }
 
 export function upsertUserMessage(repo: any, userMsg: UserMessage): any {

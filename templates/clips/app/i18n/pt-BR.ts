@@ -13,6 +13,7 @@ const messages = {
   root: {
     commandActions: "Ações",
     commandSearch: "Pesquisar",
+    openAgent: "Abrir agente",
     commandAppearance: "Aparência",
     toggleTheme: "Alternar tema",
     extensionSignedInTitle: "Conectado",
@@ -48,11 +49,13 @@ const messages = {
   navigation: {
     brand: "Clips",
     library: "Biblioteca",
+    sharedWithMe: "Compartilhado comigo",
     spaces: "Espaços",
     meetings: "Reuniões",
     dictate: "Ditar",
     archive: "Arquivo",
     trash: "Lixeira",
+    agent: "Agente",
     settings: "Configurações",
     notifications: "Notificações",
     insights: "Percepções",
@@ -82,6 +85,10 @@ const messages = {
       title: "Sua biblioteca está vazia",
       body: "Capture sua primeira gravação de tela e ela aparecerá aqui, pronta para compartilhar.",
       cta: "Gravar seu primeiro Clip",
+    },
+    shared: {
+      title: "Nenhum clipe compartilhado com você",
+      body: "Os clipes que seus colegas compartilharem com você aparecerão aqui.",
     },
     folder: {
       title: "Esta pasta está vazia",
@@ -301,6 +308,7 @@ const messages = {
     insights: "Percepções",
     downloadForMac: "Baixar para Mac",
     downloadForWindows: "Baixar para Windows",
+    downloadForLinux: "Baixar para Linux",
     downloadDesktopApp: "Baixe o aplicativo para desktop",
     agentNativeClips: "Agent-Native Clips",
     agentNativeClipsIntro: "é uma alternativa gratuita,",
@@ -443,6 +451,7 @@ const messages = {
     invite: "Convidar",
     embed: "Incorporar",
     shareLink: "Link de compartilhamento",
+    shareWithHumans: "Compartilhe com pessoas",
     shareWithAgents: "Compartilhe com agentes",
     copyAgentPrompt: "Copiar prompt para agente",
     agentPrompt:
@@ -453,6 +462,8 @@ const messages = {
     retryAgentLink: "Tentar novamente",
     gifPreview: "visualização de GIF",
     openPlayer: "Jogador aberto",
+    chooseFile: "Escolher arquivo",
+    remove: "Remover",
     downloadMp4: "Baixar MP4",
     embedsNeedPublic: "As incorporações precisam de um clipe público",
     embedPublicDescription:
@@ -556,7 +567,7 @@ const messages = {
   downloadRoute: {
     pageTitle: "Baixar Clips Desktop",
     description:
-      "Grave sua tela na barra de menu. Aplicativo de desktop com atualização automática para macOS e Windows.",
+      "Grave sua tela pela bandeja do sistema. Aplicativo de desktop com atualização automática para macOS, Windows e Linux.",
     macSublabel: "Universais (Apple Silicon + Intel)",
     windowsSublabel: "Instalador MSI de 64 bits",
     downloadFor: "Baixar para {{platform}}",
@@ -891,15 +902,6 @@ Todas as mudanças visíveis para usuários do Clips são documentadas aqui. Voc
     removeDescription:
       "{{email}} perderá acesso a esta organização. Você sempre pode convidá-lo novamente.",
     remove: "Remover",
-  },
-  slackShareHint: {
-    playsInline: "Reproduz inline no Slack",
-    connectedDescription:
-      "Cole este link em qualquer workspace conectado para reproduzi-lo inline.",
-    makeInline: "Faça reproduzir inline no Slack",
-    connectDescription:
-      "Conecte um workspace para que este link abra como vídeo.",
-    connect: "Conectar",
   },
   commentsPanel: {
     disabled: "Os comentários estão desativados para esta gravação.",

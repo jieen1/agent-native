@@ -7,6 +7,18 @@ updates mail state through actions and application state.
 Detailed draft, queue, and contact-resolution patterns live in
 `.agents/skills/`.
 
+## Coverage-aware inventory reads
+
+`list-emails` remains the compatibility list action for the UI and internal
+callers. External MCP callers receive its structured inventory envelope by
+default (or pass `format: "inventory"`). Inventory reads use `accountEmails`
+for an explicit set; the legacy singular `account` alias cannot be combined
+with it. The response reports each account's success, empty result, exhaustion
+or bounded error, so partial coverage must never be described as complete.
+Inventory items are intentionally compact metadata only — use `get-email` or
+`get-thread` only after selecting a specific result when body content is
+needed.
+
 ## Core Rules
 
 - Store large file/blob payloads in configured file/blob storage, not SQL: no
@@ -48,8 +60,9 @@ Detailed draft, queue, and contact-resolution patterns live in
 - Never send mail unless the user explicitly asks to send. Draft or queue
   review by default. `send-email` has `needsApproval: true` — it is the
   canonical, intentionally rare use of the human-in-the-loop gate in this
-  framework; the loop pauses for approval on every real send. Drafting and
-  queueing are unaffected.
+  framework. An authenticated A2A caller may carry the user's exact chat
+  authorization for one matching send; otherwise the loop pauses for approval.
+  Drafting and queueing are unaffected.
 - When drafting, first read `get-mail-settings` for signature and writing
   style. Use `signature` exactly when present — draft-writing paths that build
   a `compose-*` entry (`manage-draft`, `open-queued-draft`) call
@@ -61,7 +74,9 @@ Detailed draft, queue, and contact-resolution patterns live in
   (`draft-queue` skill), not `send-email` directly. The requester and reviewer
   must both be members of the active organization; Slack intake resolves the
   sender's real email via `users.info` (requires `users:read.email` bot scope)
-  before it will queue anything.
+  before it will queue anything. Managed installs request that scope through
+  the generated OAuth manifest; reconnect an existing Slack install after
+  granting it. Legacy bot-token installs must add the scope in Slack manually.
 - Never edit the email store to change a draft the user is currently composing;
   use `manage-draft` or the `compose-{id}` application-state key described in
   `email-drafts`.
@@ -79,23 +94,24 @@ Detailed draft, queue, and contact-resolution patterns live in
 
 ## Action Map
 
-| Action                                                                                                                                 | Purpose                                                                                |
-| -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `search-emails` / `list-emails`                                                                                                        | Query across Gmail or local-fallback data by view/query.                               |
-| `get-email` / `get-thread`                                                                                                             | Full body/metadata for one message or thread.                                          |
-| `find-contact`                                                                                                                         | Resolve a name/partial address to a real email.                                        |
-| `get-hubspot-contact`                                                                                                                  | CRM contact + deals + tickets by email (HubSpot only).                                 |
-| `manage-draft`                                                                                                                         | Create/update/delete a `compose-{id}` draft (signature-aware).                         |
-| `send-email`                                                                                                                           | Real send. `needsApproval: true` — always pauses for human approval.                   |
-| `queue-email-draft` / `list-queued-drafts` / `update-queued-draft` / `open-queued-draft` / `send-queued-drafts`                        | Teammate/Slack draft-review workflow — see `draft-queue`.                              |
-| `mark-read` / `mark-thread-read` / `star-email` / `archive-email` / `unarchive-email` / `trash-email` / `untrash-email` / `move-email` | Per-message or per-thread state changes; most call `refresh-list` internally.          |
-| `manage-gmail-filters`                                                                                                                 | Provider-native Gmail filters (create/replace/delete).                                 |
-| `manage-automations` / `trigger-automations`                                                                                           | Natural-language inbox automation rules.                                               |
-| `respond-calendar-invite`                                                                                                              | Accept/decline/tentative an invite found in Mail.                                      |
-| `get-mail-settings` / `update-mail-settings` / `import-gmail-signature`                                                                | Signature and writing-style settings.                                                  |
-| `manage-snippets`                                                                                                                      | List/create/update/delete saved reply snippets insertable from the compose slash menu. |
-| `get-tracking`                                                                                                                         | Open/click stats for a previously sent, tracked message.                               |
-| `provider-api-catalog` / `provider-api-docs` / `provider-api-request`                                                                  | Raw Gmail, Calendar, or HubSpot API calls beyond the canned actions.                   |
+| Action                                                                                                                                 | Purpose                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `search-emails` / `list-emails`                                                                                                        | Query across Gmail or local-fallback data by view/query.                                                      |
+| `get-email` / `get-thread`                                                                                                             | Full body/metadata for one message or thread.                                                                 |
+| `find-contact`                                                                                                                         | Resolve a name/partial address to a real email.                                                               |
+| `get-hubspot-contact`                                                                                                                  | CRM contact + deals + tickets by email (HubSpot only).                                                        |
+| `create-attachment-upload`                                                                                                             | Mint a five-minute, owner-bound raw-byte upload URL for one local attachment.                                 |
+| `manage-draft`                                                                                                                         | Create/update/delete a `compose-{id}` draft (signature-aware).                                                |
+| `send-email`                                                                                                                           | Real send. `needsApproval: true`; exact authenticated chat grants run once, otherwise it pauses for approval. |
+| `queue-email-draft` / `list-queued-drafts` / `update-queued-draft` / `open-queued-draft` / `send-queued-drafts`                        | Teammate/Slack draft-review workflow — see `draft-queue`.                                                     |
+| `mark-read` / `mark-thread-read` / `star-email` / `archive-email` / `unarchive-email` / `trash-email` / `untrash-email` / `move-email` | Per-message or per-thread state changes; most call `refresh-list` internally.                                 |
+| `manage-gmail-filters`                                                                                                                 | Provider-native Gmail filters (create/replace/delete).                                                        |
+| `manage-automations` / `trigger-automations`                                                                                           | Natural-language inbox automation rules.                                                                      |
+| `respond-calendar-invite`                                                                                                              | Accept/decline/tentative an invite found in Mail.                                                             |
+| `get-mail-settings` / `update-mail-settings` / `import-gmail-signature`                                                                | Signature and writing-style settings.                                                                         |
+| `manage-snippets`                                                                                                                      | List/create/update/delete saved reply snippets insertable from the compose slash menu.                        |
+| `get-tracking`                                                                                                                         | Open/click stats for a previously sent, tracked message.                                                      |
+| `provider-api-catalog` / `provider-api-docs` / `provider-api-request`                                                                  | Raw Gmail, Calendar, or HubSpot API calls beyond the canned actions.                                          |
 
 ## Response Language
 

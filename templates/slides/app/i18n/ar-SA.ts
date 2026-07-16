@@ -103,6 +103,7 @@ const messages = {
     searchImagesPlaceholder: "Buscar imagens...",
     searchForLogosImagesIcons: "Buscar logos, imagens, ícones...",
     search: "بحث",
+    searchFailed: "فشل البحث",
     logoSearchTitle: "بحث عن الشعار",
     searchCompanyLogo: "Busque uma empresa para encontrar seu logo",
     searchCompanyPlaceholder: "Buscar nome da empresa (ex.: Intuit)",
@@ -331,6 +332,8 @@ const messages = {
     hideResolved: "إخفاء المحلول",
     showResolved: "إظهار {{count}} محلولة",
     noCommentsYet: "لا توجد تعليقات بعد",
+    loadFailed: "تعذر تحميل التعليقات",
+    retry: "إعادة المحاولة",
     clickToAddComment: "انقر لإضافة تعليق",
     selectSlideToAdd: "حدد شريحة لإضافة تعليق",
   },
@@ -561,6 +564,10 @@ const messages = {
     chooseAnotherFile: "اختيار ملف آخر",
   },
   home: {
+    loadFailed: "تعذر تحميل المحتوى",
+    loadFailedDescription:
+      "لا يزال المحتوى المحفوظ متاحًا. تحقق من الاتصال وأعد المحاولة.",
+    retry: "إعادة المحاولة",
     decksTitle: "العروض",
     newDeck: "عرض جديد",
     deckLengthQuestion: "ما طول هذا العرض؟",
