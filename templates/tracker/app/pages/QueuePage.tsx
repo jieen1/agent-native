@@ -578,6 +578,7 @@ export function QueuePage() {
       hide: hideGateRow,
       unhide: unhideGateRow,
       onSuccess: () => toast.success("已批准，重新入队"),
+      onError: () => toast.error("批准失败，请重试"),
     });
   }
 
@@ -591,6 +592,7 @@ export function QueuePage() {
       hide: hideGateRow,
       unhide: unhideGateRow,
       onSuccess: () => toast.success("已驳回，移出队列"),
+      onError: () => toast.error("驳回失败，请重试"),
     });
   }
 

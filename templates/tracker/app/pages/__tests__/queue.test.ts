@@ -81,9 +81,9 @@ describe("runQueueGateAction — approve semantics (enqueue-work-item)", () => {
     const hide = vi.fn();
     const unhide = vi.fn();
     const onSuccess = vi.fn();
-    const mutateAsync = vi
-      .fn()
-      .mockRejectedValue(new Error("blocked by dependency"));
+    const onError = vi.fn();
+    const error = new Error("blocked by dependency");
+    const mutateAsync = vi.fn().mockRejectedValue(error);
 
     await runQueueGateAction({
       id: "q1",
@@ -92,12 +92,14 @@ describe("runQueueGateAction — approve semantics (enqueue-work-item)", () => {
       hide,
       unhide,
       onSuccess,
+      onError,
     });
 
     expect(hide).toHaveBeenCalledWith("q1");
     expect(mutateAsync).toHaveBeenCalledWith({ workItemId: "wi-1" });
     expect(onSuccess).not.toHaveBeenCalled();
     expect(unhide).toHaveBeenCalledWith("q1");
+    expect(onError).toHaveBeenCalledWith(error);
   });
 });
 
@@ -131,9 +133,9 @@ describe("runQueueGateAction — reject semantics (dequeue-work-item)", () => {
     const hide = vi.fn();
     const unhide = vi.fn();
     const onSuccess = vi.fn();
-    const mutateAsync = vi
-      .fn()
-      .mockRejectedValue(new Error("Not authenticated"));
+    const onError = vi.fn();
+    const error = new Error("Not authenticated");
+    const mutateAsync = vi.fn().mockRejectedValue(error);
 
     await runQueueGateAction({
       id: "q9",
@@ -142,11 +144,13 @@ describe("runQueueGateAction — reject semantics (dequeue-work-item)", () => {
       hide,
       unhide,
       onSuccess,
+      onError,
     });
 
     expect(hide).toHaveBeenCalledWith("q9");
     expect(onSuccess).not.toHaveBeenCalled();
     expect(unhide).toHaveBeenCalledWith("q9");
+    expect(onError).toHaveBeenCalledWith(error);
   });
 
   it("still resolves and calls the action even if the queue row id is unknown (fallback to raw id)", async () => {

@@ -18,11 +18,13 @@ export interface RunQueueGateActionArgs {
   hide: (id: string) => void;
   unhide: (id: string) => void;
   onSuccess?: () => void;
+  onError?: (error: unknown) => void;
 }
 
 // Optimistically hides a human-gate queue row, calls the real backing
 // action, and rolls the hide back if the action fails so the row reappears
-// for the user to retry.
+// for the user to retry. onError must be supplied so the reappearing row
+// reads as "this failed", not as "nothing happened".
 export async function runQueueGateAction({
   id,
   items,
@@ -30,13 +32,15 @@ export async function runQueueGateAction({
   hide,
   unhide,
   onSuccess,
+  onError,
 }: RunQueueGateActionArgs): Promise<void> {
   const workItemId = resolveWorkItemId(items, id);
   hide(id);
   try {
     await mutateAsync({ workItemId });
     onSuccess?.();
-  } catch {
+  } catch (error) {
     unhide(id);
+    onError?.(error);
   }
 }
