@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
+import { FailedRunEvidence } from "@/components/FailedRunEvidence";
 import { statusPresentation } from "@/components/tracker-format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ import {
   useDispatch,
   useRollbackStage,
   useRequestApproval,
+  useActivity,
 } from "@/hooks/use-tracker";
 import {
   INBOX_GROUP_LABELS,
@@ -332,6 +334,13 @@ function FailedRoutingDetail({ row }: { row: InboxRow }) {
   const requestApproval = useRequestApproval();
   const prevStage = previousStage(row.currentStageName);
   const workItemId = row.workItemId ?? row.id;
+  // On-demand only — this hook runs once per mount of THIS detail panel (the
+  // one currently open row), never once per list row. Same fetch path
+  // WorkItemDetailPage's RunEvidenceList already polls (get-activity, 4s).
+  const { data: activity, isLoading: activityLoading } = useActivity(
+    workItemId,
+    true,
+  );
 
   return (
     <div className="space-y-5 p-6">
@@ -342,6 +351,11 @@ function FailedRoutingDetail({ row }: { row: InboxRow }) {
           <p className="mt-1 text-sm text-muted-foreground">{row.summary}</p>
         ) : null}
       </div>
+
+      <FailedRunEvidence
+        activity={activity}
+        activityLoading={activityLoading}
+      />
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
         <dt className="text-muted-foreground">工作项</dt>
