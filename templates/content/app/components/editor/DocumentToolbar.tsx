@@ -77,6 +77,8 @@ import {
 import { cn } from "@/lib/utils";
 
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
+// LOCAL CUSTOMIZATION: wide-page toggle (see PageWidthToggle.tsx / LOCAL_CHANGES.md)
+import { PageWidthToggle } from "./PageWidthToggle";
 
 type ExportFormat = "pdf" | "markdown" | "html";
 
@@ -1185,6 +1187,8 @@ export function DocumentToolbar({
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
+          {/* LOCAL CUSTOMIZATION: wide-page toggle */}
+          <PageWidthToggle />
           <AgentToggleButton />
         </div>
       </div>

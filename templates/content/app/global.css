@@ -2447,3 +2447,17 @@ audio.media-block__content {
   user-select: none;
   pointer-events: none;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   LOCAL CUSTOMIZATION — wide-page toggle (not from upstream)
+   `PageWidthToggle.tsx`（右上工具条按钮）在 <html> 上切换 data-page-wide；
+   这里把文档编辑器/数据库页原本 max-w-3xl(768px) 的内容容器放宽。
+   选择器锚定 DocumentEditor/DocumentDatabase 的既有工具类三连
+   （w-full + max-w-3xl + mx-auto），不影响 portal 中的对话框等窄容器。
+   升级 upstream 后若类名变化，只需同步这一块与 PageWidthToggle.tsx。
+   完整本地改动清单见 templates/content/LOCAL_CHANGES.md。
+   ═══════════════════════════════════════════════════════════════════ */
+html[data-page-wide] .w-full.max-w-3xl.mx-auto,
+html[data-page-wide] .mx-auto.w-full.max-w-3xl {
+  max-width: min(76rem, calc(100% - 3rem));
+}
