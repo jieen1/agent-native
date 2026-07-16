@@ -224,7 +224,7 @@
 
 目标重述:**用 tracker 管理应用开发全流程(需求→拆分→派发→评审→验收→发布),orchestrator 接单后真正自动化开发,全程有守卫、有证据、有回写。**
 
-按依赖与价值排序(每条带验收判据):
+按依赖与价值排序(每条带验收判据)(执行级展开见《SDLC 实施规划(R1–R5 执行版)》):
 
 ### R1 让系统重新转起来(先决,当周可完成)
 - ✅ 已收编 recover/sdlc-issue-pipeline(运行限额兜底 + workspaceCiWatch + workspaceMergePr)并合入 main(1fd9783fb)。移植适配:迁移改写为 name-based 幂等(sdlc-run-limits);修复原提交 mergePr 的 session 级 advisory lock 连接池泄漏隐患(改事务级 xact_lock);验证 workspace-local 12/12、真实 PG 迁移冒烟 2/2、零新增失败。**待办:部署到 101——门槛是先跑一次真实运行验证 checkRunLimits(该函数无既有测试覆盖,且 v3-reconciler.spec.ts 在纯净 main 上即卡死,见下)。**
