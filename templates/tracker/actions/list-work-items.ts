@@ -1,6 +1,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
@@ -39,6 +40,11 @@ export default defineAction({
         tags: schema.workItems.tags,
         currentStageName: schema.workItems.currentStageName,
         orchestratorThreadId: schema.workItems.orchestratorThreadId,
+        // S1 board card: run deep-link (RunBadgeCompact) + owner avatar +
+        // plannedStages (mini-step subset rendering, board slim-column rule).
+        orchestratorRunId: schema.workItems.orchestratorRunId,
+        owner: schema.workItems.owner,
+        plannedStages: schema.workItems.plannedStages,
         dispatchedAt: schema.workItems.dispatchedAt,
         createdAt: schema.workItems.createdAt,
         updatedAt: schema.workItems.updatedAt,
@@ -54,13 +60,24 @@ export default defineAction({
     // (possibly status-filtered) batch.
     const displays = await computeItemKeyDisplays(
       db,
-      rows.map((r) => ({ id: r.id, projectId: r.projectId, itemKey: r.itemKey })),
+      rows.map((r) => ({
+        id: r.id,
+        projectId: r.projectId,
+        itemKey: r.itemKey,
+      })),
     );
     return rows.map((r) => ({
       ...r,
       tags: (() => {
         try {
           return JSON.parse(r.tags ?? "[]");
+        } catch {
+          return [];
+        }
+      })(),
+      plannedStages: (() => {
+        try {
+          return JSON.parse(r.plannedStages ?? "[]");
         } catch {
           return [];
         }

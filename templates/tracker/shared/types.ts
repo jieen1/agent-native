@@ -292,6 +292,11 @@ export interface TrackerWorkItem {
   // treats plannedStages/tags/nature off get-sprint's raw items).
   scaleEstimate?: string | null;
   splitParentId?: string | null;
+  // S1 board card fields (list-work-items.ts) — optional because get-sprint's
+  // items (also typed TrackerWorkItem) do not select these columns.
+  owner?: string | null;
+  orchestratorRunId?: string | null;
+  dispatchedAt?: string | null;
 }
 export interface Stage {
   id: string;
