@@ -141,12 +141,12 @@ kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid
 .ring.r-pending{border:1.6px dashed var(--muted-foreground)}
 .ring.r-queued{border:1.6px solid var(--warning)}
 .ring.r-queued::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--warning)}
-.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%);animation:breathe 2s ease-in-out infinite}
+.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%)}
 .ring.r-review{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 75%,transparent 75% 100%)}
 .ring.r-gate{border:1.6px solid var(--warning)}
 .ring.r-gate::after{content:'';position:absolute;left:5.5px;top:3px;width:1.8px;height:7px;background:var(--warning)}
 .ring.r-skipped{border:1.6px solid var(--muted-foreground);background:linear-gradient(135deg,transparent 45%,var(--muted-foreground) 45%,var(--muted-foreground) 55%,transparent 55%)}
-@keyframes breathe{0%,100%{opacity:1}50%{opacity:.55}}
+/* r-running 活跃脉动已收敛至 foundry-motion .fm-live(见挂类元素),旧 breathe keyframes 移除 */
 /* 优先级信号条 */
 .pbars{display:inline-flex;gap:1.5px;align-items:flex-end;height:12px}
 .pbars span{width:3px;border-radius:1px;background:var(--border)}
@@ -170,15 +170,7 @@ table.fd th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spa
 table.fd td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
 table.fd tr:hover td{background:oklch(0 0 0/.02)}
 .dark table.fd tr:hover td{background:oklch(1 0 0/.03)}
-/* 动效 */
-.shimmer{background:linear-gradient(90deg,var(--muted-foreground) 0%,var(--foreground) 40%,var(--muted-foreground) 80%);
-  background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
-  animation:shimmer 2.2s linear infinite}
-@keyframes shimmer{to{background-position:-200% 0}}
-.impulse{animation:impulse 2.4s ease-in-out infinite}
-@keyframes impulse{0%,100%{box-shadow:0 0 0 0 color-mix(in oklch,var(--brand) 35%,transparent)}
-  50%{box-shadow:0 0 0 4px color-mix(in oklch,var(--brand) 12%,transparent)}}
-@media (prefers-reduced-motion:reduce){.shimmer,.impulse,.ring.r-running{animation:none}}
+/* 动效:旧 shimmer/impulse 已收敛至 foundry-motion(fm-thinking/fm-live),此处移除;reduced-motion 由 foundry-motion 统一兜底 */
 /* 空态 */
 .empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px;color:var(--muted-foreground)}
 .empty .e-icon{width:40px;height:40px;border-radius:50%;background:var(--muted);
@@ -261,7 +253,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
 .collapse-row{border:1px solid var(--border);border-radius:8px;overflow:hidden}
 .collapse-head{display:flex;align-items:center;gap:6px;padding:8px 10px;cursor:pointer;font-size:12.5px}
 .collapse-head:hover{background:var(--muted)}
-.collapse-head i.chev{margin-left:auto;transition:transform .15s;color:var(--muted-foreground)}
+.collapse-head i.chev{margin-left:auto;transition:transform var(--fm-dur-1);color:var(--muted-foreground)}
 .collapse-head.open i.chev{transform:rotate(90deg)}
 .collapse-body{padding:10px 12px;border-top:1px solid var(--border);background:var(--muted);
   font-family:var(--font-mono);font-size:11px;line-height:1.7;color:var(--foreground);white-space:pre-wrap}
@@ -270,6 +262,115 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
 .kv{display:flex;gap:8px;padding:5px 0;font-size:12.5px}
 .kv .k{width:96px;flex-shrink:0;color:var(--muted-foreground)}
 .kv .v{min-width:0}
+</style>
+<style id="foundry-motion">
+  /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
+  :root {
+    /* 一次性动效时长梯度 */
+    --fm-dur-1: 120ms;   /* 微反馈:hover、图标切换 */
+    --fm-dur-2: 240ms;   /* 小型:按钮/开关状态、Toast、菜单 */
+    --fm-dur-3: 400ms;   /* 中型:对话框 enter、完成打勾、区块 reveal */
+    --fm-dur-4: 700ms;   /* 大型:庆祝时刻、欢迎/空状态插画 */
+    /* 氛围循环档(持续存在感,允许慢) */
+    --fm-ambient-1: 1600ms;  /* 活跃脉动 */
+    --fm-ambient-2: 2500ms;  /* thinking 扫光 */
+    --fm-ambient-3: 3200ms;  /* 描边光束(仅单一 CTA 级场景) */
+    /* 曲线 */
+    --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);   /* 一切常规过渡 */
+    --fm-ease-enter:    cubic-bezier(0.16, 1, 0.3, 1);   /* 进场从容 */
+    --fm-ease-exit:     cubic-bezier(0.7, 0, 0.84, 0);   /* 离场干脆 */
+    --fm-ease-bounce:   cubic-bezier(0.5, 1.5, 0.4, 1);  /* 仅庆祝时刻 */
+    /* 位移与缩放(工具产品克制档) */
+    --fm-shift-1: 4px;
+    --fm-shift-2: 8px;
+    --fm-scale-hover: 1.02;
+    --fm-scale-active: 0.98;
+  }
+
+  /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
+  @keyframes fm-text-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .fm-thinking {
+    background-image: linear-gradient(90deg,
+      var(--muted-foreground) 0%, var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%, var(--muted-foreground) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
+  }
+
+  /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
+  @keyframes fm-impulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent); }
+    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent); }
+  }
+  .fm-live { animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite; }
+
+  /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
+  @keyframes fm-complete-badge {
+    0% { transform: scale(0); } 60% { transform: scale(1.12); } 100% { transform: scale(1); }
+  }
+  @keyframes fm-complete-check { to { stroke-dashoffset: 0; } }
+  .fm-complete { animation: fm-complete-badge 500ms var(--fm-ease-bounce) both; }
+  .fm-complete svg path, .fm-complete svg polyline {
+    stroke-dasharray: 48; stroke-dashoffset: 48;
+    animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
+  }
+
+  /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
+  @keyframes fm-nav-sweep {
+    0% { transform: translateX(-100%); } 100% { transform: translateX(400%); }
+  }
+  .fm-nav-progress {
+    position: fixed; top: 0; left: 0; right: 0; height: 2px;
+    overflow: hidden; pointer-events: none; z-index: 9999; display: none;
+  }
+  .fm-nav-progress[data-active="true"] { display: block; }
+  .fm-nav-progress::before {
+    content: ""; display: block; height: 100%; width: 25%;
+    background: var(--primary);
+    animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
+  }
+
+  /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
+  [data-fm-reveal] {
+    opacity: 0; transform: translateY(var(--fm-shift-1));
+    transition: opacity var(--fm-dur-3) var(--fm-ease-enter),
+                transform var(--fm-dur-3) var(--fm-ease-enter);
+  }
+  [data-fm-reveal].fm-in { opacity: 1; transform: none; }
+  /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
+  .fm-scroll [data-fm-reveal] { transform: none; }
+
+  /* ===== 通用交互态统一 ===== */
+  .fm-hover-lift { transition: transform var(--fm-dur-2) var(--fm-ease-standard),
+                               box-shadow var(--fm-dur-2) var(--fm-ease-standard); }
+  .fm-hover-lift:hover  { transform: translateY(calc(var(--fm-shift-1) * -1)); }
+  .fm-hover-lift:active { transform: scale(var(--fm-scale-active)); }
+  .fm-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0% 1px; background-position: 0 100%; background-repeat: no-repeat;
+    transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
+  }
+  .fm-underline:hover { background-size: 100% 1px; }
+  /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
+  .fm-overlay-enter { animation-duration: var(--fm-dur-3); animation-timing-function: var(--fm-ease-enter); }
+  .fm-overlay-exit  { animation-duration: var(--fm-dur-2); animation-timing-function: var(--fm-ease-exit); }
+  /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
+  [data-fm-gesturing="true"], [data-fm-gesturing="true"] * { transition: none !important; }
+
+  /* ===== 全量降级 ===== */
+  @media (prefers-reduced-motion: reduce) {
+    .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
+    .fm-nav-progress::before { animation: none !important; }
+    .fm-thinking { color: var(--muted-foreground); background: none; }
+    [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
+    .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -308,7 +409,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
     <a class="sb-item" data-screen="s10-health-insights.html"><i class="ti ti-chart-dots"></i>洞察</a>
     <a class="sb-item"><i class="ti ti-settings"></i>设置</a>
     <div class="sb-group">活跃线程</div>
-    <a class="sb-item" data-screen="s9-brain-console.html"><span class="ring r-running" style="width:10px;height:10px"></span>Sprint 3 lead</a>
+    <a class="sb-item" data-screen="s9-brain-console.html"><span class="ring r-running fm-live" style="width:10px;height:10px"></span>Sprint 3 lead</a>
     <a class="sb-item"><span class="ring r-queued" style="width:10px;height:10px"></span>PAY-190 调研</a>
   </aside>
 
@@ -318,7 +419,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
       <a class="rh-back"><i class="ti ti-arrow-left" style="font-size:18px"></i></a>
       <span class="run-title">sdlc-issue-pipeline<span class="badge b-muted mono">@v4</span></span>
       <span class="mono" style="color:var(--muted-foreground)">run_8f3k21</span>
-      <span class="ring r-running"></span>
+      <span class="ring r-running fm-live"></span>
       <span class="mono" style="font-size:12px;color:var(--info)" id="runTimer">12m08s</span>
       <span class="badge b-muted mono">DAG v1</span>
       <div class="rh-chips">
@@ -371,7 +472,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
           </div>
           <div class="dagnode n-running beam" style="left:210px;top:120px" @click="sel='dev'" :class="sel==='dev'&&'n-selected'">
             <div class="dagnode-inner">
-              <div class="dn-row1"><i class="ti ti-cpu"></i>dev<span class="ring r-running"></span></div>
+              <div class="dn-row1"><i class="ti ti-cpu"></i>dev<span class="ring r-running fm-live"></span></div>
               <div class="dn-row2"><span class="badge b-agent">vllm</span><span class="badge b-muted mono">qwen3.6</span></div>
               <div class="dn-stats"><span>3m42s</span><span>18.4k tok</span></div>
             </div>
@@ -439,6 +540,9 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
             <button title="适应视图"><i class="ti ti-maximize"></i></button>
           </div>
         </div>
+        <div style="position:absolute;left:14px;bottom:10px;font-size:10.5px;color:var(--muted-foreground);display:flex;gap:12px;align-items:center;background:color-mix(in oklch,var(--background) 85%,transparent);padding:3px 8px;border-radius:6px">
+          <span>边 = 依赖（非执行顺序）</span><span>虚线回边 = loop / 失败回路</span><span>含 parallel_over 的模板（如 sdlc-verify）在此呈现扇出汇聚</span>
+        </div>
       </div>
 
       <!-- 右：检查器 -->
@@ -465,7 +569,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
               <div style="font-size:11px;color:var(--muted-foreground)">agent 节点 · attempt <span class="mono">2</span> · retry 上限 <span class="mono">2</span>（transient 自动重试）</div>
             </div>
             <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
-              <span class="ring r-running"></span><span class="mono shimmer" style="font-size:12px">运行中 · 3m42s</span></span>
+              <span class="ring r-running fm-live"></span><span class="mono fm-thinking" style="font-size:12px">运行中 · 3m42s</span></span>
           </div>
 
           <div>
@@ -478,7 +582,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
               <span class="mono" style="margin-left:auto;font-size:11px;color:var(--muted-foreground)">0.9k tok · 41s</span>
             </div>
             <div class="attempt-row" style="margin-top:6px">
-              <span class="ring r-running"></span>
+              <span class="ring r-running fm-live"></span>
               <span style="font-weight:500">Attempt 2</span>
               <span class="badge b-muted">TDD：红测试先行</span>
               <span class="mono" style="margin-left:auto;font-size:11px;color:var(--muted-foreground)">18.4k tok · 3m42s</span>
@@ -522,7 +626,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
         <div class="insp-body" x-show="tab==='events'" x-cloak>
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
             <span class="group-label">实时事件</span>
-            <span class="badge b-info"><span class="ring r-running" style="width:8px;height:8px;border-width:1px"></span>轮询中</span>
+            <span class="badge b-info"><span class="ring r-running fm-live" style="width:8px;height:8px;border-width:1px"></span>轮询中</span>
             <span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)">最新在上</span>
           </div>
           <div class="evt-row"><span class="t">10:42:08</span><span class="badge b-info">node.started</span><span>dev 开始执行（vllm · qwen3.6）</span></div>
@@ -536,8 +640,8 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
         </div>
 
         <!-- 时间线（patch/fork） -->
-        <div class="insp-body" x-show="tab==='timeline'" x-cloak>
-          <div class="empty">
+        <div class="insp-body fm-scroll" x-show="tab==='timeline'" x-cloak>
+          <div class="empty" data-fm-reveal>
             <span class="e-icon"><i class="ti ti-history"></i></span>
             <span style="font-weight:500;color:var(--foreground)">无补丁记录</span>
             <span style="font-size:12px;text-align:center">Patch 只能修改未执行的节点（pending / ready）<br>已执行的过去请用 Fork 分叉新 run，父链会保留在此</span>
@@ -545,7 +649,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
         </div>
 
         <!-- 输入与产物 -->
-        <div class="insp-body" x-show="tab==='io'" x-cloak style="display:flex;flex-direction:column;gap:12px">
+        <div class="insp-body fm-scroll" x-show="tab==='io'" x-cloak style="display:flex;flex-direction:column;gap:12px">
           <div>
             <div class="group-label" style="margin-bottom:6px">Run inputs</div>
             <div class="card card-pad" style="padding:10px 12px">
@@ -558,7 +662,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
           </div>
           <div>
             <div class="group-label" style="margin-bottom:6px">最终产物</div>
-            <div class="empty" style="padding:20px">
+            <div class="empty" style="padding:20px" data-fm-reveal>
               <span class="e-icon"><i class="ti ti-package"></i></span>
               <span style="font-size:12px">run 终态后汇总：PR 链接 · 合入 sha · 测试证据</span>
             </div>
@@ -578,8 +682,46 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
   }, 1000);
 </script>
 <style>[x-cloak]{display:none!important}</style>
+<script id="foundry-motion-js">
+  /* Foundry v3 motion runtime(零依赖) */
+  (function () {
+    var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* 低频页入场:一次性触发 */
+    if (!reduced && 'IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('fm-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.15 });
+      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { io.observe(el); });
+    } else {
+      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { el.classList.add('fm-in'); });
+    }
+
+    /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
+    window.fmCountTo = function (el, target, opts) {
+      var dur = (opts && opts.duration) || 400;
+      var from = parseFloat((el.textContent || '0').replace(/[^0-9.-]/g, '')) || 0;
+      var fmt = (opts && opts.format) || function (v) { return Math.round(v).toLocaleString(); };
+      if (reduced || dur <= 0) { el.textContent = fmt(target); return; }
+      var t0 = performance.now();
+      function ease(t) { return 1 - Math.pow(1 - t, 3); } /* ≈ standard 曲线的收尾感 */
+      function tick(now) {
+        var p = Math.min(1, (now - t0) / dur);
+        el.textContent = fmt(from + (target - from) * ease(p));
+        if (p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    };
+
+    /* 原型演示辅助:data-fm-count 声明式初始化 */
+    document.querySelectorAll('[data-fm-count]').forEach(function (el) {
+      var v = parseFloat(el.getAttribute('data-fm-count'));
+      if (!isNaN(v)) window.fmCountTo(el, v);
+    });
+  })();
+</script>
 </body>
-</html>        <div style="position:absolute;left:14px;bottom:10px;font-size:10.5px;color:var(--muted-foreground);display:flex;gap:12px;align-items:center;background:color-mix(in oklch,var(--background) 85%,transparent);padding:3px 8px;border-radius:6px">
-          <span>边 = 依赖（非执行顺序）</span><span>虚线回边 = loop / 失败回路</span><span>含 parallel_over 的模板（如 sdlc-verify）在此呈现扇出汇聚</span>
-        </div>
+</html>
 

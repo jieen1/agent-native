@@ -426,6 +426,115 @@ textarea.inp{height:auto;min-height:56px;padding:6px 9px;resize:vertical}
 .surf-demo{width:100%;background:var(--background);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
 .hdot{width:8px;height:8px;border-radius:50%;display:inline-block}
 </style>
+<style id="foundry-motion">
+  /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
+  :root {
+    /* 一次性动效时长梯度 */
+    --fm-dur-1: 120ms;   /* 微反馈:hover、图标切换 */
+    --fm-dur-2: 240ms;   /* 小型:按钮/开关状态、Toast、菜单 */
+    --fm-dur-3: 400ms;   /* 中型:对话框 enter、完成打勾、区块 reveal */
+    --fm-dur-4: 700ms;   /* 大型:庆祝时刻、欢迎/空状态插画 */
+    /* 氛围循环档(持续存在感,允许慢) */
+    --fm-ambient-1: 1600ms;  /* 活跃脉动 */
+    --fm-ambient-2: 2500ms;  /* thinking 扫光 */
+    --fm-ambient-3: 3200ms;  /* 描边光束(仅单一 CTA 级场景) */
+    /* 曲线 */
+    --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);   /* 一切常规过渡 */
+    --fm-ease-enter:    cubic-bezier(0.16, 1, 0.3, 1);   /* 进场从容 */
+    --fm-ease-exit:     cubic-bezier(0.7, 0, 0.84, 0);   /* 离场干脆 */
+    --fm-ease-bounce:   cubic-bezier(0.5, 1.5, 0.4, 1);  /* 仅庆祝时刻 */
+    /* 位移与缩放(工具产品克制档) */
+    --fm-shift-1: 4px;
+    --fm-shift-2: 8px;
+    --fm-scale-hover: 1.02;
+    --fm-scale-active: 0.98;
+  }
+
+  /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
+  @keyframes fm-text-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .fm-thinking {
+    background-image: linear-gradient(90deg,
+      var(--muted-foreground) 0%, var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%, var(--muted-foreground) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
+  }
+
+  /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
+  @keyframes fm-impulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent); }
+    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent); }
+  }
+  .fm-live { animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite; }
+
+  /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
+  @keyframes fm-complete-badge {
+    0% { transform: scale(0); } 60% { transform: scale(1.12); } 100% { transform: scale(1); }
+  }
+  @keyframes fm-complete-check { to { stroke-dashoffset: 0; } }
+  .fm-complete { animation: fm-complete-badge 500ms var(--fm-ease-bounce) both; }
+  .fm-complete svg path, .fm-complete svg polyline {
+    stroke-dasharray: 48; stroke-dashoffset: 48;
+    animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
+  }
+
+  /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
+  @keyframes fm-nav-sweep {
+    0% { transform: translateX(-100%); } 100% { transform: translateX(400%); }
+  }
+  .fm-nav-progress {
+    position: fixed; top: 0; left: 0; right: 0; height: 2px;
+    overflow: hidden; pointer-events: none; z-index: 9999; display: none;
+  }
+  .fm-nav-progress[data-active="true"] { display: block; }
+  .fm-nav-progress::before {
+    content: ""; display: block; height: 100%; width: 25%;
+    background: var(--primary);
+    animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
+  }
+
+  /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
+  [data-fm-reveal] {
+    opacity: 0; transform: translateY(var(--fm-shift-1));
+    transition: opacity var(--fm-dur-3) var(--fm-ease-enter),
+                transform var(--fm-dur-3) var(--fm-ease-enter);
+  }
+  [data-fm-reveal].fm-in { opacity: 1; transform: none; }
+  /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
+  .fm-scroll [data-fm-reveal] { transform: none; }
+
+  /* ===== 通用交互态统一 ===== */
+  .fm-hover-lift { transition: transform var(--fm-dur-2) var(--fm-ease-standard),
+                               box-shadow var(--fm-dur-2) var(--fm-ease-standard); }
+  .fm-hover-lift:hover  { transform: translateY(calc(var(--fm-shift-1) * -1)); }
+  .fm-hover-lift:active { transform: scale(var(--fm-scale-active)); }
+  .fm-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0% 1px; background-position: 0 100%; background-repeat: no-repeat;
+    transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
+  }
+  .fm-underline:hover { background-size: 100% 1px; }
+  /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
+  .fm-overlay-enter { animation-duration: var(--fm-dur-3); animation-timing-function: var(--fm-ease-enter); }
+  .fm-overlay-exit  { animation-duration: var(--fm-dur-2); animation-timing-function: var(--fm-ease-exit); }
+  /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
+  [data-fm-gesturing="true"], [data-fm-gesturing="true"] * { transition: none !important; }
+
+  /* ===== 全量降级 ===== */
+  @media (prefers-reduced-motion: reduce) {
+    .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
+    .fm-nav-progress::before { animation: none !important; }
+    .fm-thinking { color: var(--muted-foreground); background: none; }
+    [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
+    .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }
+  }
+</style>
 </head>
 <body x-data="{dlg:false,adlg:false,drw:false,pop:false,toasts:[],sw1:true,sw2:false,tab:'过程',seg:'看板',
   toast(m,k){const id=Date.now();this.toasts.push({id,m,k});setTimeout(()=>this.toasts=this.toasts.filter(t=>t.id!==id),3500)}}">
@@ -479,7 +588,7 @@ textarea.inp{height:auto;min-height:56px;padding:6px 9px;resize:vertical}
     <div class="group-label">导航</div>
     <a href="#nav">侧栏 / 页头 / 工具栏</a>
     <div class="group-label">其他</div>
-    <a href="#motion">动效语汇</a>
+    <a href="#motion">动效 Motion</a>
     <a href="#rules">禁则清单</a>
   </aside>
   <main class="spec-main">
@@ -1197,14 +1306,101 @@ textarea.inp{height:auto;min-height:56px;padding:6px 9px;resize:vertical}
     </section>
 
     <section id="motion">
-      <h2>动效语汇 <span class="mono">§2.6</span></h2>
-      <p class="usage">动效只表达"正在发生"；全部带 prefers-reduced-motion 降级；静态数据不动。</p>
-      <div class="demo" style="gap:22px">
-        <span class="shimmer">brain 正在评审 diff…</span>
-        <span class="ring r-running"></span>
-        <button class="btn btn-outline impulse"><i class="ti ti-player-play" style="font-size:14px"></i>2 个活跃运行</button>
-        <div class="dagnode n-running beam" style="width:150px"><div class="dagnode-inner"><div class="dn-row1" style="font-size:11.5px"><i class="ti ti-cpu"></i>border-beam</div></div></div>
-        <span class="mono" style="font-size:12px">运行中 · 3m42s（单调计时）</span>
+      <h2>动效 Motion <span class="mono">§2.6</span></h2>
+      <p class="usage">权威源 <span class="mono">design-system/foundry-motion.html</span>（Foundry v3 动效基建块；实证基础 multica.ai 源码级动效语言 + 本项目生产工具红线）；tokens 与曲线数值不可改，只按语义挂类/属性。下方 5 个模式均为可运行的活体演示——其 style/script 已整块内联进本文件一次（见 <span class="mono">#foundry-motion</span> / <span class="mono">#foundry-motion-js</span>）。</p>
+
+      <div class="demo col" style="padding:0;overflow:hidden">
+        <table class="fd">
+          <tr><th>Token</th><th>值</th><th>用途</th><th>multica 实证出处</th></tr>
+          <tr><td class="mono">--fm-dur-1</td><td class="mono">120ms</td><td>微反馈：hover、图标切换</td><td>multica base.css 最短反馈档，快于注意转移阈值，hover 不显"动画感"</td></tr>
+          <tr><td class="mono">--fm-dur-2</td><td class="mono">240ms</td><td>小型：按钮/开关状态、Toast、菜单</td><td>multica tokens.css 的 UI 元件标准档，与菜单/toast 出现节奏一致</td></tr>
+          <tr><td class="mono">--fm-dur-3</td><td class="mono">400ms</td><td>中型：对话框 enter、完成打勾、区块 reveal</td><td>multica 对话框类浮层 enter 阶梯，位移+透明度两段感知完整</td></tr>
+          <tr><td class="mono">--fm-dur-4</td><td class="mono">700ms</td><td>大型：庆祝时刻、欢迎/空状态插画</td><td>multica 大幅插画过渡上限，超过易显拖沓，已是克制上限</td></tr>
+          <tr><td class="mono">--fm-ambient-1</td><td class="mono">1600ms</td><td>活跃脉动</td><td>multica"活跃指示"呼吸周期，足够慢以不构成高频闪烁</td></tr>
+          <tr><td class="mono">--fm-ambient-2</td><td class="mono">2500ms</td><td>thinking 扫光</td><td>multica 文字扫光周期，比活跃脉动更慢以区分"思考中"与"活跃中"</td></tr>
+          <tr><td class="mono">--fm-ambient-3</td><td class="mono">3200ms</td><td>描边光束（仅单一 CTA 级场景）</td><td>multica 最慢氛围档，仅供全屏唯一焦点元素，避免多处同时争抢注意力</td></tr>
+          <tr><td class="mono">--fm-ease-standard</td><td class="mono">cubic-bezier(0.4, 0, 0.2, 1)</td><td>一切常规过渡</td><td>multica/Material 标准曲线，加减速对称，默认无语义过渡基线</td></tr>
+          <tr><td class="mono">--fm-ease-enter</td><td class="mono">cubic-bezier(0.16, 1, 0.3, 1)</td><td>进场从容</td><td>multica 入场曲线，前段快尾段长，呈现从容落位感</td></tr>
+          <tr><td class="mono">--fm-ease-exit</td><td class="mono">cubic-bezier(0.7, 0, 0.84, 0)</td><td>离场干脆</td><td>multica 离场曲线，加速陡峭，避免离场拖泥带水</td></tr>
+          <tr><td class="mono">--fm-ease-bounce</td><td class="mono">cubic-bezier(0.5, 1.5, 0.4, 1)</td><td>仅庆祝时刻</td><td>multica 唯一超出 [0,1] 区间曲线，专供一次性庆祝回弹</td></tr>
+          <tr><td class="mono">--fm-shift-1</td><td class="mono">4px</td><td>位移基准（hover 提升/reveal 入场）</td><td>multica 位移最小档，工具型产品克制上限，避免布局抖动感</td></tr>
+          <tr><td class="mono">--fm-shift-2</td><td class="mono">8px</td><td>位移强档（较大区块入场）</td><td>multica 位移次档，仅供低频大区块一次性入场</td></tr>
+          <tr><td class="mono">--fm-scale-hover</td><td class="mono">1.02</td><td>hover 放大系数</td><td>multica 悬浮缩放上限，超过即显跳动而非抬起</td></tr>
+          <tr><td class="mono">--fm-scale-active</td><td class="mono">0.98</td><td>按下收缩系数</td><td>multica 按下态缩放，与 hover 对称形成 press 实体感</td></tr>
+        </table>
+      </div>
+
+      <div class="demo col" style="gap:10px">
+        <div class="demo-label">模式 1 · thinking 扫光 fm-thinking（替代 spinner）</div>
+        <div class="card card-pad" style="width:100%"><span class="fm-thinking">brain 正在评审 diff…</span></div>
+        <div style="font-size:12px;line-height:1.7;color:var(--muted-foreground)">
+          <div><b style="color:var(--foreground)">适用场景：</b>agent/run 正在运行的内联状态文案。</div>
+          <div><b style="color:var(--foreground)">语义挂载：</b>class="fm-thinking" 直接挂在文案元素上。</div>
+          <div><b style="color:var(--foreground)">禁用场景：</b>已完成/失败的静态文案禁止保留；禁用于多行正文，仅限短句状态行。</div>
+        </div>
+      </div>
+
+      <div class="demo col" style="gap:10px">
+        <div class="demo-label">模式 2 · 活跃脉动 fm-live</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="fm-live" style="width:8px;height:8px;border-radius:50%;background:var(--agent);display:inline-block"></span>
+          <span>develop 运行中</span>
+        </div>
+        <div style="font-size:12px;line-height:1.7;color:var(--muted-foreground)">
+          <div><b style="color:var(--foreground)">适用场景：</b>卡片/行上的"活跃中"指示（点状徽章、运行中头像）。</div>
+          <div><b style="color:var(--foreground)">语义挂载：</b>class="fm-live" 挂在点/徽章这类小元素本身，不挂父容器或整卡整行。</div>
+          <div><b style="color:var(--foreground)">禁用场景：</b>禁止挂在整卡/整行造成大范围高频视觉噪音；完成/失败态禁用。</div>
+        </div>
+      </div>
+
+      <div class="demo col" style="gap:10px" x-data="{fmc:true}">
+        <div class="demo-label">模式 3 · 两段式完成 fm-complete</div>
+        <div style="display:flex;align-items:center;gap:14px;min-height:26px">
+          <template x-if="fmc"><span class="st-icon ok lg fm-complete"><i class="ti ti-check"></i></span></template>
+          <button class="btn btn-outline btn-sm" @click="fmc=false;$nextTick(()=>fmc=true)">播放完成动效</button>
+        </div>
+        <div style="font-size:12px;line-height:1.7;color:var(--muted-foreground)">
+          <div><b style="color:var(--foreground)">适用场景：</b>验收通过、迁移落库等一次性"完成时刻"，不循环播放。</div>
+          <div><b style="color:var(--foreground)">语义挂载：</b>目标徽标加 class="fm-complete"（一次性）；内联 SVG 勾形还会播放描边打勾，本产品图标默认 Tabler webfont，故通常只呈现徽标回弹。</div>
+          <div><b style="color:var(--foreground)">禁用场景：</b>非"首次达成"的历史行禁止反复播放；禁用于失败态。</div>
+        </div>
+      </div>
+
+      <div class="demo col" style="gap:10px" x-data="{nv:false}">
+        <div class="demo-label">模式 4 · 导航扫条 fm-nav-progress</div>
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="position:relative;width:220px;height:2px;border-radius:1px;overflow:hidden;background:var(--muted)">
+            <div class="fm-nav-progress" :data-active="nv" style="position:absolute;inset:0"></div>
+          </div>
+          <button class="btn btn-outline btn-sm" @click="nv=true;setTimeout(()=>nv=false,1400)">触发一次（1.4s）</button>
+        </div>
+        <div style="font-size:12px;line-height:1.7;color:var(--muted-foreground)">
+          <div><b style="color:var(--foreground)">适用场景：</b>顶部路由切换/异步加载的 pending 提示，与真实网络进度解耦。</div>
+          <div><b style="color:var(--foreground)">语义挂载：</b>&lt;div class="fm-nav-progress"&gt; 挂在 body 顶部（生产态 position:fixed），切换开始置 data-active="true"，完成后移除；本演示为容器内约束展示。</div>
+          <div><b style="color:var(--foreground)">禁用场景：</b>局部区块加载不用（改用骨架屏）；同一时刻只允许一条，不与其他顶部横幅共存。</div>
+        </div>
+      </div>
+
+      <div class="demo col" style="gap:10px">
+        <div class="demo-label">模式 5 · 计数动画 fmCountTo / data-fm-count</div>
+        <div style="display:flex;align-items:center;gap:14px">
+          <span class="mono" data-fm-count="1284" style="font-size:20px;font-weight:600">0</span>
+          <button class="btn btn-outline btn-sm" onclick="window.fmCountTo(this.previousElementSibling,Math.round(500+Math.random()*9000))">重新计数</button>
+        </div>
+        <div style="font-size:12px;line-height:1.7;color:var(--muted-foreground)">
+          <div><b style="color:var(--foreground)">适用场景：</b>KPI/统计数字变化时的读数动画（吞吐量、tok 计数等）。</div>
+          <div><b style="color:var(--foreground)">语义挂载：</b>元素加 data-fm-count="目标值" 由运行时自动初始化；手动更新调用 window.fmCountTo(el, target)。</div>
+          <div><b style="color:var(--foreground)">禁用场景：</b>高频刷新的表格/列表数字列不用（反复跳动降低可读性），仅限展示位/KPI 卡；reduced-motion 下直接落值。</div>
+        </div>
+      </div>
+
+      <div class="demo col" style="gap:6px">
+        <div class="demo-label">红线</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>高频操作面（看板/队列/表格）入场表演动效；hover 只用 --fm-dur-1/2</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>overflow:auto 容器内的元素使用位移类动效（只准 opacity）</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>拖拽/手势进行中（[data-fm-gesturing="true"]）仍带 transition</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>--fm-ease-bounce 回弹曲线用于 fm-complete 以外的场景</div>
+        <div class="gate-check"><span class="st-icon err" style="margin-top:2px"><i class="ti ti-x"></i></span>任何动效不带 prefers-reduced-motion 降级</div>
       </div>
     </section>
 
@@ -1229,5 +1425,45 @@ textarea.inp{height:auto;min-height:56px;padding:6px 9px;resize:vertical}
   </main>
 </div>
 <style>[x-cloak]{display:none!important}</style>
+<script id="foundry-motion-js">
+  /* Foundry v3 motion runtime(零依赖) */
+  (function () {
+    var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* 低频页入场:一次性触发 */
+    if (!reduced && 'IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('fm-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.15 });
+      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { io.observe(el); });
+    } else {
+      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { el.classList.add('fm-in'); });
+    }
+
+    /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
+    window.fmCountTo = function (el, target, opts) {
+      var dur = (opts && opts.duration) || 400;
+      var from = parseFloat((el.textContent || '0').replace(/[^0-9.-]/g, '')) || 0;
+      var fmt = (opts && opts.format) || function (v) { return Math.round(v).toLocaleString(); };
+      if (reduced || dur <= 0) { el.textContent = fmt(target); return; }
+      var t0 = performance.now();
+      function ease(t) { return 1 - Math.pow(1 - t, 3); } /* ≈ standard 曲线的收尾感 */
+      function tick(now) {
+        var p = Math.min(1, (now - t0) / dur);
+        el.textContent = fmt(from + (target - from) * ease(p));
+        if (p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    };
+
+    /* 原型演示辅助:data-fm-count 声明式初始化 */
+    document.querySelectorAll('[data-fm-count]').forEach(function (el) {
+      var v = parseFloat(el.getAttribute('data-fm-count'));
+      if (!isNaN(v)) window.fmCountTo(el, v);
+    });
+  })();
+</script>
 </body>
 </html>

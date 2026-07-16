@@ -80,11 +80,13 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
 .meta-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
 .screen-card{display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--card);
-  border:1px solid var(--border);border-radius:var(--radius-xl);cursor:pointer;
-  transition:border-color .15s,transform .15s,box-shadow .15s}
+  border:1px solid var(--border);border-radius:var(--radius-xl);cursor:pointer}
 .screen-card:hover{border-color:color-mix(in oklch,var(--brand) 45%,var(--border));
-  transform:translateY(-2px);box-shadow:0 8px 24px oklch(0 0 0/.06)}
+  box-shadow:0 8px 24px oklch(0 0 0/.06)}
 .dark .screen-card:hover{box-shadow:0 8px 24px oklch(0 0 0/.35)}
+/* fm-hover-lift 接管位移/阴影节奏；此处补 border-color 一并纳入同一时长，避免两套过渡系统 */
+.screen-card.fm-hover-lift{transition-property:border-color,transform,box-shadow;
+  transition-duration:var(--fm-dur-2);transition-timing-function:var(--fm-ease-standard)}
 .screen-card .sc-top{display:flex;align-items:center;gap:10px}
 .screen-card .sc-icon{width:34px;height:34px;border-radius:9px;background:var(--muted);
   display:flex;align-items:center;justify-content:center;color:var(--brand);flex-shrink:0}
@@ -106,6 +108,115 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
 .principle .psrc{font-size:10.5px;color:var(--muted-foreground)}
 .footnote{margin-top:40px;text-align:center;font-size:11.5px;color:var(--muted-foreground)}
 </style>
+<style id="foundry-motion">
+  /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
+  :root {
+    /* 一次性动效时长梯度 */
+    --fm-dur-1: 120ms;   /* 微反馈:hover、图标切换 */
+    --fm-dur-2: 240ms;   /* 小型:按钮/开关状态、Toast、菜单 */
+    --fm-dur-3: 400ms;   /* 中型:对话框 enter、完成打勾、区块 reveal */
+    --fm-dur-4: 700ms;   /* 大型:庆祝时刻、欢迎/空状态插画 */
+    /* 氛围循环档(持续存在感,允许慢) */
+    --fm-ambient-1: 1600ms;  /* 活跃脉动 */
+    --fm-ambient-2: 2500ms;  /* thinking 扫光 */
+    --fm-ambient-3: 3200ms;  /* 描边光束(仅单一 CTA 级场景) */
+    /* 曲线 */
+    --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);   /* 一切常规过渡 */
+    --fm-ease-enter:    cubic-bezier(0.16, 1, 0.3, 1);   /* 进场从容 */
+    --fm-ease-exit:     cubic-bezier(0.7, 0, 0.84, 0);   /* 离场干脆 */
+    --fm-ease-bounce:   cubic-bezier(0.5, 1.5, 0.4, 1);  /* 仅庆祝时刻 */
+    /* 位移与缩放(工具产品克制档) */
+    --fm-shift-1: 4px;
+    --fm-shift-2: 8px;
+    --fm-scale-hover: 1.02;
+    --fm-scale-active: 0.98;
+  }
+
+  /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
+  @keyframes fm-text-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .fm-thinking {
+    background-image: linear-gradient(90deg,
+      var(--muted-foreground) 0%, var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%, var(--muted-foreground) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
+  }
+
+  /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
+  @keyframes fm-impulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent); }
+    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent); }
+  }
+  .fm-live { animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite; }
+
+  /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
+  @keyframes fm-complete-badge {
+    0% { transform: scale(0); } 60% { transform: scale(1.12); } 100% { transform: scale(1); }
+  }
+  @keyframes fm-complete-check { to { stroke-dashoffset: 0; } }
+  .fm-complete { animation: fm-complete-badge 500ms var(--fm-ease-bounce) both; }
+  .fm-complete svg path, .fm-complete svg polyline {
+    stroke-dasharray: 48; stroke-dashoffset: 48;
+    animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
+  }
+
+  /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
+  @keyframes fm-nav-sweep {
+    0% { transform: translateX(-100%); } 100% { transform: translateX(400%); }
+  }
+  .fm-nav-progress {
+    position: fixed; top: 0; left: 0; right: 0; height: 2px;
+    overflow: hidden; pointer-events: none; z-index: 9999; display: none;
+  }
+  .fm-nav-progress[data-active="true"] { display: block; }
+  .fm-nav-progress::before {
+    content: ""; display: block; height: 100%; width: 25%;
+    background: var(--primary);
+    animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
+  }
+
+  /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
+  [data-fm-reveal] {
+    opacity: 0; transform: translateY(var(--fm-shift-1));
+    transition: opacity var(--fm-dur-3) var(--fm-ease-enter),
+                transform var(--fm-dur-3) var(--fm-ease-enter);
+  }
+  [data-fm-reveal].fm-in { opacity: 1; transform: none; }
+  /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
+  .fm-scroll [data-fm-reveal] { transform: none; }
+
+  /* ===== 通用交互态统一 ===== */
+  .fm-hover-lift { transition: transform var(--fm-dur-2) var(--fm-ease-standard),
+                               box-shadow var(--fm-dur-2) var(--fm-ease-standard); }
+  .fm-hover-lift:hover  { transform: translateY(calc(var(--fm-shift-1) * -1)); }
+  .fm-hover-lift:active { transform: scale(var(--fm-scale-active)); }
+  .fm-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0% 1px; background-position: 0 100%; background-repeat: no-repeat;
+    transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
+  }
+  .fm-underline:hover { background-size: 100% 1px; }
+  /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
+  .fm-overlay-enter { animation-duration: var(--fm-dur-3); animation-timing-function: var(--fm-ease-enter); }
+  .fm-overlay-exit  { animation-duration: var(--fm-dur-2); animation-timing-function: var(--fm-ease-exit); }
+  /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
+  [data-fm-gesturing="true"], [data-fm-gesturing="true"] * { transition: none !important; }
+
+  /* ===== 全量降级 ===== */
+  @media (prefers-reduced-motion: reduce) {
+    .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
+    .fm-nav-progress::before { animation: none !important; }
+    .fm-thinking { color: var(--muted-foreground); background: none; }
+    [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
+    .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }
+  }
+</style>
 </head>
 <body>
 <nav class="proto-bar">
@@ -126,7 +237,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
 </nav>
 
 <div class="wrap">
-  <header class="hero">
+  <header class="hero" data-fm-reveal>
     <div class="mark"><i class="ti ti-flame"></i></div>
     <h1>Foundry · SDLC 系统原型</h1>
     <p class="sub"><b>人负责说清楚，系统负责做出来，并且自己证明做对了。</b><br>
@@ -140,7 +251,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
   </header>
 
   <div class="grid">
-    <a class="screen-card" data-screen="s1-tracker-board.html">
+    <a class="screen-card fm-hover-lift" data-screen="s1-tracker-board.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-layout-kanban"></i></div>
         <div><div class="sc-name">看板</div><div class="sc-no">S1</div></div>
@@ -149,7 +260,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
       <div class="sc-foot"><span class="badge b-brand">tracker</span>
         <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
     </a>
-    <a class="screen-card" data-screen="s2-sprint-studio.html">
+    <a class="screen-card fm-hover-lift" data-screen="s2-sprint-studio.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-clipboard-text"></i></div>
         <div><div class="sc-name">Sprint 规划工作台</div><div class="sc-no">S2</div></div>
@@ -158,7 +269,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
       <div class="sc-foot"><span class="badge b-brand">tracker</span>
         <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
     </a>
-    <a class="screen-card" data-screen="s3-ui-review.html">
+    <a class="screen-card fm-hover-lift" data-screen="s3-ui-review.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-layout-2"></i></div>
         <div><div class="sc-name">UI 设计评审</div><div class="sc-no">S3</div></div>
@@ -167,7 +278,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
       <div class="sc-foot"><span class="badge b-brand">tracker</span><span class="badge b-evidence">design</span>
         <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
     </a>
-    <a class="screen-card" data-screen="s4-work-item.html">
+    <a class="screen-card fm-hover-lift" data-screen="s4-work-item.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-clipboard-list"></i></div>
         <div><div class="sc-name">工作项详情</div><div class="sc-no">S4</div></div>
@@ -176,7 +287,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
       <div class="sc-foot"><span class="badge b-brand">tracker</span>
         <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
     </a>
-    <a class="screen-card" data-screen="s5-inbox.html">
+    <a class="screen-card fm-hover-lift" data-screen="s5-inbox.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-inbox"></i></div>
         <div><div class="sc-name">收件箱</div><div class="sc-no">S5</div></div>
@@ -185,7 +296,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
       <div class="sc-foot"><span class="badge b-brand">tracker</span>
         <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
     </a>
-    <a class="screen-card" data-screen="s6-sprint-cockpit.html">
+    <a class="screen-card fm-hover-lift" data-screen="s6-sprint-cockpit.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-dashboard"></i></div>
         <div><div class="sc-name">Sprint 驾驶舱</div><div class="sc-no">S6</div></div>
@@ -194,7 +305,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
       <div class="sc-foot"><span class="badge b-brand">tracker</span>
         <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
     </a>
-    <a class="screen-card" data-screen="s7-run-detail.html">
+    <a class="screen-card fm-hover-lift" data-screen="s7-run-detail.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-player-play"></i></div>
         <div><div class="sc-name">运行详情</div><div class="sc-no">S7</div></div>
@@ -203,7 +314,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
       <div class="sc-foot"><span class="badge b-agent">orchestrator</span>
         <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
     </a>
-    <a class="screen-card" data-screen="s8-workflow-library.html">
+    <a class="screen-card fm-hover-lift" data-screen="s8-workflow-library.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-topology-star-3"></i></div>
         <div><div class="sc-name">工作流库</div><div class="sc-no">S8</div></div>
@@ -212,7 +323,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
       <div class="sc-foot"><span class="badge b-agent">orchestrator</span>
         <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
     </a>
-    <a class="screen-card" data-screen="s9-brain-console.html">
+    <a class="screen-card fm-hover-lift" data-screen="s9-brain-console.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-brain"></i></div>
         <div><div class="sc-name">Brain 控制台</div><div class="sc-no">S9</div></div>
@@ -221,7 +332,7 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
       <div class="sc-foot"><span class="badge b-agent">orchestrator</span>
         <span class="go">打开<i class="ti ti-chevron-right"></i></span></div>
     </a>
-    <a class="screen-card" data-screen="s10-health-insights.html">
+    <a class="screen-card fm-hover-lift" data-screen="s10-health-insights.html">
       <div class="sc-top">
         <div class="sc-icon"><i class="ti ti-heart-rate-monitor"></i></div>
         <div><div class="sc-name">健康与洞察</div><div class="sc-no">S10</div></div>
@@ -250,5 +361,45 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
 
   <p class="footnote">Foundry 设计系统 · 设计文档见 docs/sdlc-product-design/ · 演示数据：支付中心 PAY · Sprint 3</p>
 </div>
+<script id="foundry-motion-js">
+  /* Foundry v3 motion runtime(零依赖) */
+  (function () {
+    var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* 低频页入场:一次性触发 */
+    if (!reduced && 'IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('fm-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.15 });
+      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { io.observe(el); });
+    } else {
+      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { el.classList.add('fm-in'); });
+    }
+
+    /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
+    window.fmCountTo = function (el, target, opts) {
+      var dur = (opts && opts.duration) || 400;
+      var from = parseFloat((el.textContent || '0').replace(/[^0-9.-]/g, '')) || 0;
+      var fmt = (opts && opts.format) || function (v) { return Math.round(v).toLocaleString(); };
+      if (reduced || dur <= 0) { el.textContent = fmt(target); return; }
+      var t0 = performance.now();
+      function ease(t) { return 1 - Math.pow(1 - t, 3); } /* ≈ standard 曲线的收尾感 */
+      function tick(now) {
+        var p = Math.min(1, (now - t0) / dur);
+        el.textContent = fmt(from + (target - from) * ease(p));
+        if (p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    };
+
+    /* 原型演示辅助:data-fm-count 声明式初始化 */
+    document.querySelectorAll('[data-fm-count]').forEach(function (el) {
+      var v = parseFloat(el.getAttribute('data-fm-count'));
+      if (!isNaN(v)) window.fmCountTo(el, v);
+    });
+  })();
+</script>
 </body>
 </html>

@@ -1,0 +1,175 @@
+<!--
+  Foundry v3 · Motion 基建块(权威源)
+  ====================================
+  用途:被 _foundry-skeleton.html 与全部原型屏内联复制(原型自包含约定),
+  也是《Foundry·组件规范》动效章与 design_systems.customCSS 的同源出处。
+  实证基础:multica.ai 源码级动效语言(tokens.css/base.css)+ 本项目生产工具红线。
+
+  使用约定(给套用者):
+  1. <style> 与 <script> 两块整体内联;不得改数值,只按语义挂类/属性。
+  2. 动效语义映射:
+     - agent/run 正在运行的内联文案     → class="fm-thinking"
+     - 卡片/行上的"活跃中"指示          → class="fm-live"(点/徽章元素)
+     - 完成时刻(验收通过/迁移落库等)   → 元素上加 class="fm-complete"(一次性)
+     - 顶部路由/加载进度                → <div class="fm-nav-progress"> 挂 body 顶部,
+                                          data-active="true" 时显示
+     - 数字读数变化                     → 元素加 data-fm-count="目标值" 调 fmCountTo(el, v)
+     - 需要入场的低频区块(空状态/引导) → data-fm-reveal(仅低频页;列表/看板禁用)
+  3. 红线(违者打回):
+     - 高频操作面(看板/队列/表格)不加入场表演;hover 只用 --fm-dur-1/2。
+     - overflow:auto 容器内的元素禁用位移类动效(只准 opacity)。
+     - 拖拽/手势进行中禁用一切 transition(参照 multica 的 resizing 处理)。
+     - 回弹曲线只用于 fm-complete 一类庆祝时刻。
+     - 全部动效必须在 prefers-reduced-motion: reduce 下降级(本块已全局兜底)。
+-->
+
+<style id="foundry-motion">
+  /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
+  :root {
+    /* 一次性动效时长梯度 */
+    --fm-dur-1: 120ms;   /* 微反馈:hover、图标切换 */
+    --fm-dur-2: 240ms;   /* 小型:按钮/开关状态、Toast、菜单 */
+    --fm-dur-3: 400ms;   /* 中型:对话框 enter、完成打勾、区块 reveal */
+    --fm-dur-4: 700ms;   /* 大型:庆祝时刻、欢迎/空状态插画 */
+    /* 氛围循环档(持续存在感,允许慢) */
+    --fm-ambient-1: 1600ms;  /* 活跃脉动 */
+    --fm-ambient-2: 2500ms;  /* thinking 扫光 */
+    --fm-ambient-3: 3200ms;  /* 描边光束(仅单一 CTA 级场景) */
+    /* 曲线 */
+    --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);   /* 一切常规过渡 */
+    --fm-ease-enter:    cubic-bezier(0.16, 1, 0.3, 1);   /* 进场从容 */
+    --fm-ease-exit:     cubic-bezier(0.7, 0, 0.84, 0);   /* 离场干脆 */
+    --fm-ease-bounce:   cubic-bezier(0.5, 1.5, 0.4, 1);  /* 仅庆祝时刻 */
+    /* 位移与缩放(工具产品克制档) */
+    --fm-shift-1: 4px;
+    --fm-shift-2: 8px;
+    --fm-scale-hover: 1.02;
+    --fm-scale-active: 0.98;
+  }
+
+  /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
+  @keyframes fm-text-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .fm-thinking {
+    background-image: linear-gradient(90deg,
+      var(--muted-foreground) 0%, var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%, var(--muted-foreground) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
+  }
+
+  /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
+  @keyframes fm-impulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent); }
+    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent); }
+  }
+  .fm-live { animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite; }
+
+  /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
+  @keyframes fm-complete-badge {
+    0% { transform: scale(0); } 60% { transform: scale(1.12); } 100% { transform: scale(1); }
+  }
+  @keyframes fm-complete-check { to { stroke-dashoffset: 0; } }
+  .fm-complete { animation: fm-complete-badge 500ms var(--fm-ease-bounce) both; }
+  .fm-complete svg path, .fm-complete svg polyline {
+    stroke-dasharray: 48; stroke-dashoffset: 48;
+    animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
+  }
+
+  /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
+  @keyframes fm-nav-sweep {
+    0% { transform: translateX(-100%); } 100% { transform: translateX(400%); }
+  }
+  .fm-nav-progress {
+    position: fixed; top: 0; left: 0; right: 0; height: 2px;
+    overflow: hidden; pointer-events: none; z-index: 9999; display: none;
+  }
+  .fm-nav-progress[data-active="true"] { display: block; }
+  .fm-nav-progress::before {
+    content: ""; display: block; height: 100%; width: 25%;
+    background: var(--primary);
+    animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
+  }
+
+  /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
+  [data-fm-reveal] {
+    opacity: 0; transform: translateY(var(--fm-shift-1));
+    transition: opacity var(--fm-dur-3) var(--fm-ease-enter),
+                transform var(--fm-dur-3) var(--fm-ease-enter);
+  }
+  [data-fm-reveal].fm-in { opacity: 1; transform: none; }
+  /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
+  .fm-scroll [data-fm-reveal] { transform: none; }
+
+  /* ===== 通用交互态统一 ===== */
+  .fm-hover-lift { transition: transform var(--fm-dur-2) var(--fm-ease-standard),
+                               box-shadow var(--fm-dur-2) var(--fm-ease-standard); }
+  .fm-hover-lift:hover  { transform: translateY(calc(var(--fm-shift-1) * -1)); }
+  .fm-hover-lift:active { transform: scale(var(--fm-scale-active)); }
+  .fm-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0% 1px; background-position: 0 100%; background-repeat: no-repeat;
+    transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
+  }
+  .fm-underline:hover { background-size: 100% 1px; }
+  /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
+  .fm-overlay-enter { animation-duration: var(--fm-dur-3); animation-timing-function: var(--fm-ease-enter); }
+  .fm-overlay-exit  { animation-duration: var(--fm-dur-2); animation-timing-function: var(--fm-ease-exit); }
+  /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
+  [data-fm-gesturing="true"], [data-fm-gesturing="true"] * { transition: none !important; }
+
+  /* ===== 全量降级 ===== */
+  @media (prefers-reduced-motion: reduce) {
+    .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
+    .fm-nav-progress::before { animation: none !important; }
+    .fm-thinking { color: var(--muted-foreground); background: none; }
+    [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
+    .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<script id="foundry-motion-js">
+  /* Foundry v3 motion runtime(零依赖) */
+  (function () {
+    var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* 低频页入场:一次性触发 */
+    if (!reduced && 'IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('fm-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.15 });
+      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { io.observe(el); });
+    } else {
+      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { el.classList.add('fm-in'); });
+    }
+
+    /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
+    window.fmCountTo = function (el, target, opts) {
+      var dur = (opts && opts.duration) || 400;
+      var from = parseFloat((el.textContent || '0').replace(/[^0-9.-]/g, '')) || 0;
+      var fmt = (opts && opts.format) || function (v) { return Math.round(v).toLocaleString(); };
+      if (reduced || dur <= 0) { el.textContent = fmt(target); return; }
+      var t0 = performance.now();
+      function ease(t) { return 1 - Math.pow(1 - t, 3); } /* ≈ standard 曲线的收尾感 */
+      function tick(now) {
+        var p = Math.min(1, (now - t0) / dur);
+        el.textContent = fmt(from + (target - from) * ease(p));
+        if (p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    };
+
+    /* 原型演示辅助:data-fm-count 声明式初始化 */
+    document.querySelectorAll('[data-fm-count]').forEach(function (el) {
+      var v = parseFloat(el.getAttribute('data-fm-count'));
+      if (!isNaN(v)) window.fmCountTo(el, v);
+    });
+  })();
+</script>
