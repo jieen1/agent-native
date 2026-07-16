@@ -43,6 +43,7 @@ import type {
 } from "@shared/types";
 
 import { ActivityFeed } from "@/components/ActivityFeed";
+import { RunEvidenceList } from "@/components/RunEvidenceList";
 import {
   fmtDateTime,
   orchestratorBrainHref,
@@ -2607,48 +2608,18 @@ export function WorkItemDetailPage() {
               {/* F8 (S4 执行组接真): full dispatch/run history, newest first
                   — a redispatch appends a row rather than overwriting the
                   previous one (SDLC-053), so a superseded run's trail stays
-                  visible (greyed + strikethrough) instead of vanishing. */}
+                  visible (greyed + strikethrough) instead of vanishing.
+                  RunEvidenceList additionally renders, per run, a compact
+                  status + node mini-map + "查看完整转录" deep link sourced
+                  from the same get-activity poll (see RunEvidenceList.tsx
+                  for the retry-count investigation/gap). */}
               {runs.length > 0 ? (
                 <MetaRow icon={IconTimeline} label="关联运行">
-                  <ul className="flex flex-col gap-1.5">
-                    {runs.map((r, i) => (
-                      <li
-                        key={`${r.runId ?? "pending"}-${r.dispatchedAt}-${i}`}
-                        className={cn(
-                          "flex flex-wrap items-center gap-1.5 text-xs",
-                          r.superseded && "text-muted-foreground/60 line-through",
-                        )}
-                      >
-                        {r.runId ? (
-                          <a
-                            href={orchestratorRunHref(r.runId)}
-                            className={cn(
-                              "flex items-center gap-1 font-mono hover:underline",
-                              !r.superseded && "text-foreground/80 hover:text-foreground",
-                            )}
-                          >
-                            {r.runId.slice(0, 12)}…
-                            <IconExternalLink className="size-3 shrink-0 opacity-60" />
-                          </a>
-                        ) : (
-                          <span className="font-mono">等待运行 id 回填</span>
-                        )}
-                        {r.branch ? (
-                          <span className="font-mono text-muted-foreground">
-                            · {r.branch}
-                          </span>
-                        ) : null}
-                        <span className="text-muted-foreground">
-                          · {fmtDateTime(r.dispatchedAt)}
-                        </span>
-                        {r.superseded ? (
-                          <Badge variant="outline" className="h-4 px-1 text-[10px]">
-                            已重派
-                          </Badge>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
+                  <RunEvidenceList
+                    runs={runs}
+                    activity={activity.data}
+                    activityLoading={activity.isLoading}
+                  />
                 </MetaRow>
               ) : null}
 
