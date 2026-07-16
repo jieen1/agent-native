@@ -185,6 +185,7 @@
 - **`agent-native doctor` CLI**(core 0.97.0):自动扫"未域控凭据/未域控查询/env 凭据读取/兜底身份"等 7 类问题——恰好覆盖我们审计修过的漏洞类别。两应用的 agent-native.json 均未启用,接入即得回归防护网。
 - **官方 `verifyA2AToken` / `actionRouteAuth`**(core 0.101.0):我们手搓的共享 mcp-client JWT 部分从此有官方替代,P3 后续可收敛。
 - **A2A owner/org 上下文保真修复系列**(0.98.x–0.99.x):对 tracker↔orchestrator 互调的正确性直接有利,已随部署生效。
+- **全页 Agent 工作区 `AgentTabsPage`**(core,`8e6f022fa`,`/agent`,Context/Files/Connections/Jobs/Access 五 tab):两应用均未挂载,建议直接挂(参照 brain/dispatch 模板的挂载动作,半天量级、不需新建 action)。对 T-D 只是既有机制的 UI 通路而非后端修复(automations/event-bus 接线仍要单独做);对 04 章引擎注册表/智能体/健康页无替代关系(语义不同,继续独立成页);价值集中在 tracker 此前缺失的 Files/Access 界面,以及给 tracker↔orchestrator 新增一条 `@提及` NL 委托的补充通道(不改变、也不治理现有确定性回写链路)。
 
 ## 三、文档与设计资产修订记录(本次执行)
 

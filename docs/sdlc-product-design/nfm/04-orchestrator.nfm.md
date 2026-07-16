@@ -160,6 +160,13 @@ ListGrid，行 = StatusRing + 模板名与版本 + run id（mono）+ **DagMiniMa
 
 三 tab 保留并收敛：`Claude`（登录卡 + tier，与 `/brain/engines` 互链）· `模型端点`（runtime_configs 增删改与测试）· `凭证`（存在性展示，不显示值）。并发滑杆迁往健康页容量区，设置页留只读读数与深链。
 
+**框架 Agent 页（`/agent`）复用决策**：上游 `8e6f022fa` 新增全页 Agent 工作区 `AgentTabsPage`（Context/Files/Connections/Jobs/Access 五 tab，见 `agent-page` 技能）。审查结论：
+
+- **直接挂载**，承接的是"影响本应用内置默认聊天 agent"这一层（Files/Connections/Access），不与本章已规划的执行域页面冲突。
+- **§7 引擎注册表 / §8 智能体 / §10 健康页 / 本节设置均维持独立，不折叠进 Agent 页**：它们是 orchestrator 自有的多引擎/DAG worker/执行健康对象，Agent 页 tab 语义是"本应用唯一默认 agent 能调用什么、谁能连它"，不是"orchestrator 编排了哪些下游执行引擎"——语义不同。§7 的 Claude Code 登录卡是出站（orchestrator 登录 Claude Code 账号去跑 DAG 节点），Access tab 的 Claude Code 连接引导是入站（外部客户端连进本应用调用 action）；两处都保留，标签要写清楚避免混同。
+- **Context tab 价值有限，不要当成 brain 会话可观测性的答案**：它读的是 `production-agent.ts`/context-xray manifest，只覆盖 `server/plugins/agent-chat.ts` 挂的那一个默认聊天 agent；brain 线程与 DAG spawn 走 `v3-dispatcher.ts`/`agent-loader.ts` 自有的 `runAgentLoop` 调用路径，不经过这条 manifest。它不能替代 §6 Brain 控制台已有的按线程 token/上下文表盘，也不能替代 §10 健康页的遥测可信卡；只是给用得较少的默认助手对话补上系统提示 provenance/治理层级透明度。
+- **Jobs tab** 只是 recurring jobs/automations 的既有 UI 通路，不直接解决 T-D（无 automations，状态迁移靠 4s 轮询）——机制要先建成后才有得展示。
+
 ## 13. 数据模型与 action 增量（orchestrator 侧汇总）
 
 <table header-row="true">

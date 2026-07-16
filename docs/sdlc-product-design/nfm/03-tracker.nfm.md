@@ -25,6 +25,13 @@ Sidebar（Foundry 外壳）
 
 全局交互：`⌘K` 命令面板（跨工作项、Sprint、审批、页面搜索 + 快捷动作）；`C` 新建工作项；`G+B` 看板、`G+S` Sprint。
 
+**框架 Agent 页（`/agent`）复用决策**：上游 `8e6f022fa` 新增全页 Agent 工作区 `AgentTabsPage`（Context/Files/Connections/Jobs/Access 五 tab，见 `agent-page` 技能）。审查结论：
+
+- **直接挂载**：tracker 目前没有 app 级设置页（上面导航图的"设置"落不到实体路由，只有 `AgentSidebar` 内置设置浮层），挂 `/agent` 零成本拿到 Files/Access 两个界面，不必另起设置页。
+- **§9 项目设置维持独立**：project 级仓库/流程/成员配置与 Agent 页（app 级、关于"本应用默认 agent 能被谁连、能连谁"）作用域不同，不下沉为 Agent 页 tab。
+- **Connections tab 价值有限，不要过度承诺**：tracker↔orchestrator 生产链路是刻意做成的确定性 MCP `tools/call`（`agent-native.json` 的 `a2a.connections` 已注明"非 A2A NL loop"），走共享 `A2A_SECRET` 签的 JWT，不经过 Connections tab 管理的 `AgentsSection` 远程 agent 登记；挂载后只是新增一条 `@提及` 自然语言委托的平行通道，对现有回写链路没有治理或替代作用。
+- **Jobs tab 不解决 T-D**：T-D（无 automations、状态迁移靠 4s 轮询 + `get-activity` 内联写回）缺的是 event-bus/automations 后端接线本身；Jobs tab 只是既有机制的 UI 通路，机制建成前无东西可展示，且 T-D 在《对齐审查》里定性为工程卫生并行项，不在 R1–R5 主线上。
+
 ## 1. 问 Tracker（`/`）
 
 **这页回答**：现在整体什么状态、有什么等我，以及"用一句话把事交给系统"。
