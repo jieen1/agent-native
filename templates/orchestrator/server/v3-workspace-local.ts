@@ -37,7 +37,7 @@ import { join, normalize, relative, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 
-import { getV3Db, v3Schema, LOCAL_DEFAULT_OWNER } from "./db/index.js";
+import { getV3Db, v3Schema, LOCAL_DEFAULT_OWNER, getDbExec } from "./db/index.js";
 import {
   WorkspaceNotReadyError,
   DiffBaseUnresolvableError,
@@ -1682,6 +1682,336 @@ function parseGithubSlug(
   const m = /github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?$/.exec(remote.trim());
   if (!m) return null;
   return { owner: m[1], repo: m[2] };
+}
+
+// ── CI watch ─────────────────────────────────────────────────────────────────
+
+export interface CiWatchOptions {
+  /** Workspace id whose PR/branch CI status is being read. */
+  id: string;
+  /** Branch to check; defaults to the workspace's stored branch. */
+  branch?: string;
+  /** "github" (default) reads real check status via `gh pr view`; "none" is an
+   * immediate no-op green (repos with no CI configured). */
+  ciMode?: "github" | "none";
+}
+
+export interface CiCheckStatus {
+  name: string;
+  status: string | null;
+  conclusion: string | null;
+  detailsUrl?: string | null;
+}
+
+export interface CiWatchResult {
+  state: "green" | "red" | "pending" | "none";
+  prUrl: string | null;
+  checks: CiCheckStatus[];
+  summary: string;
+}
+
+const CI_PASSING_CONCLUSIONS = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
+
+/**
+ * Read the current CI status for a workspace's PR branch. A single snapshot
+ * read (no internal polling loop) — callers (the orchestrating brain) poll
+ * this on their own cadence rather than have a server action block for
+ * minutes. `ciMode: "none"` short-circuits to a green no-op without touching
+ * git/gh at all, per project_repos.ciMode semantics.
+ */
+export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
+  if (opts.ciMode === "none") {
+    return {
+      state: "none",
+      prUrl: null,
+      checks: [],
+      summary: "ciMode=none — no CI configured for this repo; treated as green.",
+    };
+  }
+
+  const dir = await getLocalWorkspaceDir(opts.id);
+  if (!dir) {
+    throw new Error(
+      `ciWatch: workspace '${opts.id}' not found or has no host_path`,
+    );
+  }
+
+  const db = getV3Db();
+  const [row] = await db
+    .select({ branch: v3Schema.v3Workspaces.branch })
+    .from(v3Schema.v3Workspaces)
+    .where(eq(v3Schema.v3Workspaces.id, opts.id))
+    .limit(1);
+  const branch = opts.branch ?? row?.branch ?? undefined;
+  if (!branch || branch.trim() === "") {
+    throw new Error(`ciWatch: no branch known for workspace '${opts.id}'`);
+  }
+
+  if (!(await hasGh())) {
+    return {
+      state: "pending",
+      prUrl: null,
+      checks: [],
+      summary: "gh CLI unavailable — cannot query CI status; treating as pending.",
+    };
+  }
+
+  const token = await resolveGithubToken();
+  const env: Record<string, string> = token ? { GH_TOKEN: token } : {};
+  const res = await gh(
+    ["pr", "view", branch, "--json", "url,state,statusCheckRollup"],
+    { cwd: dir, env },
+  );
+  if (res.code !== 0) {
+    return {
+      state: "pending",
+      prUrl: null,
+      checks: [],
+      summary: `gh pr view failed (exit ${res.code}): ${redact(res.stderr.trim(), token)}`,
+    };
+  }
+
+  let info: {
+    url?: string;
+    state?: string;
+    statusCheckRollup?: Array<Record<string, unknown>>;
+  };
+  try {
+    info = JSON.parse(res.stdout);
+  } catch {
+    return {
+      state: "pending",
+      prUrl: null,
+      checks: [],
+      summary: "gh pr view returned non-JSON output.",
+    };
+  }
+
+  const rollup = info.statusCheckRollup ?? [];
+  const checks: CiCheckStatus[] = rollup.map((c) => ({
+    name: String(c.name ?? c.context ?? "check"),
+    status: c.status != null ? String(c.status) : null,
+    conclusion:
+      (c.conclusion ?? c.state) != null ? String(c.conclusion ?? c.state) : null,
+    detailsUrl: c.detailsUrl != null ? String(c.detailsUrl) : null,
+  }));
+
+  if (checks.length === 0) {
+    return {
+      state: "pending",
+      prUrl: info.url ?? null,
+      checks: [],
+      summary: "No CI checks reported yet.",
+    };
+  }
+
+  const stillRunning = checks.some((c) => c.status && c.status !== "COMPLETED");
+  const failing = checks.filter(
+    (c) => c.conclusion != null && !CI_PASSING_CONCLUSIONS.has(c.conclusion),
+  );
+
+  if (failing.length > 0) {
+    return {
+      state: "red",
+      prUrl: info.url ?? null,
+      checks,
+      summary: `${failing.length} check(s) failing: ${failing.map((c) => c.name).join(", ")}`,
+    };
+  }
+  if (stillRunning) {
+    return {
+      state: "pending",
+      prUrl: info.url ?? null,
+      checks,
+      summary: "CI checks still running.",
+    };
+  }
+  return {
+    state: "green",
+    prUrl: info.url ?? null,
+    checks,
+    summary: `All ${checks.length} check(s) passing.`,
+  };
+}
+
+// ── Merge PR ─────────────────────────────────────────────────────────────────
+
+export interface MergePrOptions {
+  /** Workspace id whose PR branch is being merged. */
+  id: string;
+  branch?: string;
+  /** PR base branch; defaults to "main". */
+  baseBranch?: string;
+  mergeMethod?: "merge" | "squash" | "rebase";
+}
+
+export interface MergePrResult {
+  merged: boolean;
+  /** Set when merged=false — e.g. "ci_not_green", "rebase_needed: ...", "locked". */
+  reason?: string;
+  sha?: string | null;
+  prUrl?: string | null;
+}
+
+/**
+ * Merge a PR after asserting CI is green and the branch is mergeable against
+ * its base with no conflicts/staleness. Serializes concurrent merges onto the
+ * same base branch with a Postgres advisory lock so two runs targeting the
+ * same base branch never race `gh pr merge`. Never force-merges: when the
+ * branch needs a rebase/update, this returns `{ merged: false, reason:
+ * "rebase_needed: ..." }` instead of overriding — callers should re-run the
+ * full dev→qa→review→gate cycle on the refreshed base, not just retry the
+ * merge node.
+ *
+ * Lock is TRANSACTION-scoped (`pg_try_advisory_xact_lock`), not session-scoped
+ * — same reasoning as the reconciler's tick() lock (v3-reconciler.ts): `db`
+ * here is the shared framework POOL (`getV3Db()`/`getDbExec()`), so a
+ * session-scoped `pg_try_advisory_lock`/`pg_advisory_unlock` pair can acquire
+ * and release on two different pooled connections, which either errors or
+ * leaks the lock forever. The xact lock is guaranteed to release when this
+ * transaction's callback returns or throws, on the SAME connection that took
+ * it — no manual unlock/finally needed.
+ */
+export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
+  const dir = await getLocalWorkspaceDir(opts.id);
+  if (!dir) {
+    throw new Error(`mergePr: workspace '${opts.id}' not found or has no host_path`);
+  }
+
+  const db = getV3Db();
+  const [row] = await db
+    .select({
+      branch: v3Schema.v3Workspaces.branch,
+      repoUrl: v3Schema.v3Workspaces.repoUrl,
+    })
+    .from(v3Schema.v3Workspaces)
+    .where(eq(v3Schema.v3Workspaces.id, opts.id))
+    .limit(1);
+
+  const branch = opts.branch ?? row?.branch ?? undefined;
+  if (!branch || branch.trim() === "") {
+    throw new Error(`mergePr: no branch known for workspace '${opts.id}'`);
+  }
+  const remote = row?.repoUrl?.trim();
+  if (!remote) {
+    throw new Error(`mergePr: workspace '${opts.id}' has no repo_url`);
+  }
+  const base =
+    opts.baseBranch && opts.baseBranch.trim() !== "" ? opts.baseBranch.trim() : "main";
+
+  if (!(await hasGh())) {
+    return { merged: false, reason: "gh CLI unavailable — cannot merge safely" };
+  }
+
+  const token = await resolveGithubToken();
+  const env: Record<string, string> = token ? { GH_TOKEN: token } : {};
+  const slug = parseGithubSlug(remote);
+  const lockKey = slug ? `${slug.owner}/${slug.repo}:${base}` : `${remote}:${base}`;
+
+  return getDbExec().transaction!(async (tx) => {
+    const { rows } = await tx.execute({
+      sql: "SELECT pg_try_advisory_xact_lock(hashtext($1)) AS locked",
+      args: [lockKey],
+    });
+    if (!(rows[0]?.locked ?? false)) {
+      return { merged: false, reason: `another merge is in progress for '${lockKey}'` };
+    }
+
+    const viewRes = await gh(
+      [
+        "pr",
+        "view",
+        branch,
+        "--json",
+        "url,mergeable,mergeStateStatus,state,statusCheckRollup",
+      ],
+      { cwd: dir, env },
+    );
+    if (viewRes.code !== 0) {
+      return {
+        merged: false,
+        reason: `gh pr view failed: ${redact(viewRes.stderr.trim(), token)}`,
+      };
+    }
+
+    let info: {
+      url?: string;
+      mergeable?: string;
+      mergeStateStatus?: string;
+      state?: string;
+      statusCheckRollup?: Array<Record<string, unknown>>;
+    };
+    try {
+      info = JSON.parse(viewRes.stdout);
+    } catch {
+      return { merged: false, reason: "gh pr view returned non-JSON output" };
+    }
+
+    if (info.state && info.state !== "OPEN") {
+      return {
+        merged: false,
+        reason: `PR state is '${info.state}', not OPEN`,
+        prUrl: info.url ?? null,
+      };
+    }
+
+    const rollup = info.statusCheckRollup ?? [];
+    const failing = rollup.filter((c) => {
+      const status = c.status != null ? String(c.status) : null;
+      const conclusion =
+        (c.conclusion ?? c.state) != null ? String(c.conclusion ?? c.state) : null;
+      const stillRunning = status != null && status !== "COMPLETED";
+      return stillRunning || (conclusion != null && !CI_PASSING_CONCLUSIONS.has(conclusion));
+    });
+    if (failing.length > 0) {
+      return {
+        merged: false,
+        reason: `ci_not_green: ${failing.length} check(s) not passing`,
+        prUrl: info.url ?? null,
+      };
+    }
+
+    if (info.mergeable === "CONFLICTING") {
+      return {
+        merged: false,
+        reason: "rebase_needed: PR has merge conflicts with base branch",
+        prUrl: info.url ?? null,
+      };
+    }
+    if (info.mergeStateStatus === "BEHIND") {
+      return {
+        merged: false,
+        reason: "rebase_needed: branch is behind base — update needed before merge",
+        prUrl: info.url ?? null,
+      };
+    }
+
+    const method = opts.mergeMethod ?? "merge";
+    const methodFlag =
+      method === "squash" ? "--squash" : method === "rebase" ? "--rebase" : "--merge";
+    // No force/admin-override flag by design — a merge that gh refuses stays
+    // unmerged and is reported back, never overridden.
+    const mergeRes = await gh(
+      ["pr", "merge", branch, methodFlag, "--delete-branch=false"],
+      { cwd: dir, env },
+    );
+    if (mergeRes.code !== 0) {
+      return {
+        merged: false,
+        reason: `gh pr merge failed: ${redact(`${mergeRes.stdout}\n${mergeRes.stderr}`.trim(), token)}`,
+        prUrl: info.url ?? null,
+      };
+    }
+
+    // Refresh the local remote-tracking ref before reading it back — `gh pr
+    // merge` merges via the GitHub API, so the local clone's `origin/<base>`
+    // is stale until fetched.
+    await git(["fetch", "origin", base], { cwd: dir }).catch(() => null);
+    const head = await git(["rev-parse", `origin/${base}`], { cwd: dir }).catch(
+      () => null,
+    );
+    return { merged: true, sha: head?.stdout?.trim() ?? null, prUrl: info.url ?? null };
+  });
 }
 
 // ── Secret-leak defense (DESIGN §13 hardening) ───────────────────────────────

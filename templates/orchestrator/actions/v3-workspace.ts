@@ -17,6 +17,8 @@ import {
   localWorkspaceFiles,
   localWorkspaceRead,
   commitAndPush as commitAndPushLocal,
+  ciWatch as ciWatchLocal,
+  mergePr as mergePrLocal,
 } from "../server/v3-workspace-local.js";
 import { DiffBaseUnresolvableError } from "../server/v3-workspace-provision.js";
 
@@ -626,6 +628,62 @@ export const workspaceCommitPush = defineAction({
       pushDetail: pushResult.detail,
       committed: commitResult.committed,
     };
+  },
+});
+
+/** Read CI status for a host-native V3 workspace's PR/branch. */
+export const workspaceCiWatch = defineAction({
+  description:
+    "Get CI status for a V3 workspace's PR/branch. Reads real GitHub check-run " +
+    "status via `gh pr view` (ciMode='github', default) or returns an immediate " +
+    "green when ciMode='none' (repos with no CI configured). Single snapshot — " +
+    "call again to poll.",
+  schema: z.object({
+    workspaceId: z.string(),
+    branch: z.string().optional(),
+    ciMode: z.enum(["github", "none"]).optional(),
+  }),
+  readOnly: true,
+  http: { method: "GET" },
+  run: async (args) => {
+    await assertWorkspaceExists(args.workspaceId);
+    const result = await ciWatchLocal({
+      id: args.workspaceId,
+      branch: args.branch,
+      ciMode: args.ciMode,
+    });
+    return { workspaceId: args.workspaceId, ...result };
+  },
+});
+
+/** Merge a host-native V3 workspace's open PR into its base branch. */
+export const workspaceMergePr = defineAction({
+  description:
+    "Merge a V3 workspace's open PR into its base branch. Asserts the PR is " +
+    "open, CI is green, and the branch is neither conflicting nor behind base " +
+    "before merging (via `gh pr merge`). Serializes concurrent merges onto the " +
+    "same base branch with a Postgres advisory lock. Returns { merged: false, " +
+    "reason } instead of throwing when the merge cannot proceed safely (e.g. " +
+    "'ci_not_green', 'rebase_needed: ...') — there is no force-merge override; " +
+    "on rebase_needed the caller should re-run the pipeline, not just retry.",
+  schema: z.object({
+    workspaceId: z.string(),
+    branch: z.string().optional(),
+    baseBranch: z.string().optional(),
+    mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
+  }),
+  run: async (args) => {
+    const ws = await assertWorkspaceExists(args.workspaceId);
+    if (ws.state !== "ready" && ws.state !== "busy") {
+      throw new Error(`Workspace ${args.workspaceId} is ${ws.state}, cannot merge`);
+    }
+    const result = await mergePrLocal({
+      id: args.workspaceId,
+      branch: args.branch,
+      baseBranch: args.baseBranch,
+      mergeMethod: args.mergeMethod,
+    });
+    return { workspaceId: args.workspaceId, ...result };
   },
 });
 

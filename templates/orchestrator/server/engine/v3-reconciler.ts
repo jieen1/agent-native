@@ -30,11 +30,12 @@ import { getDbExec } from "../db/index.js";
 import {
   v3Runs,
   v3Nodes,
+  v3Spawns,
   v3Events,
   v3Artifacts,
-  v3Spawns,
   brainThreads,
 } from "../db/v3-schema.js";
+import type { V3RunLimits } from "../db/v3-schema.js";
 import { evaluateExpression } from "./expression-parser.js";
 import type { ExpressionContext } from "./expression-parser.js";
 import {
@@ -273,6 +274,18 @@ export class V3Reconciler {
       .select()
       .from(v3Nodes)
       .where(eq(v3Nodes.runId, runId));
+
+    // ── Engine-level guardrails (v3_runs.limits) ───────────────────────────
+    // Auto-abort a run that exceeds its configured limits even when the DAG
+    // template's own guard/loop logic fails to bound itself. No-op (zero
+    // extra DB work) when the run has no limits configured — see
+    // checkRunLimits() below.
+    const limitBreach = await this.checkRunLimits(runId, run, nodesAfterGuards);
+    if (limitBreach) {
+      await this.finalizeRun(runId, "failed", nodesAfterGuards);
+      await this.writeEvent(runId, "run.failed", { reason: limitBreach });
+      return;
+    }
 
     // 3. Detect failed nodes (non-continue) → cascade skip all downstream
     const dagNodeMap = new Map(dag.map((d) => [d.id, d]));
@@ -1828,6 +1841,69 @@ export class V3Reconciler {
   }
 
   // ─── Internal Helpers ───────────────────────────────────────────────────
+
+  /**
+   * Engine-level guardrails (v3_runs.limits): enforce max_dispatches /
+   * max_corrections_per_node / max_review_iterations even when a DAG
+   * template's own guard/loop counting logic fails to bound itself.
+   * Returns a human-readable breach reason, or null when within limits
+   * (including the common case where the run has no limits configured —
+   * that check short-circuits before any extra DB query runs).
+   */
+  private async checkRunLimits(
+    runId: string,
+    run: RunRow,
+    nodes: NodeRow[],
+  ): Promise<string | null> {
+    const limits = run.limits as V3RunLimits | null;
+    if (!limits) return null;
+    const { max_dispatches, max_corrections_per_node, max_review_iterations } = limits;
+    if (!max_dispatches && !max_corrections_per_node && !max_review_iterations) {
+      return null;
+    }
+
+    if (max_dispatches || max_corrections_per_node) {
+      const nodeIds = nodes.map((n) => n.id);
+      const spawns = nodeIds.length
+        ? await this.db
+            .select({ nodeId: v3Spawns.nodeId })
+            .from(v3Spawns)
+            .where(inArray(v3Spawns.nodeId, nodeIds))
+        : [];
+
+      if (max_dispatches && spawns.length > max_dispatches) {
+        return `max_dispatches exceeded: ${spawns.length} > ${max_dispatches}`;
+      }
+
+      if (max_corrections_per_node) {
+        const perNode = new Map<string, number>();
+        for (const s of spawns) {
+          if (!s.nodeId) continue;
+          perNode.set(s.nodeId, (perNode.get(s.nodeId) ?? 0) + 1);
+        }
+        for (const [nodeId, count] of perNode) {
+          if (count > max_corrections_per_node) {
+            const dagId = nodes.find((n) => n.id === nodeId)?.nodeIdInDag ?? nodeId;
+            return `max_corrections_per_node exceeded on node '${dagId}': ${count} > ${max_corrections_per_node}`;
+          }
+        }
+      }
+    }
+
+    if (max_review_iterations) {
+      // Guard-unrolled loop templates (sdlc-review/sdlc-full) statically
+      // duplicate review nodes as review1/review2/review3... rather than
+      // using the native `loop` node type. Count how many have started.
+      const startedReviewNodes = nodes.filter(
+        (n) => /^review\d+$/i.test(n.nodeIdInDag) && n.status !== "pending",
+      );
+      if (startedReviewNodes.length > max_review_iterations) {
+        return `max_review_iterations exceeded: ${startedReviewNodes.length} > ${max_review_iterations}`;
+      }
+    }
+
+    return null;
+  }
 
   /**
    * G20: Finalize a run, honoring on_failure:"continue" for failed nodes.

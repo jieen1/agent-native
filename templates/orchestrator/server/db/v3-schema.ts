@@ -23,6 +23,12 @@ function ownableColumns() {
   };
 }
 
+export interface V3RunLimits {
+  max_corrections_per_node?: number;
+  max_review_iterations?: number;
+  max_dispatches?: number;
+}
+
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
 export const v3RunStatusEnum = pgEnum("v3_run_status", [
@@ -96,10 +102,26 @@ export const v3Runs = pgTable("v3_runs", {
   status: v3RunStatusEnum("status").notNull().default("pending"),
   priority: integer("priority").notNull().default(0),
   tags: jsonb("tags"),
+  limits: jsonb("limits"),
   // Additive: archive flag (0/1) — hides a run from the default list (P4-A).
   archived: integer("archived").notNull().default(0),
   startedAt: timestamp("started_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+  ...ownableColumns(),
+});
+
+export const projectRepos = pgTable("project_repos", {
+  id: text("id").primaryKey(),
+  repoUrl: text("repo_url").notNull(),
+  // gateMode: 'stack' | 'tests-only' | 'none'
+  gateMode: text("gate_mode").notNull().default("tests-only"),
+  stackUpCmd: text("stack_up_cmd"),
+  healthCheckCmd: text("health_check_cmd"),
+  testCmdFull: text("test_cmd_full"),
+  // ciMode: 'github' | 'none'
+  ciMode: text("ci_mode").notNull().default("none"),
+  baseBranch: text("base_branch").notNull().default("main"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   ...ownableColumns(),
 });
 
