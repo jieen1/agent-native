@@ -3,6 +3,7 @@
 
 @import "tailwindcss";
 @import "@agent-native/core/styles/agent-native.css";
+@import "./components/design-system.css";
 
 @source "./**/*.{ts,tsx}";
 
@@ -36,6 +37,56 @@
   --sidebar-accent-foreground: 220 10% 15%;
   --sidebar-border: 220 10% 90%;
   --sidebar-ring: 220 10% 40%;
+
+  /* ── Foundry status semantic tokens (docs/sdlc-product-design/design-system/
+     foundry-components.html §2.1 "色彩 tokens") ──────────────────────────────
+     Converted from the spec's canonical OKLCH values to this file's existing
+     HSL-triplet convention (same conversion basis as --destructive above).
+     Consumed by StatusRing/StatusIcon/PriorityBars/ActorAvatar and by the
+     tracker-format.ts / BoardPage.tsx status-color maps. Do not rename —
+     these names are the ones foundry-components.html actually defines.
+     There is no separate "--brain" token in the source: ActorAvatar's brain
+     variant intentionally reuses --brand, exactly like the spec's
+     `.avatar.a-brain` rule does. */
+  --success: 129 66% 32%;
+  --warning: 44 100% 38%;
+  --info: 208 100% 42%;
+  --agent: 264 38% 54%;
+  --evidence: 172 100% 22%;
+  --brand: 212 73% 46%;
+  --brand-foreground: 0 0% 98%;
+
+  /* Foundry v3 motion tokens (docs/sdlc-product-design/design-system/
+     foundry-motion.html — identical block also inlined in
+     foundry-components.html). Values are fixed constants, not themed
+     per light/dark. Only --fm-ambient-1 is consumed today (StatusRing's
+     "running" breathing animation); the rest are added as a complete set so
+     future components don't need a second token PR. */
+  --fm-dur-1: 120ms;
+  --fm-dur-2: 240ms;
+  --fm-dur-3: 400ms;
+  --fm-dur-4: 700ms;
+  --fm-ambient-1: 1600ms;
+  --fm-ambient-2: 2500ms;
+  --fm-ambient-3: 3200ms;
+  --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --fm-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --fm-ease-exit: cubic-bezier(0.7, 0, 0.84, 0);
+  --fm-ease-bounce: cubic-bezier(0.5, 1.5, 0.4, 1);
+  --fm-shift-1: 4px;
+  --fm-shift-2: 8px;
+  --fm-scale-hover: 1.02;
+  --fm-scale-active: 0.98;
+}
+
+@theme {
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-info: hsl(var(--info));
+  --color-agent: hsl(var(--agent));
+  --color-evidence: hsl(var(--evidence));
+  --color-brand: hsl(var(--brand));
+  --color-brand-foreground: hsl(var(--brand-foreground));
 }
 
 .dark {
@@ -58,6 +109,16 @@
   --border: 220 4% 14%;
   --input: 220 4% 14%;
   --ring: 0 0% 60%;
+
+  /* Foundry status tokens, dark values (§2.1). --brand-foreground is not
+     redefined here — Foundry's own spec only sets it once in :root and lets
+     it cascade, since it stays a near-white glyph color in both themes. */
+  --success: 124 34% 48%;
+  --warning: 42 77% 58%;
+  --info: 208 83% 56%;
+  --agent: 262 56% 69%;
+  --evidence: 170 43% 42%;
+  --brand: 213 83% 60%;
 
   --sidebar-background: 220 6% 4%;
   --sidebar-foreground: 220 4% 60%;

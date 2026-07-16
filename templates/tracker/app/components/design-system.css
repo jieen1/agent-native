@@ -1,0 +1,281 @@
+/**
+ * Foundry status-vocabulary primitives: StatusRing, StatusIcon, PriorityBars,
+ * ActorAvatar. Ports the geometry from
+ * docs/sdlc-product-design/design-system/foundry-components.html
+ * (§3.1 StatusRing, §3.1a StatusIcon, §3.3 PriorityBars, §3.4 ActorAvatar)
+ * class-for-class, renamed with a `tk-` prefix and rewired onto this app's
+ * HSL custom-property tokens (see global.css) instead of the spec's raw
+ * OKLCH literals. Plain CSS rather than Tailwind utilities because these
+ * shapes need pseudo-elements, conic-gradient fills, and nth-child selectors
+ * that utility classes can't express.
+ *
+ * Do not hand-edit colors here — change the --success/--warning/--info/
+ * --agent/--evidence/--brand/--destructive tokens in global.css instead.
+ */
+
+/* ===== StatusRing (§3.1) ===================================================
+   In-progress-family states only. Terminal states (done/failed) render as
+   StatusIcon instead — see the spec's explicit "禁止用伪元素手绘勾叉" rule. */
+.tk-ring {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+}
+
+.tk-ring--pending {
+  border: 1.6px dashed hsl(var(--muted-foreground));
+}
+
+.tk-ring--queued {
+  border: 1.6px solid hsl(var(--warning));
+}
+.tk-ring--queued::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 9999px;
+  background: hsl(var(--warning));
+}
+
+.tk-ring--running {
+  border: 1.6px solid hsl(var(--info));
+  background: conic-gradient(hsl(var(--info)) 0 50%, transparent 50% 100%);
+  animation: tk-ring-breathe var(--fm-ambient-1, 1600ms) ease-in-out infinite;
+}
+
+.tk-ring--review {
+  border: 1.6px solid hsl(var(--info));
+  background: conic-gradient(hsl(var(--info)) 0 75%, transparent 75% 100%);
+}
+
+.tk-ring--gate {
+  border: 1.6px solid hsl(var(--warning));
+}
+.tk-ring--gate::after {
+  content: "";
+  position: absolute;
+  left: 5.5px;
+  top: 3px;
+  width: 1.8px;
+  height: 7px;
+  background: hsl(var(--warning));
+}
+
+.tk-ring--skipped {
+  border: 1.6px solid hsl(var(--muted-foreground));
+  background: linear-gradient(
+    135deg,
+    transparent 45%,
+    hsl(var(--muted-foreground)) 45%,
+    hsl(var(--muted-foreground)) 55%,
+    transparent 55%
+  );
+}
+
+.tk-ring--rejected {
+  border: 1.6px solid hsl(var(--destructive));
+  background: linear-gradient(
+    135deg,
+    transparent 45%,
+    hsl(var(--destructive)) 45%,
+    hsl(var(--destructive)) 55%,
+    transparent 55%
+  );
+}
+
+@keyframes tk-ring-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tk-ring--running {
+    animation: none;
+  }
+}
+
+/* ===== StatusIcon (§3.1a) ==================================================
+   Terminal / judgement states: solid circle + centered Tabler glyph. The
+   glyph color is a literal white, matching the spec's own `.st-icon{color:#fff}`
+   verbatim — there is no per-tone "-foreground" token to reference (unlike
+   ActorAvatar's brand fill, which does have --brand-foreground). */
+.tk-status-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  color: #fff;
+  vertical-align: -2px;
+}
+.tk-status-icon svg {
+  width: 10px;
+  height: 10px;
+}
+
+.tk-status-icon--sm {
+  width: 12px;
+  height: 12px;
+}
+.tk-status-icon--sm svg {
+  width: 8.5px;
+  height: 8.5px;
+}
+
+.tk-status-icon--lg {
+  width: 18px;
+  height: 18px;
+}
+.tk-status-icon--lg svg {
+  width: 12.5px;
+  height: 12.5px;
+}
+
+.tk-status-icon--ok {
+  background: hsl(var(--success));
+}
+.tk-status-icon--err {
+  background: hsl(var(--destructive));
+}
+.tk-status-icon--warn {
+  background: hsl(var(--warning));
+}
+.tk-status-icon--inf {
+  background: hsl(var(--info));
+}
+.tk-status-icon--mut {
+  background: hsl(var(--muted-foreground));
+}
+
+/* Two-stage completion flourish (foundry-motion.html "fm-complete"): a one-time
+   badge pop, opt-in via <StatusIcon animateComplete>. Never loops. */
+@keyframes tk-status-icon-complete {
+  0% {
+    transform: scale(0);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.tk-status-icon--complete {
+  animation: tk-status-icon-complete 500ms var(--fm-ease-bounce) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tk-status-icon--complete {
+    animation: none;
+  }
+}
+
+/* ===== PriorityBars (§3.3) ==================================================
+   4-bar ladder; priority uses this app's existing 1=P0 … 4=P3 convention. */
+.tk-pbars {
+  display: inline-flex;
+  align-items: flex-end;
+  height: 12px;
+  gap: 1.5px;
+}
+.tk-pbars span {
+  width: 3px;
+  border-radius: 1px;
+  background: hsl(var(--border));
+}
+.tk-pbars span:nth-child(1) {
+  height: 4px;
+}
+.tk-pbars span:nth-child(2) {
+  height: 6.5px;
+}
+.tk-pbars span:nth-child(3) {
+  height: 9px;
+}
+.tk-pbars span:nth-child(4) {
+  height: 12px;
+}
+
+.tk-pbars--p0 span {
+  background: hsl(var(--destructive));
+}
+.tk-pbars--p1 span:nth-child(-n + 3) {
+  background: hsl(var(--warning));
+}
+.tk-pbars--p2 span:nth-child(-n + 2) {
+  background: hsl(var(--info));
+}
+.tk-pbars--p3 span:nth-child(1) {
+  background: hsl(var(--muted-foreground));
+}
+
+/* ===== ActorAvatar (§3.4) ===================================================
+   Shape carries the semantics: circle = human, rounded-square = machine
+   (agent = violet outline, brain = brand/blue outline). Running state gets a
+   breathing presence dot, bottom-right. */
+.tk-avatar {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: hsl(var(--brand));
+  color: hsl(var(--brand-foreground));
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.tk-avatar--agent {
+  border-radius: 6px;
+  background: color-mix(in oklch, hsl(var(--agent)) 15%, transparent);
+  color: hsl(var(--agent));
+  border: 1px solid color-mix(in oklch, hsl(var(--agent)) 40%, transparent);
+}
+
+.tk-avatar--brain {
+  border-radius: 6px;
+  background: color-mix(in oklch, hsl(var(--brand)) 15%, transparent);
+  color: hsl(var(--brand));
+  border: 1px solid color-mix(in oklch, hsl(var(--brand)) 40%, transparent);
+}
+
+.tk-avatar-presence {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: hsl(var(--success));
+  border: 1.5px solid hsl(var(--background));
+  animation: tk-ring-breathe var(--fm-ambient-1, 1600ms) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tk-avatar-presence {
+    animation: none;
+  }
+}
+
+.tk-avstack {
+  display: inline-flex;
+}
+.tk-avstack .tk-avatar {
+  margin-left: -6px;
+  border: 1.5px solid hsl(var(--background));
+}
+.tk-avstack .tk-avatar:first-child {
+  margin-left: 0;
+}
