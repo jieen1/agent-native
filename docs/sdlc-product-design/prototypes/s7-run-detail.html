@@ -226,7 +226,7 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
 .beam{position:relative}
 .beam::before{content:'';position:absolute;inset:-2.5px;border-radius:12px;z-index:0;
   background:conic-gradient(from var(--beam-a),transparent 0turn .70turn,var(--info) .85turn,transparent 1turn);
-  animation:beamrot 2.8s linear infinite}
+  animation:beamrot var(--fm-ambient-3) linear infinite}
 @keyframes beamrot{to{--beam-a:360deg}}
 @media (prefers-reduced-motion:reduce){.beam::before{animation:none;background:color-mix(in oklch,var(--info) 30%,transparent)}}
 /* 画布控件 */
@@ -367,6 +367,8 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
   @media (prefers-reduced-motion: reduce) {
     .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
     .fm-nav-progress::before { animation: none !important; }
+    /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
+    .fm-complete svg path, .fm-complete svg polyline { stroke-dashoffset: 0; }
     .fm-thinking { color: var(--muted-foreground); background: none; }
     [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
     .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }

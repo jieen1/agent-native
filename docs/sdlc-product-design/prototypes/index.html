@@ -212,6 +212,8 @@ i.ti{font-size:16px;line-height:1;vertical-align:-2px}
   @media (prefers-reduced-motion: reduce) {
     .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
     .fm-nav-progress::before { animation: none !important; }
+    /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
+    .fm-complete svg path, .fm-complete svg polyline { stroke-dashoffset: 0; }
     .fm-thinking { color: var(--muted-foreground); background: none; }
     [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
     .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }

@@ -150,12 +150,12 @@ kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid
 .ring.r-pending{border:1.6px dashed var(--muted-foreground)}
 .ring.r-queued{border:1.6px solid var(--warning)}
 .ring.r-queued::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--warning)}
-.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%);animation:breathe 2s ease-in-out infinite}
+.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%)}
+/* r-running 活跃脉动已收敛至 foundry-motion .fm-live(见挂类元素),旧 breathe keyframes 移除 */
 .ring.r-review{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 75%,transparent 75% 100%)}
 .ring.r-gate{border:1.6px solid var(--warning)}
 .ring.r-gate::after{content:'';position:absolute;left:5.5px;top:3px;width:1.8px;height:7px;background:var(--warning)}
 .ring.r-skipped{border:1.6px solid var(--muted-foreground);background:linear-gradient(135deg,transparent 45%,var(--muted-foreground) 45%,var(--muted-foreground) 55%,transparent 55%)}
-@keyframes breathe{0%,100%{opacity:1}50%{opacity:.55}}
 /* 优先级信号条 */
 .pbars{display:inline-flex;gap:1.5px;align-items:flex-end;height:12px}
 .pbars span{width:3px;border-radius:1px;background:var(--border)}
@@ -180,7 +180,6 @@ table.fd td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-alig
 table.fd tr:hover td{background:oklch(0 0 0/.02)}
 .dark table.fd tr:hover td{background:oklch(1 0 0/.03)}
 /* 动效(一次性/氛围循环模式见文末内联的 fm-motion 基建块;.shimmer/.impulse 与 fm-thinking/fm-live 语义重复,已移除) */
-@media (prefers-reduced-motion:reduce){.ring.r-running{animation:none}}
 /* 空态 */
 .empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px;color:var(--muted-foreground)}
 .empty .e-icon{width:40px;height:40px;border-radius:50%;background:var(--muted);
@@ -290,6 +289,8 @@ table.fd tr:hover td{background:oklch(0 0 0/.02)}
   @media (prefers-reduced-motion: reduce) {
     .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
     .fm-nav-progress::before { animation: none !important; }
+    /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
+    .fm-complete svg path, .fm-complete svg polyline { stroke-dashoffset: 0; }
     .fm-thinking { color: var(--muted-foreground); background: none; }
     [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
     .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }

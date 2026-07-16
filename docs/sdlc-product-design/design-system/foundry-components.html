@@ -146,7 +146,7 @@ kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid
 .ring.r-pending{border:1.6px dashed var(--muted-foreground)}
 .ring.r-queued{border:1.6px solid var(--warning)}
 .ring.r-queued::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--warning)}
-.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%);animation:breathe 2s ease-in-out infinite}
+.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%);animation:breathe var(--fm-ambient-1) ease-in-out infinite}
 .ring.r-review{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 75%,transparent 75% 100%)}
 .ring.r-gate{border:1.6px solid var(--warning)}
 .ring.r-gate::after{content:'';position:absolute;left:5.5px;top:3px;width:1.8px;height:7px;background:var(--warning)}
@@ -170,7 +170,7 @@ kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid
 .avatar.a-brain{border-radius:6px;background:color-mix(in oklch,var(--brand) 15%,transparent);
   color:var(--brand);border:1px solid color-mix(in oklch,var(--brand) 40%,transparent)}
 .avatar .presence{position:absolute;right:-2px;bottom:-2px;width:7px;height:7px;border-radius:50%;
-  background:var(--success);border:1.5px solid var(--background);animation:breathe 2s infinite}
+  background:var(--success);border:1.5px solid var(--background);animation:breathe var(--fm-ambient-1) infinite}
 .avstack{display:inline-flex}
 .avstack .avatar{margin-left:-6px;border:1.5px solid var(--background)}
 .avstack .avatar:first-child{margin-left:0}
@@ -185,18 +185,18 @@ table.fd td.num{text-align:right;font-family:var(--font-mono)}
 /* 动效 */
 .shimmer{background:linear-gradient(90deg,var(--muted-foreground) 0%,var(--foreground) 40%,var(--muted-foreground) 80%);
   background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
-  animation:shimmer 2.2s linear infinite}
+  animation:shimmer var(--fm-ambient-2) linear infinite}
 @keyframes shimmer{to{background-position:-200% 0}}
-.impulse{animation:impulse 2.4s ease-in-out infinite}
+.impulse{animation:impulse var(--fm-ambient-1) ease-in-out infinite}
 @keyframes impulse{0%,100%{box-shadow:0 0 0 0 color-mix(in oklch,var(--brand) 35%,transparent)}
   50%{box-shadow:0 0 0 4px color-mix(in oklch,var(--brand) 12%,transparent)}}
 .beam{position:relative;overflow:hidden}
 .beam::before{content:'';position:absolute;inset:-40%;background:conic-gradient(from 0deg,transparent 0 70%,var(--info) 85%,transparent 100%);
-  animation:beamrot 3s linear infinite}
+  animation:beamrot var(--fm-ambient-3) linear infinite}
 .beam::after{content:'';position:absolute;inset:1.5px;background:var(--card);border-radius:8px}
 .beam>*{position:relative;z-index:1}
 @keyframes beamrot{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.shimmer,.impulse,.ring.r-running,.beam::before,.spin{animation:none}}
+@media (prefers-reduced-motion:reduce){.shimmer,.impulse,.ring.r-running,.avatar .presence,.beam::before,.spin,.skel::after{animation:none}}
 /* 空态 */
 .empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px;color:var(--muted-foreground)}
 .empty .e-icon{width:40px;height:40px;border-radius:50%;background:var(--muted);
@@ -413,7 +413,7 @@ textarea.inp{height:auto;min-height:56px;padding:6px 9px;resize:vertical}
 /* skeleton / progress */
 .skel{background:var(--muted);border-radius:6px;position:relative;overflow:hidden}
 .skel::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,oklch(1 0 0/.5),transparent);
-  animation:skshine 1.6s infinite}
+  animation:skshine var(--fm-ambient-1) infinite}
 .dark .skel::after{background:linear-gradient(90deg,transparent,oklch(1 0 0/.08),transparent)}
 @keyframes skshine{to{transform:translateX(100%)}}
 .prog{height:4px;border-radius:2px;background:var(--muted);min-width:220px;overflow:hidden}
@@ -530,6 +530,8 @@ textarea.inp{height:auto;min-height:56px;padding:6px 9px;resize:vertical}
   @media (prefers-reduced-motion: reduce) {
     .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
     .fm-nav-progress::before { animation: none !important; }
+    /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
+    .fm-complete svg path, .fm-complete svg polyline { stroke-dashoffset: 0; }
     .fm-thinking { color: var(--muted-foreground); background: none; }
     [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
     .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }

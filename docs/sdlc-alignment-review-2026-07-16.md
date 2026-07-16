@@ -130,7 +130,7 @@
 <tr>
 <td>九模板工作流族</td>
 <td>02 章 §工作流族</td>
-<td>❌ 仓内零证据,仅单节点 sdlc-dev 活在 101 DB</td>
+<td>❌ 仓内零种子(2026-07-16 复核订正:101 DB 实有自举遗留多套模板——sdlc-issue-pipeline 14 节点 v1–v4、sdlc-review/audit/full/promote/dev,原"仅单节点 sdlc-dev 活在 101 DB"有误;待收编入仓、硬化、种子化)</td>
 <td>—</td>
 <td>—</td>
 </tr>
@@ -144,7 +144,7 @@
 <tr>
 <td>tracker UI 屏</td>
 <td>03 章</td>
-<td>◐ 约半数半成:收件箱/规划工作台/度量/Epic 依赖图缺失;守卫流转对话框后端在、UI 未接线;队列审批仍是 toast 桩</td>
+<td>◐ 约半数半成:收件箱/规划工作台/度量/Epic 依赖图缺失;受守卫流转对话框已交付(2026-07-16 复核订正:41fe0b51b 起 WorkItemDetailPage 的 GuardedTransitionDialog 调真实 transition-work-item,原"后端在、UI 未接线"有误);队列审批仅排队人工门一路仍是 toast 桩(QueuePage :536-544),签核/裁决审批卡一路已接真 approve-gate/reject-gate(:546-552)</td>
 <td>同代码</td>
 <td>—</td>
 </tr>
@@ -204,7 +204,7 @@
 </tr>
 <tr>
 <td>生产 design 的 4 屏(s2/s5/s9/s10)落后 repo:F5 规模告警/F6 核对清单/F7 模型注册表+遥测卡 未同步</td>
-<td>已用 update-file 同步发布;S4 守卫流转对话框两边都未补,保持"未补"标注(属 §四 R3 工作)</td>
+<td>已用 update-file 同步发布;S4 受守卫流转对话框经 2026-07-16 复核订正:repo 原型自 c0c7e66d1(07-12)即含完整对话框本体(c18c8ee84 补 fm-overlay 开合动效),生产 design s4 与 repo md5 一致——原"两边都未补"有误</td>
 </tr>
 <tr>
 <td>00 章 §7「与现状的关系」是 v2.0 时点快照,严重过时</td>
@@ -234,8 +234,8 @@
 ### R2 场景①端到端走通(脊柱场景)
 单 issue 全流程:建单→规模门→派发→自动开发→评审→写回→守卫流转→验收→PR 合并(用 R1 的 CI watch/PR merge)。**验收:一张真实 issue 从 open 到交付全程零人工 SQL,状态轨迹与证据链完整可查。**
 
-### R3 给机制接上 UI 通路(机制已有、只缺界面的四处优先)
-守卫流转对话框(接线 transition-work-item)、收件箱(list-inbox/resolve)、issue 页证据链(run/diff/test)、队列审批真实化(替换 toast 桩)。随后:模型注册表页、健康页(后端 action 已在)。**验收:一个人不碰 agent 聊天窗,纯 UI 走完场景①的人工环节。**
+### R3 给机制接上 UI 通路(机制已有、只缺界面的三处优先)
+收件箱(list-inbox/resolve)、issue 页证据链(run/diff/test)、队列审批真实化(替换排队人工门一路的 toast 桩;签核/裁决审批卡一路已接真)。原列首位的"守卫流转对话框接线 transition-work-item"经 2026-07-16 复核已于 41fe0b51b 交付(GuardedTransitionDialog),从待办转为回归核对项。随后:模型注册表页、健康页(后端 action 已在)。**验收:一个人不碰 agent 聊天窗,纯 UI 走完场景①的人工环节。**
 
 ### R4 工作流族与规划技能链
 把 sdlc-issue-pipeline 扩成第一个真实多节点 DAG 模板(dev→qa→reviewer→gatekeeper→diff-audit→PR→CI→merge)入库带版本;随后 hotfix/docs-task/quick-task 族;规划域六技能(brainstorm/sprint-plan/sprint-test-plan/ui-spec/sprint-design/sprint-review)+ gap-analysis action 支撑场景②(Sprint Goal 闭环)。**验收:场景②③按路线图 §2 判据走通。**

@@ -72,7 +72,7 @@
 - **现状**:tracker complete-stage.ts(交付主干实测)在「交付」阶段完成时直接写 status=done,verdict 仅可选、无 PASSED 前置(B3 实证);dispatch-to-orchestrator.ts 派发时把 currentStageName 推到「实施」(返回 stagedAdvanced 字段),失败派发不回退;tracker update-work-item.ts 自述「metadata, not status transitions」却直接接受并写 currentStageName、无守卫,且 tracker 侧无经 audit 的人工流转 action(transition-work-item 只在 orchestrator 存在)。
 - **验收**:故障注入三连——①无 verdict 写 done→拒;②派发后**立即查业务阶段未变**(派发不推进业务阶段,无"阶段回退"可言,终判是阶段自始未动);再令首轮派发落到会 400 的端点(如临时改该仓 devModel 为不存在模型名)注入 brain 首轮零交付→**execState 回 queued、业务阶段仍未动、审计留失败事件**;③未派发项经 transition-work-item 关闭且 audit-log 有行。
 - **依赖**:F0;与 F9 配对。
-- **页面**:涉及——S4 工作项详情(受守卫流转对话框,含未派发项关闭);原型:**部分**(shield-lock 入口标识已加,对话框本体未做)。
+- **页面**:涉及——S4 工作项详情(受守卫流转对话框,含未派发项关闭);原型:**已完成**(2026-07-16 复核订正:主干 c0c7e66d1 起即含完整对话框本体,c18c8ee84 又补 fm-overlay 开合动效;原"对话框本体未做"表述过期)。
 
 ### F4 能力面矩阵(评审只读)+ spec/评审分离【已交付 2026-07-12】(设计出处 02 §5.4 / §3 评审独立性)
 
@@ -141,7 +141,7 @@
 
 上列「页面」标注中,4 处为 v2.2/v2.2.1 设计已定稿但原型屏未跟上的欠账(逐屏 grep 实测:零命中或仅入口标识):
 
-- **S4 受守卫流转对话框**(F3)——shield-lock 入口已加,对话框本体未做;其完整交互由独立的 **F1–F4 实施细则文档**承接。
+- **S4 受守卫流转对话框**(F3)——已补(2026-07-16 复核订正:主干 c0c7e66d1 起即含完整对话框本体——受限目标状态选择/强制 reason/按状态证据字段,c18c8ee84 补 fm-overlay 开合动效;生产 design s4 与 repo md5 一致);其完整交互由独立的 **F1–F4 实施细则文档**承接。
 - **S2 规划工作台:Briefs 规模告警 + 一键拆分**(F5)——未做。(repo 已补,2026-07-16 已同步生产 design)
 - **S5 评审卡:按 nature 装配的结构化核对清单控件**(F6)——评审卡已加,核对项控件未做。(repo 已补,2026-07-16 已同步生产 design)
 - **S9 模型注册表区 + 降级显式告警 / S10 遥测可信卡**(F7)——未做。(repo 已补,2026-07-16 已同步生产 design)
