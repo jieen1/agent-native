@@ -25,6 +25,42 @@ type ProjectRow = {
 } | null;
 type SprintRow = { id: string; name: string; status: string } | null;
 
+/**
+ * Read-compat fallback for items dispatched BEFORE `tracker_work_item_runs`
+ * (F8, SDLC-053) started recording history: `listWorkItemRuns` legitimately
+ * returns `[]` for these (no row was ever inserted — `recordDispatchRun` only
+ * fires on dispatch, and pre-existing dispatches were never backfilled into
+ * the new table). Without this fallback `RunEvidenceList` silently renders
+ * nothing for every item dispatched before the feature shipped, even when the
+ * orchestrator has a real, completed run for it — confirmed in production for
+ * SDLC-040/041/043, all dispatched 2026-07-11 with real `v3_runs` rows, whose
+ * `get-work-item.runs` came back `[]`.
+ *
+ * Synthesizes a single "current" run summary from the columns that already
+ * existed before F8 (`orchestratorThreadId`/`orchestratorRunId`/`branch`/
+ * `dispatchedAt` — the same ones `backfillWorkItemRun` mirrors onto for
+ * post-F8 items, "T-F8-07" in work-item-runs.ts). Only degrades: once this
+ * item is ever redispatched, `recordDispatchRun` inserts a real row and this
+ * fallback stops being reached (`listWorkItemRuns` returns non-empty).
+ */
+export function legacyRunFallback(
+  item: Pick<
+    WorkItemRow,
+    "orchestratorThreadId" | "orchestratorRunId" | "branch" | "dispatchedAt" | "updatedAt"
+  >,
+): WorkItemRunSummary[] {
+  if (!item.orchestratorThreadId) return [];
+  return [
+    {
+      runId: item.orchestratorRunId ?? null,
+      threadId: item.orchestratorThreadId,
+      branch: item.branch ?? null,
+      dispatchedAt: item.dispatchedAt ?? item.updatedAt,
+      superseded: false,
+    },
+  ];
+}
+
 /** Pure shaping of a DB work-item row into the get-work-item detail payload.
  *  Exported (not just used inline) so tests can assert on the shape without touching the DB.
  *  `actor` is optional so existing callers/tests that don't care about
@@ -187,10 +223,14 @@ export default defineAction({
       : null;
 
     const actor = actorFromCaller(ctx?.caller, getRequestUserEmail());
-    const [runs, itemKeyDisplay] = await Promise.all([
+    const [recordedRuns, itemKeyDisplay] = await Promise.all([
       listWorkItemRuns(db, item.id),
       computeItemKeyDisplay(db, { id: item.id, projectId: item.projectId, itemKey: item.itemKey }),
     ]);
+    // Read-compat: items dispatched before F8's tracker_work_item_runs table
+    // existed have no recorded history row — fall back to the legacy columns
+    // rather than silently showing no run evidence (see legacyRunFallback).
+    const runs = recordedRuns.length ? recordedRuns : legacyRunFallback(item);
     return shapeWorkItemDetail(item, project ?? null, sprint, actor, {
       runs,
       itemKeyDisplay,

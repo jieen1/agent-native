@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { RunEvidenceList } from "@/components/RunEvidenceList";
+import { RunBadgeCompact, RunEvidenceList } from "@/components/RunEvidenceList";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 function renderWithProviders(ui: ReactElement) {
@@ -251,5 +251,38 @@ describe("<RunEvidenceList>", () => {
     );
     expect(screen.getByText("历史运行 (1)")).toBeTruthy();
     expect(screen.getByText("成功")).toBeTruthy();
+  });
+});
+
+describe("<RunBadgeCompact> — Inspector「执行」组的紧凑关联运行徽标 (原型 s4-work-item.html ~558)", () => {
+  it("links to the run detail page with the truncated run id", () => {
+    render(
+      <RunBadgeCompact
+        run={currentRun}
+        activity={activityWith([{ id: currentRun.runId!, status: "failed", nodes: [] }])}
+      />,
+    );
+    const link = screen.getByText(/run_6c8p17/).closest("a");
+    expect(link?.getAttribute("href")).toBe(
+      `/orchestrator/runs/${currentRun.runId}`,
+    );
+  });
+
+  it("shows the pending placeholder (no link) when the run has no runId yet", () => {
+    const pending: WorkItemRunSummary = {
+      runId: null,
+      threadId: "th_2",
+      branch: null,
+      dispatchedAt: "2026-07-11T10:00:00.000Z",
+      superseded: false,
+    };
+    render(<RunBadgeCompact run={pending} activity={undefined} />);
+    expect(screen.getByText("等待运行 id 回填")).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("degrades gracefully (still links, no status dot) when activity hasn't correlated the run yet", () => {
+    render(<RunBadgeCompact run={currentRun} activity={undefined} />);
+    expect(screen.getByRole("link")).toBeTruthy();
   });
 });

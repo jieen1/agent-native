@@ -79,6 +79,10 @@ function TranscriptLink({ runId }: { runId: string }) {
   );
 }
 
+// success/running (emerald/blue below) have no `--success`/`--info` token in
+// this template's app/global.css (only `--destructive` is defined) — kept
+// literal pending a real token; failed/cancelled uses the real `--destructive`
+// token since one exists.
 function NodeStatusIcon({ status }: { status: string }) {
   if (status === "done") {
     return <IconCircleCheck className="size-3.5 text-success" />;
@@ -247,6 +251,49 @@ function RunHeaderLine({
         </Badge>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Compact run reference — the Inspector's "关联运行" row (`.proprow`) in the
+ * prototype only shows a small `.runbadge` (status icon + run id + external
+ * link), NOT the full node chain / evidence / history that
+ * `CurrentRunPanel` renders for the page's main "执行记录" section. This is
+ * that compact form, reusing the same `nodeStatusPresentation` tone
+ * vocabulary as the rest of this file instead of inventing a new one. */
+export function RunBadgeCompact({
+  run,
+  activity,
+}: {
+  run: WorkItemRunSummary;
+  activity: ActivityResponse | undefined;
+}) {
+  if (!run.runId) {
+    return (
+      <span className="text-xs text-muted-foreground">
+        等待运行 id 回填
+      </span>
+    );
+  }
+  const matched = activity?.runs?.find((r) => r.id === run.runId);
+  const pres = matched ? nodeStatusPresentation(matched.status) : null;
+  return (
+    <a
+      href={orchestratorRunHref(run.runId)}
+      className="inline-flex items-center gap-1.5 rounded-md border border-border px-1.5 py-0.5 font-mono text-xs text-foreground/80 hover:border-foreground/40 hover:text-foreground"
+    >
+      {pres ? (
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            pres.dot,
+            pres.live && "animate-pulse",
+          )}
+        />
+      ) : null}
+      {run.runId.slice(0, 12)}…
+      <IconExternalLink className="size-3 shrink-0 opacity-60" />
+    </a>
   );
 }
 
