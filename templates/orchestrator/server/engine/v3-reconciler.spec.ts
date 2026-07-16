@@ -35,29 +35,65 @@ vi.mock("../tracker-client.js", async (importOriginal) => {
 // / fireAndTrackSpawn's atomic CAS UPDATEs call getDbExec().execute(...)
 // directly (outside the transaction). Both paths share ONE mock execute fn so
 // tests can assert on either.
+//
+// `activeNodes` links this raw-SQL mock to the SAME node rows a test's
+// createMockDb() hands to `this.db` (see createMockDb below, which assigns
+// `hoisted.activeNodes.current`). Without this link the CAS UPDATE always
+// reported success without ever moving a node's status off "pending" — and
+// because G17's fire-and-track re-triggers `tick()` after every successful
+// spawn to wake the next wave, a still-"pending" node kept getting
+// "dispatched" again on every re-tick, forever. That unbounded tick() ->
+// dispatchNode() -> fireAndTrackSpawn() -> tick() chain resolves entirely
+// through Promise microtasks (no real timer/macrotask boundary on the
+// success path), so it starves the event loop outright: nothing, including
+// a `testTimeout` timer or stdout flush, ever gets scheduled again. Mutating
+// the shared node's status here — exactly like a real Postgres
+// status-conditioned UPDATE would — makes the CAS stop succeeding once the
+// node is no longer pending/ready, so the re-triggered tick sees nothing left
+// to dispatch and the recursion terminates on its own.
 const hoisted = vi.hoisted(() => {
-  const mockExecute = vi.fn(
-    async (query: string | { sql: string; args?: unknown[] }) => {
-      const sqlText = typeof query === "string" ? query : query.sql;
-      if (sqlText.includes("pg_try_advisory_xact_lock")) {
-        return { rows: [{ locked: true }] };
-      }
-      // G16: atomic CAS UPDATE for running transition — returns 1 row to
-      // signal success by default.
-      if (
-        sqlText.includes("UPDATE v3_nodes") &&
-        sqlText.includes("RETURNING id")
-      ) {
-        return { rows: [{ id: "node-1" }] };
+  const activeNodes: {
+    current: Array<{ id: string; status: string }> | null;
+  } = { current: null };
+
+  // Shared by the initial vi.fn() implementation AND every test's
+  // beforeEach reset (below) so the two can never drift out of sync.
+  async function defaultExecuteImpl(
+    query: string | { sql: string; args?: unknown[] },
+  ) {
+    const sqlText = typeof query === "string" ? query : query.sql;
+    if (sqlText.includes("pg_try_advisory_xact_lock")) {
+      return { rows: [{ locked: true }] };
+    }
+    // G16/G19: atomic CAS UPDATE — succeeds only while the referenced node
+    // is still in the status the SQL's WHERE clause targets (dispatchNode's
+    // claim requires pending/ready; fireAndTrackSpawn's retry-reclaim
+    // requires failed), mirroring real Postgres CAS semantics.
+    if (
+      sqlText.includes("UPDATE v3_nodes") &&
+      sqlText.includes("RETURNING id")
+    ) {
+      const args = typeof query === "string" ? undefined : query.args;
+      const nodeId = args?.[0] as string | undefined;
+      const node = activeNodes.current?.find((n) => n.id === nodeId);
+      const eligible = sqlText.includes("status = 'failed'")
+        ? node?.status === "failed"
+        : node?.status === "pending" || node?.status === "ready";
+      if (node && eligible) {
+        node.status = "running";
+        return { rows: [{ id: node.id }] };
       }
       return { rows: [] };
-    },
-  );
+    }
+    return { rows: [] };
+  }
+
+  const mockExecute = vi.fn(defaultExecuteImpl);
   const mockTransaction = vi.fn(
     async (fn: (tx: { execute: typeof mockExecute }) => Promise<unknown>) =>
       fn({ execute: mockExecute }),
   );
-  return { mockExecute, mockTransaction };
+  return { mockExecute, mockTransaction, activeNodes, defaultExecuteImpl };
 });
 
 vi.mock("../db/index.js", () => ({
@@ -69,8 +105,8 @@ vi.mock("../db/index.js", () => ({
   v3Schema: {},
 }));
 
-import { evaluateExpression } from "./expression-parser.js";
 import { onRunTerminal } from "../tracker-client.js";
+import { evaluateExpression } from "./expression-parser.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -101,6 +137,8 @@ interface MockRunRow {
   status: string;
   priority: number;
   tags: unknown;
+  /** Engine-level guardrails (checkRunLimits) — max_dispatches / max_corrections_per_node / max_review_iterations. */
+  limits: unknown;
   startedAt: Date | null;
   completedAt: Date | null;
   ownerEmail: string;
@@ -206,6 +244,12 @@ function createMockDb(
   const artifacts: MockArtifactRow[] = [...initialArtifacts];
   const events: MockEventRow[] = [...initialEvents];
   const spawns: MockSpawnRow[] = initialSpawns.map((s) => ({ ...s }));
+
+  // Give the raw-SQL CAS mock (hoisted.mockExecute, see above) a view onto
+  // these SAME node rows so a claim actually observed by this.db.select()
+  // requires the CAS to have actually succeeded, instead of the two mocks
+  // silently disagreeing about node state.
+  hoisted.activeNodes.current = nodes;
 
   let eventSeq = initialEvents.length;
 
@@ -330,6 +374,7 @@ function makeRun(overrides: Partial<MockRunRow> = {}): MockRunRow {
     status: "running",
     priority: 0,
     tags: null,
+    limits: null,
     startedAt: null,
     completedAt: null,
     ownerEmail: "local@localhost",
@@ -394,23 +439,13 @@ function makeSpawn(overrides: Partial<MockSpawnRow> = {}): MockSpawnRow {
 describe("V3Reconciler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hoisted.activeNodes.current = null;
     // Default: xact lock acquired (rows[0].locked = true) and atomic CAS
-    // succeeds (rows.length = 1).
+    // succeeds only while the target node is actually still eligible (see
+    // defaultExecuteImpl above) — reset explicitly since a prior test may
+    // have installed its own mockImplementation override.
     vi.mocked(hoisted.mockExecute).mockImplementation(
-      async (query: string | { sql: string; args?: unknown[] }) => {
-        const sqlText = typeof query === "string" ? query : query.sql;
-        if (sqlText.includes("pg_try_advisory_xact_lock")) {
-          return { rows: [{ locked: true }] };
-        }
-        // G16: atomic CAS UPDATE for running transition — returns 1 row to signal success
-        if (
-          sqlText.includes("UPDATE v3_nodes") &&
-          sqlText.includes("RETURNING id")
-        ) {
-          return { rows: [{ id: "node-1" }] };
-        }
-        return { rows: [] };
-      },
+      hoisted.defaultExecuteImpl,
     );
     vi.mocked(evaluateExpression).mockReturnValue(false);
   });
@@ -1307,6 +1342,277 @@ describe("V3Reconciler", () => {
     });
   });
 
+  describe("checkRunLimits — engine-level guardrails (run.limits)", () => {
+    it("no limits configured (limits: null) → run proceeds normally, no breach", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          dag: { nodes: [{ id: "a", type: "agent", deps: [] }] },
+          limits: null,
+        }),
+        [makeNode({ nodeIdInDag: "a", id: "node-a" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      // Not short-circuited into a limit-breach failure — normal dispatch proceeds.
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
+      expect(runs.get("run-1")?.status).not.toBe("failed");
+      expect(events.some((e) => e.kind === "run.failed")).toBe(false);
+    });
+
+    it("limits object present but every field unset → treated as no limits configured", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          dag: { nodes: [{ id: "a", type: "agent", deps: [] }] },
+          limits: {},
+        }),
+        [makeNode({ nodeIdInDag: "a", id: "node-a" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
+      expect(runs.get("run-1")?.status).not.toBe("failed");
+      expect(events.some((e) => e.kind === "run.failed")).toBe(false);
+    });
+
+    it("max_dispatches exceeded → run fails with a readable breach reason, dispatch never proceeds", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              { id: "a", type: "agent", deps: [] },
+              { id: "b", type: "agent", deps: [] },
+            ],
+          },
+          limits: { max_dispatches: 2 },
+        }),
+        [
+          makeNode({ nodeIdInDag: "a", id: "node-a", status: "done" }),
+          makeNode({ nodeIdInDag: "b", id: "node-b" }),
+        ],
+        [],
+        [],
+        [
+          makeSpawn({ id: "spawn-1", nodeId: "node-a" }),
+          makeSpawn({ id: "spawn-2", nodeId: "node-a" }),
+          makeSpawn({ id: "spawn-3", nodeId: "node-b" }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      // checkRunLimits fires before the ready-candidate scan — node "b" must
+      // never be dispatched once the run is already over budget.
+      expect(dispatcher.spawn).not.toHaveBeenCalled();
+      expect(runs.get("run-1")?.status).toBe("failed");
+      const failedEvent = events.find((e) => e.kind === "run.failed");
+      expect(failedEvent).toBeDefined();
+      expect((failedEvent?.payload as any)?.reason).toContain(
+        "max_dispatches exceeded",
+      );
+      expect((failedEvent?.payload as any)?.reason).toContain("3 > 2");
+    });
+
+    it("max_corrections_per_node exceeded on one node → breach reason names that node", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              { id: "a", type: "agent", deps: [] },
+              { id: "b", type: "agent", deps: [] },
+            ],
+          },
+          limits: { max_corrections_per_node: 2 },
+        }),
+        [
+          makeNode({ nodeIdInDag: "a", id: "node-a" }),
+          makeNode({ nodeIdInDag: "b", id: "node-b" }),
+        ],
+        [],
+        [],
+        [
+          // node-a has 3 spawns (over the per-node limit of 2); node-b has 1
+          // (within limit) — the breach must name node-a specifically.
+          makeSpawn({ id: "spawn-1", nodeId: "node-a" }),
+          makeSpawn({ id: "spawn-2", nodeId: "node-a" }),
+          makeSpawn({ id: "spawn-3", nodeId: "node-a" }),
+          makeSpawn({ id: "spawn-4", nodeId: "node-b" }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).not.toHaveBeenCalled();
+      expect(runs.get("run-1")?.status).toBe("failed");
+      const failedEvent = events.find((e) => e.kind === "run.failed");
+      expect(failedEvent).toBeDefined();
+      const reason = (failedEvent?.payload as any)?.reason as string;
+      expect(reason).toContain("max_corrections_per_node exceeded");
+      expect(reason).toContain("'a'");
+      expect(reason).toContain("3 > 2");
+    });
+
+    it("max_review_iterations exceeded → run fails with a readable breach reason", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              { id: "review1", type: "agent", deps: [] },
+              { id: "review2", type: "agent", deps: [] },
+              { id: "review3", type: "agent", deps: [] },
+            ],
+          },
+          limits: { max_review_iterations: 2 },
+        }),
+        [
+          makeNode({ nodeIdInDag: "review1", id: "n-r1", status: "done" }),
+          makeNode({ nodeIdInDag: "review2", id: "n-r2", status: "done" }),
+          makeNode({ nodeIdInDag: "review3", id: "n-r3", status: "running" }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).not.toHaveBeenCalled();
+      expect(runs.get("run-1")?.status).toBe("failed");
+      const failedEvent = events.find((e) => e.kind === "run.failed");
+      expect(failedEvent).toBeDefined();
+      const reason = (failedEvent?.payload as any)?.reason as string;
+      expect(reason).toContain("max_review_iterations exceeded");
+      expect(reason).toContain("3 > 2");
+    });
+
+    it("within all configured limits → run proceeds normally, not failed", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          dag: { nodes: [{ id: "a", type: "agent", deps: [] }] },
+          limits: {
+            max_dispatches: 10,
+            max_corrections_per_node: 5,
+            max_review_iterations: 5,
+          },
+        }),
+        [makeNode({ nodeIdInDag: "a", id: "node-a" })],
+        [],
+        [],
+        [makeSpawn({ id: "spawn-1", nodeId: "node-a" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
+      expect(runs.get("run-1")?.status).not.toBe("failed");
+      expect(events.some((e) => e.kind === "run.failed")).toBe(false);
+    });
+
+    // Boundary coverage: every breach check below uses strict `>`, not `>=`
+    // (v3-reconciler.ts checkRunLimits). Without these, a regression to `>=`
+    // would still pass every other test in this block.
+    it("max_dispatches exactly at limit → not a breach, dispatch proceeds", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              { id: "a", type: "agent", deps: [] },
+              { id: "b", type: "agent", deps: [] },
+            ],
+          },
+          limits: { max_dispatches: 2 },
+        }),
+        [
+          makeNode({ nodeIdInDag: "a", id: "node-a", status: "done" }),
+          makeNode({ nodeIdInDag: "b", id: "node-b" }),
+        ],
+        [],
+        [],
+        [
+          makeSpawn({ id: "spawn-1", nodeId: "node-a" }),
+          makeSpawn({ id: "spawn-2", nodeId: "node-a" }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
+      expect(runs.get("run-1")?.status).not.toBe("failed");
+      expect(events.some((e) => e.kind === "run.failed")).toBe(false);
+    });
+
+    it("max_corrections_per_node exactly at limit → not a breach, dispatch proceeds", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          dag: { nodes: [{ id: "a", type: "agent", deps: [] }] },
+          limits: { max_corrections_per_node: 2 },
+        }),
+        [makeNode({ nodeIdInDag: "a", id: "node-a" })],
+        [],
+        [],
+        [
+          makeSpawn({ id: "spawn-1", nodeId: "node-a" }),
+          makeSpawn({ id: "spawn-2", nodeId: "node-a" }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
+      expect(runs.get("run-1")?.status).not.toBe("failed");
+      expect(events.some((e) => e.kind === "run.failed")).toBe(false);
+    });
+
+    it("max_review_iterations exactly at limit → not a breach, dispatch proceeds", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              { id: "review1", type: "agent", deps: [] },
+              { id: "review2", type: "agent", deps: [] },
+            ],
+          },
+          limits: { max_review_iterations: 2 },
+        }),
+        [
+          makeNode({ nodeIdInDag: "review1", id: "n-r1", status: "done" }),
+          makeNode({ nodeIdInDag: "review2", id: "n-r2" }),
+        ],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
+      expect(runs.get("run-1")?.status).not.toBe("failed");
+      expect(events.some((e) => e.kind === "run.failed")).toBe(false);
+    });
+  });
+
   describe("G16 — atomic status-conditioned UPDATE", () => {
     it("G16: does not dispatch when CAS UPDATE returns 0 rows (node already claimed)", async () => {
       const V3Reconciler = await getReconciler();
@@ -1676,7 +1982,9 @@ describe("V3Reconciler", () => {
       const V3Reconciler = await getReconciler();
       const dispatcher = makeDispatcher();
       const { db } = createMockDb(
-        makeRun({ tags: { source: "tracker", item_id: "wi-1", org_id: "org-1" } }),
+        makeRun({
+          tags: { source: "tracker", item_id: "wi-1", org_id: "org-1" },
+        }),
         [makeNode({ status: "done", outputArtifactId: "artifact-1" })],
         [
           makeArtifact({
@@ -1733,7 +2041,14 @@ describe("V3Reconciler", () => {
           tags: { item_id: "wi-3", org_id: "org-3" },
           dag: { nodes: [{ id: "a", type: "agent", deps: [] }] },
         }),
-        [makeNode({ nodeIdInDag: "a", id: "n-a", status: "failed", error: "boom" })],
+        [
+          makeNode({
+            nodeIdInDag: "a",
+            id: "n-a",
+            status: "failed",
+            error: "boom",
+          }),
+        ],
       );
 
       const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
@@ -1781,7 +2096,14 @@ describe("V3Reconciler", () => {
           tags: { item_id: "wi-4", org_id: "org-4" },
           dag: { nodes: [{ id: "a", type: "agent", deps: [] }] },
         }),
-        [makeNode({ nodeIdInDag: "a", id: "n-a", status: "failed", error: "boom" })],
+        [
+          makeNode({
+            nodeIdInDag: "a",
+            id: "n-a",
+            status: "failed",
+            error: "boom",
+          }),
+        ],
       );
 
       // Fast (1ms) backoff schedule for the test — still genuinely 3 delays /
@@ -1822,45 +2144,6 @@ describe("V3Reconciler", () => {
   // array element, so the fixture always lists the node's CURRENT spawn
   // first; (b) `eq(nodeId, node.id)` — count only, order-independent. Tests
   // below follow that "current spawn first" ordering convention.
-  //
-  // Redispatch-safety note: dispatchNode's G16 CAS ("UPDATE v3_nodes SET
-  // status = 'running' ... RETURNING id") is a RAW getDbExec().execute() call
-  // — the shared beforeEach's default hoisted.mockExecute answers it with a
-  // canned success WITHOUT mutating the in-memory `nodes` array (by design,
-  // for every other describe block in this file). For any test where the
-  // conduction rule migrates a node to 'ready' and expects it to be
-  // redispatched EXACTLY once within the same tick, that default becomes
-  // wrong: the mock node's status visibly stays 'ready' forever, so the
-  // ready-candidate scan matches it again on every recursive
-  // tick()-after-successful-spawn call inside fireAndTrackSpawn — an actual
-  // infinite loop, not a production behavior (this is purely a gap in the
-  // shared mock, not a reconciler bug). installRedispatchAwareCas patches
-  // hoisted.mockExecute, for the current test only, to also flip the node's
-  // status to 'running' in the array — mirroring what the real UPDATE does —
-  // so the SAME node is correctly excluded from the next ready-candidate
-  // scan and the loop terminates after exactly one redispatch.
-  function installRedispatchAwareCas(nodes: MockNodeRow[]): void {
-    vi.mocked(hoisted.mockExecute).mockImplementation(
-      async (query: string | { sql: string; args?: unknown[] }) => {
-        const sqlText = typeof query === "string" ? query : query.sql;
-        if (sqlText.includes("pg_try_advisory_xact_lock")) {
-          return { rows: [{ locked: true }] };
-        }
-        if (
-          sqlText.includes("UPDATE v3_nodes") &&
-          sqlText.includes("status = 'running'") &&
-          sqlText.includes("RETURNING id")
-        ) {
-          const args = typeof query === "string" ? undefined : query.args;
-          const nodeId = args?.[0] as string | undefined;
-          const node = nodeId ? nodes.find((n) => n.id === nodeId) : nodes[0];
-          if (node) node.status = "running";
-          return { rows: [{ id: node?.id ?? "node-1" }] };
-        }
-        return { rows: [] };
-      },
-    );
-  }
 
   describe("R9 — spawn→node conduction (F10, SDLC-050)", () => {
     it("T-F10-01: spawn=failed & node=running, no retry policy → node fails permanently + conduction.fixed fires", async () => {
@@ -1961,7 +2244,6 @@ describe("V3Reconciler", () => {
           return id;
         }),
       } as any;
-      installRedispatchAwareCas(nodes);
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.tick("run-1");
@@ -2128,7 +2410,6 @@ describe("V3Reconciler", () => {
           return id;
         }),
       } as any;
-      installRedispatchAwareCas(nodes);
 
       const reconciler = new V3Reconciler(db, dispatcher);
       await reconciler.tick("run-1");
