@@ -328,7 +328,7 @@ function VllmCard() {
           </p>
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="inline-flex w-fit">
+              <span className="inline-flex w-fit" tabIndex={0}>
                 <Button
                   size="sm"
                   variant="outline"
@@ -669,7 +669,10 @@ function CapacitySection() {
           <div className="flex flex-col gap-3">
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="flex cursor-not-allowed items-center gap-3 text-[12px]">
+                <div
+                  className="flex cursor-not-allowed items-center gap-3 text-[12px]"
+                  tabIndex={0}
+                >
                   <span className="shrink-0">spawn 并发上限</span>
                   <Slider
                     value={[vms.capacity]}
