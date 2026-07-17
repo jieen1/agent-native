@@ -161,6 +161,26 @@ export function useCreateSprint() {
   });
 }
 
+// Goal metrics (S6 驾驶舱 Goal 卡) — deterministic parse of the sprint's
+// latest sprint-doc artifact's "## Success Metrics" section
+// (actions/extract-goal-metrics.ts). No separate stored field: the artifact
+// IS the source of truth, so a sprint that never wrote that section
+// correctly renders an honest empty state rather than fabricated metrics.
+// The action throws when no sprint-doc artifact exists at all — surfaced to
+// the caller as a query error, not swallowed, so the UI can render its own
+// "尚未创建 sprint-doc" empty state instead of a silent blank.
+export function useGoalMetrics(sprintId: string) {
+  return useActionQuery(
+    "extract-goal-metrics",
+    { sprintId },
+    { enabled: !!sprintId, retry: false },
+  ) as {
+    data?: import("@shared/types").ExtractedGoalMetrics;
+    isLoading: boolean;
+    error: unknown;
+  };
+}
+
 export function useUpdateSprint() {
   const qc = useQueryClient();
   return useActionMutation("update-sprint", {

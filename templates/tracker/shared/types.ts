@@ -224,7 +224,45 @@ export type ItemType = "需求" | "任务" | "缺陷" | "测试" | "生产问题
 export type ItemRisk = "low" | "medium" | "high";
 export type ExecutionMode = "manual" | "auto";
 export type SprintStatus = "规划" | "进行中" | "已完成" | "已发布";
-export type SprintPhase = "planning" | "executing" | "done";
+// S6 八相位驾驶舱 (03-tracker.md §5.2): widened additively from the original
+// 3-value planning|executing|done — existing rows keep working unchanged
+// (no DB migration: `phase` is a free TEXT column, never CHECK-constrained).
+// "auditing" is the internal key for the doc's "目标审计" phase (= gap-analysis
+// / Phase H) — advance-stage.ts's ACTIVE_PHASES array already used this exact
+// spelling before this type existed, so it's kept for consistency rather than
+// renamed to a literal transliteration.
+export type SprintPhase =
+  | "planning"
+  | "designing"
+  | "executing"
+  | "verifying"
+  | "auditing"
+  | "promoting"
+  | "storytelling"
+  | "done";
+export const SPRINT_PHASE_ORDER: SprintPhase[] = [
+  "planning",
+  "designing",
+  "executing",
+  "verifying",
+  "auditing",
+  "promoting",
+  "storytelling",
+  "done",
+];
+// Display label per phase — matches the s6-sprint-cockpit.html prototype's
+// phase-bar text verbatim (mixed en/zh: only "auditing" renders in Chinese
+// there, as "目标审计" / gap-analysis), rather than translating every phase.
+export const SPRINT_PHASE_LABELS: Record<SprintPhase, string> = {
+  planning: "planning",
+  designing: "designing",
+  executing: "executing",
+  verifying: "verifying",
+  auditing: "目标审计",
+  promoting: "promoting",
+  storytelling: "storytelling",
+  done: "done",
+};
 export type StageStatus = "待执行" | "执行中" | "已完成" | "已驳回" | "跳过";
 export type StageName =
   | "待办"
@@ -265,6 +303,27 @@ export interface SprintDetail extends Sprint {
   itemCount: number;
   delivered: number;
   stages: Stage[];
+}
+
+// Goal metrics (S6 驾驶舱 Goal 卡) — mirrors
+// actions/extract-goal-metrics.ts's GoalMetric/ParsedSuccessMetrics exactly
+// (that action deterministically parses the M-numbered "## Success Metrics"
+// section out of the sprint's latest sprint-doc artifact; there is no
+// separate stored goalMetrics column — the artifact IS the source of truth,
+// so the Goal card never shows data that wasn't actually written into a
+// real planning doc). The verdict dimension (MET/PARTIAL/UNMET) has no
+// producer yet (that's gap-analysis / the 目标审计 phase, out of this
+// scope) — every extracted metric is honestly "pending" until that exists.
+export interface GoalMetric {
+  id: string;
+  type: "Leading" | "Lagging";
+  statement: string;
+  signal: string;
+}
+export interface ExtractedGoalMetrics {
+  goal: string;
+  metrics: GoalMetric[];
+  warnings: string[];
 }
 export interface TrackerWorkItem {
   id: string;
@@ -431,12 +490,14 @@ export type ApprovalStatus = "pending" | "approved" | "rejected";
 export type GateKey =
   | "plan-signoff"
   | "design-signoff"
+  | "ui-signoff"
   | "escalation"
   | "audit-deferral";
 
 export const GATE_KEY_LABELS: Record<GateKey, string> = {
   "plan-signoff": "计划签批",
   "design-signoff": "设计签批",
+  "ui-signoff": "UI签批",
   escalation: "升级审批",
   "audit-deferral": "审计推迟",
 };

@@ -3,9 +3,10 @@ import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
+import { eq, isNull } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
-import { eq, isNull } from "drizzle-orm";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope, and } from "../server/lib/access.js";
 
@@ -19,7 +20,13 @@ export default defineAction({
   schema: z.object({
     sprintId: z.string().min(1).describe("Sprint ID to attach the approval to"),
     gateKey: z
-      .enum(["plan-signoff", "design-signoff", "escalation", "audit-deferral"])
+      .enum([
+        "plan-signoff",
+        "design-signoff",
+        "ui-signoff",
+        "escalation",
+        "audit-deferral",
+      ])
       .describe("Gate type"),
     workItemId: z
       .string()
