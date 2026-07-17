@@ -88,11 +88,15 @@ export function parseOutputSchemaProperties(
     let enumValues: string[] | undefined;
     if (raw.enum !== undefined) {
       if (
+        raw.type !== "string" ||
         !Array.isArray(raw.enum) ||
         !raw.enum.every((v) => typeof v === "string")
       ) {
         return UNSTRUCTURABLE;
       }
+      // Present-but-empty `enum: []` still means "enum mode, no values yet"
+      // (distinct from an absent `enum` key, which means "not an enum") —
+      // preserve it as `enumValues: []`, not `undefined`.
       enumValues = raw.enum as string[];
     }
 
@@ -124,8 +128,12 @@ export function serializeOutputSchemaProperties(
   const required = named.filter((p) => p.required).map((p) => p.name);
   const propsOut: Record<string, unknown> = {};
   for (const p of named) {
+    // `enumValues !== undefined` (not `.length > 0`) — a freshly-toggled
+    // enum field starts with zero values and must still emit a real (if
+    // empty) `enum` key, or the next parse reads it back as a plain string
+    // and the toggle silently reverts.
     propsOut[p.name] =
-      p.type === "string" && p.enumValues && p.enumValues.length > 0
+      p.type === "string" && p.enumValues !== undefined
         ? { type: "string", enum: p.enumValues }
         : { type: p.type };
   }

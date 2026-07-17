@@ -91,10 +91,42 @@ describe("parseOutputSchemaProperties", () => {
     ).toEqual({ structurable: false, properties: [] });
   });
 
+  it("falls back to unstructurable for a non-string type carrying a string-array enum (e.g. boolean)", () => {
+    expect(
+      parseOutputSchemaProperties({
+        type: "object",
+        properties: { flag: { type: "boolean", enum: ["yes", "no"] } },
+      }),
+    ).toEqual({ structurable: false, properties: [] });
+  });
+
   it("falls back to unstructurable for an unrecognized top-level key ($ref etc.)", () => {
     expect(
       parseOutputSchemaProperties({ type: "object", $ref: "#/definitions/x" }),
     ).toEqual({ structurable: false, properties: [] });
+  });
+
+  it("parses a present-but-empty `enum: []` as enumValues: [] (still enum mode), distinct from an absent enum key", () => {
+    expect(
+      parseOutputSchemaProperties({
+        type: "object",
+        properties: {
+          verdict: { type: "string", enum: [] },
+          plain: { type: "string" },
+        },
+      }),
+    ).toEqual({
+      structurable: true,
+      properties: [
+        { name: "verdict", type: "string", required: false, enumValues: [] },
+        {
+          name: "plain",
+          type: "string",
+          required: false,
+          enumValues: undefined,
+        },
+      ],
+    });
   });
 });
 
@@ -151,6 +183,93 @@ describe("serializeOutputSchemaProperties", () => {
     expect(parsed.structurable).toBe(true);
     const serialized = serializeOutputSchemaProperties(parsed.properties);
     expect(parseOutputSchemaProperties(serialized)).toEqual(parsed);
+  });
+
+  it("emits a real (if empty) `enum: []` key for a freshly-toggled enum field with zero values, not a plain string", () => {
+    const result = serializeOutputSchemaProperties([
+      { name: "verdict", type: "string", required: false, enumValues: [] },
+    ]) as Record<string, unknown>;
+    expect(result.properties).toEqual({
+      verdict: { type: "string", enum: [] },
+    });
+  });
+});
+
+// Regression test for the reported bug: clicking "设为枚举 (enum)" on a plain
+// string field set `enumValues: []` to enter enum mode, but serialize used
+// to gate the `enum` key on `.length > 0` and drop it — so the very next
+// parse (the same render cycle the UI actually does on every commit) read
+// back a schema with no `enum` key, set `enumValues: undefined`, and
+// `isEnum` (`type === "string" && enumValues !== undefined`) flipped back to
+// false. The toggle looked like a no-op and there was no way to create a
+// brand-new enum field through the structured editor.
+describe("toggle-to-enum UI flow (regression)", () => {
+  it("stays in enum mode across a full toggle → serialize → re-parse cycle with zero values", () => {
+    // Start: a plain string field, never an enum (state a).
+    const plain: SchemaPropertyDraft = {
+      name: "verdict",
+      type: "string",
+      required: false,
+      enumValues: undefined,
+    };
+    const isEnum = (p: SchemaPropertyDraft) =>
+      p.type === "string" && p.enumValues !== undefined;
+    expect(isEnum(plain)).toBe(false);
+
+    // Click "设为枚举 (enum)" — enters enum mode with zero values (state b).
+    const toggledOn: SchemaPropertyDraft = { ...plain, enumValues: [] };
+    expect(isEnum(toggledOn)).toBe(true);
+
+    // The editor commits on every change: serialize the draft list, then
+    // the next render re-parses `value` from scratch (the real UI path —
+    // `parsed` is recomputed from the committed schema, not cached).
+    const committed = serializeOutputSchemaProperties([toggledOn]);
+    const reparsed = parseOutputSchemaProperties(committed);
+    expect(reparsed.structurable).toBe(true);
+    expect(reparsed.properties).toHaveLength(1);
+    const roundTripped = reparsed.properties[0]!;
+    expect(roundTripped).toEqual({
+      name: "verdict",
+      type: "string",
+      required: false,
+      enumValues: [],
+    });
+    // The toggle must not have silently reverted.
+    expect(isEnum(roundTripped)).toBe(true);
+  });
+
+  it("preserves the first added enum value through a second commit → re-parse cycle", () => {
+    // Continuing from the empty-enum state above, the realistic next step:
+    // the user types a value into the now-visible chip-list editor.
+    const afterToggle: SchemaPropertyDraft = {
+      name: "verdict",
+      type: "string",
+      required: false,
+      enumValues: [],
+    };
+    const withFirstValue: SchemaPropertyDraft = {
+      ...afterToggle,
+      enumValues: ["approved"],
+    };
+
+    const committed = serializeOutputSchemaProperties([withFirstValue]);
+    expect(committed).toEqual({
+      type: "object",
+      properties: { verdict: { type: "string", enum: ["approved"] } },
+    });
+
+    const reparsed = parseOutputSchemaProperties(committed);
+    expect(reparsed).toEqual({
+      structurable: true,
+      properties: [
+        {
+          name: "verdict",
+          type: "string",
+          required: false,
+          enumValues: ["approved"],
+        },
+      ],
+    });
   });
 });
 
