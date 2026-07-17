@@ -1,22 +1,24 @@
-import { useState, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router";
-import { useTranslation } from "react-i18next";
-import { IconMenu2 } from "@tabler/icons-react";
-import { Sidebar } from "./Sidebar";
-import { Header } from "./Header";
-import { HeaderActionsProvider } from "./HeaderActions";
 import {
   AgentSidebar,
   focusAgentChat,
   navigateWithAgentChatViewTransition,
 } from "@agent-native/core/client";
-import { TAB_ID } from "@/lib/tab-id";
+import { IconMenu2 } from "@tabler/icons-react";
+import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router";
+
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { TAB_ID } from "@/lib/tab-id";
+
+import { Header } from "./Header";
+import { HeaderActionsProvider } from "./HeaderActions";
+import { Sidebar } from "./Sidebar";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -37,7 +39,6 @@ function routeOwnsToolbar(pathname: string): boolean {
     pathname.startsWith("/agents") ||
     pathname.startsWith("/workspaces") ||
     pathname.startsWith("/spawns") ||
-    pathname.startsWith("/pool") ||
     pathname.startsWith("/settings") ||
     pathname.startsWith("/extensions")
   );
