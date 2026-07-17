@@ -97,7 +97,7 @@ interface HealthTelemetry {
 
 interface PoolStatusData {
   vms: {
-    warm_idle: number;
+    available: number;
     busy: number;
     capacity: number;
     queue_waiting: number;
@@ -647,15 +647,14 @@ function CapacitySection() {
         ) : vms ? (
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px]">
             <span>
-              microVM 容量{" "}
+              spawn 并发上限{" "}
               <b className="font-mono text-foreground">{vms.capacity}</b>
             </span>
             <span>
               忙碌 <b className="font-mono text-foreground">{vms.busy}</b>
             </span>
             <span>
-              热机空闲{" "}
-              <b className="font-mono text-foreground">{vms.warm_idle}</b>
+              可用 <b className="font-mono text-foreground">{vms.available}</b>
             </span>
             <span>
               队列等待{" "}
@@ -664,13 +663,12 @@ function CapacitySection() {
           </div>
         ) : null}
         <DataSourceNote>
-          spawn 并发上限（G18）目前是固定容量 `DEFAULT_POOL_CAPACITY = 8`，与
-          reconciler 的 `poolCapacity` 常量保持一致；调整并发的
-          `set-concurrency` 尚未接入（server/runtime/backpressure.ts 明确标注为
-          "a future set-concurrency
-          wire-up"）——因此这里不提供可交互滑杆，避免呈现一个写不进去的控件。
-          上方「忙碌」「热机空闲」「队列等待」均从当前排队/spawn 快照实时推导，
-          不是独立的 VM 预热池状态。
+          spawn 并发上限（G18）目前是固定容量，从 server/engine/v3-reconciler.ts
+          的 `DEFAULT_POOL_CAPACITY = 8` 常量读取（单一出处）；调整并发的
+          `set-concurrency` 尚未接入（server/runtime/backpressure.ts 标注为 "a
+          future set-concurrency
+          wire-up"）——因此这里不提供可交互滑杆。上方数值均从当前排队/spawn
+          快照实时推导。
         </DataSourceNote>
         <DataTable<DispatchQueueItem>
           isLoading={queueLoading && queue.length === 0}

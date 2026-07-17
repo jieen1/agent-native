@@ -98,8 +98,10 @@ const RESOLVED_STATUSES = new Set(["done", "skipped"]);
 // spawn→node conduction rule (see reconcileSpawnConduction below).
 const SPAWN_TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
 
-// G18: default pool capacity; overridable via constructor option.
-const DEFAULT_POOL_CAPACITY = 8;
+// G18: default global spawn-dispatch concurrency ceiling; overridable via
+// constructor option. Exported so other modules (e.g. the poolStatus action)
+// read this single source of truth instead of mirroring the literal.
+export const DEFAULT_POOL_CAPACITY = 8;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
