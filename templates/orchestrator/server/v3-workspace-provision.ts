@@ -14,6 +14,8 @@
 // pass.
 
 import { spawn } from "node:child_process";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
@@ -173,6 +175,83 @@ export function execCmd(
   });
 }
 
+// ── Monorepo-aware vitest resolution ────────────────────────────────────────
+//
+// SDLC-0xx (dogfood false-positive, 07-16 board #47/#72): W2/W3 both invoke
+// `pnpm exec vitest ...`. For the original single-app-repo shape `dir` IS the
+// vitest-declaring package, so that always worked. The dogfood project's repo
+// is a MIRROR OF THIS MONOREPO — `dir` is the pnpm WORKSPACE root, whose own
+// package.json never lists `vitest` (every template/package declares it
+// individually via `"vitest": "catalog:"`, per this repo's own
+// pnpm-workspace.yaml). `pnpm exec` resolves bins from the invoking package's
+// own dependencies, not the whole workspace, so `pnpm exec vitest --version`
+// run AT the workspace root can never succeed — even right after a fully
+// successful `pnpm install` — and W2 never passes (ERR_PNPM_RECURSIVE_EXEC_
+// FIRST_FAIL, reproduced independently twice on 101).
+
+async function packageDeclaresVitest(pkgDir: string): Promise<boolean> {
+  try {
+    const raw = await readFile(join(pkgDir, "package.json"), "utf8");
+    const pkg = JSON.parse(raw) as {
+      dependencies?: Record<string, unknown>;
+      devDependencies?: Record<string, unknown>;
+    };
+    return Boolean(pkg.dependencies?.vitest ?? pkg.devDependencies?.vitest);
+  } catch {
+    return false;
+  }
+}
+
+async function listSubdirs(dir: string): Promise<string[]> {
+  try {
+    return (await readdir(dir, { withFileTypes: true }))
+      .filter(
+        (e) =>
+          e.isDirectory() &&
+          e.name !== "node_modules" &&
+          !e.name.startsWith("."),
+      )
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve the directory W2/W3 should actually invoke `pnpm exec vitest` in.
+ *
+ * Returns `dir` unchanged whenever `dir`'s own package.json already declares
+ * `vitest` (the original single-app-repo assumption) — zero behavior change
+ * for that shape, including a genuinely broken/uninstalled workspace (still
+ * fails exactly as before; this never widens what counts as "warm").
+ *
+ * Otherwise walks `dir`'s immediate children and grandchildren (bounded — no
+ * `node_modules`/dotdir descent, no pnpm-workspace.yaml glob parsing) for the
+ * first package.json that declares `vitest`, e.g. `templates/orchestrator` in
+ * this repo's own shape, and scopes the probe/smoke command into THAT
+ * directory instead. Falls back to `dir` when nothing is found anywhere, so a
+ * workspace where NO package resolves vitest still correctly fails W2/W3.
+ */
+export async function resolveVitestProjectDir(dir: string): Promise<string> {
+  if (await packageDeclaresVitest(dir)) return dir;
+
+  const level1 = await listSubdirs(dir);
+  for (const name of level1) {
+    const child = join(dir, name);
+    if (await packageDeclaresVitest(child)) return child;
+  }
+  for (const name of level1) {
+    const parent = join(dir, name);
+    for (const sub of await listSubdirs(parent)) {
+      const grandchild = join(parent, sub);
+      if (await packageDeclaresVitest(grandchild)) return grandchild;
+    }
+  }
+
+  return dir;
+}
+
 // ── W2: dependency prewarming ────────────────────────────────────────────────
 
 /** Shared pnpm store dir (hardlink cache — DESIGN §7 "共享 pnpm store 硬链"). */
@@ -188,6 +267,14 @@ export interface DepWarmReport {
   probeOutput: string;
   installOutput: string | null;
   durationMs: number;
+  /**
+   * The directory the probe actually ran in. Equals `dir` for a standalone
+   * single-app repo; a monorepo checkout whose OWN package.json doesn't
+   * declare `vitest` resolves to the first workspace member that does (see
+   * {@link resolveVitestProjectDir}) — kept on the report so `ready_report`
+   * shows WHERE warmth was proven, not just that it was.
+   */
+  probeDir: string;
 }
 
 export interface DepWarmOptions {
@@ -204,6 +291,12 @@ export interface DepWarmOptions {
  * shared hardlink cache, seconds not minutes) and re-probes. Throws
  * `WorkspaceNotReadyError('W2', …)` when the re-probe still fails — a node
  * never runs `pnpm install` itself (DESIGN §7: "职责归供给,不归 agent").
+ *
+ * The probe/re-probe run in {@link resolveVitestProjectDir}'s resolution of
+ * `dir` (itself, unless `dir` is a monorepo root that doesn't declare vitest
+ * — see that function). `pnpm install` always targets `dir` itself: it's a
+ * whole-workspace operation regardless of cwd depth, so scoping it would be a
+ * no-op at best and is left unchanged.
  */
 export async function assertDependenciesWarm(
   dir: string,
@@ -213,9 +306,10 @@ export async function assertDependenciesWarm(
   const probeTimeoutMs = opts.probeTimeoutMs ?? 15_000;
   const installTimeoutMs = opts.installTimeoutMs ?? 120_000;
   const startedAt = Date.now();
+  const probeDir = await resolveVitestProjectDir(dir);
 
   const probe = await exec("pnpm exec vitest --version", {
-    cwd: dir,
+    cwd: probeDir,
     timeoutMs: probeTimeoutMs,
   });
   if (probe.code === 0) {
@@ -225,6 +319,7 @@ export async function assertDependenciesWarm(
       probeOutput: probe.stdout || probe.stderr,
       installOutput: null,
       durationMs: Date.now() - startedAt,
+      probeDir,
     };
   }
 
@@ -235,14 +330,14 @@ export async function assertDependenciesWarm(
   );
 
   const reprobe = await exec("pnpm exec vitest --version", {
-    cwd: dir,
+    cwd: probeDir,
     timeoutMs: probeTimeoutMs,
   });
 
   if (reprobe.code !== 0) {
     throw new WorkspaceNotReadyError(
       "W2",
-      `pnpm exec vitest --version failed after install (exit ${reprobe.code}). ` +
+      `pnpm exec vitest --version failed after install (exit ${reprobe.code}, probeDir=${probeDir}). ` +
         `install output: ${(install.stdout + install.stderr).slice(-2000)} ` +
         `reprobe output: ${(reprobe.stdout + reprobe.stderr).slice(-500)}`,
     );
@@ -254,6 +349,7 @@ export async function assertDependenciesWarm(
     probeOutput: reprobe.stdout || reprobe.stderr,
     installOutput: (install.stdout + install.stderr).slice(-4000),
     durationMs: Date.now() - startedAt,
+    probeDir,
   };
 }
 
@@ -282,6 +378,8 @@ export interface SmokeReport {
   /** Best-effort parsed test count from the reporter output; null if unparseable. */
   testsRun: number | null;
   durationMs: number;
+  /** The directory `command` actually ran in — see {@link runTestCmdSmoke}. */
+  execDir: string;
 }
 
 export interface SmokeOptions {
@@ -304,15 +402,25 @@ function parseTestsRun(output: string): number | null {
  * W3 — run `test_cmd_smoke` (real subprocess, 120s default timeout per
  * DESIGN §7). A non-zero exit (including a timeout) throws
  * `WorkspaceNotReadyError('W3', …)`; the workspace never reaches `ready_at`.
+ *
+ * The DEFAULT command shells out to `pnpm exec vitest`, which hits the exact
+ * same monorepo-root resolution problem as W2 (see
+ * {@link resolveVitestProjectDir}) — so the default command's cwd is resolved
+ * the same way. An explicit project-level override (`opts.command` set) is
+ * respected literally at `dir` — an operator who configured their own command
+ * owns its working directory; auto-relocating it could silently break a
+ * command that assumes repo-root-relative paths.
  */
 export async function runTestCmdSmoke(
   dir: string,
   opts: SmokeOptions = {},
 ): Promise<SmokeReport> {
   const exec = opts.exec ?? execCmd;
+  const usingDefault = !opts.command || opts.command.trim() === "";
   const command = resolveTestCmdSmoke(opts.command);
   const timeoutMs = opts.timeoutMs ?? 120_000;
-  const res = await exec(command, { cwd: dir, timeoutMs });
+  const execDir = usingDefault ? await resolveVitestProjectDir(dir) : dir;
+  const res = await exec(command, { cwd: execDir, timeoutMs });
   const output = `${res.stdout}\n${res.stderr}`.trim();
 
   if (res.timedOut) {
@@ -324,7 +432,7 @@ export async function runTestCmdSmoke(
   if (res.code !== 0) {
     throw new WorkspaceNotReadyError(
       "W3",
-      `test_cmd_smoke failed (exit ${res.code}): ${command}\n${output.slice(-2000)}`,
+      `test_cmd_smoke failed (exit ${res.code}, execDir=${execDir}): ${command}\n${output.slice(-2000)}`,
     );
   }
 
@@ -335,5 +443,6 @@ export async function runTestCmdSmoke(
     output: output.slice(-4000),
     testsRun: parseTestsRun(output),
     durationMs: res.durationMs,
+    execDir,
   };
 }

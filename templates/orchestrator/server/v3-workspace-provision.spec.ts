@@ -4,16 +4,18 @@
 // execute" half (T-F1-07's anti-empty-dir check) runs a REAL nested vitest
 // subprocess over a temp fixture — no mocked green.
 
-import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   mkdtempSync,
   rmSync,
   writeFileSync,
   mkdirSync,
   existsSync,
+  readFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 import {
   execCmd,
@@ -21,6 +23,7 @@ import {
   runTestCmdSmoke,
   resolvePnpmStoreDir,
   resolveTestCmdSmoke,
+  resolveVitestProjectDir,
   DEFAULT_TEST_CMD_SMOKE,
   WorkspaceNotReadyError,
   DiffBaseUnresolvableError,
@@ -121,7 +124,9 @@ describe("assertDependenciesWarm (W2, T-F1-06)", () => {
     expect(report.durationMs).toBeGreaterThanOrEqual(0);
     // Exactly one call — the probe. No install.
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec.mock.calls[0]?.[0 as number]).toBe("pnpm exec vitest --version");
+    expect(exec.mock.calls[0]?.[0 as number]).toBe(
+      "pnpm exec vitest --version",
+    );
   });
 
   it("cold probe → pnpm install --prefer-offline --store-dir <shared store> → re-probe passes", async () => {
@@ -162,6 +167,160 @@ describe("assertDependenciesWarm (W2, T-F1-06)", () => {
     expect(resolvePnpmStoreDir()).toBe("/workspaces/.pnpm-store");
     process.env.ORCH_PNPM_STORE = "/mnt/store";
     expect(resolvePnpmStoreDir()).toBe("/mnt/store");
+  });
+});
+
+// ── resolveVitestProjectDir (SDLC-0xx dogfood false positive, board #47/#72) ─
+//
+// The dogfood project's repo is a MIRROR OF THIS MONOREPO: `dir` passed to W2/
+// W3 is the pnpm WORKSPACE root, whose own package.json never lists `vitest`
+// (every template/package declares it individually). `pnpm exec vitest
+// --version` run there can never succeed even after a fully successful `pnpm
+// install` (ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL) — these tests exercise the
+// real filesystem-walk fix directly, with REAL temp-dir fixtures (no mocked
+// resolution).
+
+describe("resolveVitestProjectDir (monorepo-aware W2/W3 routing)", () => {
+  it("returns dir unchanged when dir's own package.json already declares vitest (standalone repo — zero behavior change)", async () => {
+    const root = tempDir("f1-vitest-standalone-");
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "^4.1.5" } }),
+    );
+    await expect(resolveVitestProjectDir(root)).resolves.toBe(root);
+  });
+
+  it("walks one level down (this repo's own templates/<app> shape) for the first package declaring vitest", async () => {
+    const root = tempDir("f1-vitest-mono-l1-");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
+    const appDir = join(root, "templates", "orchestrator");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "catalog:" } }),
+    );
+
+    await expect(resolveVitestProjectDir(root)).resolves.toBe(appDir);
+  });
+
+  it("ignores node_modules and dotdirs while walking (never picks a vendored copy)", async () => {
+    const root = tempDir("f1-vitest-skip-");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
+    mkdirSync(join(root, "node_modules", "vitest"), { recursive: true });
+    writeFileSync(
+      join(root, "node_modules", "vitest", "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "^4.1.5" } }),
+    );
+    mkdirSync(join(root, ".git"), { recursive: true });
+    writeFileSync(
+      join(root, ".git", "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "^4.1.5" } }),
+    );
+
+    await expect(resolveVitestProjectDir(root)).resolves.toBe(root);
+  });
+
+  it("falls back to dir when NO package anywhere declares vitest (genuinely broken/non-monorepo workspace — never widens what counts as warm)", async () => {
+    const root = tempDir("f1-vitest-broken-");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
+    const pkgDir = join(root, "some-pkg");
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(
+      join(pkgDir, "package.json"),
+      JSON.stringify({ dependencies: { lodash: "^4.0.0" } }),
+    );
+
+    await expect(resolveVitestProjectDir(root)).resolves.toBe(root);
+  });
+});
+
+describe("assertDependenciesWarm — monorepo routing (SDLC-0xx dogfood false positive)", () => {
+  it("cold monorepo checkout: probe/reprobe scope into the vitest-declaring subdir; install still targets the workspace root", async () => {
+    const root = tempDir("f1-w2-mono-cold-");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
+    const appDir = join(root, "templates", "orchestrator");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "catalog:" } }),
+    );
+
+    const calls: { command: string; cwd: string }[] = [];
+    const exec = vi.fn(async (command: string, opts: { cwd: string }) => {
+      calls.push({ command, cwd: opts.cwd });
+      if (command.startsWith("pnpm install"))
+        return ok("installed workspace deps");
+      // First call is the cold probe (miss); second is the post-install reprobe.
+      return calls.length === 1
+        ? fail(254, "ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL")
+        : ok("4.1.9");
+    });
+
+    const report = await assertDependenciesWarm(root, { exec });
+
+    expect(report.ok).toBe(true);
+    expect(report.installed).toBe(true);
+    expect(report.probeDir).toBe(appDir);
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toEqual({
+      command: "pnpm exec vitest --version",
+      cwd: appDir,
+    });
+    expect(calls[1]?.command).toContain("pnpm install --prefer-offline");
+    // Install is a whole-workspace operation — it ALWAYS targets dir itself,
+    // never the resolved subdir (T-F1-06 regression: scoping it would just
+    // reinstall the same workspace from a deeper cwd, no benefit, more risk).
+    expect(calls[1]?.cwd).toBe(root);
+    expect(calls[2]).toEqual({
+      command: "pnpm exec vitest --version",
+      cwd: appDir,
+    });
+  });
+
+  it("warm monorepo checkout: a single probe scoped straight to the subdir — root is never touched", async () => {
+    const root = tempDir("f1-w2-mono-warm-");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
+    const appDir = join(root, "templates", "orchestrator");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "catalog:" } }),
+    );
+
+    const exec = vi.fn(async (_command: string, _opts: { cwd: string }) =>
+      ok("4.1.9"),
+    );
+    const report = await assertDependenciesWarm(root, { exec });
+
+    expect(report.ok).toBe(true);
+    expect(report.installed).toBe(false);
+    expect(report.probeDir).toBe(appDir);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec.mock.calls[0]?.[0]).toBe("pnpm exec vitest --version");
+    expect(exec.mock.calls[0]?.[1]).toMatchObject({ cwd: appDir });
+  });
+
+  it("genuinely broken workspace (no package anywhere resolves vitest, even after install) still fails W2 — the fix must not weaken this", async () => {
+    const root = tempDir("f1-w2-mono-broken-");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
+    mkdirSync(join(root, "templates", "orchestrator"), { recursive: true });
+    writeFileSync(
+      join(root, "templates", "orchestrator", "package.json"),
+      JSON.stringify({ dependencies: {} }),
+    );
+
+    const exec = vi.fn(async (_command: string, _opts: { cwd: string }) =>
+      fail(254, "ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL"),
+    );
+
+    await expect(assertDependenciesWarm(root, { exec })).rejects.toMatchObject({
+      name: "WorkspaceNotReadyError",
+      stage: "W2",
+      errorClass: "infra",
+    });
+    // The probe/reprobe/install all ran at dir (root) — resolveVitestProjectDir
+    // found nothing to scope into, so behavior is byte-for-byte the pre-fix path.
+    expect(exec.mock.calls.every((c) => c[1]?.cwd === root)).toBe(true);
   });
 });
 
@@ -236,4 +395,115 @@ describe("runTestCmdSmoke (W3, T-F1-07)", () => {
       }),
     ).rejects.toMatchObject({ name: "WorkspaceNotReadyError", stage: "W3" });
   }, 180_000);
+});
+
+// ── runTestCmdSmoke — monorepo routing (SDLC-0xx dogfood false positive) ────
+
+describe("runTestCmdSmoke — monorepo routing", () => {
+  it("default command scopes into the vitest-declaring subdir for a monorepo root", async () => {
+    const root = tempDir("f1-w3-mono-default-");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
+    const appDir = join(root, "templates", "orchestrator");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "catalog:" } }),
+    );
+
+    const exec = vi.fn(async (_command: string, _opts: { cwd: string }) =>
+      ok("Tests 1 passed"),
+    );
+    const report = await runTestCmdSmoke(root, { exec });
+
+    expect(report.ok).toBe(true);
+    expect(report.execDir).toBe(appDir);
+    expect(exec.mock.calls[0]?.[0]).toBe(DEFAULT_TEST_CMD_SMOKE);
+    expect(exec.mock.calls[0]?.[1]).toMatchObject({ cwd: appDir });
+  });
+
+  it("an explicit project-level override still runs at dir itself, even in a monorepo shape (operator owns the cwd contract)", async () => {
+    const root = tempDir("f1-w3-mono-override-");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
+    mkdirSync(join(root, "templates", "orchestrator"), { recursive: true });
+    writeFileSync(
+      join(root, "templates", "orchestrator", "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "catalog:" } }),
+    );
+
+    const exec = vi.fn(async (_command: string, _opts: { cwd: string }) =>
+      ok("Tests 1 passed"),
+    );
+    const report = await runTestCmdSmoke(root, {
+      exec,
+      command: "./scripts/custom-smoke.sh",
+    });
+
+    expect(report.execDir).toBe(root);
+    expect(exec.mock.calls[0]?.[1]).toMatchObject({ cwd: root });
+  });
+
+  it("a genuinely broken monorepo (no package resolves vitest) still fails W3", async () => {
+    const root = tempDir("f1-w3-mono-broken-");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
+    mkdirSync(join(root, "templates", "orchestrator"), { recursive: true });
+    writeFileSync(
+      join(root, "templates", "orchestrator", "package.json"),
+      JSON.stringify({ dependencies: {} }),
+    );
+
+    const exec = vi.fn(async (_command: string, _opts: { cwd: string }) =>
+      fail(254, "ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL"),
+    );
+
+    await expect(runTestCmdSmoke(root, { exec })).rejects.toMatchObject({
+      name: "WorkspaceNotReadyError",
+      stage: "W3",
+    });
+  });
+});
+
+// ── REAL end-to-end reproduction against this repo's own monorepo root ──────
+//
+// This is the actual bug shape reported from 101 (task board #47/#72): the
+// dogfood project's workspace IS a checkout of this same monorepo, and its
+// root package.json genuinely does not declare vitest (confirmed below, not
+// assumed) — every template declares it individually. No injected `exec`
+// here — this spawns REAL `pnpm`/`vitest` subprocesses against the real
+// checkout two directories up from this template, so it only proves the fix
+// against a genuine monorepo shape, not a synthetic fixture.
+
+describe("W2 real end-to-end reproduction (SDLC-0xx dogfood false positive)", () => {
+  const monorepoRoot = join(process.cwd(), "..", "..");
+  const looksLikeMonorepoRoot =
+    existsSync(join(monorepoRoot, "pnpm-workspace.yaml")) &&
+    existsSync(join(monorepoRoot, "package.json"));
+
+  it.skipIf(!looksLikeMonorepoRoot)(
+    "root package.json has no vitest of its own (the bug precondition) yet assertDependenciesWarm now resolves + passes",
+    async () => {
+      const rootPkg = JSON.parse(
+        readFileSync(join(monorepoRoot, "package.json"), "utf8"),
+      ) as {
+        dependencies?: Record<string, unknown>;
+        devDependencies?: Record<string, unknown>;
+      };
+      expect(
+        rootPkg.dependencies?.vitest ?? rootPkg.devDependencies?.vitest,
+      ).toBeUndefined();
+
+      const report = await assertDependenciesWarm(monorepoRoot, {
+        probeTimeoutMs: 30_000,
+        installTimeoutMs: 180_000,
+      });
+
+      expect(report.ok).toBe(true);
+      // Proves the fix actually routed AWAY from the root (which is exactly
+      // where the pre-fix probe always failed with
+      // ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL) into a real workspace member.
+      expect(report.probeDir).not.toBe(monorepoRoot);
+      expect(report.probeDir.startsWith(monorepoRoot)).toBe(true);
+      expect(report.probeOutput).toMatch(/\d+\.\d+\.\d+/);
+    },
+    180_000,
+  );
 });
