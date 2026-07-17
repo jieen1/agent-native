@@ -124,8 +124,8 @@ v3_workspaces 加列:base_sha TEXT(建区时目标分支 tip)、ready_at TIMESTA
 <td>①调用改经 runAgentLoopDirectWithSoftTimeout(core 既有导出,usage 返回形状不变);②opts 增 threadId=spawn:{spawnId}(前缀防撞 chat 线程)+ ownerEmail/orgId——激活 OM 消费/tool journal/context-xray;③send sink 累计 tool_result 体量,超 ORCH_DEV_COMPACT_THRESHOLD_TOKENS(默认 70000)fire-and-forget maybeCompactThread;④isResumableEngineError→appendAgentLoopContinuation 续传,spawn_events 记 context.compacted / loop.resumed</td>
 </tr>
 <tr>
-<td>server/engine/v3-dispatcher.ts(→ F2b 后续切片)</td>
-<td>attempt 重试:上一 attempt 溢出终止且有续传检查点→buildPrompt 注入「已完成产物清单+剩余任务」段(C3,禁止从零重跑)。F2 首切片实施期 v3-dispatcher 明令禁碰(F1/F4 并行防冲突),checkpoint 消费端(重试注入)整体改判入 F2b;当前 checkpoint 为只写</td>
+<td>server/engine/v3-dispatcher.ts(F2b 已交付)</td>
+<td>attempt 重试:fetchPriorCheckpoint 按 node_id 查该节点已有的 v3_spawns 行(存在即为重试),取最近一次的 context_checkpoint;非空则 formatCheckpointInjection 生成「已完成产物清单+剩余任务」段,在插值之后拼到 rendered_prompt 尾部(C3,禁止从零重跑)。首次 attempt 或检查点为空时不注入。覆盖 in-process 重试与 reconcile 触发的重新派发两条路径(T-F2-06)</td>
 </tr>
 <tr>
 <td>server/runtime/executors/context-checkpoint.ts(新,约 80 行)</td>
@@ -545,10 +545,10 @@ F0(交付主干统一)
 </tr>
 <tr>
 <td>T-F2-06</td>
-<td>重启后 checkpoint 注入(注入)【未覆盖——checkpoint 消费端(dispatcher 重试注入)属 F2b 后续切片,当前 checkpoint 为只写】</td>
+<td>重启后 checkpoint 注入(注入)【F2b 已交付——dispatcher 侧注入逻辑见 v3-dispatcher.ts fetchPriorCheckpoint/formatCheckpointInjection,单测见 v3-dispatcher.spec.ts「F2b: retry checkpoint injection (T-F2-06)」】</td>
 <td>进程级中断不归零(用重启法,不预设 kill)</td>
-<td>维护窗口:dev spawn 运行中重启 orchestrator;reconcile 重置后查新 attempt 的 rendered_prompt</td>
-<td>prompt 含「已完成产物清单+剩余任务」段;不重复实现已完成文件(F2b 交付后验收)</td>
+<td>单测以预置一条带 context_checkpoint 的 v3_spawns 行 + 重新调用 spawn() 模拟 reconcile 重置后的重新派发,断言新 spawn 的 rendered_prompt;真实的进程级重启仍需 101 隔离窗口做端到端确证</td>
+<td>prompt 含「已完成产物清单+剩余任务」段;不重复实现已完成文件;首次 attempt 或检查点为空时不注入(单测覆盖)</td>
 </tr>
 <tr>
 <td>T-F2-07</td>
@@ -921,8 +921,8 @@ F0(交付主干统一)
 <td>T-F2-02…05、08、13</td>
 </tr>
 <tr>
-<td>F2 dispatcher 重试注入(→ F2b 后续切片)</td>
-<td>T-F2-06(F2b 交付后验收)</td>
+<td>F2 dispatcher 重试注入(F2b 已交付)</td>
+<td>T-F2-06</td>
 </tr>
 <tr>
 <td>F2 context-checkpoint.ts</td>

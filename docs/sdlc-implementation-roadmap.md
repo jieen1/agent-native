@@ -103,7 +103,7 @@ output-tokens 告警、engine-loop 32k、brain-model 目录)。**生产环境是
 - **依赖**:F0(基线定义在交付主干上)。
 - **页面**:引擎侧为主;可选 S7 运行详情加 staleness 提示(原型未含,非必需)。
 
-### F2 执行器上下文管理(调研结论 B)【已交付 2026-07-12(F2b 消费端切片待办)】(设计出处 02 §4.1 C1–C4)
+### F2 执行器上下文管理(调研结论 B)【已交付 2026-07-12(F2b 消费端切片已在分支交付,未部署 101)】(设计出处 02 §4.1 C1–C4)
 
 - **做什么**:engine-loop 给 runAgentLoop 传 `threadId=spawnId + ownerEmail/orgId`
   激活 OM 压缩/工具日志;send sink 超阈值触发 `maybeCompactThread`;外层换

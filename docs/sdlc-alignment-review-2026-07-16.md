@@ -13,7 +13,7 @@
 </tr>
 <tr>
 <td>机制层(F0–F10 地基,11 项)</td>
-<td><b>~85% 已交付并部署</b>(F2b 消费端切片待办)</td>
+<td><b>~85% 已交付并部署</b>(F2b 消费端切片已在分支交付,待部署 101)</td>
 <td>2026-07-12 合入统一主干并部署 101,迁移落库、功能冒烟通过;2026-07-16 随全量重建仍在线</td>
 </tr>
 <tr>
@@ -60,7 +60,7 @@
 <tr>
 <td>F2 执行器上下文</td>
 <td>路线图 §1</td>
-<td>✅(F2b 消费端待办)</td>
+<td>✅(F2b 消费端已在分支交付,待合并)</td>
 <td>✅</td>
 <td>❌ 未触发</td>
 </tr>
@@ -196,7 +196,7 @@
 </tr>
 <tr>
 <td>路线图(24OzeoGlaJL9)仍标 8 项 F 能力【缺失】,与部署事实矛盾</td>
-<td>全部状态标签修正为【已交付 2026-07-12】(F2 注明 F2b 待办),加时点声明,repo+content 双改</td>
+<td>全部状态标签修正为【已交付 2026-07-12】(F2 注明 F2b 待办,已于 2026-07-17 在分支交付——见 T-F2-06),加时点声明,repo+content 双改</td>
 </tr>
 <tr>
 <td>《F5–F10 详细实施方案》从未发布到 content</td>
@@ -243,7 +243,7 @@
 ### R5 四域打通(design/content 集成)
 ui-spec 子流程(设计稿→评审→实现比对)、content 项目文档库自动归档。**验收:一个带 UI 的 issue 走完 05 章旅程,产物自动落库。**
 
-> 工程卫生并行项:接入 agent-native doctor;audit backlog 里的 O12(action 面收敛)、T-D(automations 替代 4s 轮询)、O13(去残余硬编码)按机会处理;F2b、回写持久 outbox 排入 R2 之后。
+> 工程卫生并行项:接入 agent-native doctor;audit backlog 里的 O12(action 面收敛)、T-D(automations 替代 4s 轮询)、O13(去残余硬编码)按机会处理;F2b(已交付,见 T-F2-06)、回写持久 outbox 排入 R2 之后。
 
 ## 五、UI/设计系统:Foundry v3(本次交付)
 

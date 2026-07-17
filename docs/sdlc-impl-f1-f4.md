@@ -134,7 +134,7 @@ W1 → W2/W3(供给管道)→ staleness 事件(T-F1-12,**本轮未排上,列为�
 | 文件 | 改动 |
 |---|---|
 | `server/runtime/executors/engine-loop.ts` | ①runAgentLoop 调用改经 `runAgentLoopDirectWithSoftTimeout`(core 既有导出),透传 usage 返回形状不变;②opts 增 `threadId: spawn:${spawnId}`(前缀防与 chat threadId 撞库)+ 既有 ownerEmail/orgId——激活 core 内 OM 消费(每迭代 `applyObservationalMemoryToContext`)、tool journal、context-xray;③send sink 累计 tool_result 字符数,超阈值(`ORCH_DEV_COMPACT_THRESHOLD_TOKENS`,默认 70_000,字符/4 估算)fire-and-forget `maybeCompactThread({ threadId, ownerEmail, orgId, messages })`;④截断/溢出类可续错误(`isResumableEngineError`)→ 续传分支:`appendAgentLoopContinuation`(已写文件清单+剩余任务),同一 spawn 继续,`spawn_events` 记 `context.compacted` / `loop.resumed` 事件 |
-| `server/engine/v3-dispatcher.ts`(**→ F2b 后续切片**) | spawn attempt 重试路径:上一 attempt 因溢出终止且存在续传检查点(见 2C)→ 新 attempt 的 buildPrompt 注入「已完成产物清单+剩余任务」段(C3:禁止从零重跑)。**F2 首切片实施期 v3-dispatcher 明令禁碰(F1/F4 并行防冲突),checkpoint 消费端(重试注入)整体改判入 F2b;当前 checkpoint 为只写** |
+| `server/engine/v3-dispatcher.ts`(**F2b 已交付**) | spawn attempt 重试路径:`fetchPriorCheckpoint` 按 `node_id` 查该节点已有的 `v3_spawns` 行(存在即为重试),取最近一次的 `context_checkpoint`;非空则 `formatCheckpointInjection` 生成「已完成产物清单+剩余任务」段,在 renderTemplate 插值**之后**拼到 rendered_prompt 尾部(C3:禁止从零重跑;插值后拼接是为了不让上一轮 LLM 输出里的字面 `{{...}}` 二次进入模板渲染器)。首次 attempt 或上一 attempt 检查点为空/未写入时不注入任何内容,不伪造占位段。覆盖 in-process 重试(`fireAndTrackSpawn`)与 reconcile 触发的重新派发(T-F2-06 的重启场景)两条路径,因为两者都经同一个 `spawn()`。 |
 | `server/runtime/executors/context-checkpoint.ts`(新,~80 行) | 从 send 流增量提取「已写文件清单」(edit/write 工具调用成功记录),spawn 终止时落 `v3_spawns.context_checkpoint JSONB`;供 dispatcher 重试注入 |
 
 **接口/配置**
@@ -399,7 +399,7 @@ UI=Playwright(登录态 check-state.json 法)。
 | T-F2-03 | threadId 传入激活 OM 通道(集成) | dev 循环挂上 OM/日志线程(簇十,M3-D 根因) | 101 隔离窗口跑一轮 dev spawn;SQL 按 threadId 前缀查 observational_memory 表 | observational_memory 出现 `spawn:<id>` 键行(证明 threadId 已透传并激活通道,**确定性**);压缩是否实际发生由 T-F2-10 端到端确证,本条只锁通道接通,不依赖单轮是否越阈值 |
 | T-F2-04 | threadId 前缀防撞 | spawn 记忆不污染 chat 线程 | 对照跑一轮 chat 会话;SQL 查 observational_memory 两类 threadId | `spawn:*` 与 `bt_*` 行互斥,无交叉读写 |
 | T-F2-05 | 断流续传(注入;禁 kill) | 截断不从零重跑(C3;M3-D 三连溢出教训) | 隔离窗口:dev spawn 运行中把 runtime_config baseUrl 临时指向不可达端口(或网络层阻断 :9000),随后恢复 | `isResumableEngineError` 命中→续传;同一 spawn 续跑完成;spawn_events 有 `loop.resumed`;已写文件无重复写(journal 防重放) |
-| T-F2-06 | 重启后 checkpoint 注入(注入)**【❌ 未覆盖——checkpoint 消费端(dispatcher 重试注入)属 F2b 后续切片,当前 checkpoint 为只写】** | 进程级中断不归零(用重启法,不预设 kill) | 维护窗口:dev spawn 运行中重启 orchestrator;reconcile 重置后查新 attempt 的 rendered_prompt | prompt 含「已完成产物清单+剩余任务」段;不重复实现已完成文件(**F2b 交付后验收**) |
+| T-F2-06 | 重启后 checkpoint 注入(注入)**【✅ F2b 已交付——dispatcher 侧注入逻辑见 v3-dispatcher.ts `fetchPriorCheckpoint`/`formatCheckpointInjection`,单测见 v3-dispatcher.spec.ts「F2b: retry checkpoint injection (T-F2-06)」describe 块】** | 进程级中断不归零(用重启法,不预设 kill) | 单测以「预置一条带 context_checkpoint 的 v3_spawns 行 + 重新调用 spawn()」模拟 reconcile 重置后的重新派发,断言新 spawn 的 rendered_prompt;**真实的进程级重启(维护窗口重启 orchestrator 进程)仍需 101 隔离窗口做端到端确证,单测覆盖的是重试注入逻辑本身,不是重启本身** | prompt 含「已完成产物清单+剩余任务」段;不重复实现已完成文件;首次 attempt 或检查点为空时不注入(单测覆盖) |
 | T-F2-07 | checkpoint 落盘与只增 | 断点数据可靠 | spawn 正常完成/异常终止两态查 v3_spawns.context_checkpoint | 两态均落盘;重复终止路径不覆盖已有清单 |
 | T-F2-08 | 32k 请求回归 | 64k 预算反噬不复发(SDLC-060) | 断言 engine-loop 实际传参(或 vLLM 侧请求日志) | max_tokens==32000(或 env 覆盖值),≠200000 |
 | T-F2-09 | clamp 告警回归 | 静默钳制不复发(CORE-PATCHES #4) | 单测:`resolveMaxOutputTokensForEngine(engine, 200_000)` + console.warn spy | 返回 64000 且 warn 含 "clamped"。**注:warn 文本断言属 packages/core changeset(spec 需 console.warn spy),不属本切片** |
@@ -483,7 +483,7 @@ Postgres 临时库;UI=Playwright。
 | F1 staleness 事件 | T-F1-12(**本轮延后未执行,剩余项**——见 §1A) |
 | F1 迁移 +3 列 / S7 UI | T-F1-13 / T-F1-14(**S7 UI 本轮延后未执行,剩余项**) |
 | F2 engine-loop(wrapper/threadId/压缩/续传) | T-F2-02…05、08、13 |
-| F2 dispatcher 重试注入(**→ F2b 后续切片**) | T-F2-06(F2b 交付后验收) |
+| F2 dispatcher 重试注入(**F2b 已交付**) | T-F2-06 |
 | F2 context-checkpoint.ts | T-F2-01、07 |
 | F2 32k+clamp 回归 / 端到端 | T-F2-08、09 / T-F2-10 |
 | F2 迁移 +1 列 / S7 UI | T-F2-11 / T-F2-12 |

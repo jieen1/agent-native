@@ -484,10 +484,10 @@ merge-base --is-ancestor` 核实,凡本文引用的文件路径与行号均为�
 <td>每应用 0.5 天</td>
 </tr>
 <tr>
-<td>F2b(执行器上下文消费端切片)</td>
+<td>F2b(执行器上下文消费端切片)【已完成,见 T-F2-06】</td>
 <td>把 F2(已交付)C1-C4 契约在 engine-loop 侧真正接进 worker 调用路径的消费端切片补完</td>
-<td>orchestrator engine-loop 相关文件(需在启动时核对准确路径)</td>
-<td>F2 已交付;建议 R1 之后、R4 之前</td>
+<td>orchestrator `server/engine/v3-dispatcher.ts`(`fetchPriorCheckpoint`/`formatCheckpointInjection`)</td>
+<td>F2 已交付;2026-07-17 在分支 `f2b-checkpoint-retry-injection` 交付,待合并</td>
 <td>1–2 天</td>
 </tr>
 <tr>
@@ -583,7 +583,7 @@ merge-base --is-ancestor` 核实,凡本文引用的文件路径与行号均为�
 </tr>
 <tr>
 <td>§6 工程卫生七项</td>
-<td>doctor/O13/O12 全程可并行;F2b 建议 R1 后 R4 前;outbox/T-D 排 R2 之后;verifyA2AToken 收敛全程可并行但需双向改动窗口</td>
+<td>doctor/O13/O12 全程可并行;F2b 建议 R1 后 R4 前(已完成);outbox/T-D 排 R2 之后;verifyA2AToken 收敛全程可并行但需双向改动窗口</td>
 <td>各项互不依赖,除 T-D 依赖 outbox</td>
 </tr>
 </table>
