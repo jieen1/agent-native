@@ -552,6 +552,29 @@ ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS health_check_log TEXT`,
     version: 29,
     sql: `CREATE UNIQUE INDEX IF NOT EXISTS tracker_exec_queue_work_item_id_key ON tracker_exec_queue (work_item_id)`,
   },
+  {
+    // v30 (R4a.3, docs/sdlc-product-design/r4-workflow-families-planning-
+    // skills.md §4.4 first bullet): L1 deterministic pre-selection routing
+    // table. Additive new table — no existing table touched. See schema.ts's
+    // projectWorkflowRules docblock for column semantics.
+    version: 30,
+    sql: `CREATE TABLE IF NOT EXISTS tracker_project_workflow_rules (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  item_type TEXT NOT NULL DEFAULT '',
+  nature TEXT NOT NULL DEFAULT '',
+  in_sprint INTEGER,
+  template_name TEXT NOT NULL,
+  default_inputs TEXT NOT NULL DEFAULT '{}',
+  priority INTEGER NOT NULL DEFAULT 100,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+  org_id TEXT,
+  visibility TEXT NOT NULL DEFAULT 'private'
+);
+CREATE INDEX IF NOT EXISTS tracker_project_workflow_rules_project_idx ON tracker_project_workflow_rules (project_id, priority)`,
+  },
 ];
 
 const coreRunMigrations = runMigrations(TRACKER_MIGRATIONS, {

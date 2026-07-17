@@ -25,6 +25,8 @@ import {
   extractDeliveryFromArtifactTexts,
   onRunTerminal,
   attemptWithBackoff,
+  parseTemplateDeviationTags,
+  buildTemplateDeviation,
   type WritebackOutcome,
 } from "./tracker-client.js";
 
@@ -272,6 +274,81 @@ describe("extractDeliveryFromArtifactTexts", () => {
   });
 });
 
+// ── parseTemplateDeviationTags / buildTemplateDeviation (R4a.3 L2) ──────────
+
+describe("parseTemplateDeviationTags", () => {
+  it("extracts suggestedTemplate/ruleId/deviationReason when present", () => {
+    expect(
+      parseTemplateDeviationTags({
+        suggestedTemplate: "sdlc-issue-pipeline",
+        ruleId: "rule-1",
+        deviationReason: "改动仅 1 文件",
+      }),
+    ).toEqual({
+      suggestedTemplate: "sdlc-issue-pipeline",
+      ruleId: "rule-1",
+      deviationReason: "改动仅 1 文件",
+    });
+  });
+
+  it("returns nulls for missing/wrong-typed keys or a non-object tags value", () => {
+    expect(parseTemplateDeviationTags({})).toEqual({
+      suggestedTemplate: null,
+      ruleId: null,
+      deviationReason: null,
+    });
+    expect(parseTemplateDeviationTags({ suggestedTemplate: 42 })).toEqual({
+      suggestedTemplate: null,
+      ruleId: null,
+      deviationReason: null,
+    });
+    expect(parseTemplateDeviationTags(null)).toEqual({
+      suggestedTemplate: null,
+      ruleId: null,
+      deviationReason: null,
+    });
+  });
+});
+
+describe("buildTemplateDeviation", () => {
+  it("returns undefined when there is no chosen template name", () => {
+    expect(
+      buildTemplateDeviation(null, { suggestedTemplate: "hotfix" }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when there is no L1 suggestion to compare against", () => {
+    expect(buildTemplateDeviation("quick-task", {})).toBeUndefined();
+  });
+
+  it("returns undefined when chosen matches suggested and no deviationReason was logged", () => {
+    expect(
+      buildTemplateDeviation("hotfix", { suggestedTemplate: "hotfix" }),
+    ).toBeUndefined();
+  });
+
+  it("returns a receipt when chosen differs from suggested", () => {
+    expect(
+      buildTemplateDeviation("quick-task", {
+        suggestedTemplate: "sdlc-issue-pipeline",
+      }),
+    ).toEqual({ chosen: "quick-task", suggested: "sdlc-issue-pipeline" });
+  });
+
+  it("includes deviationReason when the brain logged one, even if chosen matches suggested", () => {
+    expect(
+      buildTemplateDeviation("hotfix", {
+        suggestedTemplate: "hotfix",
+        deviationReason: "手工确认后仍走建议模板",
+      }),
+    ).toEqual({
+      chosen: "hotfix",
+      suggested: "hotfix",
+      deviationReason: "手工确认后仍走建议模板",
+    });
+  });
+});
+
 // ── onRunTerminal ────────────────────────────────────────────────────────────
 
 describe("onRunTerminal", () => {
@@ -335,6 +412,38 @@ describe("onRunTerminal", () => {
     }
   });
 
+  it("delivered + templateDeviation: forwards it as part of the writeback-run-meta call", async () => {
+    const fetchMock = mockFetchJsonRpcResult({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome: WritebackOutcome = {
+      kind: "delivered",
+      workItemId: "wi-1",
+      orgId: "org-1",
+      runId: "run-1",
+      branch: "orchestrator/run-1",
+      templateDeviation: {
+        chosen: "quick-task",
+        suggested: "sdlc-issue-pipeline",
+        deviationReason: "改动仅 1 文件",
+      },
+    };
+    await onRunTerminal(outcome);
+
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    expect(body.params.name).toBe("writeback-run-meta");
+    expect(body.params.arguments).toEqual({
+      workItemId: "wi-1",
+      runId: "run-1",
+      branch: "orchestrator/run-1",
+      templateDeviation: {
+        chosen: "quick-task",
+        suggested: "sdlc-issue-pipeline",
+        deviationReason: "改动仅 1 文件",
+      },
+    });
+  });
+
   it("zero-delivery: calls writeback-exec-state(queued) only — no run-meta, no advance-stage", async () => {
     const fetchMock = mockFetchJsonRpcResult({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
@@ -361,13 +470,11 @@ describe("onRunTerminal", () => {
   it("propagates the underlying error on tracker failure (so the caller can retry)", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue({
-          ok: false,
-          status: 503,
-          text: async () => "down",
-        }),
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: async () => "down",
+      }),
     );
     await expect(
       onRunTerminal({

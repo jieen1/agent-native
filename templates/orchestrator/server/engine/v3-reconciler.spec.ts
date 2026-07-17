@@ -105,6 +105,23 @@ vi.mock("../db/index.js", () => ({
   v3Schema: {},
 }));
 
+// ── Mock the R4a.3 §4.2 point 7 claude-code concurrency gate ────────────────
+// Real `admitClaudeCodeNode` (server/queue/claude-code-admit.spec.ts covers
+// its own logic in isolation) would call getSetting/getDbExec with no
+// meaningful fixture wiring here — mocked so the "claude-code concurrency
+// gate" describe block below can control admission directly per test, and so
+// every OTHER existing test (none of which dispatch a claude-code-targeting
+// node) is entirely unaffected — nodeTargetsClaudeCode gates whether this
+// mock is ever even consulted.
+vi.mock("../queue/claude-code-admit.js", () => ({
+  admitClaudeCodeNode: vi.fn(async () => ({
+    admitted: true,
+    running: 0,
+    limit: 1,
+  })),
+}));
+
+import { admitClaudeCodeNode } from "../queue/claude-code-admit.js";
 import { onRunTerminal } from "../tracker-client.js";
 import { evaluateExpression } from "./expression-parser.js";
 
@@ -1790,6 +1807,87 @@ describe("V3Reconciler", () => {
       const { db } = createMockDb(makeRun(), []);
       // Should not throw
       expect(() => new V3Reconciler(db, dispatcher, 4)).not.toThrow();
+    });
+  });
+
+  describe("R4a.3 §4.2 point 7 — claude-code worker-node concurrency gate", () => {
+    it("gated: a claude-code-targeting node is left pending (not claimed, not spawned) when admission is denied", async () => {
+      vi.mocked(admitClaudeCodeNode).mockResolvedValueOnce({
+        admitted: false,
+        running: 1,
+        limit: 1,
+      });
+
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, nodes, events } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              { id: "review", type: "agent", agent: "claude-code", deps: [] },
+            ],
+          },
+        }),
+        [makeNode({ nodeIdInDag: "review", id: "node-review" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).not.toHaveBeenCalled();
+      expect(nodes[0]!.status).toBe("pending"); // untouched — no claim attempted
+      const gatedEvent = events.find(
+        (e) => e.kind === "claude_code.concurrency_gated",
+      );
+      expect(gatedEvent).toBeDefined();
+      expect((gatedEvent?.payload as any)?.nodeId).toBe("review");
+    });
+
+    it("admitted: a claude-code-targeting node dispatches normally when a slot is free", async () => {
+      vi.mocked(admitClaudeCodeNode).mockResolvedValueOnce({
+        admitted: true,
+        running: 0,
+        limit: 1,
+      });
+
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, nodes } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [
+              { id: "review", type: "agent", agent: "claude-code", deps: [] },
+            ],
+          },
+        }),
+        [makeNode({ nodeIdInDag: "review", id: "node-review" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
+      expect(nodes[0]!.status).toBe("running");
+    });
+
+    it("a non-claude-code node dispatches without ever consulting the gate", async () => {
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, nodes } = createMockDb(
+        makeRun({
+          dag: {
+            nodes: [{ id: "dev", type: "agent", agent: "vllm", deps: [] }],
+          },
+        }),
+        [makeNode({ nodeIdInDag: "dev", id: "node-dev" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher);
+      await reconciler.tick("run-1");
+
+      expect(dispatcher.spawn).toHaveBeenCalledTimes(1);
+      expect(nodes[0]!.status).toBe("running");
+      expect(admitClaudeCodeNode).not.toHaveBeenCalled();
     });
   });
 

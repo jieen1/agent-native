@@ -165,6 +165,21 @@ beforeAll(async () => {
       org_id TEXT,
       visibility TEXT NOT NULL DEFAULT 'private'
     );
+    CREATE TABLE tracker_project_workflow_rules (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      item_type TEXT NOT NULL DEFAULT '',
+      nature TEXT NOT NULL DEFAULT '',
+      in_sprint INTEGER,
+      template_name TEXT NOT NULL,
+      default_inputs TEXT NOT NULL DEFAULT '{}',
+      priority INTEGER NOT NULL DEFAULT 100,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      owner_email TEXT NOT NULL DEFAULT 'local@localhost',
+      org_id TEXT,
+      visibility TEXT NOT NULL DEFAULT 'private'
+    );
   `);
 
   const mod = await import("../dispatch-to-orchestrator.js");
@@ -695,7 +710,9 @@ describe("T-F8-03: dispatch-to-orchestrator 写 tracker_work_item_runs (单件�
   it("a failed dispatch (no threadId) writes ZERO run rows", async () => {
     const id = await insertItem({ currentStageName: "待办" });
     mockCallOrchestratorTool.mockResolvedValue({ data: {} });
-    await expect(asUser(() => dispatchToOrchestrator.run({ workItemId: id }))).rejects.toThrow();
+    await expect(
+      asUser(() => dispatchToOrchestrator.run({ workItemId: id })),
+    ).rejects.toThrow();
     expect(await fetchRuns(id)).toHaveLength(0);
   });
 });
@@ -705,10 +722,17 @@ describe("T-F8-03 (bulk 镜像): bulk-dispatch-to-orchestrator 同样写 tracker
     const idA = await insertItem({ currentStageName: "待办" });
     const idB = await insertItem({ currentStageName: "设计" });
     mockCallOrchestratorTool.mockResolvedValue({
-      data: { threadId: "bt_bulk_run", status: "running", taskId: "task_x", workspaceId: null },
+      data: {
+        threadId: "bt_bulk_run",
+        status: "running",
+        taskId: "task_x",
+        workspaceId: null,
+      },
     });
 
-    await asUser(() => bulkDispatchToOrchestrator.run({ workItemIds: [idA, idB] }));
+    await asUser(() =>
+      bulkDispatchToOrchestrator.run({ workItemIds: [idA, idB] }),
+    );
 
     expect(await fetchRuns(idA)).toHaveLength(1);
     expect(await fetchRuns(idB)).toHaveLength(1);

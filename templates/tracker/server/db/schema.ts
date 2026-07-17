@@ -288,6 +288,48 @@ export const projectRepos = table("tracker_project_repos", {
 });
 
 // ---------------------------------------------------------------------------
+// R4a.3 L1 — project-level deterministic pre-selection routing table (design
+// authority: docs/sdlc-product-design/r4-workflow-families-planning-skills.md
+// §4.4 first bullet). Each row is an override/extension of the code-level
+// DEFAULT_WORKFLOW_RULES fallback in server/lib/workflow-routing.ts (which
+// mirrors the s8 prototype's static routing table) — a project with zero rows
+// still gets sensible routing from the defaults; rows here let a project
+// override or add project-specific matches without a code change.
+//
+// itemType/nature are matcher strings; "" (empty) means "any" (wildcard) for
+// that dimension. inSprint is a tri-state matcher: null = any, 1 = must be in
+// a sprint, 0 = must NOT be in a sprint. Lower priority = evaluated first
+// (matches this repo's existing priority convention, e.g. brain_tasks/exec
+// queue ordering) so a project can add a higher-precedence override by giving
+// it a smaller priority number than the row it should beat.
+// defaultInputs is a JSON object (stored as TEXT — no jsonb: this app's
+// schema stays dialect-agnostic across Postgres/LibSQL, see every other
+// JSON-shaped column in this file).
+// ---------------------------------------------------------------------------
+export const projectWorkflowRules = table("tracker_project_workflow_rules", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  // Matches work_items.type (需求/任务/缺陷/生产问题/from-audit/...). "" = any.
+  itemType: text("item_type").notNull().default(""),
+  // Matches work_items.type OR a tag in work_items.tags/nature (e.g. "文档",
+  // "调研", "from-audit"). "" = any.
+  nature: text("nature").notNull().default(""),
+  // null = any; 1 = item must have a sprintId; 0 = item must NOT have one.
+  // (No explicit .default(null) — a column without .notNull()/.default() is
+  // already nullable with a natural NULL default; several pre-existing
+  // .default(null) calls elsewhere in this file trigger a drizzle-orm type
+  // error under the current TS/drizzle version — a known baseline issue this
+  // new column avoids by omitting the redundant call.)
+  inSprint: integer("in_sprint"),
+  templateName: text("template_name").notNull(),
+  defaultInputs: text("default_inputs").notNull().default("{}"),
+  priority: integer("priority").notNull().default(100),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  ...ownableColumns(),
+});
+
+// ---------------------------------------------------------------------------
 // Approvals — gate sign-off records for plan/design/escalation/audit-deferral.
 //
 // gateKey: 'plan-signoff' | 'design-signoff' | 'escalation' | 'audit-deferral'

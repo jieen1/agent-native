@@ -33,16 +33,20 @@ import {
   v3Spawns,
   v3Events,
   v3Artifacts,
+  v3WorkflowTemplates,
   brainThreads,
 } from "../db/v3-schema.js";
 import type { V3RunLimits } from "../db/v3-schema.js";
+import { admitClaudeCodeNode } from "../queue/claude-code-admit.js";
 import {
   onRunTerminal,
   parseRunTags,
   extractDeliveryFromArtifactTexts,
   attemptWithBackoff,
+  buildTemplateDeviation,
   type WritebackOutcome,
 } from "../tracker-client.js";
+import { nodeTargetsClaudeCode } from "./dag-validator.js";
 import { evaluateExpression } from "./expression-parser.js";
 import type { ExpressionContext } from "./expression-parser.js";
 
@@ -706,6 +710,36 @@ export class V3Reconciler {
 
     switch (node.type) {
       case "agent": {
+        // R4a.3 §4.2 point 7 — claude-code worker-node concurrency gate.
+        // Checked BEFORE the atomic claim below so a gated node is left
+        // untouched (still pending/ready) for a later tick to retry, exactly
+        // like the "another tick already claimed this node" skip just below
+        // — no state to unwind if we reject here. Guarded behind the (pure,
+        // synchronous) nodeTargetsClaudeCode predicate FIRST so a non-
+        // claude-code node (the overwhelming majority) never pays the extra
+        // settings/DB round-trip.
+        const agentDagNodeForGate = dag.find(
+          (d) => d.id === node.nodeIdInDag,
+        ) as V3NodeDag | undefined;
+        if (
+          agentDagNodeForGate?.type === "agent" &&
+          nodeTargetsClaudeCode(
+            agentDagNodeForGate as unknown as {
+              agent?: string;
+              engine_override?: string;
+            },
+          )
+        ) {
+          const { admitted, running, limit } = await admitClaudeCodeNode();
+          if (!admitted) {
+            events.push({
+              kind: "claude_code.concurrency_gated",
+              payload: { nodeId: node.nodeIdInDag, running, limit },
+            });
+            return { events, slotConsumed: false };
+          }
+        }
+
         // G16: Atomic status-conditioned UPDATE — only dispatch when rowcount == 1
         const updateResult = await getDbExec().execute({
           sql: `UPDATE v3_nodes SET status = 'running', started_at = now()
@@ -1924,7 +1958,11 @@ export class V3Reconciler {
   ): Promise<void> {
     // Only transition if not already terminal
     const current = await this.db
-      .select({ status: v3Runs.status, tags: v3Runs.tags })
+      .select({
+        status: v3Runs.status,
+        tags: v3Runs.tags,
+        templateId: v3Runs.templateId,
+      })
       .from(v3Runs)
       .where(eq(v3Runs.id, runId))
       .limit(1);
@@ -1979,6 +2017,8 @@ export class V3Reconciler {
         runId,
         workItemId,
         orgId,
+        current[0]!.tags,
+        current[0]!.templateId,
       );
       await this.enqueueWritebackOutbox(runId, outcome);
 
@@ -2029,6 +2069,8 @@ export class V3Reconciler {
     runId: string,
     workItemId: string,
     orgId: string | null,
+    tags: unknown,
+    templateId: string | null,
   ): Promise<WritebackOutcome> {
     if (status !== "done") {
       return {
@@ -2065,15 +2107,45 @@ export class V3Reconciler {
     }
 
     const { branch } = extractDeliveryFromArtifactTexts(texts);
-    return branch
-      ? { kind: "delivered", workItemId, orgId, runId, branch }
-      : {
-          kind: "zero-delivery",
-          workItemId,
-          orgId,
-          runId,
-          reason: "run-done-no-delivery",
-        };
+    if (!branch) {
+      return {
+        kind: "zero-delivery",
+        workItemId,
+        orgId,
+        runId,
+        reason: "run-done-no-delivery",
+      };
+    }
+
+    // R4a.3 L2 (§4.4 second bullet) — best-effort: resolve the run's REAL
+    // template name (ground truth) and diff it against the L1 suggestion
+    // carried in tags. A lookup failure (or a dag-only run with no
+    // templateId) degrades to "nothing to report" rather than blocking
+    // writeback classification.
+    let templateDeviation: ReturnType<typeof buildTemplateDeviation>;
+    try {
+      let chosenTemplateName: string | null = null;
+      if (templateId) {
+        const [tpl] = await this.db
+          .select({ name: v3WorkflowTemplates.name })
+          .from(v3WorkflowTemplates)
+          .where(eq(v3WorkflowTemplates.id, templateId))
+          .limit(1);
+        chosenTemplateName = tpl?.name ?? null;
+      }
+      templateDeviation = buildTemplateDeviation(chosenTemplateName, tags);
+    } catch {
+      templateDeviation = undefined;
+    }
+
+    return {
+      kind: "delivered",
+      workItemId,
+      orgId,
+      runId,
+      branch,
+      ...(templateDeviation ? { templateDeviation } : {}),
+    };
   }
 
   /**

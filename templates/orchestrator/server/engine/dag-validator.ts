@@ -1,6 +1,7 @@
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import type { FormatName } from "ajv-formats";
+
 import { validateExpressionSyntax } from "./expression-parser.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -71,9 +72,57 @@ export interface V3HumanGateNode {
   guard?: string;
 }
 
-export type V3Node = V3AgentNode | V3ParallelNode | V3LoopNode | V3HumanGateNode;
+export type V3Node =
+  | V3AgentNode
+  | V3ParallelNode
+  | V3LoopNode
+  | V3HumanGateNode;
 
 const VALID_TYPES = new Set(["agent", "parallel_over", "loop", "human_gate"]);
+
+// ── R4a.3 §4.2 point 7 — claude-code engine recognition ─────────────────────
+//
+// True for either the literal agent-def name "claude-code" or an
+// `acp:claude*` engine string. Historically only checked against
+// `engine_override` (the hard mechanism-level ban below, unchanged): a DAG
+// worker node may never explicitly override its engine to reach the CC
+// subscription runtime directly. Exported so callers OUTSIDE this file (the
+// claude-code concurrency admission gate, server/queue/claude-code-admit.ts)
+// can recognize the SAME "this node resolves to the claude-code runtime"
+// condition via the `agent` field too — closing the real gap the design
+// identified: `agent:"claude-code"` was never recognized by ANY mechanism
+// before this, not even for resource-protection purposes.
+//
+// IMPORTANT — this does NOT extend the hard validation-error ban to the
+// `agent` field. `agent:"claude-code"` is a first-party, sanctioned worker
+// (framework agent-def `.claude/agents/claude-code.md`, used for review/audit
+// nodes by all 9 seed templates and by production brain-authored DAGs like
+// `sdlc-issue-pipeline` v4) — banning it here would break those. The
+// resource-protection concern (unlimited concurrent claude-code spawns) is
+// closed by the concurrency gate, not by rejecting the DAG at save/validate
+// time.
+export function isClaudeCodeEngineRef(ref: string | null | undefined): boolean {
+  if (!ref) return false;
+  const v = ref.trim();
+  return v === "claude-code" || v.toLowerCase().startsWith("acp:claude");
+}
+
+/** True when this agent node resolves to the claude-code runtime via EITHER
+ *  `engine_override` (blocked outright by validateDag, see below) OR `agent`
+ *  (sanctioned — see doc comment above). Used by the concurrency gate to
+ *  recognize both paths consistently. Accepts a loosely-typed subset (both
+ *  fields optional) rather than `Pick<V3AgentNode, ...>` so callers working
+ *  from an untyped/parsed dag node (e.g. the reconciler's `V3NodeDag`, or a
+ *  JSON-parsed run.dag) can pass partial data without a cast fight. */
+export function nodeTargetsClaudeCode(node: {
+  agent?: string | null;
+  engine_override?: string | null;
+}): boolean {
+  return (
+    isClaudeCodeEngineRef(node.engine_override) ||
+    isClaudeCodeEngineRef(node.agent)
+  );
+}
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -86,11 +135,18 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
     try {
       parsed = JSON.parse(dag);
     } catch (err: any) {
-      return { ok: false, errors: [`Failed to parse JSON: ${err.message ?? String(err)}`] };
+      return {
+        ok: false,
+        errors: [`Failed to parse JSON: ${err.message ?? String(err)}`],
+      };
     }
   }
 
-  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as any).nodes)) {
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !Array.isArray((parsed as any).nodes)
+  ) {
     return { ok: false, errors: ["dag must be an object with a nodes array"] };
   }
 
@@ -111,7 +167,9 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
       continue;
     }
     if (typeof node.id !== "string" || typeof node.type !== "string") {
-      errors.push(`Node '${String(node.id ?? "?")}': must have string type and id`);
+      errors.push(
+        `Node '${String(node.id ?? "?")}': must have string type and id`,
+      );
       continue;
     }
 
@@ -131,7 +189,8 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
 
   // --- Rule 5: deps point to existing ids ---
   for (const node of nodes) {
-    if (!node || typeof node !== "object" || typeof node.id !== "string") continue;
+    if (!node || typeof node !== "object" || typeof node.id !== "string")
+      continue;
     const deps = "deps" in node ? (node as any).deps : undefined;
     if (Array.isArray(deps)) {
       for (const dep of deps) {
@@ -145,7 +204,8 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
   // --- Rule 6: cycle detection (DFS) ---
   const adjacency = new Map<string, string[]>();
   for (const node of nodes) {
-    if (!node || typeof node !== "object" || typeof node.id !== "string") continue;
+    if (!node || typeof node !== "object" || typeof node.id !== "string")
+      continue;
     const nDeps = "deps" in node ? (node as any).deps : undefined;
     adjacency.set(node.id, Array.isArray(nDeps) ? nDeps : []);
   }
@@ -156,12 +216,36 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
 
   // --- Ajv for schema validation ---
   const ajv = new Ajv({ strict: false });
-  const allFormats: FormatName[] = ["date", "time", "date-time", "duration", "uri", "uri-reference", "uri-template", "url", "email", "hostname", "ipv4", "ipv6", "regex", "uuid", "json-pointer", "json-pointer-uri-fragment", "relative-json-pointer", "byte", "int32", "int64", "float", "double"];
+  const allFormats: FormatName[] = [
+    "date",
+    "time",
+    "date-time",
+    "duration",
+    "uri",
+    "uri-reference",
+    "uri-template",
+    "url",
+    "email",
+    "hostname",
+    "ipv4",
+    "ipv6",
+    "regex",
+    "uuid",
+    "json-pointer",
+    "json-pointer-uri-fragment",
+    "relative-json-pointer",
+    "byte",
+    "int32",
+    "int64",
+    "float",
+    "double",
+  ];
   addFormats(ajv, allFormats);
 
   // --- Node-specific rules ---
   for (const node of nodes) {
-    if (!node || typeof node !== "object" || typeof node.id !== "string") continue;
+    if (!node || typeof node !== "object" || typeof node.id !== "string")
+      continue;
     const { id, type } = node;
 
     // ── Shared: guard validation (§4 — applies to ALL node types) ──
@@ -172,7 +256,9 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
       } else {
         const gResult = validateExpressionSyntax(sharedGuard);
         if (!gResult.ok) {
-          errors.push(`Node '${id}': guard expression: ${gResult.error ?? "syntax error"}`);
+          errors.push(
+            `Node '${id}': guard expression: ${gResult.error ?? "syntax error"}`,
+          );
         }
       }
     }
@@ -180,40 +266,63 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
     if (type === "agent") {
       const agent = node as V3AgentNode;
 
-      if (!agent.agent || typeof agent.agent !== "string" || !agent.agent.trim()) {
+      if (
+        !agent.agent ||
+        typeof agent.agent !== "string" ||
+        !agent.agent.trim()
+      ) {
         errors.push(`Node '${id}': agent must be a non-empty string`);
       }
-      if (!agent.prompt || typeof agent.prompt !== "string" || !agent.prompt.trim()) {
+      if (
+        !agent.prompt ||
+        typeof agent.prompt !== "string" ||
+        !agent.prompt.trim()
+      ) {
         errors.push(`Node '${id}': prompt must be a non-empty string`);
       }
       if (agent.output_schema != null) {
         try {
-          if (typeof agent.output_schema !== "object" || Array.isArray(agent.output_schema)) {
-            errors.push(`Node '${id}': output_schema must be a JSON Schema object`);
+          if (
+            typeof agent.output_schema !== "object" ||
+            Array.isArray(agent.output_schema)
+          ) {
+            errors.push(
+              `Node '${id}': output_schema must be a JSON Schema object`,
+            );
           } else {
             ajv.compile(agent.output_schema as object);
           }
         } catch (err: any) {
-          errors.push(`Node '${id}': invalid output_schema: ${err.message ?? String(err)}`);
+          errors.push(
+            `Node '${id}': invalid output_schema: ${err.message ?? String(err)}`,
+          );
         }
       }
       // G40: validate optional numeric/object fields
-      if (agent.max_summary_tokens != null && typeof agent.max_summary_tokens !== "number") {
+      if (
+        agent.max_summary_tokens != null &&
+        typeof agent.max_summary_tokens !== "number"
+      ) {
         errors.push(`Node '${id}': max_summary_tokens must be a number`);
       }
-      if (agent.timeout_seconds != null && typeof agent.timeout_seconds !== "number") {
+      if (
+        agent.timeout_seconds != null &&
+        typeof agent.timeout_seconds !== "number"
+      ) {
         errors.push(`Node '${id}': timeout_seconds must be a number`);
       }
       if (agent.workspace != null && typeof agent.workspace !== "string") {
         errors.push(`Node '${id}': workspace must be a string`);
       }
-      if (agent.engine_override != null && typeof agent.engine_override !== "string") {
+      if (
+        agent.engine_override != null &&
+        typeof agent.engine_override !== "string"
+      ) {
         errors.push(`Node '${id}': engine_override must be a string`);
       }
       if (
         typeof agent.engine_override === "string" &&
-        (agent.engine_override.trim() === "claude-code" ||
-          agent.engine_override.trim().toLowerCase().startsWith("acp:claude"))
+        isClaudeCodeEngineRef(agent.engine_override)
       ) {
         errors.push(
           `Node '${id}': engine_override 'claude-code' is not allowed on DAG worker nodes — ` +
@@ -247,17 +356,34 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
         if (inlineBody.type !== "agent") {
           errors.push(`Node '${id}': inline body type must be 'agent'`);
         }
-        if (!inlineBody.agent || typeof inlineBody.agent !== "string" || !inlineBody.agent.trim()) {
-          errors.push(`Node '${id}': inline body agent must be a non-empty string`);
+        if (
+          !inlineBody.agent ||
+          typeof inlineBody.agent !== "string" ||
+          !inlineBody.agent.trim()
+        ) {
+          errors.push(
+            `Node '${id}': inline body agent must be a non-empty string`,
+          );
         }
-        if (!inlineBody.prompt || typeof inlineBody.prompt !== "string" || !inlineBody.prompt.trim()) {
-          errors.push(`Node '${id}': inline body prompt must be a non-empty string`);
+        if (
+          !inlineBody.prompt ||
+          typeof inlineBody.prompt !== "string" ||
+          !inlineBody.prompt.trim()
+        ) {
+          errors.push(
+            `Node '${id}': inline body prompt must be a non-empty string`,
+          );
         }
       } else {
-        errors.push(`Node '${id}': body must be a node-id string or an inline agent node object`);
+        errors.push(
+          `Node '${id}': body must be a node-id string or an inline agent node object`,
+        );
       }
       // G41: validate max_concurrency
-      if (pnode.max_concurrency != null && (typeof pnode.max_concurrency !== "number" || pnode.max_concurrency < 1)) {
+      if (
+        pnode.max_concurrency != null &&
+        (typeof pnode.max_concurrency !== "number" || pnode.max_concurrency < 1)
+      ) {
         errors.push(`Node '${id}': max_concurrency must be a positive number`);
       }
       // G41: validate items_from as expression (kept as string per design)
@@ -267,7 +393,9 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
         } else {
           const iResult = validateExpressionSyntax(pnode.items_from);
           if (!iResult.ok) {
-            errors.push(`Node '${id}': items_from expression: ${iResult.error ?? "syntax error"}`);
+            errors.push(
+              `Node '${id}': items_from expression: ${iResult.error ?? "syntax error"}`,
+            );
           }
         }
       }
@@ -292,18 +420,24 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
           }
         }
       } else {
-        errors.push(`Node '${id}': body must be a node-id string or an array of node-id strings`);
+        errors.push(
+          `Node '${id}': body must be a node-id string or an array of node-id strings`,
+        );
       }
       if (lnode.until) {
         const uResult = validateExpressionSyntax(lnode.until);
         if (!uResult.ok) {
-          errors.push(`Node '${id}': until expression: ${uResult.error ?? "syntax error"}`);
+          errors.push(
+            `Node '${id}': until expression: ${uResult.error ?? "syntax error"}`,
+          );
         }
       }
       if (lnode.items_from) {
         const iResult = validateExpressionSyntax(lnode.items_from);
         if (!iResult.ok) {
-          errors.push(`Node '${id}': items_from expression: ${iResult.error ?? "syntax error"}`);
+          errors.push(
+            `Node '${id}': items_from expression: ${iResult.error ?? "syntax error"}`,
+          );
         }
       }
       // G42: validate both maxIterations and max_iterations (aliases); if both set they must agree
@@ -316,13 +450,19 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
         errors.push(`Node '${id}': max_iterations must be a number`);
       }
       if (mi1 != null && mi2 != null && mi1 !== mi2) {
-        errors.push(`Node '${id}': maxIterations and max_iterations are aliases — they must not conflict`);
+        errors.push(
+          `Node '${id}': maxIterations and max_iterations are aliases — they must not conflict`,
+        );
       }
     }
 
     if (type === "human_gate") {
       const hnode = node as V3HumanGateNode;
-      if (!hnode.prompt || typeof hnode.prompt !== "string" || !hnode.prompt.trim()) {
+      if (
+        !hnode.prompt ||
+        typeof hnode.prompt !== "string" ||
+        !hnode.prompt.trim()
+      ) {
         errors.push(`Node '${id}': prompt must be a non-empty string`);
       }
     }
@@ -345,9 +485,7 @@ export function detectCycle(adjacency: Map<string, string[]>): string | null {
     if (color.get(start)! !== WHITE) continue;
 
     // Stack entries: [node, neighborIndex]
-    const stack: Array<[string, number]> = [
-      [start, 0],
-    ];
+    const stack: Array<[string, number]> = [[start, 0]];
     color.set(start, GRAY);
 
     while (stack.length) {

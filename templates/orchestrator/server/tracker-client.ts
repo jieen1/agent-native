@@ -245,6 +245,22 @@ export function extractDeliveryFromArtifactTexts(
 
 // ── onRunTerminal ────────────────────────────────────────────────────────────
 
+/**
+ * R4a.3 L2 (docs/sdlc-product-design/r4-workflow-families-planning-skills.md
+ * §4.4 second bullet) — "brain deviated from the L1 suggestion" receipt.
+ * `chosen` is the run's REAL template name (ground truth, resolved from
+ * `v3_runs.template_id`); `suggested`/`deviationReason` come from the run's
+ * own `tags` (propagated from `dispatch-to-orchestrator.ts`'s L1 suggestion,
+ * and — when the brain deviates — a `deviationReason` tag it is instructed to
+ * set on its workflowRun call, see brain-send.ts). Leave-a-trace only, not
+ * mechanical enforcement (the design is explicit: "留痕+度量, 不是机制性禁止").
+ */
+export interface TemplateDeviation {
+  chosen: string;
+  suggested?: string;
+  deviationReason?: string;
+}
+
 export type WritebackOutcome =
   | {
       kind: "delivered";
@@ -252,6 +268,10 @@ export type WritebackOutcome =
       orgId: string | null;
       runId: string;
       branch: string | null;
+      /** Present only when the run's tags show an L1 suggestion AND the run
+       *  actually used a different template (or the brain explicitly logged
+       *  a deviationReason anyway). */
+      templateDeviation?: TemplateDeviation;
     }
   | {
       kind: "zero-delivery";
@@ -264,6 +284,52 @@ export type WritebackOutcome =
        * report). */
       reason: string;
     };
+
+/** Best-effort extraction of the L1/L2 routing tags a run may carry. Tolerant
+ *  of missing keys, wrong types, or `tags` not being an object. */
+export interface TemplateDeviationTags {
+  suggestedTemplate: string | null;
+  ruleId: string | null;
+  deviationReason: string | null;
+}
+
+export function parseTemplateDeviationTags(
+  tags: unknown,
+): TemplateDeviationTags {
+  const t =
+    tags && typeof tags === "object" ? (tags as Record<string, unknown>) : {};
+  const str = (v: unknown): string | null =>
+    typeof v === "string" && v ? v : null;
+  return {
+    suggestedTemplate: str(t.suggestedTemplate),
+    ruleId: str(t.ruleId),
+    deviationReason: str(t.deviationReason),
+  };
+}
+
+/**
+ * Pure: build the `templateDeviation` receipt from the run's real (ground-
+ * truth) template name and its tags — or `undefined` when there is nothing to
+ * report (no L1 suggestion was ever attached, or the run matched it exactly
+ * with no explicit deviationReason).
+ */
+export function buildTemplateDeviation(
+  chosenTemplateName: string | null,
+  tags: unknown,
+): TemplateDeviation | undefined {
+  if (!chosenTemplateName) return undefined;
+  const { suggestedTemplate, deviationReason } =
+    parseTemplateDeviationTags(tags);
+  if (!suggestedTemplate) return undefined;
+  if (suggestedTemplate === chosenTemplateName && !deviationReason) {
+    return undefined;
+  }
+  return {
+    chosen: chosenTemplateName,
+    suggested: suggestedTemplate,
+    ...(deviationReason ? { deviationReason } : {}),
+  };
+}
 
 /**
  * A SINGLE writeback attempt for a terminal run. Throws on any failure (the
@@ -297,12 +363,15 @@ export async function onRunTerminal(outcome: WritebackOutcome): Promise<void> {
     return;
   }
 
-  const { workItemId, orgId, runId, branch } = outcome;
+  const { workItemId, orgId, runId, branch, templateDeviation } = outcome;
 
   await callTrackerTool(orgId, "writeback-run-meta", {
     workItemId,
     runId,
     ...(branch ? { branch } : {}),
+    // R4a.3 L2 — leave-a-trace only (§4.4 second bullet): present only when
+    // the run's tags show it actually deviated from the L1 suggestion.
+    ...(templateDeviation ? { templateDeviation } : {}),
   });
 
   await callTrackerTool(orgId, "writeback-exec-state", {

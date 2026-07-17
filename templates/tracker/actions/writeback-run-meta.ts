@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { backfillWorkItemRun } from "../server/lib/work-item-runs.js";
 import { assertWritebackCaller } from "../server/lib/writeback-actor.js";
@@ -25,10 +26,27 @@ export default defineAction({
     workItemId: z.string().min(1),
     runId: z.string().min(1).describe("The bound DAG/workflow run id"),
     branch: z.string().optional().describe("The delivery branch, once known"),
+    // R4a.3 L2 (docs/sdlc-product-design/r4-workflow-families-planning-
+    // skills.md §4.4 second bullet) — optional "brain deviated from the L1
+    // suggestion" receipt. Leave-a-trace only: present only when the
+    // orchestrator detected the run's actual template differs from
+    // `tags.suggestedTemplate` (or the brain explicitly logged a
+    // deviationReason anyway). Written as its own activity so the work
+    // item's activity stream can render "brain 改用 X: reason".
+    templateDeviation: z
+      .object({
+        chosen: z.string(),
+        suggested: z.string().optional(),
+        deviationReason: z.string().optional(),
+      })
+      .optional(),
   }),
   http: { method: "POST" },
   run: async (args, ctx) => {
-    assertWritebackCaller({ caller: ctx?.caller, userEmail: getRequestUserEmail() });
+    assertWritebackCaller({
+      caller: ctx?.caller,
+      userEmail: getRequestUserEmail(),
+    });
 
     const db = getDb();
     const item = (
@@ -60,7 +78,35 @@ export default defineAction({
         actorKind: "agent",
         actorName: "回写通道",
         eventType: "writeback.run-meta",
-        payload: JSON.stringify({ runId: args.runId, branch: args.branch ?? null }),
+        payload: JSON.stringify({
+          runId: args.runId,
+          branch: args.branch ?? null,
+        }),
+        createdAt: now,
+        ownerEmail: item.ownerEmail,
+        orgId: item.orgId ?? null,
+        visibility: "private",
+      });
+    }
+
+    // R4a.3 L2 — leave-a-trace only (§4.4 second bullet): a separate activity
+    // row so the work item's activity stream can render "brain 改用 X 而非建议
+    // 的 Y：理由". Written independent of `updated` (a stale/superseded runId
+    // still carries a real, worth-recording deviation).
+    if (args.templateDeviation) {
+      const now = new Date().toISOString();
+      await db.insert(schema.activities).values({
+        id: `act_wbdev_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+        workItemId: item.id,
+        actorKind: "agent",
+        actorName: "回写通道",
+        eventType: "workflow.template-deviation",
+        payload: JSON.stringify({
+          runId: args.runId,
+          chosen: args.templateDeviation.chosen,
+          suggested: args.templateDeviation.suggested ?? null,
+          deviationReason: args.templateDeviation.deviationReason ?? null,
+        }),
         createdAt: now,
         ownerEmail: item.ownerEmail,
         orgId: item.orgId ?? null,
