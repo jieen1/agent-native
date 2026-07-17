@@ -12,12 +12,20 @@
 //   8. Update v3_nodes status
 //   9. Error class mapping: transient → recreate, schema-violation → rollback, permanent/cancelled → keep
 
-import { eq, sql } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import type { FormatName } from "ajv-formats";
+import { eq, sql } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
+import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
+import {
+  loadAgent,
+  dispatchWorkerConfig,
+  minimalAgentConfig,
+  type AgentConfig,
+} from "../agent-loader.js";
 import {
   v3Runs,
   v3Nodes,
@@ -26,32 +34,25 @@ import {
   v3Events,
   spawnEvents,
 } from "../db/v3-schema.js";
-import type { RuntimeExecStep } from "../runtime/executors/types.js";
-import type { InferSelectModel } from "drizzle-orm";
-import {
-  loadAgent,
-  dispatchWorkerConfig,
-  minimalAgentConfig,
-  type AgentConfig,
-} from "../agent-loader.js";
-import { renderTemplate, type ExpressionContext } from "./interpolation.js";
-import type { V3Node, V3AgentNode } from "./dag-validator.js";
-import { NodeRunner } from "../runtime/node-runner.js";
+import { resolveRealName } from "../model-registry.js";
 import {
   runClaudeCodeWorker,
   isClaudeCodeRuntime,
 } from "../runtime/claude-code-worker.js";
+import type { ContextCheckpoint } from "../runtime/executors/context-checkpoint.js";
+import type { RuntimeExecStep } from "../runtime/executors/types.js";
+import type { RuntimeExecutor } from "../runtime/executors/types.js";
+import { NodeRunner } from "../runtime/node-runner.js";
+import type { NodeRunnerResult } from "../runtime/node-runner.js";
+import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
+import { WorkspaceNotReadyError } from "../v3-workspace-provision.js";
+import type { V3Node, V3AgentNode } from "./dag-validator.js";
+import { renderTemplate, type ExpressionContext } from "./interpolation.js";
 import {
   runAcpClaudeCodeWorker,
   isAcpClaudeCodeWorkerEnabled,
 } from "./v3-acp-adapter.js";
-import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
-import { WorkspaceNotReadyError } from "../v3-workspace-provision.js";
-import type { RuntimeExecutor } from "../runtime/executors/types.js";
-import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
-import type { NodeRunnerResult } from "../runtime/node-runner.js";
 import { getWorkspace } from "./v3-workspace.js";
-import { resolveRealName } from "../model-registry.js";
 
 /**
  * Route a CC-worker DAG-node turn. Tries the framework `acp:claude-code`
@@ -417,6 +418,33 @@ export function computeUsageSuspect(opts: {
   return opts.tokensOutput > elapsedSec * maxTps();
 }
 
+/**
+ * F2b (T-F2-06): render a prior attempt's {@link ContextCheckpoint} as the
+ * retry-prompt section a fresh attempt is told to read before starting —
+ * "已完成产物清单" (completed artifacts so far) + "剩余任务" (remaining
+ * work), matching the exact section framing spec'd in docs/sdlc-impl-f1-f4.md
+ * §2A/§6.2 (T-F2-06). Callers only invoke this with a non-empty checkpoint
+ * (see {@link V3Dispatcher.fetchPriorCheckpoint}), so both blocks are
+ * conditional but at least one always renders.
+ */
+export function formatCheckpointInjection(
+  checkpoint: ContextCheckpoint,
+): string {
+  const lines: string[] = ["── 上一次尝试的进度(重试续接,不要从零重做)──"];
+
+  if (checkpoint.writtenFiles.length > 0) {
+    lines.push("已完成产物清单:");
+    for (const file of checkpoint.writtenFiles) lines.push(`- ${file}`);
+  }
+
+  if (checkpoint.remainingTasksSummary) {
+    lines.push("剩余任务:");
+    lines.push(checkpoint.remainingTasksSummary);
+  }
+
+  return lines.join("\n");
+}
+
 // ── V3Dispatcher ─────────────────────────────────────────────────────────────
 
 export class V3Dispatcher {
@@ -480,9 +508,25 @@ export class V3Dispatcher {
     // dagNode.prompt is the template string authored by the DAG author with
     // {{ }} interpolations. system_prompt stays static / verbatim (channel
     // input 1). NEVER render system_prompt as the user prompt.
-    const renderedPrompt = dagNodePrompt
+    const renderedBasePrompt = dagNodePrompt
       ? renderTemplate(dagNodePrompt, context)
       : "(no prompt defined)";
+
+    // ── Step 4a: F2b retry checkpoint injection (T-F2-06) ──────────────────
+    // C3 ("截断重试=携带已完成工作,禁止从零重跑"): a RETRY attempt (this node
+    // already has >=1 prior v3_spawns row) carries forward the immediately-
+    // prior attempt's context_checkpoint — written-files list + remaining-
+    // work summary — appended AFTER interpolation, never re-run through
+    // renderTemplate: the checkpoint is untrusted prior-LLM-output text that
+    // could itself contain a literal `{{...}}` and blow up interpolation. A
+    // node's FIRST attempt has no prior spawn row, so fetchPriorCheckpoint
+    // returns null and the prompt is unchanged. A prior attempt that never
+    // got far enough to checkpoint anything (null/empty) also yields null —
+    // no fabricated placeholder section.
+    const priorCheckpoint = await this.fetchPriorCheckpoint(nodeRow);
+    const renderedPrompt = priorCheckpoint
+      ? `${renderedBasePrompt}\n\n${formatCheckpointInjection(priorCheckpoint)}`
+      : renderedBasePrompt;
 
     // ── Step 4b: Resolve the node's workspace ref (BUG 1 fix) ──────────────
     // The DAG author writes `workspace: "{{inputs.workspaceId}}"` (a channel
@@ -507,7 +551,8 @@ export class V3Dispatcher {
 
     // ── Step 5: Create V3 spawn input (4-field channel contract) ──────────
     // system_prompt = verbatim from agent.md (channel input 1).
-    // rendered_prompt = interpolated dagNode.prompt (channel input 2).
+    // rendered_prompt = interpolated dagNode.prompt, plus the F2b retry
+    // checkpoint section on a retry attempt (channel input 2).
     const v3Input: V3SpawnInput = {
       system_prompt: agentConfig.systemPrompt,
       rendered_prompt: renderedPrompt,
@@ -752,7 +797,12 @@ export class V3Dispatcher {
 
       // If still a violation after the correction attempt, fail the node.
       if (classifiedOutput.path === "schema-violation") {
-        const usage = await this.resolveSpawnUsage(runnerResult, latencyMs, agentConfig, nodeRow);
+        const usage = await this.resolveSpawnUsage(
+          runnerResult,
+          latencyMs,
+          agentConfig,
+          nodeRow,
+        );
         await this.writeSpawnRecord({
           spawnId,
           nodeRow,
@@ -864,7 +914,12 @@ export class V3Dispatcher {
       orgId: nodeRow.orgId,
     });
 
-    const usage = await this.resolveSpawnUsage(runnerResult, latencyMs, agentConfig, nodeRow);
+    const usage = await this.resolveSpawnUsage(
+      runnerResult,
+      latencyMs,
+      agentConfig,
+      nodeRow,
+    );
     await this.writeSpawnRecord({
       spawnId,
       nodeRow,
@@ -1183,6 +1238,48 @@ export class V3Dispatcher {
     };
   }
 
+  /**
+   * F2b (T-F2-06): fetch the immediately-prior attempt's `context_checkpoint`
+   * for this node, for retry-prompt injection in {@link spawn} Step 4a. A
+   * node's spawn history is durable (every attempt — in-process retry or
+   * reconcile-conduction-triggered redispatch after a restart — inserts a NEW
+   * `v3_spawns` row bound by `node_id`; see the durable-attempt-counter note
+   * on `reconcileSpawnConduction` in v3-reconciler.ts), so "zero rows" IS the
+   * first-attempt signal. Returns null on a first attempt, or when the prior
+   * attempt's checkpoint was never computed or carries nothing usable (empty
+   * writtenFiles AND no remainingTasksSummary) — callers must inject nothing
+   * in either case rather than fabricate a placeholder section.
+   */
+  private async fetchPriorCheckpoint(
+    nodeRow: NodeRow,
+  ): Promise<ContextCheckpoint | null> {
+    const priorSpawns = await this.db
+      .select({
+        startedAt: v3Spawns.startedAt,
+        contextCheckpoint: v3Spawns.contextCheckpoint,
+      })
+      .from(v3Spawns)
+      .where(eq(v3Spawns.nodeId, nodeRow.id));
+
+    if (priorSpawns.length === 0) return null;
+
+    const [latest] = [...priorSpawns].sort((a, b) => {
+      const at = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+      const bt = b.startedAt ? new Date(b.startedAt).getTime() : 0;
+      return bt - at;
+    });
+
+    const checkpoint = (latest?.contextCheckpoint ??
+      null) as ContextCheckpoint | null;
+    if (!checkpoint) return null;
+    const hasWrittenFiles =
+      Array.isArray(checkpoint.writtenFiles) &&
+      checkpoint.writtenFiles.length > 0;
+    if (!hasWrittenFiles && !checkpoint.remainingTasksSummary) return null;
+
+    return checkpoint;
+  }
+
   // ── Private: DB writes ───────────────────────────────────────────────────
 
   /**
@@ -1335,12 +1432,19 @@ export class V3Dispatcher {
     // reported the split, so a reader of tokens_output sees no regression —
     // the row is still marked suspect below via tokensInput===0.
     const tokensOutput = runnerResult.tokensOutput ?? runnerResult.tokensSpent;
-    const rateSuspect = computeUsageSuspect({ tokensInput, tokensOutput, latencyMs });
+    const rateSuspect = computeUsageSuspect({
+      tokensInput,
+      tokensOutput,
+      latencyMs,
+    });
 
     let modelRealName: string | null = null;
     let nameSuspect = false;
     try {
-      const resolved = await resolveRealName(agentConfig.model, nodeRow.ownerEmail);
+      const resolved = await resolveRealName(
+        agentConfig.model,
+        nodeRow.ownerEmail,
+      );
       modelRealName = resolved.realName;
       nameSuspect = resolved.suspect;
     } catch (err) {
