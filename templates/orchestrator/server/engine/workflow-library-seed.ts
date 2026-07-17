@@ -106,7 +106,6 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "develop",
           agent: "vllm",
-          deps: [],
           prompt:
             "你是开发者。请在当前 workspace 用 Read/Edit/Write/Bash 完成下面的开发规格,实现全部代码改动:\n\n{{inputs.spec}}\n\n严格遵守工程约束(只改指定文件/范围、DB 变更加性、复用现有写法、新表要有建表迁移)。**不要运行 pnpm install 或构建**。完成后简述改/新建了哪些文件及关键改动。",
           workspace: "{{inputs.workspaceId}}",
@@ -137,9 +136,8 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "develop",
           agent: "vllm",
-          deps: [],
           prompt:
-            "你是开发者。在当前 workspace 用 Read/Edit/Write/Bash 完成下面的开发规格:\n\n{{inputs.spec}}\n\n严格遵守工程约束(只改指定文件/范围、DB变更加性、复用现有写法、失败要记日志不静默吞错、依赖表存在的启动逻辑要幂等)。不要 pnpm install 或构建。完成后简述改了哪些文件。",
+            "你是开发者。在当前 workspace 用 Read/Edit/Write/Bash 完成开发规格:\n\n{{inputs.spec}}\n\n严格遵守工程约束(只改指定文件/范围、加性变更、复用现有写法、失败记日志不静默吞错、启动逻辑幂等)。不要 pnpm install 或构建。完成后简述改了哪些文件。",
           workspace: "{{inputs.workspaceId}}",
         },
         {
@@ -148,7 +146,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           agent: "reviewer",
           deps: ["develop"],
           prompt:
-            "审查当前 workspace 的改动(先 git diff,再读改动文件)。对照规格找真实缺陷(逻辑/边界/类型/越界文件/丢需求/静默吞错/非幂等)。规格:\n{{inputs.spec}}\n只审查不改代码。",
+            "审查当前 workspace 改动(先 git diff,再读改动文件)。对照规格找真实缺陷。规格:\n{{inputs.spec}}\n只审查不改代码。",
           workspace: "{{inputs.workspaceId}}",
           output_schema: {
             type: "object",
@@ -170,7 +168,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           deps: ["review1"],
           guard: "deps.review1.output.verdict != 'approved'",
           prompt:
-            "审查者(第1轮)提出修改意见,请在当前 workspace 逐条修复。\n结论:{{deps.review1.output.summary}}\n问题:{{deps.review1.output.issues}}\n只修这些,不引入无关改动。完成后简述改了什么。",
+            "审查者(第1轮)提出了修改意见,请在当前 workspace 逐条修复。审查结果:\n{{deps.review1.output}}\n只修这些问题,不引入无关改动。完成后简述改了什么。",
           workspace: "{{inputs.workspaceId}}",
         },
         {
@@ -180,7 +178,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           deps: ["fix1"],
           guard: "deps.review1.output.verdict != 'approved'",
           prompt:
-            "开发者已按第1轮意见修复。再次审查当前 workspace 改动(git diff + 读文件),对照规格找剩余缺陷。规格:\n{{inputs.spec}}\n只审查不改代码。",
+            "开发者已按第1轮意见修复。再次审查当前 workspace 改动,对照规格找剩余缺陷。规格:\n{{inputs.spec}}\n只审查不改代码。",
           workspace: "{{inputs.workspaceId}}",
           output_schema: {
             type: "object",
@@ -202,7 +200,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           deps: ["review2"],
           guard: "deps.review2.output.verdict != 'approved'",
           prompt:
-            "审查者(第2轮)仍有修改意见,请在当前 workspace 逐条修复。\n结论:{{deps.review2.output.summary}}\n问题:{{deps.review2.output.issues}}\n只修这些。完成后简述改了什么。",
+            "审查者(第2轮)仍有意见,请逐条修复。审查结果:\n{{deps.review2.output}}\n只修这些。完成后简述。",
           workspace: "{{inputs.workspaceId}}",
         },
         {
@@ -212,7 +210,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           deps: ["fix2"],
           guard: "deps.review2.output.verdict != 'approved'",
           prompt:
-            "开发者已按第2轮意见修复。第3轮(最终)审查当前 workspace 改动,对照规格给出最终结论。规格:\n{{inputs.spec}}\n只审查不改代码。",
+            "第3轮(最终)审查当前 workspace 改动,对照规格给最终结论。规格:\n{{inputs.spec}}\n只审查不改代码。",
           workspace: "{{inputs.workspaceId}}",
           output_schema: {
             type: "object",
@@ -252,7 +250,6 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "audit1",
           agent: "auditor",
-          deps: [],
           prompt:
             "对下面的目标做 Phase H 目标审计。用 git diff、Read、grep 核实当前 workspace 是否真正达成目标(不看任务清单,只看代码/证据)。\n\n目标:\n{{inputs.goal}}\n\n给出结构化 verdict 与证据。",
           workspace: "{{inputs.workspaceId}}",
@@ -349,7 +346,6 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "develop",
           agent: "vllm",
-          deps: [],
           prompt:
             "你是开发者。在当前 workspace 完成开发规格:\n\n{{inputs.spec}}\n\n严格遵守工程约束(只改指定文件/范围、加性变更、失败记日志不静默吞错、启动逻辑幂等)。不要 pnpm install 或构建。完成后简述改了哪些文件。",
           workspace: "{{inputs.workspaceId}}",
