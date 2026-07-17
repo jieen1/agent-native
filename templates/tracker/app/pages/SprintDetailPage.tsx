@@ -407,7 +407,7 @@ function ExecutingPhasePanel({ items }: { items: TrackerWorkItem[] }) {
   const columns: [string, TrackerWorkItem[], React.ReactNode][] = [
     ["排队", queued, <StatusRing key="q" status="queued" size={10} />],
     ["运行中", running, <StatusRing key="r" status="running" size={10} />],
-    ["已完成", merged, <StatusIcon key="m" tone="ok" size="sm" />],
+    ["已合入", merged, <StatusIcon key="m" tone="ok" size="sm" />],
   ];
 
   return (

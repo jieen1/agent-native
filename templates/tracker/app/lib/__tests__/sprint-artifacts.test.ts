@@ -12,7 +12,8 @@ describe("classifyDocKey — S6 产物库三段式分组 (03-tracker.md §5.2 �
   it("classifies design docs, including the brief: prefix family", () => {
     expect(classifyDocKey("ui-spec")).toBe("设计");
     expect(classifyDocKey("ui-prototype")).toBe("设计");
-    expect(classifyDocKey("technical-design")).toBe("设计");
+    expect(classifyDocKey("tech-design")).toBe("设计");
+    expect(classifyDocKey("shared-brief")).toBe("设计");
     expect(classifyDocKey("briefs-index")).toBe("设计");
     expect(classifyDocKey("brief:PAY-201")).toBe("设计");
   });
