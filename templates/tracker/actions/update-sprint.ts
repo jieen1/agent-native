@@ -35,6 +35,31 @@ export default defineAction({
     branch: z.string().optional().describe("New git branch"),
     startDate: z.string().optional().describe("New start date (ISO-8601)"),
     endDate: z.string().optional().describe("New end date (ISO-8601)"),
+    studioState: z
+      .object({
+        stepOverrides: z
+          .record(
+            z.string(),
+            z.enum([
+              "final",
+              "in-progress",
+              "skipped",
+              "not-applicable",
+              "pending",
+            ]),
+          )
+          .optional()
+          .describe(
+            "Manual step-rail override, keyed by step number (as a string)",
+          ),
+        problemPoolCollapsed: z.boolean().optional(),
+      })
+      .partial()
+      .optional()
+      .describe(
+        "Sprint Studio manual UI state (r4-workflow-families-planning-skills.md §5.1). " +
+          "Shallow-merged onto the existing stored value — pass only the fields you're changing.",
+      ),
   }),
   http: { method: "POST" },
   run: async (args) => {
@@ -61,6 +86,23 @@ export default defineAction({
     if (args.branch !== undefined) values.branch = args.branch.trim();
     if (args.startDate !== undefined) values.startDate = args.startDate.trim();
     if (args.endDate !== undefined) values.endDate = args.endDate.trim();
+    if (args.studioState !== undefined) {
+      let current: Record<string, unknown> = {};
+      try {
+        current = JSON.parse(existing.studioState || "{}");
+      } catch {
+        current = {};
+      }
+      const merged = {
+        ...current,
+        ...args.studioState,
+        stepOverrides: {
+          ...(current.stepOverrides as Record<string, string> | undefined),
+          ...args.studioState.stepOverrides,
+        },
+      };
+      values.studioState = JSON.stringify(merged);
+    }
 
     await db
       .update(schema.sprints)
@@ -89,6 +131,13 @@ export default defineAction({
       endDate: row.endDate,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      studioState: (() => {
+        try {
+          return JSON.parse(row.studioState || "{}");
+        } catch {
+          return {};
+        }
+      })(),
     };
   },
 });

@@ -120,6 +120,14 @@ export const sprints = table("tracker_sprints", {
   endDate: text("end_date").default(""),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  // R4b.2 (Sprint Studio, r4-workflow-families-planning-skills.md §5.1): the
+  // one genuinely-new column — manual step-rail overrides (activate/skip/mark
+  // n/a) and UI prefs (e.g. problem-pool collapsed) that have no other home.
+  // JSON-encoded (this schema has no native jsonb type; see `tags`/
+  // `scaleEstimate` for the same text-column convention). Shape:
+  // { stepOverrides?: Record<number, "in-progress"|"final"|"skipped"|"not-applicable">,
+  //   problemPoolCollapsed?: boolean }
+  studioState: text("studio_state").notNull().default("{}"),
   ...ownableColumns(),
 });
 
@@ -330,9 +338,12 @@ export const projectWorkflowRules = table("tracker_project_workflow_rules", {
 });
 
 // ---------------------------------------------------------------------------
-// Approvals — gate sign-off records for plan/design/escalation/audit-deferral.
+// Approvals — gate sign-off records for plan/design/ui/escalation/audit-deferral.
 //
-// gateKey: 'plan-signoff' | 'design-signoff' | 'escalation' | 'audit-deferral'
+// gateKey: 'plan-signoff' | 'design-signoff' | 'ui-signoff' | 'escalation' |
+//   'audit-deferral' (see shared/types.ts's GateKey union + the zod enum on
+//   request-approval.ts's schema for the actually-enforced list — this column
+//   itself carries no DB-level constraint, plain text).
 // gateRef: optional JSON {runId, nodeId} linking to an orchestrator workflow gate.
 // status: 'pending' | 'approved' | 'rejected'
 // Idempotency: at most one pending row per (sprintId, gateKey, workItemId).

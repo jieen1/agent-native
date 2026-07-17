@@ -6,7 +6,15 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { createClient, type Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 
@@ -98,6 +106,7 @@ beforeAll(async () => {
       end_date TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      studio_state TEXT NOT NULL DEFAULT '{}',
       owner_email TEXT NOT NULL,
       org_id TEXT,
       visibility TEXT NOT NULL DEFAULT 'private'
@@ -153,10 +162,12 @@ beforeAll(async () => {
   `);
 
   const getReviewChecklistModule = await import("../get-review-checklist.js");
-  const createSprintArtifactModule = await import("../create-sprint-artifact.js");
+  const createSprintArtifactModule =
+    await import("../create-sprint-artifact.js");
   const setArtifactReviewModule = await import("../set-artifact-review.js");
   getReviewChecklist = getReviewChecklistModule.default as unknown as AnyAction;
-  createSprintArtifact = createSprintArtifactModule.default as unknown as AnyAction;
+  createSprintArtifact =
+    createSprintArtifactModule.default as unknown as AnyAction;
   setArtifactReview = setArtifactReviewModule.default as unknown as AnyAction;
 }, 30_000);
 
@@ -208,7 +219,8 @@ async function insertSprint(id: string) {
 
 async function insertItem(overrides: Record<string, unknown> = {}) {
   const now = new Date().toISOString();
-  const id = (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
+  const id =
+    (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
   await db.insert(trackerSchema.workItems).values({
     id,
     projectId: "proj-1",
@@ -252,10 +264,15 @@ diff --git a/templates/tracker/server/db/schema.ts b/templates/tracker/server/db
     const id = await insertItem({ sprintId: null, nature: "[]" });
 
     const result = await asUser(() =>
-      getReviewChecklist.run({ workItemId: id, diff: DIFF_SCHEMA_ADDS_TABLE_NO_MIGRATION }),
+      getReviewChecklist.run({
+        workItemId: id,
+        diff: DIFF_SCHEMA_ADDS_TABLE_NO_MIGRATION,
+      }),
     );
 
-    const migrationItem = result.items.find((i: any) => i.key === "migration-audit");
+    const migrationItem = result.items.find(
+      (i: any) => i.key === "migration-audit",
+    );
     expect(migrationItem).toBeDefined();
     expect(migrationItem.state).toBe("fail");
     expect(migrationItem.detail).toBe("tracker_artifact_reviews");
@@ -272,7 +289,9 @@ diff --git a/templates/tracker/server/plugins/db.ts b/templates/tracker/server/p
     const result = await asUser(() =>
       getReviewChecklist.run({ workItemId: id, diff: diffWithMigration }),
     );
-    const migrationItem = result.items.find((i: any) => i.key === "migration-audit");
+    const migrationItem = result.items.find(
+      (i: any) => i.key === "migration-audit",
+    );
     expect(migrationItem.state).toBe("pass");
     expect(migrationItem.detail).toBeUndefined();
   });

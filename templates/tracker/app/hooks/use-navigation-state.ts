@@ -13,6 +13,8 @@ interface NavigationState {
   itemId?: string;
   projectId?: string;
   sprintId?: string;
+  /** Sprint Studio's active step rail number (1-7), R4b.2. */
+  activeStep?: number;
 }
 
 interface NavigateCommand extends NavigationState {
@@ -96,6 +98,12 @@ export function useNavigationState() {
         state.view = "team";
       } else if (pathname.startsWith("/extensions")) {
         state.view = "extensions";
+      } else if (/\/sprints\/[^/]+\/studio/.test(pathname)) {
+        const match = pathname.match(/\/sprints\/([^/]+)\/studio/);
+        state.view = "sprint-studio";
+        if (match) state.sprintId = decodeURIComponent(match[1]);
+        const step = Number(searchParams.get("step"));
+        if (Number.isFinite(step) && step > 0) state.activeStep = step;
       } else if (pathname.startsWith("/sprints/")) {
         const match = pathname.match(/\/sprints\/([^/]+)/);
         state.view = "sprint";

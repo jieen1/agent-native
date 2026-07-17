@@ -6,7 +6,15 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { createClient, type Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 
@@ -69,6 +77,18 @@ beforeAll(async () => {
       scale_estimate TEXT,
       split_parent_id TEXT
     );
+    CREATE TABLE tracker_activities (
+      id TEXT PRIMARY KEY,
+      work_item_id TEXT NOT NULL,
+      actor_kind TEXT NOT NULL DEFAULT 'agent',
+      actor_name TEXT NOT NULL DEFAULT '智能体',
+      event_type TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      owner_email TEXT NOT NULL,
+      org_id TEXT,
+      visibility TEXT NOT NULL DEFAULT 'private'
+    );
   `);
 
   const mod = await import("../update-work-item.js");
@@ -81,8 +101,17 @@ afterAll(() => {
 });
 
 beforeEach(async () => {
-  await client.executeMultiple(`DELETE FROM tracker_work_items;`);
+  await client.executeMultiple(
+    `DELETE FROM tracker_work_items; DELETE FROM tracker_activities;`,
+  );
 });
+
+async function activitiesFor(workItemId: string) {
+  return db
+    .select()
+    .from(trackerSchema.activities)
+    .where(eq(trackerSchema.activities.workItemId, workItemId));
+}
 
 async function insertItem(overrides: Record<string, unknown> = {}) {
   const now = new Date().toISOString();
@@ -108,7 +137,10 @@ async function insertItem(overrides: Record<string, unknown> = {}) {
 
 async function fetchItem(id: string) {
   return (
-    await db.select().from(trackerSchema.workItems).where(eq(trackerSchema.workItems.id, id))
+    await db
+      .select()
+      .from(trackerSchema.workItems)
+      .where(eq(trackerSchema.workItems.id, id))
   )[0];
 }
 
@@ -122,9 +154,7 @@ describe("T-F3-07: update-work-item 拒绝 currentStageName (real action schema)
     const id = await insertItem({ currentStageName: "待办" });
 
     await expect(
-      asUser(() =>
-        updateWorkItem.run({ id, currentStageName: "实施" } as any),
-      ),
+      asUser(() => updateWorkItem.run({ id, currentStageName: "实施" } as any)),
     ).rejects.toThrow();
 
     const row = await fetchItem(id);
@@ -146,5 +176,55 @@ describe("T-F3-07: update-work-item 拒绝 currentStageName (real action schema)
     expect(updated.priority).toBe(3);
     expect(updated.risk).toBe("high");
     expect(updated.owner).toBe("alice@example.com");
+  });
+});
+
+// ============================================================================
+// R4b.2 Sprint Studio 问题池「挂载」(drag-to-attach): dragging/clicking a
+// backlog item onto the sprint calls update-work-item({sprintId}) — this must
+// both persist the attach AND leave an activity-stream trace (§5.4), unlike
+// this action's other silent metadata patches.
+// ============================================================================
+
+describe("R4b.2 problem-pool drag-to-attach (update-work-item sprintId)", () => {
+  it("writes sprintId and logs a sprint.attach activity when attaching a backlog item", async () => {
+    const id = await insertItem({ sprintId: null });
+
+    const updated = await asUser(() =>
+      updateWorkItem.run({ id, sprintId: "sprint-9" }),
+    );
+    expect(updated.sprintId).toBe("sprint-9");
+
+    const activities = await activitiesFor(id);
+    expect(activities).toHaveLength(1);
+    expect(activities[0]!.eventType).toBe("sprint.attach");
+    const payload = JSON.parse(activities[0]!.payload);
+    expect(payload).toEqual({ fromSprintId: null, toSprintId: "sprint-9" });
+  });
+
+  it("logs sprint.detach when clearing sprintId back to null", async () => {
+    const id = await insertItem({ sprintId: "sprint-9" });
+
+    await asUser(() => updateWorkItem.run({ id, sprintId: null }));
+
+    const activities = await activitiesFor(id);
+    expect(activities).toHaveLength(1);
+    expect(activities[0]!.eventType).toBe("sprint.detach");
+  });
+
+  it("does not log an activity when sprintId is omitted (unrelated metadata edit)", async () => {
+    const id = await insertItem({ sprintId: "sprint-9" });
+
+    await asUser(() => updateWorkItem.run({ id, priority: 2 }));
+
+    expect(await activitiesFor(id)).toHaveLength(0);
+  });
+
+  it("does not log an activity when sprintId is set to its current value (no-op)", async () => {
+    const id = await insertItem({ sprintId: "sprint-9" });
+
+    await asUser(() => updateWorkItem.run({ id, sprintId: "sprint-9" }));
+
+    expect(await activitiesFor(id)).toHaveLength(0);
   });
 });

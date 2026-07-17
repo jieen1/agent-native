@@ -91,6 +91,16 @@ export interface WorkItem {
   // F5 (v25): present on list-work-items rows (board-level scale badge).
   scaleEstimate?: ScaleEstimate | null;
   splitParentId?: string | null;
+  // list-work-items.ts actually selects these too (board slim-column /
+  // R4b.2 problem-pool need them) — this interface just hadn't caught up.
+  sprintId?: string | null;
+  itemKey?: string;
+  itemKeyDisplay?: string;
+  risk?: string;
+  tags?: string[];
+  currentStageName?: string;
+  plannedStages?: string[];
+  owner?: string | null;
 }
 
 // F8 (回链完整性): one row of a work item's dispatch/run history, newest
@@ -282,6 +292,20 @@ export const STAGE_ORDER: StageName[] = [
   "交付",
 ];
 
+// R4b.2 Sprint Studio manual step-rail override / UI-pref state — the one
+// genuinely-new persisted column (`sprints.studioState`). See
+// server/lib/studio-step-derive.ts for how stepOverrides feeds derivation.
+export interface SprintStudioState {
+  stepOverrides?: Record<string, StudioStepState>;
+  problemPoolCollapsed?: boolean;
+}
+export type StudioStepState =
+  | "final"
+  | "in-progress"
+  | "skipped"
+  | "not-applicable"
+  | "pending";
+
 export interface Sprint {
   id: string;
   projectId: string;
@@ -297,6 +321,7 @@ export interface Sprint {
   updatedAt: string;
   itemCount?: number;
   delivered?: number;
+  studioState?: SprintStudioState;
 }
 export interface SprintDetail extends Sprint {
   items: TrackerWorkItem[];
@@ -514,6 +539,9 @@ export interface Approval {
   reason: string | null;
   decidedAt: string | null;
   createdAt: string;
+  anchorArtifactId?: string | null;
+  anchorVersion?: number | null;
+  staleAt?: string | null;
 }
 
 // Review checklist types (F6 gate criteria, S5 门判据 panel) — mirrors

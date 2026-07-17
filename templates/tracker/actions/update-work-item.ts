@@ -1,9 +1,16 @@
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
+import {
+  getRequestOrgId,
+  getRequestUserEmail,
+} from "@agent-native/core/server/request-context";
 import { eq, and } from "drizzle-orm";
+import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+
+const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
 export default defineAction({
   description:
@@ -44,13 +51,17 @@ export default defineAction({
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.id), ownerScope(schema.workItems)))
+        .where(
+          and(eq(schema.workItems.id, args.id), ownerScope(schema.workItems)),
+        )
         .limit(1)
     )[0];
     if (!existing) throw new Error("Work item not found");
 
     const now = new Date().toISOString();
-    const patch: Partial<typeof schema.workItems.$inferInsert> = { updatedAt: now };
+    const patch: Partial<typeof schema.workItems.$inferInsert> = {
+      updatedAt: now,
+    };
 
     if (args.title !== undefined) patch.title = args.title;
     if (args.description !== undefined) patch.description = args.description;
@@ -58,9 +69,11 @@ export default defineAction({
     if (args.priority !== undefined) patch.priority = args.priority;
     if (args.risk !== undefined) patch.risk = args.risk;
     if (args.tags !== undefined) patch.tags = JSON.stringify(args.tags);
-    if (args.executionMode !== undefined) patch.executionMode = args.executionMode;
+    if (args.executionMode !== undefined)
+      patch.executionMode = args.executionMode;
     if (args.sprintId !== undefined) patch.sprintId = args.sprintId;
-    if (args.plannedStages !== undefined) patch.plannedStages = JSON.stringify(args.plannedStages);
+    if (args.plannedStages !== undefined)
+      patch.plannedStages = JSON.stringify(args.plannedStages);
     if (args.branch !== undefined) patch.branch = args.branch;
     if (args.owner !== undefined) patch.owner = args.owner;
     if (args.nature !== undefined) patch.nature = JSON.stringify(args.nature);
@@ -68,7 +81,32 @@ export default defineAction({
     await db
       .update(schema.workItems)
       .set(patch)
-      .where(and(eq(schema.workItems.id, args.id), ownerScope(schema.workItems)));
+      .where(
+        and(eq(schema.workItems.id, args.id), ownerScope(schema.workItems)),
+      );
+
+    // R4b.2 Sprint Studio 问题池挂载 (§5.4): a sprintId change is the
+    // "拖入 sprint" action — worth an activity entry, unlike this action's
+    // other metadata patches which are silent. Only log a real change, not a
+    // no-op write of the same value.
+    if (args.sprintId !== undefined && args.sprintId !== existing.sprintId) {
+      const orgId = getRequestOrgId() ?? null;
+      await db.insert(schema.activities).values({
+        id: nanoid(),
+        workItemId: args.id,
+        actorKind: "human",
+        actorName: ownerEmail,
+        eventType: args.sprintId ? "sprint.attach" : "sprint.detach",
+        payload: JSON.stringify({
+          fromSprintId: existing.sprintId,
+          toSprintId: args.sprintId,
+        }),
+        createdAt: now,
+        ownerEmail,
+        orgId,
+        visibility: "private",
+      });
+    }
 
     const updated = (
       await db

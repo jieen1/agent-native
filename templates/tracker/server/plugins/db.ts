@@ -575,6 +575,16 @@ ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS health_check_log TEXT`,
 );
 CREATE INDEX IF NOT EXISTS tracker_project_workflow_rules_project_idx ON tracker_project_workflow_rules (project_id, priority)`,
   },
+  {
+    // v31 (R4b.2 Sprint Studio, r4-workflow-families-planning-skills.md §5.1):
+    // studio_state — the one genuinely-new column for Studio's manual
+    // step-rail overrides + UI prefs. See schema.ts's sprints docblock.
+    // Renumbered from v30 to v31 during merge — v30 collided with R4a.3's
+    // already-deployed projectWorkflowRules migration above (both branches
+    // independently picked 30; R4a.3's was live in production first).
+    version: 31,
+    sql: `ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS studio_state TEXT NOT NULL DEFAULT '{}'`,
+  },
 ];
 
 const coreRunMigrations = runMigrations(TRACKER_MIGRATIONS, {

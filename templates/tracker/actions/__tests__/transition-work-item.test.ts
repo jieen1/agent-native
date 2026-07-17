@@ -129,6 +129,7 @@ beforeAll(async () => {
       end_date TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      studio_state TEXT NOT NULL DEFAULT '{}',
       owner_email TEXT NOT NULL,
       org_id TEXT,
       visibility TEXT NOT NULL DEFAULT 'private'
@@ -213,7 +214,8 @@ beforeEach(async () => {
 
 async function insertItem(overrides: Record<string, unknown> = {}) {
   const now = new Date().toISOString();
-  const id = (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
+  const id =
+    (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
   await db.insert(trackerSchema.workItems).values({
     id,
     projectId: "proj-1",
@@ -235,7 +237,10 @@ async function insertItem(overrides: Record<string, unknown> = {}) {
 
 async function fetchItem(id: string) {
   return (
-    await db.select().from(trackerSchema.workItems).where(eq(trackerSchema.workItems.id, id))
+    await db
+      .select()
+      .from(trackerSchema.workItems)
+      .where(eq(trackerSchema.workItems.id, id))
   )[0];
 }
 
@@ -281,7 +286,11 @@ describe("T-F3-03: agent 写 done 机制拒绝", () => {
 
 describe("done 通道: 源态约束与 CHANGES_REQUESTED 重定向", () => {
   it("human 自「待人工评审」(验收) + PASSED + commit → done 落库 (唯一合法 done 路径)", async () => {
-    const id = await insertItem({ currentStageName: "验收", status: "open", execState: "returned" });
+    const id = await insertItem({
+      currentStageName: "验收",
+      status: "open",
+      execState: "returned",
+    });
 
     const result = await asUser(() =>
       transitionWorkItem.run(
@@ -303,7 +312,11 @@ describe("done 通道: 源态约束与 CHANGES_REQUESTED 重定向", () => {
   });
 
   it("human 自「测试」+ 全证据 → done 被拒 (invalid-source-state), 状态不变", async () => {
-    const id = await insertItem({ currentStageName: "测试", status: "open", execState: "dispatched" });
+    const id = await insertItem({
+      currentStageName: "测试",
+      status: "open",
+      execState: "dispatched",
+    });
 
     await expect(
       asUser(() =>
@@ -326,7 +339,11 @@ describe("done 通道: 源态约束与 CHANGES_REQUESTED 重定向", () => {
   });
 
   it("自「待人工评审」发 done+CHANGES_REQUESTED → 重定向为回退「实施」(驳回返工), 不写 done", async () => {
-    const id = await insertItem({ currentStageName: "验收", status: "open", execState: "returned" });
+    const id = await insertItem({
+      currentStageName: "验收",
+      status: "open",
+      execState: "returned",
+    });
 
     const result = await asUser(() =>
       transitionWorkItem.run(
@@ -352,7 +369,11 @@ describe("done 通道: 源态约束与 CHANGES_REQUESTED 重定向", () => {
   });
 
   it("自其他源态(测试)发 done+CHANGES_REQUESTED → 重定向不生效, 按 done 被拒, 零写入", async () => {
-    const id = await insertItem({ currentStageName: "测试", status: "open", execState: "dispatched" });
+    const id = await insertItem({
+      currentStageName: "测试",
+      status: "open",
+      execState: "dispatched",
+    });
 
     await expect(
       asUser(() =>
@@ -382,7 +403,11 @@ describe("done 通道: 源态约束与 CHANGES_REQUESTED 重定向", () => {
 
 describe("T-F3-09: closed 通道(未派发限定)", () => {
   it("① 未派发项 human+reason → closed succeeds; closedReason/closedAt + audit + activity row", async () => {
-    const id = await insertItem({ currentStageName: "待办", status: "open", execState: null });
+    const id = await insertItem({
+      currentStageName: "待办",
+      status: "open",
+      execState: null,
+    });
 
     const result = await asUser(() =>
       transitionWorkItem.run(
@@ -399,7 +424,9 @@ describe("T-F3-09: closed 通道(未派发限定)", () => {
     expect(row.closedAt).toBeTruthy();
 
     const activities = await fetchActivities(id);
-    expect(activities.some((a) => a.eventType === "transition.closed")).toBe(true);
+    expect(activities.some((a) => a.eventType === "transition.closed")).toBe(
+      true,
+    );
   });
 
   it("② 已派发项(execState=dispatched) → rejected, no state change", async () => {
@@ -490,10 +517,17 @@ describe("T-F3-11: 人工纠错回退留痕", () => {
 
 describe("T-F3-08: allowedTransitions 同源(前后端不漂移)", () => {
   it("get-work-item's allowedTransitions for a human caller matches the guard's own allowedTransitions() for the same fixture", async () => {
-    const { allowedTransitions } = await import("../../server/lib/transition-guard.js");
-    const id = await insertItem({ currentStageName: "测试", status: "open", execState: "dispatched" });
+    const { allowedTransitions } =
+      await import("../../server/lib/transition-guard.js");
+    const id = await insertItem({
+      currentStageName: "测试",
+      status: "open",
+      execState: "dispatched",
+    });
 
-    const detail = await asUser(() => getWorkItem.run({ id }, ctxFor("frontend")));
+    const detail = await asUser(() =>
+      getWorkItem.run({ id }, ctxFor("frontend")),
+    );
     const guardSide = allowedTransitions(
       { currentStageName: "测试", status: "open", execState: "dispatched" },
       { kind: "human", email: OWNER },
@@ -503,7 +537,11 @@ describe("T-F3-08: allowedTransitions 同源(前后端不漂移)", () => {
   });
 
   it("agent (tool) caller gets an empty allowedTransitions set", async () => {
-    const id = await insertItem({ currentStageName: "测试", status: "open", execState: "dispatched" });
+    const id = await insertItem({
+      currentStageName: "测试",
+      status: "open",
+      execState: "dispatched",
+    });
     const detail = await asUser(() => getWorkItem.run({ id }, ctxFor("tool")));
     expect(detail.allowedTransitions).toEqual([]);
   });
@@ -517,7 +555,11 @@ describe("T-F3-15: 并发流转竞态(CAS)", () => {
   it("two concurrent transitions from the same source snapshot — exactly one wins, the other is rejected as a conflict, no double-apply", async () => {
     // 验收(待人工评审) source: both target=done (full evidence) and target=实施
     // (manual-override rollback) are independently legal from this state.
-    const id = await insertItem({ currentStageName: "验收", status: "open", execState: "dispatched" });
+    const id = await insertItem({
+      currentStageName: "验收",
+      status: "open",
+      execState: "dispatched",
+    });
 
     const callA = asUser(() =>
       transitionWorkItem.run(
@@ -550,7 +592,8 @@ describe("T-F3-15: 并发流转竞态(CAS)", () => {
     // The terminal state is EXACTLY the winner's — either done, or 实施 —
     // never a mix of both (no double-apply).
     const wonDone = row.status === "done";
-    const wonRollback = row.currentStageName === "实施" && row.status === "open";
+    const wonRollback =
+      row.currentStageName === "实施" && row.status === "open";
     expect(wonDone || wonRollback).toBe(true);
     expect(wonDone && wonRollback).toBe(false);
 

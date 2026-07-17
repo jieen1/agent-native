@@ -7,6 +7,7 @@ export const TRACKER_NAVIGATION_VIEWS = [
   "item",
   "sprints",
   "sprint",
+  "sprint-studio",
   "queue",
   "inbox",
   "new-item",
@@ -21,6 +22,8 @@ export interface TrackerNavigationTarget {
   itemId?: string | null;
   projectId?: string | null;
   sprintId?: string | null;
+  /** Sprint Studio's active step rail number (1-7), R4b.2. */
+  activeStep?: number | null;
 }
 
 export function trackerRoutePath(
@@ -29,6 +32,7 @@ export function trackerRoutePath(
   const itemId = target.itemId ?? undefined;
   const projectId = target.projectId ?? undefined;
   const sprintId = target.sprintId ?? undefined;
+  const activeStep = target.activeStep ?? undefined;
 
   if (!target.view && itemId) return `/items/${encodeURIComponent(itemId)}`;
   if (!target.view && sprintId)
@@ -48,6 +52,11 @@ export function trackerRoutePath(
       return "/sprints";
     case "sprint":
       return sprintId ? `/sprints/${encodeURIComponent(sprintId)}` : null;
+    case "sprint-studio":
+      if (!sprintId) return null;
+      return activeStep
+        ? `/sprints/${encodeURIComponent(sprintId)}/studio?step=${activeStep}`
+        : `/sprints/${encodeURIComponent(sprintId)}/studio`;
     case "queue":
       return "/queue";
     case "inbox":

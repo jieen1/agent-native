@@ -709,3 +709,74 @@ export function useSplitWorkItem() {
     },
   });
 }
+
+// ── R4b.2 Sprint Studio (/sprints/:id/studio) ───────────────────────────────
+
+export function useArtifactReviews(
+  params:
+    | { artifactId: string; version?: number }
+    | { sprintId: string; docKey: string },
+  enabled = true,
+) {
+  return useActionQuery("list-artifact-reviews", params as any, {
+    enabled,
+  }) as {
+    data?: {
+      artifactId: string | null;
+      version: number | null;
+      reviews: Array<{
+        id: string;
+        reviewKey: string;
+        checked: number;
+        reviewer: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+    };
+    isLoading: boolean;
+  };
+}
+
+export function useCheckArtifactGates(
+  sprintId: string | undefined,
+  docKey: string | undefined,
+) {
+  return useActionQuery(
+    "check-artifact-gates",
+    { sprintId: sprintId ?? "", docKey: docKey ?? "" },
+    { enabled: !!sprintId && !!docKey },
+  ) as {
+    data?: {
+      sprintId: string;
+      docKey: string;
+      artifactId: string | null;
+      version: number | null;
+      items: Array<{
+        key: string;
+        label: string;
+        source: "machine" | "human";
+        state: "pass" | "fail" | "needs-human";
+        detail?: string;
+      }>;
+      complete: boolean;
+      note?: string;
+    };
+    isLoading: boolean;
+  };
+}
+
+// extract-briefs is a mutating (POST) action but idempotent per docKey
+// (content-hash skip) — the Briefs step calls it both for the initial view
+// and for the explicit "重新提取"/"强制提取" buttons, never silently on an
+// unrelated render.
+export function useExtractBriefs() {
+  const qc = useQueryClient();
+  return useActionMutation("extract-briefs", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-sprint-artifacts"] });
+      qc.invalidateQueries({ queryKey: ["action", "list-work-items"] });
+    },
+    // Not toasted: design-signoff-required is an expected, recoverable state
+    // the Briefs view should render inline (force button), not a red toast.
+  });
+}
