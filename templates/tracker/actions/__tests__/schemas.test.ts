@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 // ============================================================================
 // Inline schema copies (mirroring the Zod schemas from each action file).
@@ -7,43 +7,74 @@ import { z } from 'zod';
 // ============================================================================
 
 const createSprintSchema = z.object({
-  projectId: z.string().min(1).describe('Owning project id'),
-  name: z.string().min(1).describe('Sprint name'),
-  goal: z.string().optional().describe('Sprint goal or theme'),
-  branch: z.string().optional().describe('Git branch the sprint targets'),
-  startDate: z.string().optional().describe('Sprint start date (ISO-8601)'),
-  endDate: z.string().optional().describe('Sprint end date (ISO-8601)'),
+  projectId: z.string().min(1).describe("Owning project id"),
+  name: z.string().min(1).describe("Sprint name"),
+  goal: z.string().optional().describe("Sprint goal or theme"),
+  branch: z.string().optional().describe("Git branch the sprint targets"),
+  startDate: z.string().optional().describe("Sprint start date (ISO-8601)"),
+  endDate: z.string().optional().describe("Sprint end date (ISO-8601)"),
 });
 
 const updateSprintSchema = z.object({
-  id: z.string().min(1).describe('Sprint id'),
-  name: z.string().min(1).optional().describe('New sprint name'),
-  goal: z.string().optional().describe('New sprint goal'),
-  status: z.string().optional().describe('New status (规划|进行中|已完成)'),
-  branch: z.string().optional().describe('New git branch'),
-  startDate: z.string().optional().describe('New start date (ISO-8601)'),
-  endDate: z.string().optional().describe('New end date (ISO-8601)'),
+  id: z.string().min(1).describe("Sprint id"),
+  name: z.string().min(1).optional().describe("New sprint name"),
+  goal: z.string().optional().describe("New sprint goal"),
+  status: z.string().optional().describe("New status (规划|进行中|已完成)"),
+  // S6 八相位驾驶舱: widened from planning|executing|done — mirrors the real
+  // enum in actions/update-sprint.ts exactly, so a future drift between the
+  // two throws this test, not just a runtime surprise.
+  phase: z
+    .enum([
+      "planning",
+      "designing",
+      "executing",
+      "verifying",
+      "auditing",
+      "promoting",
+      "storytelling",
+      "done",
+    ])
+    .optional(),
+  executorThreadId: z.string().nullable().optional(),
+  branch: z.string().optional().describe("New git branch"),
+  startDate: z.string().optional().describe("New start date (ISO-8601)"),
+  endDate: z.string().optional().describe("New end date (ISO-8601)"),
 });
 
+// Mirrors actions/request-approval.ts's gateKey enum.
+const requestApprovalGateKeySchema = z.enum([
+  "plan-signoff",
+  "design-signoff",
+  "ui-signoff",
+  "escalation",
+  "audit-deferral",
+]);
+
 const triggerStageSchema = z.object({
-  workItemId: z.string().min(1).describe('Work item to trigger a stage on'),
-  stageName: z.string().min(1).describe('Stage name (e.g. 分析, 设计, 实施, 测试, 验收, 交付)'),
+  workItemId: z.string().min(1).describe("Work item to trigger a stage on"),
+  stageName: z
+    .string()
+    .min(1)
+    .describe("Stage name (e.g. 分析, 设计, 实施, 测试, 验收, 交付)"),
 });
 
 const rollbackStageSchema = z.object({
-  workItemId: z.string().min(1).describe('Work item to rollback'),
-  targetStage: z.string().min(1).describe('Target stage name to rollback to'),
-  reason: z.string().optional().describe('Reason for the rollback'),
+  workItemId: z.string().min(1).describe("Work item to rollback"),
+  targetStage: z.string().min(1).describe("Target stage name to rollback to"),
+  reason: z.string().optional().describe("Reason for the rollback"),
 });
 
 const createArtifactSchema = z.object({
   workItemId: z.string().min(1),
   stageId: z.string().min(1),
   stageName: z.string().min(1),
-  kind: z.string().min(1).describe('e.g. 分析报告 / 设计稿 / 代码变更 / 测试集 / 验收报告'),
+  kind: z
+    .string()
+    .min(1)
+    .describe("e.g. 分析报告 / 设计稿 / 代码变更 / 测试集 / 验收报告"),
   name: z.string().min(1),
   contentRef: z.string().optional(),
-  producedByKind: z.enum(['agent', 'human']).optional(),
+  producedByKind: z.enum(["agent", "human"]).optional(),
 });
 
 const addCommentSchema = z.object({
@@ -53,14 +84,21 @@ const addCommentSchema = z.object({
 });
 
 const addLinkSchema = z.object({
-  fromItemId: z.string().min(1).describe('Source work item id'),
-  toItemId: z.string().min(1).describe('Target work item id'),
-  linkType: z.string().min(1).describe('Link type, e.g. depends-on, blocks, relates-to'),
+  fromItemId: z.string().min(1).describe("Source work item id"),
+  toItemId: z.string().min(1).describe("Target work item id"),
+  linkType: z
+    .string()
+    .min(1)
+    .describe("Link type, e.g. depends-on, blocks, relates-to"),
 });
 
 const enqueueWorkItemSchema = z.object({
-  workItemId: z.string().min(1).describe('Work item id to enqueue'),
-  priority: z.coerce.number().int().optional().describe('Queue priority (default 0)'),
+  workItemId: z.string().min(1).describe("Work item id to enqueue"),
+  priority: z.coerce
+    .number()
+    .int()
+    .optional()
+    .describe("Queue priority (default 0)"),
 });
 
 // F3 (T-F3-07): currentStageName REMOVED from this schema and `.strict()`
@@ -132,7 +170,15 @@ const listOrgMembersSchema = z.object({});
 // STAGE_ORDER constant (from shared/types.ts)
 // ============================================================================
 
-const STAGE_ORDER = ['待办', '分析', '设计', '实施', '测试', '验收', '交付'] as const;
+const STAGE_ORDER = [
+  "待办",
+  "分析",
+  "设计",
+  "实施",
+  "测试",
+  "验收",
+  "交付",
+] as const;
 
 // ============================================================================
 // TrackerWorkItem type structure (compile-time check)
@@ -163,78 +209,92 @@ type TrackerWorkItem = {
 // Tests for createSprintSchema
 // ============================================================================
 
-describe('create-sprint schema', () => {
-  it('validates valid input with required fields', () => {
-    const result = createSprintSchema.safeParse({ projectId: 'p1', name: 'Sprint 1' });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.projectId).toBe('p1');
-      expect(result.data.name).toBe('Sprint 1');
-    }
-  });
-
-  it('validates valid input with all optional fields', () => {
+describe("create-sprint schema", () => {
+  it("validates valid input with required fields", () => {
     const result = createSprintSchema.safeParse({
-      projectId: 'p1',
-      name: 'S1',
-      goal: 'Ship feature X',
-      branch: 'feature/x',
-      startDate: '2026-01-01',
-      endDate: '2026-01-14',
+      projectId: "p1",
+      name: "Sprint 1",
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.goal).toBe('Ship feature X');
-      expect(result.data.branch).toBe('feature/x');
-      expect(result.data.startDate).toBe('2026-01-01');
-      expect(result.data.endDate).toBe('2026-01-14');
+      expect(result.data.projectId).toBe("p1");
+      expect(result.data.name).toBe("Sprint 1");
     }
   });
 
-  it('rejects missing projectId', () => {
-    const result = createSprintSchema.safeParse({ name: 'Sprint 1' });
+  it("validates valid input with all optional fields", () => {
+    const result = createSprintSchema.safeParse({
+      projectId: "p1",
+      name: "S1",
+      goal: "Ship feature X",
+      branch: "feature/x",
+      startDate: "2026-01-01",
+      endDate: "2026-01-14",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.goal).toBe("Ship feature X");
+      expect(result.data.branch).toBe("feature/x");
+      expect(result.data.startDate).toBe("2026-01-01");
+      expect(result.data.endDate).toBe("2026-01-14");
+    }
+  });
+
+  it("rejects missing projectId", () => {
+    const result = createSprintSchema.safeParse({ name: "Sprint 1" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing name', () => {
-    const result = createSprintSchema.safeParse({ projectId: 'p1' });
+  it("rejects missing name", () => {
+    const result = createSprintSchema.safeParse({ projectId: "p1" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty projectId', () => {
-    const result = createSprintSchema.safeParse({ projectId: '', name: 'Sprint 1' });
+  it("rejects empty projectId", () => {
+    const result = createSprintSchema.safeParse({
+      projectId: "",
+      name: "Sprint 1",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty name', () => {
-    const result = createSprintSchema.safeParse({ projectId: 'p1', name: '' });
+  it("rejects empty name", () => {
+    const result = createSprintSchema.safeParse({ projectId: "p1", name: "" });
     expect(result.success).toBe(false);
   });
 
-  it('accepts optional fields individually', () => {
-    const goalOnly = createSprintSchema.safeParse({ projectId: 'p1', name: 'S1', goal: 'Goal' });
+  it("accepts optional fields individually", () => {
+    const goalOnly = createSprintSchema.safeParse({
+      projectId: "p1",
+      name: "S1",
+      goal: "Goal",
+    });
     expect(goalOnly.success).toBe(true);
 
-    const branchOnly = createSprintSchema.safeParse({ projectId: 'p1', name: 'S1', branch: 'main' });
+    const branchOnly = createSprintSchema.safeParse({
+      projectId: "p1",
+      name: "S1",
+      branch: "main",
+    });
     expect(branchOnly.success).toBe(true);
 
     const datesOnly = createSprintSchema.safeParse({
-      projectId: 'p1',
-      name: 'S1',
-      startDate: '2026-01-01',
-      endDate: '2026-01-14',
+      projectId: "p1",
+      name: "S1",
+      startDate: "2026-01-01",
+      endDate: "2026-01-14",
     });
     expect(datesOnly.success).toBe(true);
   });
 
-  it('accepts empty string optional fields (min(1) does not apply to optional)', () => {
+  it("accepts empty string optional fields (min(1) does not apply to optional)", () => {
     const result = createSprintSchema.safeParse({
-      projectId: 'p1',
-      name: 'S1',
-      goal: '',
-      branch: '',
-      startDate: '',
-      endDate: '',
+      projectId: "p1",
+      name: "S1",
+      goal: "",
+      branch: "",
+      startDate: "",
+      endDate: "",
     });
     expect(result.success).toBe(true);
   });
@@ -244,64 +304,73 @@ describe('create-sprint schema', () => {
 // Tests for updateSprintSchema
 // ============================================================================
 
-describe('update-sprint schema', () => {
-  it('validates valid input with only the id', () => {
-    const result = updateSprintSchema.safeParse({ id: 's1' });
+describe("update-sprint schema", () => {
+  it("validates valid input with only the id", () => {
+    const result = updateSprintSchema.safeParse({ id: "s1" });
     expect(result.success).toBe(true);
   });
 
-  it('validates valid input with all optional fields', () => {
+  it("validates valid input with all optional fields", () => {
     const result = updateSprintSchema.safeParse({
-      id: 's1',
-      name: 'New Name',
-      goal: 'New goal',
-      status: '进行中',
-      branch: 'develop',
-      startDate: '2026-02-01',
-      endDate: '2026-02-14',
+      id: "s1",
+      name: "New Name",
+      goal: "New goal",
+      status: "进行中",
+      branch: "develop",
+      startDate: "2026-02-01",
+      endDate: "2026-02-14",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing id', () => {
-    const result = updateSprintSchema.safeParse({ name: 'Updated' });
+  it("rejects missing id", () => {
+    const result = updateSprintSchema.safeParse({ name: "Updated" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty id', () => {
-    const result = updateSprintSchema.safeParse({ id: '' });
+  it("rejects empty id", () => {
+    const result = updateSprintSchema.safeParse({ id: "" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty name when explicitly provided (min(1) applies to optional)', () => {
-    const result = updateSprintSchema.safeParse({ id: 's1', name: '' });
+  it("rejects empty name when explicitly provided (min(1) applies to optional)", () => {
+    const result = updateSprintSchema.safeParse({ id: "s1", name: "" });
     expect(result.success).toBe(false);
   });
 
-  it('accepts partial updates with just one field', () => {
-    const justName = updateSprintSchema.safeParse({ id: 's1', name: 'Renamed' });
+  it("accepts partial updates with just one field", () => {
+    const justName = updateSprintSchema.safeParse({
+      id: "s1",
+      name: "Renamed",
+    });
     expect(justName.success).toBe(true);
 
-    const justStatus = updateSprintSchema.safeParse({ id: 's1', status: '已完成' });
+    const justStatus = updateSprintSchema.safeParse({
+      id: "s1",
+      status: "已完成",
+    });
     expect(justStatus.success).toBe(true);
 
-    const justBranch = updateSprintSchema.safeParse({ id: 's1', branch: 'hotfix' });
+    const justBranch = updateSprintSchema.safeParse({
+      id: "s1",
+      branch: "hotfix",
+    });
     expect(justBranch.success).toBe(true);
   });
 
-  it('does not reject extra fields (Zod default is passthrough)', () => {
+  it("does not reject extra fields (Zod default is passthrough)", () => {
     const result = updateSprintSchema.safeParse({
-      id: 's1',
-      name: 'N',
-      extraField: 'should pass',
+      id: "s1",
+      name: "N",
+      extraField: "should pass",
     });
     expect(result.success).toBe(true);
   });
 
-  it('accepts non-ascii Chinese status value', () => {
+  it("accepts non-ascii Chinese status value", () => {
     const result = updateSprintSchema.safeParse({
-      id: 's1',
-      status: '已发布',
+      id: "s1",
+      status: "已发布",
     });
     expect(result.success).toBe(true);
   });
@@ -311,49 +380,61 @@ describe('update-sprint schema', () => {
 // Tests for triggerStageSchema
 // ============================================================================
 
-describe('trigger-stage schema', () => {
-  it('validates valid input with required fields', () => {
+describe("trigger-stage schema", () => {
+  it("validates valid input with required fields", () => {
     const result = triggerStageSchema.safeParse({
-      workItemId: 'wi1',
-      stageName: '分析',
+      workItemId: "wi1",
+      stageName: "分析",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing workItemId', () => {
-    const result = triggerStageSchema.safeParse({ stageName: '分析' });
+  it("rejects missing workItemId", () => {
+    const result = triggerStageSchema.safeParse({ stageName: "分析" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing stageName', () => {
-    const result = triggerStageSchema.safeParse({ workItemId: 'wi1' });
+  it("rejects missing stageName", () => {
+    const result = triggerStageSchema.safeParse({ workItemId: "wi1" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty workItemId', () => {
-    const result = triggerStageSchema.safeParse({ workItemId: '', stageName: '分析' });
+  it("rejects empty workItemId", () => {
+    const result = triggerStageSchema.safeParse({
+      workItemId: "",
+      stageName: "分析",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty stageName', () => {
-    const result = triggerStageSchema.safeParse({ workItemId: 'wi1', stageName: '' });
+  it("rejects empty stageName", () => {
+    const result = triggerStageSchema.safeParse({
+      workItemId: "wi1",
+      stageName: "",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-string workItemId', () => {
-    const result = triggerStageSchema.safeParse({ workItemId: 123, stageName: '分析' });
+  it("rejects non-string workItemId", () => {
+    const result = triggerStageSchema.safeParse({
+      workItemId: 123,
+      stageName: "分析",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-string stageName', () => {
-    const result = triggerStageSchema.safeParse({ workItemId: 'wi1', stageName: 123 });
+  it("rejects non-string stageName", () => {
+    const result = triggerStageSchema.safeParse({
+      workItemId: "wi1",
+      stageName: 123,
+    });
     expect(result.success).toBe(false);
   });
 
-  it('accepts all valid stage names from STAGE_ORDER', () => {
+  it("accepts all valid stage names from STAGE_ORDER", () => {
     for (const stage of STAGE_ORDER) {
       const result = triggerStageSchema.safeParse({
-        workItemId: 'wi1',
+        workItemId: "wi1",
         stageName: stage,
       });
       expect(result.success).toBe(true);
@@ -365,57 +446,63 @@ describe('trigger-stage schema', () => {
 // Tests for rollbackStageSchema
 // ============================================================================
 
-describe('rollback-stage schema', () => {
-  it('validates valid input with required fields', () => {
+describe("rollback-stage schema", () => {
+  it("validates valid input with required fields", () => {
     const result = rollbackStageSchema.safeParse({
-      workItemId: 'wi1',
-      targetStage: '设计',
+      workItemId: "wi1",
+      targetStage: "设计",
     });
     expect(result.success).toBe(true);
   });
 
-  it('validates valid input with reason', () => {
+  it("validates valid input with reason", () => {
     const result = rollbackStageSchema.safeParse({
-      workItemId: 'wi1',
-      targetStage: '分析',
-      reason: '设计有问题需要重新分析',
+      workItemId: "wi1",
+      targetStage: "分析",
+      reason: "设计有问题需要重新分析",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing workItemId', () => {
-    const result = rollbackStageSchema.safeParse({ targetStage: '设计' });
+  it("rejects missing workItemId", () => {
+    const result = rollbackStageSchema.safeParse({ targetStage: "设计" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing targetStage', () => {
-    const result = rollbackStageSchema.safeParse({ workItemId: 'wi1' });
+  it("rejects missing targetStage", () => {
+    const result = rollbackStageSchema.safeParse({ workItemId: "wi1" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty workItemId', () => {
-    const result = rollbackStageSchema.safeParse({ workItemId: '', targetStage: '设计' });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects empty targetStage', () => {
-    const result = rollbackStageSchema.safeParse({ workItemId: 'wi1', targetStage: '' });
-    expect(result.success).toBe(false);
-  });
-
-  it('accepts empty reason (optional, no min)', () => {
+  it("rejects empty workItemId", () => {
     const result = rollbackStageSchema.safeParse({
-      workItemId: 'wi1',
-      targetStage: '设计',
-      reason: '',
+      workItemId: "",
+      targetStage: "设计",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty targetStage", () => {
+    const result = rollbackStageSchema.safeParse({
+      workItemId: "wi1",
+      targetStage: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts empty reason (optional, no min)", () => {
+    const result = rollbackStageSchema.safeParse({
+      workItemId: "wi1",
+      targetStage: "设计",
+      reason: "",
     });
     expect(result.success).toBe(true);
   });
 
-  it('accepts reason omitted entirely', () => {
+  it("accepts reason omitted entirely", () => {
     const result = rollbackStageSchema.safeParse({
-      workItemId: 'wi1',
-      targetStage: '设计',
+      workItemId: "wi1",
+      targetStage: "设计",
     });
     expect(result.success).toBe(true);
   });
@@ -425,146 +512,146 @@ describe('rollback-stage schema', () => {
 // Tests for createArtifactSchema
 // ============================================================================
 
-describe('create-artifact schema', () => {
-  it('validates valid input with required fields', () => {
+describe("create-artifact schema", () => {
+  it("validates valid input with required fields", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'Requirements analysis',
+      workItemId: "wi1",
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "Requirements analysis",
     });
     expect(result.success).toBe(true);
   });
 
-  it('validates valid input with all optional fields', () => {
+  it("validates valid input with all optional fields", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'Requirements analysis',
-      contentRef: 's3://bucket/key',
-      producedByKind: 'agent',
+      workItemId: "wi1",
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "Requirements analysis",
+      contentRef: "s3://bucket/key",
+      producedByKind: "agent",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing workItemId', () => {
+  it("rejects missing workItemId", () => {
     const result = createArtifactSchema.safeParse({
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'name',
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "name",
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing stageId', () => {
+  it("rejects missing stageId", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'name',
+      workItemId: "wi1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "name",
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing stageName', () => {
+  it("rejects missing stageName", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      kind: '分析报告',
-      name: 'name',
+      workItemId: "wi1",
+      stageId: "stage1",
+      kind: "分析报告",
+      name: "name",
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing kind', () => {
+  it("rejects missing kind", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      stageName: '分析',
-      name: 'name',
+      workItemId: "wi1",
+      stageId: "stage1",
+      stageName: "分析",
+      name: "name",
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing name', () => {
+  it("rejects missing name", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
+      workItemId: "wi1",
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
     });
     expect(result.success).toBe(false);
   });
 
   it('validates producedByKind enum ("agent")', () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'name',
-      producedByKind: 'agent',
+      workItemId: "wi1",
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "name",
+      producedByKind: "agent",
     });
     expect(result.success).toBe(true);
   });
 
   it('validates producedByKind enum ("human")', () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'name',
-      producedByKind: 'human',
+      workItemId: "wi1",
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "name",
+      producedByKind: "human",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects invalid producedByKind value', () => {
+  it("rejects invalid producedByKind value", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'name',
-      producedByKind: 'robot' as any,
+      workItemId: "wi1",
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "name",
+      producedByKind: "robot" as any,
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty workItemId', () => {
+  it("rejects empty workItemId", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: '',
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'name',
+      workItemId: "",
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "name",
     });
     expect(result.success).toBe(false);
   });
 
-  it('accepts producedByKind omitted', () => {
+  it("accepts producedByKind omitted", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'name',
+      workItemId: "wi1",
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "name",
     });
     expect(result.success).toBe(true);
   });
 
-  it('accepts contentRef omitted', () => {
+  it("accepts contentRef omitted", () => {
     const result = createArtifactSchema.safeParse({
-      workItemId: 'wi1',
-      stageId: 'stage1',
-      stageName: '分析',
-      kind: '分析报告',
-      name: 'name',
+      workItemId: "wi1",
+      stageId: "stage1",
+      stageName: "分析",
+      kind: "分析报告",
+      name: "name",
     });
     expect(result.success).toBe(true);
   });
@@ -574,63 +661,66 @@ describe('create-artifact schema', () => {
 // Tests for addCommentSchema
 // ============================================================================
 
-describe('add-comment schema', () => {
-  it('validates valid input with required fields', () => {
+describe("add-comment schema", () => {
+  it("validates valid input with required fields", () => {
     const result = addCommentSchema.safeParse({
-      workItemId: 'wi1',
-      body: 'This looks great!',
+      workItemId: "wi1",
+      body: "This looks great!",
     });
     expect(result.success).toBe(true);
   });
 
-  it('validates valid input with authorName', () => {
+  it("validates valid input with authorName", () => {
     const result = addCommentSchema.safeParse({
-      workItemId: 'wi1',
-      body: 'Comment text',
-      authorName: 'Alice',
+      workItemId: "wi1",
+      body: "Comment text",
+      authorName: "Alice",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing workItemId', () => {
-    const result = addCommentSchema.safeParse({ body: 'Some comment' });
+  it("rejects missing workItemId", () => {
+    const result = addCommentSchema.safeParse({ body: "Some comment" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing body', () => {
-    const result = addCommentSchema.safeParse({ workItemId: 'wi1' });
+  it("rejects missing body", () => {
+    const result = addCommentSchema.safeParse({ workItemId: "wi1" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty workItemId', () => {
-    const result = addCommentSchema.safeParse({ workItemId: '', body: 'text' });
+  it("rejects empty workItemId", () => {
+    const result = addCommentSchema.safeParse({ workItemId: "", body: "text" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty body', () => {
-    const result = addCommentSchema.safeParse({ workItemId: 'wi1', body: '' });
+  it("rejects empty body", () => {
+    const result = addCommentSchema.safeParse({ workItemId: "wi1", body: "" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-string workItemId', () => {
-    const result = addCommentSchema.safeParse({ workItemId: 123, body: 'text' });
+  it("rejects non-string workItemId", () => {
+    const result = addCommentSchema.safeParse({
+      workItemId: 123,
+      body: "text",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-string body', () => {
-    const result = addCommentSchema.safeParse({ workItemId: 'wi1', body: 123 });
+  it("rejects non-string body", () => {
+    const result = addCommentSchema.safeParse({ workItemId: "wi1", body: 123 });
     expect(result.success).toBe(false);
   });
 
-  it('accepts single character body (min(1))', () => {
-    const result = addCommentSchema.safeParse({ workItemId: 'wi1', body: 'x' });
+  it("accepts single character body (min(1))", () => {
+    const result = addCommentSchema.safeParse({ workItemId: "wi1", body: "x" });
     expect(result.success).toBe(true);
   });
 
-  it('accepts multi-line body', () => {
+  it("accepts multi-line body", () => {
     const result = addCommentSchema.safeParse({
-      workItemId: 'wi1',
-      body: 'Line 1\nLine 2\nLine 3',
+      workItemId: "wi1",
+      body: "Line 1\nLine 2\nLine 3",
     });
     expect(result.success).toBe(true);
   });
@@ -640,74 +730,109 @@ describe('add-comment schema', () => {
 // Tests for addLinkSchema
 // ============================================================================
 
-describe('add-link schema', () => {
-  it('validates valid input with required fields', () => {
+describe("add-link schema", () => {
+  it("validates valid input with required fields", () => {
     const result = addLinkSchema.safeParse({
-      fromItemId: 'wi1',
-      toItemId: 'wi2',
-      linkType: 'depends-on',
+      fromItemId: "wi1",
+      toItemId: "wi2",
+      linkType: "depends-on",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing fromItemId', () => {
-    const result = addLinkSchema.safeParse({ toItemId: 'wi2', linkType: 'depends-on' });
+  it("rejects missing fromItemId", () => {
+    const result = addLinkSchema.safeParse({
+      toItemId: "wi2",
+      linkType: "depends-on",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing toItemId', () => {
-    const result = addLinkSchema.safeParse({ fromItemId: 'wi1', linkType: 'depends-on' });
+  it("rejects missing toItemId", () => {
+    const result = addLinkSchema.safeParse({
+      fromItemId: "wi1",
+      linkType: "depends-on",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing linkType', () => {
-    const result = addLinkSchema.safeParse({ fromItemId: 'wi1', toItemId: 'wi2' });
+  it("rejects missing linkType", () => {
+    const result = addLinkSchema.safeParse({
+      fromItemId: "wi1",
+      toItemId: "wi2",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty fromItemId', () => {
-    const result = addLinkSchema.safeParse({ fromItemId: '', toItemId: 'wi2', linkType: 'depends-on' });
+  it("rejects empty fromItemId", () => {
+    const result = addLinkSchema.safeParse({
+      fromItemId: "",
+      toItemId: "wi2",
+      linkType: "depends-on",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty toItemId', () => {
-    const result = addLinkSchema.safeParse({ fromItemId: 'wi1', toItemId: '', linkType: 'depends-on' });
+  it("rejects empty toItemId", () => {
+    const result = addLinkSchema.safeParse({
+      fromItemId: "wi1",
+      toItemId: "",
+      linkType: "depends-on",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty linkType', () => {
-    const result = addLinkSchema.safeParse({ fromItemId: 'wi1', toItemId: 'wi2', linkType: '' });
+  it("rejects empty linkType", () => {
+    const result = addLinkSchema.safeParse({
+      fromItemId: "wi1",
+      toItemId: "wi2",
+      linkType: "",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('validates various link types', () => {
-    const types = ['depends-on', 'blocks', 'relates-to', 'duplicates', 'implemented-by'];
+  it("validates various link types", () => {
+    const types = [
+      "depends-on",
+      "blocks",
+      "relates-to",
+      "duplicates",
+      "implemented-by",
+    ];
     for (const lt of types) {
       const result = addLinkSchema.safeParse({
-        fromItemId: 'wi1',
-        toItemId: 'wi2',
+        fromItemId: "wi1",
+        toItemId: "wi2",
         linkType: lt,
       });
       expect(result.success).toBe(true);
     }
   });
 
-  it('accepts fromItemId same as toItemId (schema allows it, business logic may reject)', () => {
+  it("accepts fromItemId same as toItemId (schema allows it, business logic may reject)", () => {
     const result = addLinkSchema.safeParse({
-      fromItemId: 'wi1',
-      toItemId: 'wi1',
-      linkType: 'relates-to',
+      fromItemId: "wi1",
+      toItemId: "wi1",
+      linkType: "relates-to",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects non-string fromItemId', () => {
-    const result = addLinkSchema.safeParse({ fromItemId: 123, toItemId: 'wi2', linkType: 'depends-on' });
+  it("rejects non-string fromItemId", () => {
+    const result = addLinkSchema.safeParse({
+      fromItemId: 123,
+      toItemId: "wi2",
+      linkType: "depends-on",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-string linkType', () => {
-    const result = addLinkSchema.safeParse({ fromItemId: 'wi1', toItemId: 'wi2', linkType: 123 });
+  it("rejects non-string linkType", () => {
+    const result = addLinkSchema.safeParse({
+      fromItemId: "wi1",
+      toItemId: "wi2",
+      linkType: 123,
+    });
     expect(result.success).toBe(false);
   });
 });
@@ -716,66 +841,66 @@ describe('add-link schema', () => {
 // Tests for enqueueWorkItemSchema
 // ============================================================================
 
-describe('enqueue-work-item schema', () => {
-  it('validates valid input with only workItemId', () => {
-    const result = enqueueWorkItemSchema.safeParse({ workItemId: 'wi1' });
+describe("enqueue-work-item schema", () => {
+  it("validates valid input with only workItemId", () => {
+    const result = enqueueWorkItemSchema.safeParse({ workItemId: "wi1" });
     expect(result.success).toBe(true);
   });
 
-  it('validates valid input with positive priority', () => {
+  it("validates valid input with positive priority", () => {
     const result = enqueueWorkItemSchema.safeParse({
-      workItemId: 'wi1',
+      workItemId: "wi1",
       priority: 5,
     });
     expect(result.success).toBe(true);
   });
 
-  it('validates negative priority', () => {
+  it("validates negative priority", () => {
     const result = enqueueWorkItemSchema.safeParse({
-      workItemId: 'wi1',
+      workItemId: "wi1",
       priority: -3,
     });
     expect(result.success).toBe(true);
   });
 
-  it('validates priority 0', () => {
+  it("validates priority 0", () => {
     const result = enqueueWorkItemSchema.safeParse({
-      workItemId: 'wi1',
+      workItemId: "wi1",
       priority: 0,
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing workItemId', () => {
+  it("rejects missing workItemId", () => {
     const result = enqueueWorkItemSchema.safeParse({ priority: 1 });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty workItemId', () => {
-    const result = enqueueWorkItemSchema.safeParse({ workItemId: '' });
+  it("rejects empty workItemId", () => {
+    const result = enqueueWorkItemSchema.safeParse({ workItemId: "" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-integer priority (float)', () => {
+  it("rejects non-integer priority (float)", () => {
     const result = enqueueWorkItemSchema.safeParse({
-      workItemId: 'wi1',
+      workItemId: "wi1",
       priority: 1.5,
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-numeric priority', () => {
+  it("rejects non-numeric priority", () => {
     const result = enqueueWorkItemSchema.safeParse({
-      workItemId: 'wi1',
-      priority: 'high',
+      workItemId: "wi1",
+      priority: "high",
     });
     expect(result.success).toBe(false);
   });
 
-  it('accepts priority as string via coerce', () => {
+  it("accepts priority as string via coerce", () => {
     const result = enqueueWorkItemSchema.safeParse({
-      workItemId: 'wi1',
-      priority: '5',
+      workItemId: "wi1",
+      priority: "5",
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -783,7 +908,7 @@ describe('enqueue-work-item schema', () => {
     }
   });
 
-  it('rejects non-string workItemId', () => {
+  it("rejects non-string workItemId", () => {
     const result = enqueueWorkItemSchema.safeParse({ workItemId: 123 });
     expect(result.success).toBe(false);
   });
@@ -793,27 +918,27 @@ describe('enqueue-work-item schema', () => {
 // Tests for updateWorkItemSchema
 // ============================================================================
 
-describe('update-work-item schema', () => {
-  it('validates valid input with only the id', () => {
-    const result = updateWorkItemSchema.safeParse({ id: 'wi1' });
+describe("update-work-item schema", () => {
+  it("validates valid input with only the id", () => {
+    const result = updateWorkItemSchema.safeParse({ id: "wi1" });
     expect(result.success).toBe(true);
   });
 
-  it('validates valid input with all fields', () => {
+  it("validates valid input with all fields", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
-      title: 'New title',
-      description: 'Updated description',
-      type: 'task',
+      id: "wi1",
+      title: "New title",
+      description: "Updated description",
+      type: "task",
       priority: 3,
-      risk: 'medium',
-      tags: ['frontend', 'urgent'],
-      executionMode: 'auto',
+      risk: "medium",
+      tags: ["frontend", "urgent"],
+      executionMode: "auto",
       sprintId: null,
-      plannedStages: ['分析', '设计'],
-      branch: 'feature/x',
-      owner: 'alice@example.com',
-      nature: ['后端'],
+      plannedStages: ["分析", "设计"],
+      branch: "feature/x",
+      owner: "alice@example.com",
+      nature: ["后端"],
     });
     expect(result.success).toBe(true);
   });
@@ -821,122 +946,122 @@ describe('update-work-item schema', () => {
   // T-F3-07: update-work-item 拒 currentStageName — the旁路(bypass) that let
   // stage advancement skip the F3 guard entirely must be schema-rejected, not
   // silently accepted/stripped.
-  it('F3/T-F3-07: rejects currentStageName as an unrecognized key', () => {
+  it("F3/T-F3-07: rejects currentStageName as an unrecognized key", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
-      currentStageName: '实施',
+      id: "wi1",
+      currentStageName: "实施",
     });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(
-        result.error.issues.some((i) => i.code === 'unrecognized_keys'),
+        result.error.issues.some((i) => i.code === "unrecognized_keys"),
       ).toBe(true);
     }
   });
 
-  it('F3/T-F3-07: rejects currentStageName even alongside other valid fields', () => {
+  it("F3/T-F3-07: rejects currentStageName even alongside other valid fields", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
-      title: 'Sneaky stage bump',
-      currentStageName: 'done' as any,
+      id: "wi1",
+      title: "Sneaky stage bump",
+      currentStageName: "done" as any,
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing id', () => {
-    const result = updateWorkItemSchema.safeParse({ title: 'No id' });
+  it("rejects missing id", () => {
+    const result = updateWorkItemSchema.safeParse({ title: "No id" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty id', () => {
-    const result = updateWorkItemSchema.safeParse({ id: '' });
+  it("rejects empty id", () => {
+    const result = updateWorkItemSchema.safeParse({ id: "" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-integer priority', () => {
+  it("rejects non-integer priority", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
+      id: "wi1",
       priority: 1.5,
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects string priority', () => {
+  it("rejects string priority", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
-      priority: 'high',
+      id: "wi1",
+      priority: "high",
     });
     expect(result.success).toBe(false);
   });
 
-  it('accepts null sprintId', () => {
+  it("accepts null sprintId", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
+      id: "wi1",
       sprintId: null,
     });
     expect(result.success).toBe(true);
   });
 
-  it('accepts string sprintId', () => {
+  it("accepts string sprintId", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
-      sprintId: 'sp1',
+      id: "wi1",
+      sprintId: "sp1",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects non-null-non-string sprintId', () => {
+  it("rejects non-null-non-string sprintId", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
+      id: "wi1",
       sprintId: 123 as any,
     });
     expect(result.success).toBe(false);
   });
 
-  it('accepts null branch', () => {
+  it("accepts null branch", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
+      id: "wi1",
       branch: null,
     });
     expect(result.success).toBe(true);
   });
 
-  it('accepts empty tags array', () => {
+  it("accepts empty tags array", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
+      id: "wi1",
       tags: [],
     });
     expect(result.success).toBe(true);
   });
 
-  it('accepts populated tags array', () => {
+  it("accepts populated tags array", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
-      tags: ['tag1', 'tag2', 'tag3'],
+      id: "wi1",
+      tags: ["tag1", "tag2", "tag3"],
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects tags with non-string items', () => {
+  it("rejects tags with non-string items", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
-      tags: ['valid', 123 as any],
+      id: "wi1",
+      tags: ["valid", 123 as any],
     });
     expect(result.success).toBe(false);
   });
 
-  it('accepts empty plannedStages array', () => {
+  it("accepts empty plannedStages array", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
+      id: "wi1",
       plannedStages: [],
     });
     expect(result.success).toBe(true);
   });
 
-  it('accepts populated plannedStages array', () => {
+  it("accepts populated plannedStages array", () => {
     const result = updateWorkItemSchema.safeParse({
-      id: 'wi1',
-      plannedStages: ['分析', '设计', '实施'],
+      id: "wi1",
+      plannedStages: ["分析", "设计", "实施"],
     });
     expect(result.success).toBe(true);
   });
@@ -946,61 +1071,87 @@ describe('update-work-item schema', () => {
 // Tests for create-work-item schema (M1-6: from-audit type)
 // ============================================================================
 
-describe('create-work-item schema', () => {
-  it('validates valid input with only required fields', () => {
-    const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 'A task' });
+describe("create-work-item schema", () => {
+  it("validates valid input with only required fields", () => {
+    const result = createWorkItemSchema.safeParse({
+      projectId: "p1",
+      title: "A task",
+    });
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing projectId', () => {
-    const result = createWorkItemSchema.safeParse({ title: 'A task' });
+  it("rejects missing projectId", () => {
+    const result = createWorkItemSchema.safeParse({ title: "A task" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing title', () => {
-    const result = createWorkItemSchema.safeParse({ projectId: 'p1' });
+  it("rejects missing title", () => {
+    const result = createWorkItemSchema.safeParse({ projectId: "p1" });
     expect(result.success).toBe(false);
   });
 
-  it('accepts all Chinese type values', () => {
-    for (const type of ['需求', '任务', '缺陷', '测试', '生产问题', '集合']) {
-      const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 't', type });
+  it("accepts all Chinese type values", () => {
+    for (const type of ["需求", "任务", "缺陷", "测试", "生产问题", "集合"]) {
+      const result = createWorkItemSchema.safeParse({
+        projectId: "p1",
+        title: "t",
+        type,
+      });
       expect(result.success).toBe(true);
     }
   });
 
   it('accepts "from-audit" as a real type value (not just a tag)', () => {
     const result = createWorkItemSchema.safeParse({
-      projectId: 'p1',
-      title: 't',
-      type: 'from-audit',
+      projectId: "p1",
+      title: "t",
+      type: "from-audit",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects an unrecognized type value', () => {
+  it("rejects an unrecognized type value", () => {
     const result = createWorkItemSchema.safeParse({
-      projectId: 'p1',
-      title: 't',
-      type: 'not-a-real-type',
+      projectId: "p1",
+      title: "t",
+      type: "not-a-real-type",
     });
     expect(result.success).toBe(false);
   });
 
-  it('accepts legacy English type aliases', () => {
-    for (const type of ['requirement', 'task', 'defect', 'incident', 'story', 'epic']) {
-      const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 't', type });
+  it("accepts legacy English type aliases", () => {
+    for (const type of [
+      "requirement",
+      "task",
+      "defect",
+      "incident",
+      "story",
+      "epic",
+    ]) {
+      const result = createWorkItemSchema.safeParse({
+        projectId: "p1",
+        title: "t",
+        type,
+      });
       expect(result.success).toBe(true);
     }
   });
 
-  it('accepts null owner (unassigned)', () => {
-    const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 't', owner: null });
+  it("accepts null owner (unassigned)", () => {
+    const result = createWorkItemSchema.safeParse({
+      projectId: "p1",
+      title: "t",
+      owner: null,
+    });
     expect(result.success).toBe(true);
   });
 
-  it('coerces string priority to number', () => {
-    const result = createWorkItemSchema.safeParse({ projectId: 'p1', title: 't', priority: '1' });
+  it("coerces string priority to number", () => {
+    const result = createWorkItemSchema.safeParse({
+      projectId: "p1",
+      title: "t",
+      priority: "1",
+    });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.priority).toBe(1);
@@ -1012,57 +1163,73 @@ describe('create-work-item schema', () => {
 // Tests for advance-stage schema (M1-6)
 // ============================================================================
 
-describe('advance-stage schema', () => {
-  it('validates valid item-scope input', () => {
+describe("advance-stage schema", () => {
+  it("validates valid item-scope input", () => {
     const result = advanceStageSchema.safeParse({
-      scope: 'item',
-      id: 'wi1',
-      fromStage: '分析',
+      scope: "item",
+      id: "wi1",
+      fromStage: "分析",
     });
     expect(result.success).toBe(true);
   });
 
-  it('validates valid sprint-scope input', () => {
+  it("validates valid sprint-scope input", () => {
     const result = advanceStageSchema.safeParse({
-      scope: 'sprint',
-      id: 'sp1',
-      fromStage: '实施',
-      expectedRunId: 'run_123',
+      scope: "sprint",
+      id: "sp1",
+      fromStage: "实施",
+      expectedRunId: "run_123",
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects an invalid scope value', () => {
+  it("rejects an invalid scope value", () => {
     const result = advanceStageSchema.safeParse({
-      scope: 'epic',
-      id: 'wi1',
-      fromStage: '分析',
+      scope: "epic",
+      id: "wi1",
+      fromStage: "分析",
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing scope', () => {
-    const result = advanceStageSchema.safeParse({ id: 'wi1', fromStage: '分析' });
+  it("rejects missing scope", () => {
+    const result = advanceStageSchema.safeParse({
+      id: "wi1",
+      fromStage: "分析",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing id', () => {
-    const result = advanceStageSchema.safeParse({ scope: 'item', fromStage: '分析' });
+  it("rejects missing id", () => {
+    const result = advanceStageSchema.safeParse({
+      scope: "item",
+      fromStage: "分析",
+    });
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing fromStage', () => {
-    const result = advanceStageSchema.safeParse({ scope: 'item', id: 'wi1' });
+  it("rejects missing fromStage", () => {
+    const result = advanceStageSchema.safeParse({ scope: "item", id: "wi1" });
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty id and empty fromStage', () => {
-    expect(advanceStageSchema.safeParse({ scope: 'item', id: '', fromStage: '分析' }).success).toBe(false);
-    expect(advanceStageSchema.safeParse({ scope: 'item', id: 'wi1', fromStage: '' }).success).toBe(false);
+  it("rejects empty id and empty fromStage", () => {
+    expect(
+      advanceStageSchema.safeParse({ scope: "item", id: "", fromStage: "分析" })
+        .success,
+    ).toBe(false);
+    expect(
+      advanceStageSchema.safeParse({ scope: "item", id: "wi1", fromStage: "" })
+        .success,
+    ).toBe(false);
   });
 
-  it('accepts expectedRunId omitted', () => {
-    const result = advanceStageSchema.safeParse({ scope: 'item', id: 'wi1', fromStage: '分析' });
+  it("accepts expectedRunId omitted", () => {
+    const result = advanceStageSchema.safeParse({
+      scope: "item",
+      id: "wi1",
+      fromStage: "分析",
+    });
     expect(result.success).toBe(true);
   });
 });
@@ -1071,47 +1238,47 @@ describe('advance-stage schema', () => {
 // Tests for STAGE_ORDER constant
 // ============================================================================
 
-describe('STAGE_ORDER constant', () => {
-  it('has exactly 7 stages', () => {
+describe("STAGE_ORDER constant", () => {
+  it("has exactly 7 stages", () => {
     expect(STAGE_ORDER.length).toBe(7);
   });
 
-  it('has correct first stage (待办)', () => {
-    expect(STAGE_ORDER[0]).toBe('待办');
+  it("has correct first stage (待办)", () => {
+    expect(STAGE_ORDER[0]).toBe("待办");
   });
 
-  it('has correct second stage (分析)', () => {
-    expect(STAGE_ORDER[1]).toBe('分析');
+  it("has correct second stage (分析)", () => {
+    expect(STAGE_ORDER[1]).toBe("分析");
   });
 
-  it('has correct third stage (设计)', () => {
-    expect(STAGE_ORDER[2]).toBe('设计');
+  it("has correct third stage (设计)", () => {
+    expect(STAGE_ORDER[2]).toBe("设计");
   });
 
-  it('has correct fourth stage (实施)', () => {
-    expect(STAGE_ORDER[3]).toBe('实施');
+  it("has correct fourth stage (实施)", () => {
+    expect(STAGE_ORDER[3]).toBe("实施");
   });
 
-  it('has correct fifth stage (测试)', () => {
-    expect(STAGE_ORDER[4]).toBe('测试');
+  it("has correct fifth stage (测试)", () => {
+    expect(STAGE_ORDER[4]).toBe("测试");
   });
 
-  it('has correct sixth stage (验收)', () => {
-    expect(STAGE_ORDER[5]).toBe('验收');
+  it("has correct sixth stage (验收)", () => {
+    expect(STAGE_ORDER[5]).toBe("验收");
   });
 
-  it('has correct seventh stage (交付)', () => {
-    expect(STAGE_ORDER[6]).toBe('交付');
+  it("has correct seventh stage (交付)", () => {
+    expect(STAGE_ORDER[6]).toBe("交付");
   });
 
-  it('has no duplicate stages', () => {
+  it("has no duplicate stages", () => {
     const unique = new Set(STAGE_ORDER);
     expect(unique.size).toBe(STAGE_ORDER.length);
   });
 
-  it('all elements are strings', () => {
+  it("all elements are strings", () => {
     for (const stage of STAGE_ORDER) {
-      expect(typeof stage).toBe('string');
+      expect(typeof stage).toBe("string");
     }
   });
 });
@@ -1120,102 +1287,102 @@ describe('STAGE_ORDER constant', () => {
 // Tests for TrackerWorkItem type structure (compile-time)
 // ============================================================================
 
-describe('TrackerWorkItem type structure', () => {
-  it('accepts a valid TrackerWorkItem object at compile time', () => {
+describe("TrackerWorkItem type structure", () => {
+  it("accepts a valid TrackerWorkItem object at compile time", () => {
     const item: TrackerWorkItem = {
-      id: 'wi1',
-      projectId: 'p1',
+      id: "wi1",
+      projectId: "p1",
       sprintId: null,
-      itemKey: 'WI-1',
-      type: 'task',
-      title: 'Test task',
-      description: 'A test task',
-      status: 'open',
+      itemKey: "WI-1",
+      type: "task",
+      title: "Test task",
+      description: "A test task",
+      status: "open",
       priority: 1,
-      risk: 'low',
-      tags: ['test'],
-      executionMode: 'auto',
-      currentStageName: '待办',
-      plannedStages: ['待办', '分析', '设计'],
+      risk: "low",
+      tags: ["test"],
+      executionMode: "auto",
+      currentStageName: "待办",
+      plannedStages: ["待办", "分析", "设计"],
       branch: null,
       orchestratorThreadId: null,
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(item.id).toBe('wi1');
-    expect(item.type).toBe('task');
-    expect(item.status).toBe('open');
+    expect(item.id).toBe("wi1");
+    expect(item.type).toBe("task");
+    expect(item.status).toBe("open");
     expect(item.sprintId).toBeNull();
-    expect(item.tags).toEqual(['test']);
-    expect(item.currentStageName).toBe('待办');
+    expect(item.tags).toEqual(["test"]);
+    expect(item.currentStageName).toBe("待办");
   });
 
-  it('allows sprintId to be a string', () => {
+  it("allows sprintId to be a string", () => {
     const item: TrackerWorkItem = {
-      id: 'wi2',
-      projectId: 'p1',
-      sprintId: 'sp1',
-      itemKey: 'WI-2',
-      type: 'requirement',
-      title: 'Another task',
-      description: 'desc',
-      status: 'running',
+      id: "wi2",
+      projectId: "p1",
+      sprintId: "sp1",
+      itemKey: "WI-2",
+      type: "requirement",
+      title: "Another task",
+      description: "desc",
+      status: "running",
       priority: 5,
-      risk: 'high',
+      risk: "high",
       tags: [],
-      executionMode: 'manual',
-      currentStageName: '实施',
+      executionMode: "manual",
+      currentStageName: "实施",
       plannedStages: [],
-      branch: 'main',
-      orchestratorThreadId: 'thread-1',
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
+      branch: "main",
+      orchestratorThreadId: "thread-1",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
     };
-    expect(item.sprintId).toBe('sp1');
-    expect(item.branch).toBe('main');
-    expect(item.orchestratorThreadId).toBe('thread-1');
+    expect(item.sprintId).toBe("sp1");
+    expect(item.branch).toBe("main");
+    expect(item.orchestratorThreadId).toBe("thread-1");
   });
 
-  it('has all expected fields', () => {
+  it("has all expected fields", () => {
     const item: TrackerWorkItem = {
-      id: '',
-      projectId: '',
+      id: "",
+      projectId: "",
       sprintId: null,
-      itemKey: '',
-      type: '',
-      title: '',
-      description: '',
-      status: '',
+      itemKey: "",
+      type: "",
+      title: "",
+      description: "",
+      status: "",
       priority: 0,
-      risk: '',
+      risk: "",
       tags: [],
-      executionMode: '',
-      currentStageName: '',
+      executionMode: "",
+      currentStageName: "",
       plannedStages: [],
       branch: null,
       orchestratorThreadId: null,
-      createdAt: '',
-      updatedAt: '',
+      createdAt: "",
+      updatedAt: "",
     };
     const fields = Object.keys(item) as (keyof TrackerWorkItem)[];
-    expect(fields).toContain('id');
-    expect(fields).toContain('projectId');
-    expect(fields).toContain('sprintId');
-    expect(fields).toContain('itemKey');
-    expect(fields).toContain('type');
-    expect(fields).toContain('title');
-    expect(fields).toContain('description');
-    expect(fields).toContain('status');
-    expect(fields).toContain('priority');
-    expect(fields).toContain('risk');
-    expect(fields).toContain('tags');
-    expect(fields).toContain('executionMode');
-    expect(fields).toContain('currentStageName');
-    expect(fields).toContain('plannedStages');
-    expect(fields).toContain('branch');
-    expect(fields).toContain('orchestratorThreadId');
-    expect(fields).toContain('createdAt');
-    expect(fields).toContain('updatedAt');
+    expect(fields).toContain("id");
+    expect(fields).toContain("projectId");
+    expect(fields).toContain("sprintId");
+    expect(fields).toContain("itemKey");
+    expect(fields).toContain("type");
+    expect(fields).toContain("title");
+    expect(fields).toContain("description");
+    expect(fields).toContain("status");
+    expect(fields).toContain("priority");
+    expect(fields).toContain("risk");
+    expect(fields).toContain("tags");
+    expect(fields).toContain("executionMode");
+    expect(fields).toContain("currentStageName");
+    expect(fields).toContain("plannedStages");
+    expect(fields).toContain("branch");
+    expect(fields).toContain("orchestratorThreadId");
+    expect(fields).toContain("createdAt");
+    expect(fields).toContain("updatedAt");
   });
 });
 
@@ -1223,8 +1390,74 @@ describe('TrackerWorkItem type structure', () => {
 // Tests for listOrgMembersSchema
 // ============================================================================
 
-describe('list-org-members schema', () => {
-  it('accepts an empty object (no required params)', () => {
+describe("list-org-members schema", () => {
+  it("accepts an empty object (no required params)", () => {
     expect(() => listOrgMembersSchema.parse({})).not.toThrow();
+  });
+});
+
+// ============================================================================
+// S6 八相位驾驶舱: update-sprint's widened phase enum + request-approval's
+// ui-signoff gate key.
+// ============================================================================
+
+describe("update-sprint schema — 八相位 phase enum (S6)", () => {
+  it("still accepts the original three values (no data-loss on existing sprints)", () => {
+    for (const phase of ["planning", "executing", "done"]) {
+      expect(updateSprintSchema.safeParse({ id: "s1", phase }).success).toBe(
+        true,
+      );
+    }
+  });
+
+  it("accepts all five newly-added phases", () => {
+    for (const phase of [
+      "designing",
+      "verifying",
+      "auditing",
+      "promoting",
+      "storytelling",
+    ]) {
+      expect(updateSprintSchema.safeParse({ id: "s1", phase }).success).toBe(
+        true,
+      );
+    }
+  });
+
+  it("rejects an unknown phase value", () => {
+    const result = updateSprintSchema.safeParse({
+      id: "s1",
+      phase: "reviewing",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("omitting phase is still valid (optional field)", () => {
+    expect(updateSprintSchema.safeParse({ id: "s1" }).success).toBe(true);
+  });
+});
+
+describe("request-approval schema — ui-signoff gate key (S6)", () => {
+  it("accepts the pre-existing three gate keys", () => {
+    for (const key of [
+      "plan-signoff",
+      "design-signoff",
+      "escalation",
+      "audit-deferral",
+    ]) {
+      expect(requestApprovalGateKeySchema.safeParse(key).success).toBe(true);
+    }
+  });
+
+  it("accepts the new ui-signoff gate key", () => {
+    expect(requestApprovalGateKeySchema.safeParse("ui-signoff").success).toBe(
+      true,
+    );
+  });
+
+  it("rejects an unrecognized gate key", () => {
+    expect(
+      requestApprovalGateKeySchema.safeParse("random-signoff").success,
+    ).toBe(false);
   });
 });

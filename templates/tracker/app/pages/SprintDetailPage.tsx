@@ -1,31 +1,57 @@
 import type {
-  ScaleEstimate,
-  SprintDetail,
-  TrackerWorkItem,
-  Stage,
-  SprintArtifact,
   Approval,
   GateKey,
+  ScaleEstimate,
+  SprintDetail,
+  SprintArtifact,
+  SprintPhase,
+  TrackerWorkItem,
 } from "@shared/types";
-import { GATE_KEY_LABELS as gateLabels } from "@shared/types";
+import {
+  GATE_KEY_LABELS as gateLabels,
+  SPRINT_PHASE_LABELS,
+  SPRINT_PHASE_ORDER,
+} from "@shared/types";
 import {
   IconAlertTriangle,
   IconArrowLeft,
+  IconBrain,
   IconCalendar,
+  IconCheck,
+  IconClipboardList,
+  IconExternalLink,
   IconFileText,
   IconGitBranch,
-  IconPackage,
+  IconHandStop,
+  IconPlayerPlay,
+  IconPlayerTrackNext,
   IconPlus,
-  IconClock,
-  IconCheck,
+  IconRubberStamp,
   IconX,
-  IconShieldCheck,
 } from "@tabler/icons-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams } from "react-router";
 import { Link } from "react-router";
 
+import { ActorAvatar } from "@/components/ActorAvatar";
 import { ArtifactBadge, ArtifactViewDialog } from "@/components/ArtifactBadge";
+import { InspectorSection } from "@/components/InspectorSection";
+import { PriorityBars } from "@/components/PriorityBars";
+import { RunBadgeCompact } from "@/components/RunEvidenceList";
+import { SprintPhaseStepper } from "@/components/SprintPhaseStepper";
+import { StatusIcon } from "@/components/StatusIcon";
+import { StatusRing } from "@/components/StatusRing";
+import { orchestratorBrainHref } from "@/components/tracker-format";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,20 +72,39 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  useApprovals,
+  useApproveGate,
+  useGoalMetrics,
+  useQueueHealth,
+  useRejectGate,
+  useRequestApproval,
   useSprint,
   useSprintArtifacts,
-  useApprovals,
-  useRequestApproval,
-  useApproveGate,
-  useRejectGate,
+  useUpdateSprint,
 } from "@/hooks/use-tracker";
+import { classifyDocKey, ARTIFACT_GROUP_ORDER } from "@/lib/sprint-artifacts";
+import {
+  computeBurndown,
+  medianStageDurationsMinutes,
+} from "@/lib/sprint-metrics";
 import { cn } from "@/lib/utils";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// F5 (v25): get-sprint.ts returns raw DB rows — scale_estimate arrives as a
-// JSON string (or null); parse defensively (see shared/types.ts's
-// TrackerWorkItem.scaleEstimate docblock for why this isn't pre-parsed).
 function parseScaleEstimate(
   raw: string | null | undefined,
 ): ScaleEstimate | null {
@@ -71,7 +116,6 @@ function parseScaleEstimate(
   }
 }
 
-/** 规模徽标(Briefs 列表行,02 §3.10)— ok=灰点,split-required=warning badge. */
 function ScaleBadgeCompact({ raw }: { raw: string | null | undefined }) {
   const estimate = parseScaleEstimate(raw);
   if (!estimate) return null;
@@ -86,103 +130,43 @@ function ScaleBadgeCompact({ raw }: { raw: string | null | undefined }) {
       </Badge>
     );
   }
-  return (
-    <span
-      className="inline-block size-2 shrink-0 rounded-full bg-muted-foreground/40"
-      title="规模估算: ok"
-    />
-  );
-}
-
-function sprintStatusVariant(
-  status: string,
-): "default" | "secondary" | "outline" {
-  switch (status) {
-    case "进行中":
-      return "default";
-    case "已完成":
-    case "已发布":
-      return "outline";
-    case "规划":
-    default:
-      return "secondary";
-  }
+  return null;
 }
 
 function sprintStatusColor(status: string): string {
   switch (status) {
-    case "规划":
-      return "bg-secondary text-secondary-foreground";
     case "进行中":
       return "bg-blue-500 text-white";
     case "已完成":
       return "bg-emerald-500 text-white";
     case "已发布":
       return "bg-emerald-600 text-white";
+    case "规划":
     default:
-      return "bg-muted text-muted-foreground";
+      return "bg-secondary text-secondary-foreground";
   }
 }
 
-const SPRINT_PHASE_LABEL: Record<string, string> = {
-  planning: "规划",
-  executing: "执行中",
-  done: "已完成",
+// Phase header badge tone — a coarse mapping over the 8 real phases, not a
+// fabricated gate-criteria fraction. Text is the raw phase label (matches the
+// prototype's plain-English badge, e.g. `<span class="badge b-info">executing</span>`).
+const PHASE_TONE: Record<SprintPhase, string> = {
+  planning: "bg-secondary text-secondary-foreground",
+  designing: "bg-secondary text-secondary-foreground",
+  executing: "bg-info text-white",
+  verifying: "bg-info text-white",
+  auditing: "bg-warning text-white",
+  promoting: "bg-info text-white",
+  storytelling: "bg-agent text-white",
+  done: "bg-success text-white",
 };
-function sprintPhaseLabel(phase: string): string {
-  return SPRINT_PHASE_LABEL[phase] ?? phase;
-}
-function sprintPhaseColor(phase: string): string {
-  switch (phase) {
-    case "planning":
-      return "bg-secondary text-secondary-foreground";
-    case "executing":
-      return "bg-blue-500 text-white";
-    case "done":
-      return "bg-emerald-500 text-white";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
+function phaseTone(phase: string): string {
+  return PHASE_TONE[phase as SprintPhase] ?? "bg-muted text-muted-foreground";
 }
 
 function fmtDate(d: string): string {
   if (!d) return "—";
   return d.slice(0, 10);
-}
-
-function fmtDateTime(d: string): string {
-  if (!d) return "—";
-  return d.slice(0, 16).replace("T", " ");
-}
-
-function priorityLabel(p: number): string {
-  switch (p) {
-    case 1:
-      return "P0";
-    case 2:
-      return "P1";
-    case 3:
-      return "P2";
-    case 4:
-      return "P3";
-    default:
-      return "P?";
-  }
-}
-
-function priorityColor(p: number): string {
-  switch (p) {
-    case 1:
-      return "bg-red-500 text-white";
-    case 2:
-      return "bg-orange-500 text-white";
-    case 3:
-      return "bg-amber-500 text-white";
-    case 4:
-      return "bg-blue-500 text-white";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
 }
 
 function itemTypeColor(t: string): string {
@@ -200,6 +184,17 @@ function itemTypeColor(t: string): string {
     default:
       return "bg-muted text-muted-foreground";
   }
+}
+
+function elapsedSince(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
+  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h${m % 60}m`;
 }
 
 function stageColors(stageName: string): string {
@@ -223,24 +218,7 @@ function stageColors(stageName: string): string {
   }
 }
 
-function stageStatusLabel(status: string): { label: string; color: string } {
-  switch (status) {
-    case "待执行":
-      return { label: "待执行", color: "text-gray-500" };
-    case "执行中":
-      return { label: "执行中", color: "text-blue-500" };
-    case "已完成":
-      return { label: "已完成", color: "text-emerald-500" };
-    case "已驳回":
-      return { label: "已驳回", color: "text-red-500" };
-    case "跳过":
-      return { label: "跳过", color: "text-gray-400" };
-    default:
-      return { label: status, color: "text-muted-foreground" };
-  }
-}
-
-// ── Metadata row ─────────────────────────────────────────────────────────────
+// ── Metadata row (Inspector) ─────────────────────────────────────────────────
 
 function MetaRow({
   icon: Icon,
@@ -254,7 +232,7 @@ function MetaRow({
   return (
     <div className="flex items-start gap-3 px-3.5 py-2.5">
       <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-      <span className="w-20 shrink-0 pt-px text-xs text-muted-foreground">
+      <span className="w-16 shrink-0 pt-px text-xs text-muted-foreground">
         {label}
       </span>
       <div className="min-w-0 flex-1 text-sm">{children}</div>
@@ -262,7 +240,8 @@ function MetaRow({
   );
 }
 
-// ── Delivery progress card ───────────────────────────────────────────────────
+// ── Delivery progress card (kept — real, generic fallback for every phase,
+// not just executing) ────────────────────────────────────────────────────────
 
 function DeliveryProgressCard({ items }: { items: TrackerWorkItem[] }) {
   const stageOrder = [
@@ -275,7 +254,6 @@ function DeliveryProgressCard({ items }: { items: TrackerWorkItem[] }) {
     "交付",
   ] as const;
 
-  // Count items per currentStageName
   const stageCounts: Record<string, number> = {};
   for (const s of stageOrder) {
     stageCounts[s] = 0;
@@ -288,6 +266,7 @@ function DeliveryProgressCard({ items }: { items: TrackerWorkItem[] }) {
   }
 
   const totalItems = items.length;
+  if (totalItems === 0) return null;
 
   return (
     <div className="rounded-xl border bg-card p-5 shadow-sm">
@@ -328,45 +307,249 @@ function DeliveryProgressCard({ items }: { items: TrackerWorkItem[] }) {
   );
 }
 
-// ── Sprint items list card ───────────────────────────────────────────────────
+// ── ① executing 相位面板 (miniboard: 排队/运行中/已完成, real per-item
+// grouping — no fabricated git log / no fabricated dependency reason) ───────
 
-function SprintItemsCard({
-  sprint,
-  items,
-  stages,
-}: {
-  sprint: SprintDetail;
-  items: TrackerWorkItem[];
-  stages: Stage[];
-}) {
-  if (items.length === 0) {
+function MiniCard({ item }: { item: TrackerWorkItem }) {
+  const isRunning = item.status === "running" || item.status === "dispatched";
+  const isBlocked = item.status === "blocked";
+  const isMerged =
+    item.status === "done" ||
+    item.status === "closed" ||
+    item.currentStageName === "交付";
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-background p-2.5 text-xs">
+      <div className="flex items-center gap-1.5">
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {item.itemKeyDisplay ?? item.itemKey}
+        </span>
+        <PriorityBars priority={item.priority} />
+      </div>
+      <Link
+        to={`/items/${item.id}`}
+        className="truncate font-medium text-foreground hover:underline"
+      >
+        {item.title}
+      </Link>
+      {isBlocked ? (
+        <Badge className="w-fit gap-1 bg-warning/15 px-1.5 text-[10.5px] text-warning hover:bg-warning/15">
+          <IconHandStop className="size-3" />
+          等待人工确认
+        </Badge>
+      ) : isRunning ? (
+        <span className="flex items-center gap-1.5 text-[11px] text-info">
+          <StatusRing status="running" size={10} />
+          执行中
+          {item.dispatchedAt ? (
+            <span className="font-mono text-muted-foreground">
+              {elapsedSince(item.dispatchedAt)}
+            </span>
+          ) : null}
+        </span>
+      ) : isMerged ? (
+        <span className="flex items-center gap-1.5">
+          <Badge className="gap-1 bg-success/15 px-1.5 text-[10.5px] text-success hover:bg-success/15">
+            <IconCheck className="size-3" />
+            已完成
+          </Badge>
+          {item.orchestratorRunId ? (
+            <RunBadgeCompact
+              run={{
+                runId: item.orchestratorRunId,
+                threadId: item.orchestratorThreadId,
+                branch: item.branch ?? null,
+                dispatchedAt: item.dispatchedAt ?? item.updatedAt,
+                superseded: false,
+              }}
+              activity={undefined}
+            />
+          ) : null}
+        </span>
+      ) : (
+        <span className="text-[11px] text-muted-foreground">排队中</span>
+      )}
+    </div>
+  );
+}
+
+function ExecutingPhasePanel({ items }: { items: TrackerWorkItem[] }) {
+  const queued: TrackerWorkItem[] = [];
+  const running: TrackerWorkItem[] = [];
+  const merged: TrackerWorkItem[] = [];
+  for (const item of items) {
+    if (item.status === "running" || item.status === "dispatched") {
+      running.push(item);
+    } else if (item.status === "queued" || item.status === "blocked") {
+      queued.push(item);
+    } else if (
+      item.status === "done" ||
+      item.status === "closed" ||
+      item.currentStageName === "交付"
+    ) {
+      merged.push(item);
+    }
+  }
+
+  if (queued.length === 0 && running.length === 0 && merged.length === 0) {
     return (
-      <div className="rounded-xl border bg-card p-8 text-center">
-        <p className="text-sm text-muted-foreground">本 Sprint 暂无工作项。</p>
-        <Button asChild size="sm" className="mt-3 gap-1.5">
-          <Link to="/items/new">
-            <IconPlus className="size-4" />
-            新建工作项
-          </Link>
-        </Button>
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
+          <IconPlayerPlay className="size-4 text-info" />
+          实施进行中
+        </div>
+        <p className="text-sm text-muted-foreground">
+          暂无正在排队、执行或已完成的工作项。
+        </p>
       </div>
     );
   }
 
-  // Build a map of workItemId → current Stage (latest stage for each item)
-  const stageMap = new Map<string, Stage>();
-  for (const s of stages) {
-    if (!stageMap.has(s.workItemId)) {
-      stageMap.set(s.workItemId, s);
-    }
-  }
+  const columns: [string, TrackerWorkItem[], React.ReactNode][] = [
+    ["排队", queued, <StatusRing key="q" status="queued" size={10} />],
+    ["运行中", running, <StatusRing key="r" status="running" size={10} />],
+    ["已合入", merged, <StatusIcon key="m" tone="ok" size="sm" />],
+  ];
 
   return (
     <div className="rounded-xl border bg-card p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">
-          本 Sprint 工作项 · {items.length}
-        </h3>
+      <div className="mb-4 flex items-center gap-2 text-sm font-semibold">
+        <IconPlayerPlay className="size-4 text-info" />
+        实施进行中
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {columns.map(([label, list, ring]) => (
+          <div key={label} className="flex min-w-0 flex-col gap-2">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              {ring}
+              {label}
+              <span className="font-mono">{list.length}</span>
+            </div>
+            {list.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground/70">—</p>
+            ) : (
+              list.map((item) => <MiniCard key={item.id} item={item} />)
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-[10.5px] text-muted-foreground">
+        「实时合入流」（sprint 分支 git 提交时间线）需要真实 git log
+        数据源，当前无此读取通道，本次范围外未实现。
+      </p>
+    </div>
+  );
+}
+
+// ── ② 工作项表 (Key/标题/阶段/运行信号/PR·运行) ──────────────────────────────
+
+function StageRing({ status }: { status: string }) {
+  switch (status) {
+    case "running":
+    case "dispatched":
+      return <StatusRing status="running" size={12} />;
+    case "queued":
+      return <StatusRing status="queued" size={12} />;
+    case "blocked":
+      return <StatusRing status="gate" size={12} />;
+    case "failed":
+      return <StatusIcon tone="err" size="sm" />;
+    case "done":
+    case "closed":
+      return <StatusIcon tone="ok" size="sm" />;
+    default:
+      return <StatusRing status="pending" size={12} />;
+  }
+}
+
+function RunSignalCell({ item }: { item: TrackerWorkItem }) {
+  if (item.status === "running" || item.status === "dispatched") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11.5px] text-info">
+        <StatusRing status="running" size={11} />
+        执行中
+        {item.dispatchedAt ? (
+          <span className="font-mono text-muted-foreground">
+            {elapsedSince(item.dispatchedAt)}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+  if (item.status === "queued") {
+    return (
+      <Badge className="h-5 gap-1 bg-warning/15 px-1.5 text-[10.5px] text-warning hover:bg-warning/15">
+        排队中
+      </Badge>
+    );
+  }
+  if (item.status === "blocked") {
+    return (
+      <Badge className="h-5 gap-1 bg-warning/15 px-1.5 text-[10.5px] text-warning hover:bg-warning/15">
+        <IconHandStop className="size-3" />
+        等待人工确认
+      </Badge>
+    );
+  }
+  if (item.status === "failed") {
+    return (
+      <Badge className="h-5 gap-1 bg-destructive/15 px-1.5 text-[10.5px] text-destructive hover:bg-destructive/15">
+        <IconX className="size-3" />
+        失败
+      </Badge>
+    );
+  }
+  if (item.status === "done" || item.status === "closed") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11.5px] text-success">
+        <StatusIcon tone="ok" size="sm" />
+        已完成
+      </span>
+    );
+  }
+  if (item.status === "returned") {
+    return (
+      <Badge className="h-5 gap-1 bg-agent/15 px-1.5 text-[10.5px] text-agent hover:bg-agent/15">
+        待人工评审
+      </Badge>
+    );
+  }
+  return <span className="text-xs text-muted-foreground">—</span>;
+}
+
+/** "PR" column — the tracker never persists a real PR number for a work
+ *  item (only get-activity's per-item transcript parse does, and polling
+ *  that for every row here would be an N+1 waterfall — see BoardPage's
+ *  RunSignalLine, which makes the same trade-off). Links to the bound
+ *  orchestrator run instead of showing a fabricated PR number. */
+function RunLinkCell({ item }: { item: TrackerWorkItem }) {
+  if (!item.orchestratorRunId) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  return (
+    <RunBadgeCompact
+      run={{
+        runId: item.orchestratorRunId,
+        threadId: item.orchestratorThreadId,
+        branch: item.branch ?? null,
+        dispatchedAt: item.dispatchedAt ?? item.updatedAt,
+        superseded: false,
+      }}
+      activity={undefined}
+    />
+  );
+}
+
+function SprintItemsTable({ items }: { items: TrackerWorkItem[] }) {
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <IconClipboardList className="size-4 text-muted-foreground" />
+          工作项
+          <span className="font-mono font-normal text-muted-foreground">
+            {items.length}
+          </span>
+        </div>
         <Button asChild size="sm" variant="outline" className="gap-1.5">
           <Link to="/items/new">
             <IconPlus className="size-4" />
@@ -375,98 +558,77 @@ function SprintItemsCard({
         </Button>
       </div>
 
-      <div className="divide-y divide-border">
-        {items.map((item) => {
-          const currentStage = stageMap.get(item.id);
-          return (
-            <div
-              key={item.id}
-              className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
-            >
-              {/* Item key — F8: itemKeyDisplay disambiguates historical
-                  duplicate itemKeys within the same project (SDLC-032~036). */}
-              <span
-                className="w-16 shrink-0 font-mono text-[11px] font-medium text-muted-foreground"
-                title={
-                  item.itemKeyDisplay && item.itemKeyDisplay !== item.itemKey
-                    ? "历史重号，已消歧显示"
-                    : undefined
-                }
-              >
-                {item.itemKeyDisplay ?? item.itemKey}
-              </span>
-
-              {/* Title (link) */}
-              <Link
-                to={`/items/${item.id}`}
-                className="min-w-0 flex-1 truncate text-sm font-medium text-foreground hover:text-foreground hover:underline"
-              >
-                {item.title}
-              </Link>
-
-              {/* Type badge */}
-              <Badge
-                variant="outline"
-                className={cn(
-                  "h-5 px-1.5 text-[11px]",
-                  itemTypeColor(item.type),
-                )}
-              >
-                {item.type}
-              </Badge>
-
-              {/* Priority badge */}
-              <Badge
-                variant="outline"
-                className={cn(
-                  "h-5 px-1.5 text-[11px]",
-                  priorityColor(item.priority),
-                )}
-              >
-                {priorityLabel(item.priority)}
-              </Badge>
-
-              {/* F5: 规模徽标(Briefs 列表行) */}
-              <ScaleBadgeCompact raw={item.scaleEstimate} />
-
-              {/* Current stage · stageStatus */}
-              {currentStage ? (
-                <span className="flex shrink-0 items-center gap-1 text-xs">
-                  <span className="font-medium text-foreground">
-                    {currentStage.stageName}
-                  </span>
-                  <span
-                    className={cn(
-                      "text-muted-foreground",
-                      stageStatusLabel(currentStage.stageStatus).color,
-                    )}
-                  >
-                    · {stageStatusLabel(currentStage.stageStatus).label}
-                  </span>
-                </span>
-              ) : (
-                <span className="text-xs text-muted-foreground">—</span>
-              )}
-
-              {/* Assignee avatar (small) */}
-              <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-                {(item as { assigneeName?: string }).assigneeName
-                  ? (item as { assigneeName?: string }).assigneeName![0]
-                  : "?"}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+      {items.length === 0 ? (
+        <div className="rounded-xl border bg-card p-8 text-center">
+          <p className="text-sm text-muted-foreground">
+            本 Sprint 暂无工作项。
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-9 px-3 text-[10.5px]">Key</TableHead>
+                <TableHead className="h-9 px-3 text-[10.5px]">标题</TableHead>
+                <TableHead className="h-9 px-3 text-[10.5px]">阶段</TableHead>
+                <TableHead className="h-9 px-3 text-[10.5px]">
+                  运行信号
+                </TableHead>
+                <TableHead className="h-9 px-3 text-[10.5px]">
+                  PR / 运行
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground">
+                    {item.itemKeyDisplay ?? item.itemKey}
+                  </TableCell>
+                  <TableCell className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to={`/items/${item.id}`}
+                        className="min-w-0 truncate font-medium text-foreground hover:underline"
+                      >
+                        {item.title}
+                      </Link>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "h-5 shrink-0 px-1.5 text-[10.5px]",
+                          itemTypeColor(item.type),
+                        )}
+                      >
+                        {item.type}
+                      </Badge>
+                      <ScaleBadgeCompact raw={item.scaleEstimate} />
+                    </div>
+                  </TableCell>
+                  <TableCell className="px-3 py-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs">
+                      <StageRing status={item.status} />
+                      {item.currentStageName}
+                    </span>
+                  </TableCell>
+                  <TableCell className="px-3 py-2">
+                    <RunSignalCell item={item} />
+                  </TableCell>
+                  <TableCell className="px-3 py-2">
+                    <RunLinkCell item={item} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </section>
   );
 }
 
-// ── Sprint Artifacts Section ──────────────────────────────────────────────────
-// ArtifactBadge and ArtifactViewDialog (agent/human tone + content dialog) now
-// live in @/components/ArtifactBadge — shared with the per-work-item "产物"
-// panel (ArtifactsPanel) and the Inbox "关联产物" card so every screen uses
-// the same vocabulary instead of each defining their own copy.
+// ── ③ 产物库 (规划/设计/验证/其他 三段式分组) ────────────────────────────────
 
 function SprintArtifactsSection({ sprintId }: { sprintId: string }) {
   const { data, isLoading } = useSprintArtifacts(sprintId);
@@ -477,78 +639,81 @@ function SprintArtifactsSection({ sprintId }: { sprintId: string }) {
   const byDocKey = data?.byDocKey ?? {};
   const docKeys = Object.keys(byDocKey);
 
+  const grouped = useMemo(() => {
+    const groups: Record<string, string[]> = {};
+    for (const key of docKeys) {
+      const group = classifyDocKey(key);
+      (groups[group] ??= []).push(key);
+    }
+    return groups;
+  }, [docKeys]);
+
   if (isLoading) {
     return (
       <div className="rounded-xl border bg-card p-5 shadow-sm">
-        <h3 className="mb-4 text-sm font-semibold">产物</h3>
+        <h3 className="mb-4 text-sm font-semibold">产物库</h3>
         <Skeleton className="h-20 w-full" />
       </div>
     );
   }
 
-  if (docKeys.length === 0) {
-    return (
-      <div className="rounded-xl border bg-card p-5 shadow-sm">
-        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold">
-          <IconFileText className="size-4 text-muted-foreground" />
-          产物
-        </h3>
-        <p className="text-sm text-muted-foreground">本 Sprint 暂无产物。</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="rounded-xl border bg-card p-5 shadow-sm">
-      <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold">
+    <section>
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
         <IconFileText className="size-4 text-muted-foreground" />
-        产物 · {docKeys.length} 类
-      </h3>
-      <div className="space-y-4">
-        {docKeys.map((docKey) => {
-          const versions = byDocKey[docKey] ?? [];
-          const latest = versions[versions.length - 1];
-          if (!latest) return null;
-          return (
-            <div key={docKey} className="rounded-lg border p-3">
-              <div className="mb-2 flex items-center gap-2">
-                <span className="font-mono text-xs font-semibold text-foreground/80">
-                  {docKey}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {latest.kind}
-                </span>
-                <span className="ml-auto text-[11px] text-muted-foreground">
-                  共 {versions.length} 版
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {versions.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedArtifact(a);
-                      setDialogOpen(true);
-                    }}
-                    className={cn(
-                      "flex items-center gap-1.5 rounded border px-2 py-1 text-xs transition-colors hover:bg-accent",
-                      a.id === latest.id
-                        ? "border-primary/50 bg-primary/5"
-                        : "border-border bg-background",
-                    )}
-                  >
-                    <ArtifactBadge kind={a.producedByKind} />
-                    <span className="font-mono">v{a.version}</span>
-                    <span className="max-w-[120px] truncate text-muted-foreground">
-                      {a.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+        产物库
+        <span className="font-mono font-normal text-muted-foreground">
+          {docKeys.length}
+        </span>
+      </div>
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        {docKeys.length === 0 ? (
+          <p className="text-sm text-muted-foreground">本 Sprint 暂无产物。</p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {ARTIFACT_GROUP_ORDER.filter((g) => grouped[g]?.length).map(
+              (group) => (
+                <div key={group}>
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {group}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {grouped[group]!.map((docKey) => {
+                      const versions = byDocKey[docKey] ?? [];
+                      const latest = versions[versions.length - 1];
+                      if (!latest) return null;
+                      return (
+                        <div
+                          key={docKey}
+                          className="flex flex-wrap items-center gap-2 border-b border-border/60 py-1.5 text-[12.5px] last:border-0"
+                        >
+                          <span className="font-medium">{docKey}</span>
+                          <Badge
+                            variant="secondary"
+                            className="h-5 px-1.5 font-mono text-[10.5px]"
+                          >
+                            共 {versions.length} 版
+                          </Badge>
+                          <ArtifactBadge kind={latest.producedByKind} />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedArtifact(latest);
+                              setDialogOpen(true);
+                            }}
+                            className="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground hover:underline"
+                          >
+                            agent 视图
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ),
+            )}
+          </div>
+        )}
       </div>
       <ArtifactViewDialog
         artifact={selectedArtifact}
@@ -558,11 +723,12 @@ function SprintArtifactsSection({ sprintId }: { sprintId: string }) {
           setSelectedArtifact(null);
         }}
       />
-    </div>
+    </section>
   );
 }
 
-// ── Sprint Approvals Section ──────────────────────────────────────────────────
+// ── ④ 审批记录 (kept — real, interactive; SprintApprovalsSection未改变行为，
+// 仅标题/图标向原型靠拢) ──────────────────────────────────────────────────────
 
 function approvalStatusBadge(status: string) {
   switch (status) {
@@ -730,20 +896,20 @@ function SprintApprovalsSection({ sprintId }: { sprintId: string }) {
   const history = approvals.filter((a) => a.status !== "pending");
 
   return (
-    <div className="rounded-xl border bg-card p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <IconShieldCheck className="size-4 text-muted-foreground" />
-          审批
+    <section>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <IconRubberStamp className="size-4 text-muted-foreground" />
+          审批记录
           {pending.length > 0 ? (
             <Badge
               variant="secondary"
-              className="bg-amber-400/20 text-amber-700 ml-1"
+              className="ml-1 bg-amber-400/20 text-amber-700"
             >
               {pending.length} 待审
             </Badge>
           ) : null}
-        </h3>
+        </div>
         <Button
           size="sm"
           variant="outline"
@@ -755,99 +921,103 @@ function SprintApprovalsSection({ sprintId }: { sprintId: string }) {
         </Button>
       </div>
 
-      {isLoading ? (
-        <Skeleton className="h-16 w-full" />
-      ) : approvals.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          本 Sprint 暂无审批记录。
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {/* Pending approvals */}
-          {pending.length > 0 ? (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                待审批 · {pending.length}
-              </p>
-              {pending.map((a) => (
-                <div
-                  key={a.id}
-                  className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/30 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium">
-                        {gateLabels[a.gateKey as GateKey] ?? a.gateKey}
-                      </span>
-                      {approvalStatusBadge(a.status)}
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        {isLoading ? (
+          <Skeleton className="h-16 w-full" />
+        ) : approvals.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            本 Sprint 暂无审批记录。
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {pending.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  待审批 · {pending.length}
+                </p>
+                {pending.map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/30 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {gateLabels[a.gateKey as GateKey] ?? a.gateKey}
+                        </span>
+                        {approvalStatusBadge(a.status)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                        <span>发起人: {a.requestedBy}</span>
+                        {a.workItemId ? (
+                          <span>工作项: {a.workItemId}</span>
+                        ) : null}
+                        <span>{fmtApprovalTime(a.createdAt)}</span>
+                      </div>
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-                      <span>发起人: {a.requestedBy}</span>
-                      {a.workItemId ? (
-                        <span>工作项: {a.workItemId}</span>
-                      ) : null}
-                      <span>{fmtApprovalTime(a.createdAt)}</span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="gap-1"
+                        onClick={() =>
+                          void approveGate.mutateAsync({ id: a.id })
+                        }
+                        disabled={approveGate.isPending}
+                      >
+                        <IconCheck className="size-3.5" />
+                        批准
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1 text-destructive hover:text-destructive"
+                        onClick={() => setRejectTarget(a.id)}
+                      >
+                        <IconX className="size-3.5" />
+                        拒绝
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="default"
-                      className="gap-1"
-                      onClick={() => void approveGate.mutateAsync({ id: a.id })}
-                      disabled={approveGate.isPending}
-                    >
-                      <IconCheck className="size-3.5" />
-                      批准
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-1 text-destructive hover:text-destructive"
-                      onClick={() => setRejectTarget(a.id)}
-                    >
-                      <IconX className="size-3.5" />
-                      拒绝
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
+                ))}
+              </div>
+            ) : null}
 
-          {/* History */}
-          {history.length > 0 ? (
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                历史记录 · {history.length}
-              </p>
-              {history.map((a) => (
-                <div
-                  key={a.id}
-                  className="flex flex-col gap-1 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium">
-                        {gateLabels[a.gateKey as GateKey] ?? a.gateKey}
-                      </span>
-                      {approvalStatusBadge(a.status)}
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-                      <span>发起人: {a.requestedBy}</span>
-                      {a.decidedBy ? <span>决策人: {a.decidedBy}</span> : null}
-                      {a.reason ? <span>原因: {a.reason}</span> : null}
-                      {a.decidedAt ? (
-                        <span>决策时间: {fmtApprovalTime(a.decidedAt)}</span>
-                      ) : null}
+            {history.length > 0 ? (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  历史记录 · {history.length}
+                </p>
+                {history.map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex flex-col gap-1 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {gateLabels[a.gateKey as GateKey] ?? a.gateKey}
+                        </span>
+                        {approvalStatusBadge(a.status)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                        <span>发起人: {a.requestedBy}</span>
+                        {a.decidedBy ? (
+                          <span>决策人: {a.decidedBy}</span>
+                        ) : null}
+                        {a.reason ? <span>原因: {a.reason}</span> : null}
+                        {a.decidedAt ? (
+                          <span>决策时间: {fmtApprovalTime(a.decidedAt)}</span>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      )}
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
 
       <RequestApprovalDialog
         sprintId={sprintId}
@@ -861,7 +1031,344 @@ function SprintApprovalsSection({ sprintId }: { sprintId: string }) {
           onClose={() => setRejectTarget(null)}
         />
       ) : null}
+    </section>
+  );
+}
+
+// ── Right column: Goal card ─────────────────────────────────────────────────
+
+function GoalCard({ sprintId, goal }: { sprintId: string; goal: string }) {
+  const { data, isLoading, error } = useGoalMetrics(sprintId);
+
+  return (
+    <InspectorSection label="Goal · 完成判据的锚" first>
+      <div className="px-3.5 pb-3">
+        <p className="mb-2 text-[12.5px] font-medium leading-snug">
+          {goal || "（未填写 Sprint 目标）"}
+        </p>
+
+        {isLoading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : error ? (
+          <p className="text-[11.5px] text-muted-foreground">
+            未设置目标指标 — 尚未创建 sprint-doc
+            产物，无法提取目标指标。在规划工作台产出 sprint-doc 并补充「##
+            Success Metrics」章节后自动识别。
+          </p>
+        ) : !data || data.metrics.length === 0 ? (
+          <p className="text-[11.5px] text-muted-foreground">
+            未设置目标指标 — sprint-doc 尚未包含「## Success
+            Metrics」章节（格式：
+            <code className="mx-1 rounded bg-muted px-1 font-mono text-[10.5px]">
+              - M1 | Leading | 陈述 | 证据来源
+            </code>
+            ），补充后自动识别，不编造。
+          </p>
+        ) : (
+          <>
+            <div className="flex flex-col gap-1.5">
+              {data.metrics.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-center gap-1.5 text-[11.5px]"
+                >
+                  <StatusRing status="pending" size={11} />
+                  <span className="font-mono text-muted-foreground">
+                    {m.id}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{m.statement}</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    待 gap-analysis
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[10.5px] text-muted-foreground">
+              指标从 sprint-doc「Success Metrics」章节解析；MET/PARTIAL/UNMET
+              判定由 gap-analysis（目标审计相位）回填，该机制本次未实现，故均
+              显示「待 gap-analysis」——sprint 完成由 Goal 判定，不由单子关完
+              判定。
+            </p>
+          </>
+        )}
+      </div>
+    </InspectorSection>
+  );
+}
+
+// ── Right column: 签核迷你卡 (real approvals data, read-only summary) ───────
+
+const MINI_GATE_KEYS: GateKey[] = [
+  "plan-signoff",
+  "ui-signoff",
+  "design-signoff",
+];
+
+function GateMiniList({ sprintId }: { sprintId: string }) {
+  const { data, isLoading } = useApprovals({ sprintId });
+  const approvals: Approval[] = Array.isArray(data) ? data : [];
+
+  if (isLoading) {
+    return (
+      <div className="px-3.5 py-2">
+        <Skeleton className="h-16 w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col">
+      {MINI_GATE_KEYS.map((key) => {
+        const latest = approvals.find(
+          (a) => a.gateKey === key && !a.workItemId,
+        );
+        return (
+          <div
+            key={key}
+            className="flex items-center gap-2 px-3.5 py-1.5 text-[12.5px]"
+          >
+            {!latest ? (
+              <StatusRing status="pending" size={12} />
+            ) : latest.status === "approved" ? (
+              <StatusIcon tone="ok" size="sm" />
+            ) : latest.status === "rejected" ? (
+              <StatusIcon tone="err" size="sm" />
+            ) : (
+              <StatusRing status="gate" size={12} />
+            )}
+            {gateLabels[key]}
+            <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+              {latest?.decidedAt
+                ? latest.decidedAt.slice(5, 10)
+                : latest
+                  ? "待审批"
+                  : "未发起"}
+            </span>
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+// ── Right column: 健康门 (real cross-app orchestrator signal, reuses
+// get-queue-health — same channel /queue's health bar already uses) ────────
+
+function HealthRow({
+  tone,
+  label,
+  detail,
+}: {
+  tone: "ok" | "warn" | "err";
+  label: string;
+  detail: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-2 px-3.5 py-1.5 text-[12.5px]">
+          <StatusIcon tone={tone} size="sm" aria-label={label} />
+          {label}
+          <span className="ml-auto truncate text-[11px] text-muted-foreground">
+            {detail}
+          </span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="left">{detail}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function HealthGateMini() {
+  const { data: health } = useQueueHealth();
+
+  if (!health) {
+    return (
+      <div className="px-3.5 py-2">
+        <Skeleton className="h-12 w-full" />
+      </div>
+    );
+  }
+
+  if (!health.orchestratorReachable) {
+    return (
+      <p className="px-3.5 py-2 text-[11.5px] text-destructive">
+        编排器不可达（{health.orchestratorError ?? "连接失败"}）——健康门状态
+        暂不可读，出于诚实原则不展示伪造的健康态。
+      </p>
+    );
+  }
+
+  const vllmOk = !!health.devEngine?.configured;
+  const ccOk = !!health.claudeCode?.loggedIn && !health.claudeCode.expired;
+  const brainOk = !!health.brain?.driverAlive;
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <div className="flex flex-col">
+        <HealthRow
+          tone={vllmOk ? "ok" : "warn"}
+          label="vLLM"
+          detail={
+            vllmOk
+              ? `已配置：${health.devEngine?.model ?? "?"}`
+              : "未配置开发引擎"
+          }
+        />
+        <HealthRow
+          tone={ccOk ? "ok" : "err"}
+          label="Claude Code"
+          detail={
+            health.claudeCode == null
+              ? "未知"
+              : health.claudeCode.expired
+                ? "登录已过期"
+                : health.claudeCode.loggedIn
+                  ? "已登录"
+                  : "未登录"
+          }
+        />
+        <HealthRow
+          tone={brainOk ? "ok" : "err"}
+          label="Brain 槽"
+          detail={
+            health.brain == null
+              ? "未知"
+              : `${health.brain.running} / ${health.brain.concurrency ?? "?"}`
+          }
+        />
+      </div>
+    </TooltipProvider>
+  );
+}
+
+// ── Right column: 度量摘要 (real burndown + median stage duration, honest
+// empty state when there isn't enough real history) ────────────────────────
+
+function MetricsSummary({ sprint }: { sprint: SprintDetail }) {
+  const burndown = useMemo(
+    () => computeBurndown(sprint.items, sprint.stages, sprint.startDate),
+    [sprint.items, sprint.stages, sprint.startDate],
+  );
+  const durations = useMemo(
+    () => medianStageDurationsMinutes(sprint.stages),
+    [sprint.stages],
+  );
+
+  const svgWidth = 260;
+  const svgHeight = 56;
+  const points = burndown?.points ?? [];
+  const lastPoint = points[points.length - 1];
+  const maxRemaining = burndown ? Math.max(1, burndown.total) : 1;
+  const polyline = points
+    .map((p, i) => {
+      const x = points.length > 1 ? (i / (points.length - 1)) * svgWidth : 0;
+      const y = svgHeight - (p.remaining / maxRemaining) * svgHeight;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  return (
+    <div className="px-3.5 pb-3">
+      {burndown ? (
+        <>
+          <svg
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+            className="h-14 w-full"
+            role="img"
+            aria-label={`燃尽：剩 ${lastPoint?.remaining ?? 0}/${burndown.total}`}
+          >
+            <polyline
+              points={polyline}
+              fill="none"
+              className="stroke-info"
+              strokeWidth={2}
+            />
+          </svg>
+          <div className="mt-1 flex justify-between font-mono text-[10.5px] text-muted-foreground">
+            <span>
+              燃尽 · 剩 {lastPoint?.remaining ?? 0}/{burndown.total}
+            </span>
+            <span>{sprint.startDate.slice(5, 10)} 至今</span>
+          </div>
+        </>
+      ) : (
+        <p className="text-[11.5px] text-muted-foreground">
+          暂无足够真实数据绘制燃尽趋势（需要 Sprint 起始日期与至少一天跨度）。
+        </p>
+      )}
+
+      <div className="my-2.5 h-px bg-border" />
+
+      <div className="text-[11.5px] text-muted-foreground">中位环节耗时</div>
+      {durations.length === 0 ? (
+        <p className="mt-1 text-[11.5px] text-muted-foreground">
+          暂无耗时数据（尚无已完成阶段记录）。
+        </p>
+      ) : (
+        <p className="mt-0.5 font-mono text-[11.5px]">
+          {durations.map((d) => `${d.stageName} ${d.minutes}m`).join(" · ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── 推进相位 (manual, unguarded — the criteria engine described by the
+// prototype's "判据 N/M" fraction does not exist for the 8 cross-phase
+// transitions; this is an honest manual override, not a fake gate check) ───
+
+function AdvancePhaseButton({
+  sprintId,
+  phase,
+}: {
+  sprintId: string;
+  phase: string;
+}) {
+  const updateSprint = useUpdateSprint();
+  const [open, setOpen] = useState(false);
+  const currentIdx = SPRINT_PHASE_ORDER.indexOf(phase as SprintPhase);
+  const nextPhase =
+    currentIdx >= 0 && currentIdx < SPRINT_PHASE_ORDER.length - 1
+      ? SPRINT_PHASE_ORDER[currentIdx + 1]
+      : null;
+
+  if (!nextPhase) return null;
+
+  return (
+    <>
+      <Button size="sm" className="gap-1.5" onClick={() => setOpen(true)}>
+        <IconPlayerTrackNext className="size-4" />
+        推进到 {SPRINT_PHASE_LABELS[nextPhase]}
+      </Button>
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              推进 Sprint 相位到「{SPRINT_PHASE_LABELS[nextPhase]}」？
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作直接把 sprint 相位设为「{SPRINT_PHASE_LABELS[nextPhase]}
+              」，不做判据校验——跨相位的判据引擎（原型「判据 N/M」）本次未
+              实现，这是一次人工手动推进。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                void updateSprint.mutateAsync({
+                  id: sprintId,
+                  phase: nextPhase,
+                })
+              }
+            >
+              确认推进
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -874,7 +1381,7 @@ export function SprintDetailPage() {
 
   if (isLoading && !sprint) {
     return (
-      <div className="mx-auto max-w-5xl space-y-5 p-6">
+      <div className="mx-auto max-w-6xl space-y-5 p-6">
         <Skeleton className="h-7 w-24" />
         <Skeleton className="h-9 w-2/3" />
         <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
@@ -899,10 +1406,10 @@ export function SprintDetailPage() {
   }
 
   const items = sprint.items ?? [];
-  const stages = sprint.stages ?? [];
+  const phase = sprint.phase ?? "planning";
 
   return (
-    <div className="mx-auto max-w-5xl p-5 sm:p-6">
+    <div className="mx-auto max-w-6xl p-5 sm:p-6">
       {/* Back link */}
       <Button asChild variant="ghost" size="sm" className="-ml-2 mb-3 gap-1.5">
         <Link to="/sprints">
@@ -911,97 +1418,92 @@ export function SprintDetailPage() {
       </Button>
 
       {/* ── Header ── */}
-      <header className="mb-5">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <Badge
-            variant={sprintStatusVariant(sprint.status)}
-            className={cn("px-2 text-[11px]", sprintStatusColor(sprint.status))}
-          >
-            {sprint.status}
-          </Badge>
-          <Badge
-            className={cn(
-              "px-2 text-[11px]",
-              sprintPhaseColor(sprint.phase ?? "planning"),
-            )}
-          >
-            {sprintPhaseLabel(sprint.phase ?? "planning")}
-          </Badge>
-        </div>
-
-        <h1 className="text-2xl font-semibold leading-tight tracking-tight">
-          {sprint.name}
-        </h1>
-
-        {sprint.goal ? (
-          <p className="mt-2 text-sm text-muted-foreground">{sprint.goal}</p>
-        ) : null}
-
-        {/* Meta info */}
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {sprint.branch ? (
-            <div className="flex items-center gap-2 text-sm">
-              <IconGitBranch className="size-4 text-muted-foreground" />
-              <span className="font-mono text-xs text-foreground/80">
-                {sprint.branch}
-              </span>
-            </div>
-          ) : null}
-          {sprint.startDate || sprint.endDate ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <IconCalendar className="size-3.5" />
-              <span className="text-xs">{fmtDate(sprint.startDate)}</span>
-              {sprint.startDate && sprint.endDate ? (
-                <span className="text-muted-foreground/50">→</span>
-              ) : null}
-              <span className="text-xs">{fmtDate(sprint.endDate)}</span>
-            </div>
-          ) : null}
+      <header className="mb-2">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold leading-tight tracking-tight">
+              {sprint.name}
+            </h1>
+            <Badge
+              className={cn(
+                "px-2 text-[11px]",
+                sprintStatusColor(sprint.status),
+              )}
+            >
+              {sprint.status}
+            </Badge>
+            <Badge className={cn("px-2 text-[11px]", phaseTone(phase))}>
+              {SPRINT_PHASE_LABELS[phase as SprintPhase] ?? phase}
+            </Badge>
+          </div>
+          <AdvancePhaseButton sprintId={id} phase={phase} />
         </div>
       </header>
 
+      {/* ── 八相位 Stepper ── */}
+      <SprintPhaseStepper phase={phase} />
+
       {/* ── Body ── */}
-      <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
-        {/* Left column: progress + items + artifacts + approvals */}
+      <div className="mt-2 grid gap-5 lg:grid-cols-[1fr_320px]">
+        {/* Left column */}
         <div className="order-2 min-w-0 space-y-5 lg:order-1">
+          {phase === "executing" ? <ExecutingPhasePanel items={items} /> : null}
           <DeliveryProgressCard items={items} />
-          <SprintItemsCard sprint={sprint} items={items} stages={stages} />
+          <SprintItemsTable items={items} />
           <SprintArtifactsSection sprintId={id} />
           <SprintApprovalsSection sprintId={id} />
         </div>
 
-        {/* Right column: meta */}
+        {/* Right column: Inspector */}
         <aside className="order-1 lg:order-2">
-          <div className="divide-y divide-border rounded-xl border border-border bg-card lg:sticky lg:top-4">
-            <MetaRow icon={IconGitBranch} label="分支">
-              <span className="font-mono text-xs text-foreground/80">
-                {sprint.branch ?? "未配置"}
-              </span>
-            </MetaRow>
+          <div className="space-y-0 divide-y divide-border rounded-xl border border-border bg-card px-1 lg:sticky lg:top-4">
+            <GoalCard sprintId={id} goal={sprint.goal ?? ""} />
 
-            <MetaRow icon={IconCalendar} label="开始日期">
-              <span className="text-xs text-muted-foreground">
-                {fmtDate(sprint.startDate)}
-              </span>
-            </MetaRow>
+            <InspectorSection label="Sprint">
+              <MetaRow icon={IconGitBranch} label="分支">
+                <span className="font-mono text-xs text-foreground/80">
+                  {sprint.branch || "未配置"}
+                </span>
+              </MetaRow>
+              <MetaRow icon={IconCalendar} label="起止">
+                <span className="font-mono text-xs text-foreground/80">
+                  {fmtDate(sprint.startDate)} ~ {fmtDate(sprint.endDate)}
+                </span>
+              </MetaRow>
+            </InspectorSection>
 
-            <MetaRow icon={IconClock} label="结束日期">
-              <span className="text-xs text-muted-foreground">
-                {fmtDate(sprint.endDate)}
-              </span>
-            </MetaRow>
+            <InspectorSection label="签核">
+              <GateMiniList sprintId={id} />
+            </InspectorSection>
 
-            <MetaRow icon={IconPackage} label="工作项">
-              <span className="text-xs text-muted-foreground">
-                {items.length} 项
-              </span>
-            </MetaRow>
+            <InspectorSection label="健康门">
+              <HealthGateMini />
+            </InspectorSection>
 
-            <MetaRow icon={IconClock} label="创建时间">
-              <span className="text-xs text-muted-foreground">
-                {fmtDateTime(sprint.createdAt)}
-              </span>
-            </MetaRow>
+            <InspectorSection label="执行负责">
+              {sprint.executorThreadId ? (
+                <MetaRow icon={IconBrain} label="线程">
+                  <div className="flex items-center gap-2">
+                    <ActorAvatar kind="brain" size={22} />
+                    <a
+                      href={orchestratorBrainHref(sprint.executorThreadId)}
+                      className="flex min-w-0 items-center gap-1 truncate font-mono text-xs text-foreground/80 hover:text-foreground hover:underline"
+                    >
+                      {sprint.executorThreadId.slice(0, 14)}…
+                      <IconExternalLink className="size-3 shrink-0 opacity-60" />
+                    </a>
+                  </div>
+                </MetaRow>
+              ) : (
+                <p className="px-3.5 py-2.5 text-xs text-muted-foreground">
+                  未绑定执行线程
+                </p>
+              )}
+            </InspectorSection>
+
+            <InspectorSection label="度量摘要">
+              <MetricsSummary sprint={sprint} />
+            </InspectorSection>
           </div>
         </aside>
       </div>
