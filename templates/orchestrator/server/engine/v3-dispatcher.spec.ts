@@ -4,8 +4,8 @@
 // interpolation context building, and error classification.
 // All DB and NodeRunner calls are mocked.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mock dependencies ───────────────────────────────────────────────────────
 
@@ -71,24 +71,25 @@ vi.mock("../v3-workspace-local.js", () => ({
 // getV3Db(). Mock it so these unit tests never touch a real DB — individual
 // T-F7-06 cases override the resolved value per-test.
 vi.mock("../model-registry.js", () => ({
-  resolveRealName: vi.fn().mockResolvedValue({ realName: null, suspect: false }),
+  resolveRealName: vi
+    .fn()
+    .mockResolvedValue({ realName: null, suspect: false }),
 }));
 
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { loadAgent } from "../agent-loader.js";
-import { renderTemplate } from "./interpolation.js";
-import { getWorkspace } from "./v3-workspace.js";
-import { v3Runs, v3Events } from "../db/v3-schema.js";
+import { v3Runs, v3Events, v3Spawns } from "../db/v3-schema.js";
 import { resolveRealName } from "../model-registry.js";
-
+import type { RuntimeExecutor } from "../runtime/executors/types.js";
+import { renderTemplate } from "./interpolation.js";
 import {
   classifyNodeError,
   errorClassToOnFailurePolicy,
   computeUsageSuspect,
+  formatCheckpointInjection,
 } from "./v3-dispatcher.js";
-
-import type { RuntimeExecutor } from "../runtime/executors/types.js";
+import { getWorkspace } from "./v3-workspace.js";
 
 // ── Mock DB Builder ──────────────────────────────────────────────────────────
 
@@ -759,7 +760,10 @@ describe("F7 usage capture + suspect flagging", () => {
       systemPrompt: "Dev agent",
     });
     vi.mocked(renderTemplate).mockReturnValue("Do the work");
-    vi.mocked(resolveRealName).mockResolvedValue({ realName: null, suspect: false });
+    vi.mocked(resolveRealName).mockResolvedValue({
+      realName: null,
+      suspect: false,
+    });
   });
 
   it("T-F7-03: tokensInput/tokensOutput persist from the return value (fixes the tokens_input-always-0 bug)", async () => {
@@ -772,20 +776,22 @@ describe("F7 usage capture + suspect flagging", () => {
       // the (correct) physically-impossible-rate guard flags ANY positive
       // output as suspect. 10s * 60 tps = 600-token ceiling; 567 < 600, so this
       // healthy row is NOT suspect.
-      vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(async () => {
-        vi.advanceTimersByTime(10_000);
-        return {
-          output: "done",
-          tokensSpent: 1234 + 567,
-          tokensInput: 1234,
-          tokensOutput: 567,
-          toolCallCount: 1,
-          model: "qwen3.6",
-          vmName: null,
-          durationMs: 50,
-          attempts: 1,
-        } as any;
-      });
+      vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(
+        async () => {
+          vi.advanceTimersByTime(10_000);
+          return {
+            output: "done",
+            tokensSpent: 1234 + 567,
+            tokensInput: 1234,
+            tokensOutput: 567,
+            toolCallCount: 1,
+            model: "qwen3.6",
+            vmName: null,
+            durationMs: 50,
+            attempts: 1,
+          } as any;
+        },
+      );
 
       const mockDb = createMockDb();
       const executor: RuntimeExecutor = { kind: "test", run: vi.fn() };
@@ -834,20 +840,22 @@ describe("F7 usage capture + suspect flagging", () => {
       // Real startedAt/completedAt drive latencyMs — advance the frozen clock
       // by ~10s INSIDE the mocked return so `Date.now() - startedAt` reflects
       // it, with no real waiting and no fake-timer/async-scheduling races.
-      vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(async () => {
-        vi.advanceTimersByTime(10_000);
-        return {
-          output: "done",
-          tokensSpent: 1_000_000,
-          tokensInput: 1000, // non-zero: isolates the RATE condition, not the zero-input one
-          tokensOutput: 1_000_000,
-          toolCallCount: 1,
-          model: "qwen3.6",
-          vmName: null,
-          durationMs: 50,
-          attempts: 1,
-        } as any;
-      });
+      vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(
+        async () => {
+          vi.advanceTimersByTime(10_000);
+          return {
+            output: "done",
+            tokensSpent: 1_000_000,
+            tokensInput: 1000, // non-zero: isolates the RATE condition, not the zero-input one
+            tokensOutput: 1_000_000,
+            toolCallCount: 1,
+            model: "qwen3.6",
+            vmName: null,
+            durationMs: 50,
+            attempts: 1,
+          } as any;
+        },
+      );
 
       const mockDb = createMockDb();
       const executor: RuntimeExecutor = { kind: "test", run: vi.fn() };
@@ -873,20 +881,22 @@ describe("F7 usage capture + suspect flagging", () => {
       vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
       // Realistic latency (see T-F7-03) so the healthy 60-token output row is
       // NOT flagged suspect and the assertion isolates the name-attribution.
-      vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(async () => {
-        vi.advanceTimersByTime(10_000);
-        return {
-          output: "done",
-          tokensSpent: 100,
-          tokensInput: 40,
-          tokensOutput: 60,
-          toolCallCount: 1,
-          model: "qwen3.6",
-          vmName: null,
-          durationMs: 50,
-          attempts: 1,
-        } as any;
-      });
+      vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(
+        async () => {
+          vi.advanceTimersByTime(10_000);
+          return {
+            output: "done",
+            tokensSpent: 100,
+            tokensInput: 40,
+            tokensOutput: 60,
+            toolCallCount: 1,
+            model: "qwen3.6",
+            vmName: null,
+            durationMs: 50,
+            attempts: 1,
+          } as any;
+        },
+      );
 
       const mockDb = createMockDb();
       const executor: RuntimeExecutor = { kind: "test", run: vi.fn() };
@@ -894,7 +904,10 @@ describe("F7 usage capture + suspect flagging", () => {
 
       await dispatcher.spawn(makeNodeRow() as any, "run-1");
 
-      expect(resolveRealName).toHaveBeenCalledWith("qwen3.6", "local@localhost");
+      expect(resolveRealName).toHaveBeenCalledWith(
+        "qwen3.6",
+        "local@localhost",
+      );
       expect(mockDb.spawns[0].modelRealName).toBe("ThinkingCap-Qwen3.6-27B");
       expect(mockDb.spawns[0].usageSuspect).toBeFalsy();
     } finally {
@@ -936,23 +949,338 @@ describe("F7 usage capture + suspect flagging", () => {
 describe("computeUsageSuspect (pure function boundary cases)", () => {
   it("tokensInput===0 is always suspect regardless of rate", () => {
     expect(
-      computeUsageSuspect({ tokensInput: 0, tokensOutput: 1, latencyMs: 100_000 }),
+      computeUsageSuspect({
+        tokensInput: 0,
+        tokensOutput: 1,
+        latencyMs: 100_000,
+      }),
     ).toBe(true);
   });
 
   it("a normal rate is not suspect", () => {
     expect(
-      computeUsageSuspect({ tokensInput: 100, tokensOutput: 500, latencyMs: 10_000 }),
+      computeUsageSuspect({
+        tokensInput: 100,
+        tokensOutput: 500,
+        latencyMs: 10_000,
+      }),
     ).toBe(false);
   });
 
   it("output tokens exceeding elapsedSec * ORCH_MAX_TPS(default 60) is suspect", () => {
     // 10s elapsed * 60 tps = 600 token ceiling; 601 trips it, 600 does not.
     expect(
-      computeUsageSuspect({ tokensInput: 10, tokensOutput: 601, latencyMs: 10_000 }),
+      computeUsageSuspect({
+        tokensInput: 10,
+        tokensOutput: 601,
+        latencyMs: 10_000,
+      }),
     ).toBe(true);
     expect(
-      computeUsageSuspect({ tokensInput: 10, tokensOutput: 600, latencyMs: 10_000 }),
+      computeUsageSuspect({
+        tokensInput: 10,
+        tokensOutput: 600,
+        latencyMs: 10_000,
+      }),
     ).toBe(false);
+  });
+});
+
+// ── Tests: formatCheckpointInjection (pure function) ────────────────────────
+
+describe("formatCheckpointInjection", () => {
+  it("renders both blocks when writtenFiles and remainingTasksSummary are present", () => {
+    const text = formatCheckpointInjection({
+      writtenFiles: ["server/foo.ts", "server/bar.ts"],
+      remainingTasksSummary: "补充 bar.ts 的类型定义并跑通测试",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    });
+
+    expect(text).toContain("已完成产物清单");
+    expect(text).toContain("server/foo.ts");
+    expect(text).toContain("server/bar.ts");
+    expect(text).toContain("剩余任务");
+    expect(text).toContain("补充 bar.ts 的类型定义并跑通测试");
+  });
+
+  it("omits the 已完成产物清单 block when writtenFiles is empty", () => {
+    const text = formatCheckpointInjection({
+      writtenFiles: [],
+      remainingTasksSummary: "继续实现",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    });
+
+    expect(text).not.toContain("已完成产物清单");
+    expect(text).toContain("剩余任务");
+    expect(text).toContain("继续实现");
+  });
+
+  it("omits the 剩余任务 block when remainingTasksSummary is null", () => {
+    const text = formatCheckpointInjection({
+      writtenFiles: ["server/foo.ts"],
+      remainingTasksSummary: null,
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    });
+
+    expect(text).toContain("已完成产物清单");
+    expect(text).toContain("server/foo.ts");
+    expect(text).not.toContain("剩余任务");
+  });
+});
+
+// ── Tests: F2b retry checkpoint injection (T-F2-06) ──────────────────────────
+//
+// docs/sdlc-impl-f1-f4.md §2A/§6.2: T-F2-06 — "进程级中断不归零(用重启法,不
+// 预设 kill):维护窗口 dev spawn 运行中重启 orchestrator;reconcile 重置后查
+// 新 attempt 的 rendered_prompt 应含「已完成产物清单+剩余任务」段". A live
+// process restart is a 101-only integration scenario; the piece that is
+// actually unit-testable — and the ONLY piece F2b changed — is what
+// `V3Dispatcher.spawn()` puts in the NEW attempt's `rendered_prompt` once
+// reconcile has re-armed the node to `ready` for redispatch (reconcile
+// itself only flips `v3_nodes.status`/`current_spawn_id`, never touches
+// `rendered_prompt` — see `reconcileSpawnConduction` in v3-reconciler.ts).
+// These tests simulate that redispatch directly: a `v3_spawns` row from a
+// prior (crashed/exhausted) attempt already sits in the DB with a persisted
+// `context_checkpoint`, and we assert the FRESH spawn's rendered_prompt.
+describe("F2b: retry checkpoint injection (T-F2-06)", () => {
+  /** Same shape as `createRunMockDb` (Workspace readiness gate, above), plus
+   * a `table === v3Spawns` branch returning caller-supplied prior spawn rows
+   * — the durable attempt history `fetchPriorCheckpoint` reads. */
+  function createRetryMockDb(opts: {
+    dag: unknown;
+    priorSpawns?: Array<{
+      startedAt: Date | null;
+      contextCheckpoint: unknown;
+    }>;
+  }) {
+    const artifacts: Array<Record<string, unknown>> = [];
+    const spawnsById = new Map<string, Record<string, unknown>>();
+    const events: Array<Record<string, unknown>> = [];
+    const runRow = { id: "run-1", dag: opts.dag };
+    const priorSpawns = opts.priorSpawns ?? [];
+
+    const db = {
+      select: () => ({
+        from: (table: unknown) => ({
+          where: async () => {
+            if (table === v3Runs) return [runRow];
+            if (table === v3Spawns) return priorSpawns;
+            return [];
+          },
+        }),
+      }),
+      update: () => ({ set: () => ({ where: async () => ({}) }) }),
+      insert: (table: unknown) => ({
+        values: (row: Record<string, unknown>) => {
+          let recorded = false;
+          const commit = async () => {
+            if (!recorded) {
+              recorded = true;
+              if (table === v3Events) events.push(row);
+              else if (row.kind && row.textContent !== undefined)
+                artifacts.push(row);
+              else if (row.renderedPrompt !== undefined) {
+                spawnsById.set(String(row.id), {
+                  ...(spawnsById.get(String(row.id)) ?? {}),
+                  ...row,
+                });
+              }
+            }
+            return {};
+          };
+          return {
+            onConflictDoNothing: () => commit(),
+            onConflictDoUpdate: () => commit(),
+            then: (
+              resolve: (v: unknown) => void,
+              reject: (e: unknown) => void,
+            ) => commit().then(resolve, reject),
+          };
+        },
+      }),
+    } as unknown as PostgresJsDatabase;
+
+    return { db, artifacts, spawnsById, events };
+  }
+
+  function makeNodeRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: "node-dev",
+      runId: "run-1",
+      nodeIdInDag: "dev",
+      type: "agent",
+      status: "running",
+      iteration: 0,
+      fanoutIndex: 0,
+      currentSpawnId: null,
+      outputArtifactId: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      ownerEmail: "local@localhost",
+      orgId: null,
+      ...overrides,
+    };
+  }
+
+  const dag = {
+    nodes: [
+      {
+        id: "dev",
+        type: "agent",
+        agent: "dev-agent",
+        prompt: "Implement the spec exactly.",
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.mocked(renderTemplate).mockImplementation(
+      (template: string) => template,
+    );
+    vi.mocked(loadAgent).mockResolvedValue({
+      name: "dev-agent",
+      description: "",
+      runtime: "none" as const,
+      engine: "",
+      model: "",
+      tools: [],
+      systemPrompt: "Implement the spec",
+    });
+    vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(
+      async () =>
+        ({
+          output: "done",
+          tokensSpent: 10,
+          toolCallCount: 0,
+          model: "test-model",
+          vmName: null,
+          durationMs: 5,
+          attempts: 1,
+        }) as any,
+    );
+  });
+
+  async function spawnAndGetRenderedPrompt(mockDb: {
+    db: PostgresJsDatabase;
+    spawnsById: Map<string, Record<string, unknown>>;
+  }): Promise<string> {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+    const executor: RuntimeExecutor = {
+      kind: "test",
+      run: vi.fn().mockResolvedValue({} as any),
+    };
+    const dispatcher = new V3Dispatcher(mockDb.db, executor);
+    const spawnId = await dispatcher.spawn(makeNodeRow() as any, "run-1");
+    return String(mockDb.spawnsById.get(spawnId)?.renderedPrompt ?? "");
+  }
+
+  it("retry attempt (one prior v3_spawns row with a checkpoint) injects 已完成产物清单+剩余任务 into the new attempt's rendered_prompt", async () => {
+    const priorCheckpoint = {
+      writtenFiles: ["server/foo.ts", "server/bar.ts"],
+      remainingTasksSummary: "补充 bar.ts 的类型定义并跑通测试",
+      updatedAt: "2026-07-16T10:00:00.000Z",
+    };
+
+    const mockDb = createRetryMockDb({
+      dag,
+      priorSpawns: [
+        {
+          startedAt: new Date("2026-07-16T10:00:00Z"),
+          contextCheckpoint: priorCheckpoint,
+        },
+      ],
+    });
+
+    const renderedPrompt = await spawnAndGetRenderedPrompt(mockDb);
+
+    // Injection APPENDS after the interpolated base prompt — never replaces it.
+    expect(renderedPrompt).toContain("Implement the spec exactly.");
+    // T-F2-06 acceptance wording verbatim (docs/sdlc-impl-f1-f4.md §6.2).
+    expect(renderedPrompt).toContain("已完成产物清单");
+    expect(renderedPrompt).toContain("剩余任务");
+    expect(renderedPrompt).toContain("server/foo.ts");
+    expect(renderedPrompt).toContain("server/bar.ts");
+    expect(renderedPrompt).toContain("补充 bar.ts 的类型定义并跑通测试");
+  });
+
+  it("first attempt (zero prior v3_spawns rows) — no injection, prompt unchanged", async () => {
+    const mockDb = createRetryMockDb({ dag, priorSpawns: [] });
+
+    const renderedPrompt = await spawnAndGetRenderedPrompt(mockDb);
+
+    expect(renderedPrompt).toBe("Implement the spec exactly.");
+    expect(renderedPrompt).not.toContain("已完成产物清单");
+    expect(renderedPrompt).not.toContain("剩余任务");
+  });
+
+  it("prior attempt exists but never checkpointed anything (context_checkpoint null) — inject nothing, no fabricated section", async () => {
+    const mockDb = createRetryMockDb({
+      dag,
+      priorSpawns: [
+        {
+          startedAt: new Date("2026-07-16T10:00:00Z"),
+          contextCheckpoint: null,
+        },
+      ],
+    });
+
+    const renderedPrompt = await spawnAndGetRenderedPrompt(mockDb);
+
+    expect(renderedPrompt).toBe("Implement the spec exactly.");
+    expect(renderedPrompt).not.toContain("已完成产物清单");
+  });
+
+  it("prior attempt's checkpoint is empty (no written files, no summary) — inject nothing", async () => {
+    const mockDb = createRetryMockDb({
+      dag,
+      priorSpawns: [
+        {
+          startedAt: new Date("2026-07-16T10:00:00Z"),
+          contextCheckpoint: {
+            writtenFiles: [],
+            remainingTasksSummary: null,
+            updatedAt: "2026-07-16T10:00:00.000Z",
+          },
+        },
+      ],
+    });
+
+    const renderedPrompt = await spawnAndGetRenderedPrompt(mockDb);
+
+    expect(renderedPrompt).toBe("Implement the spec exactly.");
+    expect(renderedPrompt).not.toContain("已完成产物清单");
+    expect(renderedPrompt).not.toContain("剩余任务");
+  });
+
+  it("multiple prior spawn rows (2nd retry) — injects the LATEST attempt's checkpoint, not an earlier one", async () => {
+    const mockDb = createRetryMockDb({
+      dag,
+      priorSpawns: [
+        {
+          startedAt: new Date("2026-07-16T09:00:00Z"),
+          contextCheckpoint: {
+            writtenFiles: ["stale.ts"],
+            remainingTasksSummary: "stale summary",
+            updatedAt: "2026-07-16T09:00:00.000Z",
+          },
+        },
+        {
+          startedAt: new Date("2026-07-16T11:00:00Z"),
+          contextCheckpoint: {
+            writtenFiles: ["fresh.ts"],
+            remainingTasksSummary: "fresh summary",
+            updatedAt: "2026-07-16T11:00:00.000Z",
+          },
+        },
+      ],
+    });
+
+    const renderedPrompt = await spawnAndGetRenderedPrompt(mockDb);
+
+    expect(renderedPrompt).toContain("fresh.ts");
+    expect(renderedPrompt).toContain("fresh summary");
+    expect(renderedPrompt).not.toContain("stale.ts");
+    expect(renderedPrompt).not.toContain("stale summary");
   });
 });
