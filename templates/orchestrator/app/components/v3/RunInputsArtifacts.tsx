@@ -102,10 +102,10 @@ function TerminalOutputCard({
             variant="outline"
             className={
               status === "failed"
-                ? "h-4.5 border-red-500/40 px-1.5 text-[10px] text-red-600 dark:text-red-400"
+                ? "h-4.5 border-destructive/40 px-1.5 text-[10px] text-destructive"
                 : status === "skipped"
                   ? "h-4.5 px-1.5 text-[10px] text-muted-foreground"
-                  : "h-4.5 border-emerald-500/40 px-1.5 text-[10px] text-emerald-600 dark:text-emerald-400"
+                  : "h-4.5 border-success/40 px-1.5 text-[10px] text-success"
             }
           >
             {status}
@@ -191,10 +191,10 @@ export function RunInputsArtifacts({
                 <span className="font-mono text-foreground/85">
                   {diffStats.filesChanged} 文件
                 </span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                <span className="font-mono text-success">
                   +{diffStats.additions}
                 </span>
-                <span className="font-mono text-red-600 dark:text-red-400">
+                <span className="font-mono text-destructive">
                   -{diffStats.deletions}
                 </span>
                 <span className="ml-auto text-[10.5px] text-muted-foreground">

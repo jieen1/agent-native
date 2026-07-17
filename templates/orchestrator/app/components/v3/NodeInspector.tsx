@@ -265,7 +265,7 @@ function AttemptRow({ spawn }: { spawn: V3NodeSpawnLogEntry }) {
       className={cn(
         "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs",
         spawn.status === "failed"
-          ? "border-red-500/30 bg-red-500/[0.04]"
+          ? "border-destructive/30 bg-destructive/[0.04]"
           : "border-border",
       )}
     >

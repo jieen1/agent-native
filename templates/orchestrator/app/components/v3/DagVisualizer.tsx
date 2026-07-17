@@ -155,13 +155,13 @@ function NodeCard({
       className={cn(
         "absolute flex flex-col gap-1.5 rounded-xl border bg-card px-3.5 py-3 text-left shadow-sm transition-all",
         status === "failed"
-          ? "border-red-500/60 bg-red-500/[0.06]"
+          ? "border-destructive/60 bg-destructive/[0.06]"
           : status === "running"
-            ? "border-blue-500/60 bg-blue-500/5"
+            ? "border-info/60 bg-info/5"
             : status === "done"
-              ? "border-emerald-500/50 bg-emerald-500/[0.04]"
+              ? "border-success/50 bg-success/[0.04]"
               : status === "awaiting-approval"
-                ? "border-purple-500/60 bg-purple-500/[0.06]"
+                ? "border-agent/60 bg-agent/[0.06]"
                 : "border-border",
         status === "pending" && "border-dashed",
         selected
@@ -182,7 +182,7 @@ function NodeCard({
         {isParallel ? (
           <span
             title="与其它节点并行（依赖图同层，非串行顺序）"
-            className="rounded-sm bg-sky-500/10 px-1 text-[9px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400"
+            className="rounded-sm bg-info/10 px-1 text-[9px] font-semibold uppercase tracking-wide text-info"
           >
             并行
           </span>
@@ -348,7 +348,7 @@ export function DagVisualizer({
                 refY="3.5"
                 orient="auto"
               >
-                <path d="M0,0 L7,3.5 L0,7 Z" className="fill-emerald-500" />
+                <path d="M0,0 L7,3.5 L0,7 Z" className="fill-success" />
               </marker>
               <marker
                 id="dag-arrow-failed"
@@ -358,7 +358,7 @@ export function DagVisualizer({
                 refY="3.5"
                 orient="auto"
               >
-                <path d="M0,0 L7,3.5 L0,7 Z" className="fill-red-500" />
+                <path d="M0,0 L7,3.5 L0,7 Z" className="fill-destructive" />
               </marker>
               <marker
                 id="dag-arrow-pending"
@@ -398,9 +398,9 @@ export function DagVisualizer({
               const fromStatus = fromRep?.status ?? "pending";
               const strokeClass =
                 fromStatus === "done"
-                  ? "stroke-emerald-500"
+                  ? "stroke-success"
                   : fromStatus === "failed"
-                    ? "stroke-red-500"
+                    ? "stroke-destructive"
                     : "stroke-muted-foreground/50";
               const marker =
                 fromStatus === "done"
@@ -480,7 +480,7 @@ export function DagVisualizer({
 
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-t border-border bg-background/85 px-3 py-1.5 text-[10.5px] text-muted-foreground">
         <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-0.5 w-4 bg-emerald-500" />
+          <span className="inline-block h-0.5 w-4 bg-success" />
           依赖已完成
         </span>
         <span className="inline-flex items-center gap-1">
@@ -488,7 +488,7 @@ export function DagVisualizer({
           依赖待完成
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-0.5 w-4 bg-red-500" />
+          <span className="inline-block h-0.5 w-4 bg-destructive" />
           依赖失败
         </span>
         <span className="ml-auto">
