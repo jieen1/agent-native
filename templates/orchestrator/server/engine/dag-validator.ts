@@ -70,6 +70,11 @@ export interface V3HumanGateNode {
   prompt: string;
   deps?: string[];
   guard?: string;
+  /** Choices a human may pick when resolving this gate — `nodeResolveGate`
+   *  (actions/v3-run-detail.ts) validates `choice` against this array when
+   *  present. Optional: an unset/empty array means any non-empty string is
+   *  accepted (G31). */
+  options?: string[];
 }
 
 export type V3Node =

@@ -30,10 +30,15 @@ import {
   type WorkflowNode,
   type WorkflowNodeType,
 } from "./workflow-dag-types";
-import type { DispatchGradeLintResult } from "./workflow-library-types";
+import type {
+  DispatchGradeLintResult,
+  WorkflowVersionRow,
+} from "./workflow-library-types";
 import { WorkflowDagPreview } from "./WorkflowDagPreview";
+import { WorkflowDiffDialog } from "./WorkflowDiffDialog";
 import { WorkflowNodeDetail } from "./WorkflowNodeDetail";
 import { WorkflowNodeList } from "./WorkflowNodeList";
+import { WorkflowVersionChain } from "./WorkflowVersionChain";
 
 interface LocationPrefill {
   name?: string;
@@ -85,6 +90,17 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
     () => agentDefs.map((a) => ({ name: a.name })),
     [agentDefs],
   );
+
+  // ── Version lineage + diff-vs-previous (r4 doc §4.5 gap #3 — same data/
+  // components the library page already renders, s8b-workflow-detail.html
+  // §7). Only meaningful once a saved template is loaded — a brand-new
+  // unsaved template has no version history yet. ───────────────────────────
+  const { data: versions = [], isLoading: versionsLoading } = useActionQuery(
+    "workflowVersions" as any,
+    { name: loaded?.name ?? "" },
+    { enabled: isEdit && !!loaded?.name },
+  ) as { data?: WorkflowVersionRow[]; isLoading: boolean };
+  const [diffOpen, setDiffOpen] = useState(false);
 
   const saveAction = useActionMutation("workflowSave" as any, {});
 
@@ -393,6 +409,17 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
           </div>
         ) : null}
 
+        {isEdit && loaded ? (
+          <div className="border-b border-border bg-card px-4 py-3">
+            <WorkflowVersionChain
+              name={loaded.name}
+              versions={versions}
+              isLoading={versionsLoading}
+              onOpenDiff={() => setDiffOpen(true)}
+            />
+          </div>
+        ) : null}
+
         <Tabs
           value={activeTab}
           onValueChange={(v) =>
@@ -468,6 +495,15 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
           </TabsContent>
         </Tabs>
       </div>
+
+      {isEdit && loaded ? (
+        <WorkflowDiffDialog
+          open={diffOpen}
+          onOpenChange={setDiffOpen}
+          name={loaded.name}
+          versions={versions}
+        />
+      ) : null}
     </div>
   );
 }
