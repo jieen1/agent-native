@@ -1,15 +1,23 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
-import { useTranslation } from "react-i18next";
+import {
+  appPath,
+  FeedbackButton,
+  navigateWithAgentChatViewTransition,
+  useChatThreads,
+  type ChatThreadSummary,
+} from "@agent-native/core/client";
+import { ExtensionsSidebarSection } from "@agent-native/core/client/extensions";
+import { OrgSwitcher } from "@agent-native/core/client/org";
 import {
   IconActivity,
   IconArchive,
   IconBook,
   IconBrain,
+  IconChartDots,
   IconDatabase,
   IconDots,
   IconEdit,
   IconFolders,
+  IconHeartRateMonitor,
   IconLayoutKanban,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
@@ -21,19 +29,11 @@ import {
   IconSettings,
   IconSitemap,
 } from "@tabler/icons-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
+import { Link, useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
-import {
-  appPath,
-  FeedbackButton,
-  navigateWithAgentChatViewTransition,
-  useChatThreads,
-  type ChatThreadSummary,
-} from "@agent-native/core/client";
-import { ExtensionsSidebarSection } from "@agent-native/core/client/extensions";
-import { AccountUsageChip } from "./AccountUsageChip";
-import { OrgSwitcher } from "@agent-native/core/client/org";
-import { cn } from "@/lib/utils";
-import { APP_TITLE } from "@/lib/app-config";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +46,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { APP_TITLE } from "@/lib/app-config";
+import { cn } from "@/lib/utils";
+
+import { AccountUsageChip } from "./AccountUsageChip";
 
 const navItems = [
   {
@@ -103,6 +107,20 @@ const navItems = [
     label: "资源池",
     href: "/pool",
     view: "pool",
+  },
+  {
+    icon: IconHeartRateMonitor,
+    labelKey: "nav.health",
+    label: "健康",
+    href: "/health",
+    view: "health",
+  },
+  {
+    icon: IconChartDots,
+    labelKey: "nav.insights",
+    label: "洞察",
+    href: "/insights",
+    view: "insights",
   },
   {
     icon: IconSettings,
@@ -197,7 +215,8 @@ function ChatThreadsSection() {
     const refresh = () => refreshThreads();
     const handleRunning = (event: Event) => {
       const detail = (event as CustomEvent).detail as
-        { isRunning?: unknown } | undefined;
+        | { isRunning?: unknown }
+        | undefined;
       if (typeof detail?.isRunning === "boolean") refreshThreads();
     };
 
