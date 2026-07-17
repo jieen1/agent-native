@@ -3,6 +3,7 @@ import {
   IconDatabaseOff,
   IconGitFork,
   IconHeartRateMonitor,
+  IconInfoCircle,
   IconListSearch,
   IconScale,
   IconTopologyStar3,
@@ -10,8 +11,13 @@ import {
 import { Link } from "react-router";
 
 import { EmptyState } from "@/components/board/EmptyState";
-import { DataSourceNote } from "@/components/health/health-shared";
+import { DataHint } from "@/components/health/health-shared";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { APP_TITLE } from "@/lib/app-config";
 
 export function meta() {
@@ -43,8 +49,25 @@ export default function InsightsRoute() {
           <IconChartDots className="size-4" />
         </span>
         <div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+          <h1 className="flex items-center gap-1.5 text-xl font-semibold tracking-tight sm:text-2xl">
             洞察
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="数据源说明"
+                  className="text-muted-foreground/50 outline-none transition-colors hover:text-muted-foreground focus-visible:text-muted-foreground"
+                >
+                  <IconInfoCircle className="size-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 text-xs text-muted-foreground">
+                本页每个区块都还没有真实数据源：`insightsSummary` 聚合 action
+                尚未建立，失败归因还额外需要 `v3_runs.score` / `failureClass`
+                列（均为 04 章 §13 列出的待建增量）。下面保留
+                原型的结构，但不会用编造的数字或图表填充。
+              </PopoverContent>
+            </Popover>
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             执行质量归因（scorecard 范式）—— run
@@ -52,17 +75,6 @@ export default function InsightsRoute() {
           </p>
         </div>
       </header>
-
-      <DataSourceNote>
-        本页每个区块都还没有真实数据源：`insightsSummary` 聚合 action 尚未建立，
-        失败归因还额外需要 `v3_runs.score` / `failureClass` 列（均为 04 章 §13
-        列出的待建增量）。下面保留原型的结构，但不会用编造的数字或图表填充 ——
-        标题下都会说明"数据源建设中"。可先看{" "}
-        <Link to="/health" className="underline-offset-2 hover:underline">
-          健康
-        </Link>{" "}
-        页的真实运行时信号。
-      </DataSourceNote>
 
       {/* ── KPI row ─────────────────────────────────────────────────────── */}
       <section className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -73,7 +85,9 @@ export default function InsightsRoute() {
                 {kpi.label}
               </div>
               <div className="mt-1 font-mono text-xl font-semibold text-muted-foreground/50">
-                —
+                <DataHint trigger="—" variant="bare">
+                  insightsSummary 聚合 action 尚未建立。
+                </DataHint>
               </div>
             </CardContent>
           </Card>

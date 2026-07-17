@@ -1,13 +1,17 @@
-import { IconInfoCircle } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 // Shared bits for /health and /insights (S10 · docs/sdlc-product-design/04-orchestrator.md §10/§11).
 // Both pages mix real action-backed data with sections that have no backing
-// action yet — DataSourceNote is the one place that "not real data" gets
-// spelled out, so every placeholder reads the same way instead of each
-// section inventing its own disclaimer wording.
+// action yet. Per AGENTS.md "Frontend And UX", that honesty must not read as
+// a standing caption — DataHint is the shared affordance for it: a small
+// hover/focus trigger that reveals the caveat instead of printing it inline.
 
 export function HealthDot({
   tone,
@@ -30,13 +34,38 @@ export function HealthDot({
   );
 }
 
-/** Inline note marking a value/section as not backed by a real action yet. */
-export function DataSourceNote({ children }: { children: ReactNode }) {
+/**
+ * Inline hover/focus hint marking a value as not backed by a real action yet.
+ * Renders as a small dotted-underline trigger, not a standing paragraph — the
+ * caveat only appears on hover/focus.
+ */
+export function DataHint({
+  trigger,
+  children,
+  variant = "underline",
+}: {
+  trigger: ReactNode;
+  children: ReactNode;
+  /** "bare" drops the dotted underline — use for glyph triggers (e.g. "—")
+   * where an underline would visually collide with the glyph itself. */
+  variant?: "underline" | "bare";
+}) {
   return (
-    <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
-      <IconInfoCircle className="mt-0.5 size-3.5 shrink-0" />
-      <span>{children}</span>
-    </p>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          className={cn(
+            "cursor-help outline-none",
+            variant === "underline" &&
+              "underline decoration-dotted decoration-muted-foreground/50 underline-offset-2",
+          )}
+        >
+          {trigger}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64 text-xs">{children}</TooltipContent>
+    </Tooltip>
   );
 }
 
