@@ -1,16 +1,28 @@
-import { useState } from "react";
-import { useNavigate } from "react-router";
-import { toast } from "sonner";
 import {
   useActionMutation,
   useActionQuery,
   callAction,
 } from "@agent-native/core/client";
-import { APP_TITLE } from "@/lib/app-config";
-import { DataTable } from "@/components/board/DataTable";
+import {
+  IconCode,
+  IconPlus,
+  IconSitemap,
+  IconTopologyStar3,
+} from "@tabler/icons-react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router";
+import { toast } from "sonner";
+
 import { EmptyState } from "@/components/board/EmptyState";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -21,54 +33,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  IconEdit,
-  IconCopy,
-  IconTrash,
-  IconPlus,
-  IconSitemap,
-  IconInfoCircle,
-} from "@tabler/icons-react";
+import type {
+  WorkflowListRow,
+  WorkflowVersionRow,
+} from "@/components/v3/workflow-library-types";
+import { WorkflowDiffDialog } from "@/components/v3/WorkflowDiffDialog";
+import { WorkflowImportDialog } from "@/components/v3/WorkflowImportDialog";
+import { WorkflowLibraryCard } from "@/components/v3/WorkflowLibraryCard";
+import { WorkflowRunDialog } from "@/components/v3/WorkflowRunDialog";
+import { WorkflowVersionChain } from "@/components/v3/WorkflowVersionChain";
+import { APP_TITLE } from "@/lib/app-config";
 
 export function meta() {
   return [{ title: `${APP_TITLE} — 工作流` }];
-}
-
-interface WorkflowRow {
-  id: string;
-  name: string;
-  version: number;
-  description: string | null;
-  nodeCount: number;
-  createdAt: string | null;
-}
-
-function fmtRelative(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    const diff = Date.now() - new Date(iso).getTime();
-    const s = Math.round(diff / 1000);
-    if (s < 60) return `${s} 秒前`;
-    const m = Math.floor(s / 60);
-    if (m < 60) return `${m} 分钟前`;
-    const h = Math.floor(m / 60);
-    if (h < 24) return `${h} 小时前`;
-    const d = Math.floor(h / 24);
-    if (d < 30) return `${d} 天前`;
-    const mo = Math.floor(d / 30);
-    if (mo < 12) return `${mo} 个月前`;
-    return `${Math.floor(mo / 12)} 年前`;
-  } catch {
-    return iso;
-  }
 }
 
 const EMPTY_NEW_FORM = {
@@ -76,6 +53,39 @@ const EMPTY_NEW_FORM = {
   startFrom: "blank" as "blank" | "duplicate",
   duplicateSourceId: "",
 };
+
+interface WorkflowGroup {
+  label: string;
+  rows: WorkflowListRow[];
+}
+
+function groupByFamily(rows: WorkflowListRow[]): WorkflowGroup[] {
+  const sdlc = rows.filter((r) => r.meta.family === "sdlc");
+  const light = rows.filter((r) => r.meta.family === "light");
+  const other = rows.filter(
+    (r) => r.meta.family !== "sdlc" && r.meta.family !== "light",
+  );
+  const groups: WorkflowGroup[] = [];
+  if (sdlc.length > 0) groups.push({ label: "SDLC 族 · 内置", rows: sdlc });
+  if (light.length > 0) groups.push({ label: "轻量族 · 短流程", rows: light });
+  if (other.length > 0) groups.push({ label: "自定义", rows: other });
+  return groups;
+}
+
+// Static reference table (04 §4 "适用规则（项目级可改）"). Not yet backed by a
+// per-project routing-rule data model — no such table exists elsewhere in the
+// schema today, and inventing one is out of this task's scope (see the task
+// report for the explicit scope call). This mirrors the s8 prototype's content
+// verbatim as a read-only reference, editable only by a future project-level
+// settings feature.
+const APPLICABILITY_RULES: Array<[string, string]> = [
+  ["需求 / 任务（sprint 内）", "sdlc-issue-pipeline"],
+  ["缺陷 / 生产问题", "hotfix"],
+  ["from-audit 单", "hotfix（实施 · 测试）"],
+  ["文档", "docs-task"],
+  ["调研", "spike-research"],
+  ["无 sprint · auto", "quick-task"],
+];
 
 export default function V3TemplatesRoute() {
   const navigate = useNavigate();
@@ -85,10 +95,24 @@ export default function V3TemplatesRoute() {
     isLoading,
     error,
   } = useActionQuery("workflowList" as any, {}, undefined) as {
-    data?: WorkflowRow[];
+    data?: WorkflowListRow[];
     isLoading: boolean;
     error?: unknown;
   };
+
+  const groups = useMemo(() => groupByFamily(templates), [templates]);
+
+  const [selectedName, setSelectedName] = useState<string | null>(null);
+  useEffect(() => {
+    if (selectedName || templates.length === 0) return;
+    setSelectedName(templates[0].name);
+  }, [templates, selectedName]);
+
+  const { data: versions = [], isLoading: versionsLoading } = useActionQuery(
+    "workflowVersions" as any,
+    { name: selectedName ?? "" },
+    { enabled: !!selectedName },
+  ) as { data?: WorkflowVersionRow[]; isLoading: boolean };
 
   const saveAction = useActionMutation("workflowSave" as any, {});
   const deleteAction = useActionMutation("workflowDelete" as any, {});
@@ -96,9 +120,13 @@ export default function V3TemplatesRoute() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_NEW_FORM);
   const [duplicating, setDuplicating] = useState(false);
-
-  const [deleteTarget, setDeleteTarget] = useState<WorkflowRow | null>(null);
   const [duplicatingRowId, setDuplicatingRowId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WorkflowListRow | null>(
+    null,
+  );
+  const [runTemplate, setRunTemplate] = useState<WorkflowListRow | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
 
   const closeCreateDialog = () => {
     setCreateOpen(false);
@@ -162,7 +190,7 @@ export default function V3TemplatesRoute() {
     }
   };
 
-  const handleDuplicateRow = async (row: WorkflowRow) => {
+  const handleDuplicateRow = async (row: WorkflowListRow) => {
     setDuplicatingRowId(row.id);
     try {
       const source = (await callAction("workflowGet" as any, {
@@ -203,6 +231,7 @@ export default function V3TemplatesRoute() {
       {
         onSuccess: () => {
           toast.success("模板已删除");
+          if (selectedName === deleteTarget.name) setSelectedName(null);
           setDeleteTarget(null);
         },
         onError: (err) => {
@@ -214,151 +243,116 @@ export default function V3TemplatesRoute() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            工作流
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            派发运行所依据的 DAG
-            模板。打开模板即可在可视化编辑器中构建和校验其图结构。
-          </p>
+    <div className="flex h-[calc(100vh-3.5rem)] w-full flex-col">
+      <div className="flex items-center gap-2.5 px-6 pb-2.5 pt-3.5">
+        <span className="flex size-[30px] items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          <IconTopologyStar3 className="size-[17px]" />
+        </span>
+        <h1 className="text-base font-semibold">工作流</h1>
+        <span className="font-mono text-xs text-muted-foreground">
+          {templates.length}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          版本化 DAG 模板 · 改流程不改代码
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
+            <IconCode className="mr-1 size-3.5" />
+            导入 JSON
+          </Button>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <IconPlus className="mr-1 size-3.5" />
+            新建工作流
+          </Button>
         </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <IconPlus className="mr-1 size-4" />
-          新建模板
-        </Button>
-      </header>
+      </div>
 
-      {error ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-          加载模板失败。
-        </div>
-      ) : (
-        <>
-          <DataTable<WorkflowRow>
-            isLoading={isLoading}
-            rows={templates}
-            rowKey={(r) => r.id}
-            onRowClick={(r) => navigate(`/workflows/${r.id}`)}
-            columns={[
-              {
-                id: "name",
-                header: "名称",
-                cell: (r) => (
-                  <span className="font-medium text-sm">{r.name}</span>
-                ),
-              },
-              {
-                id: "version",
-                header: "版本",
-                cell: (r) => (
-                  <Badge variant="secondary" className="font-mono text-xs">
-                    v{r.version}
-                  </Badge>
-                ),
-              },
-              {
-                id: "nodes",
-                header: "节点数",
-                className: "hidden sm:table-cell",
-                headClassName: "hidden sm:table-cell",
-                cell: (r) => (
-                  <span className="text-xs text-muted-foreground">
-                    {r.nodeCount}
-                  </span>
-                ),
-              },
-              {
-                id: "stages",
-                header: "使用中的阶段",
-                className: "hidden md:table-cell",
-                headClassName: "hidden md:table-cell",
-                cell: () => (
-                  <span className="text-xs text-muted-foreground">—</span>
-                ),
-              },
-              {
-                id: "modified",
-                header: "最后修改",
-                className: "hidden lg:table-cell",
-                headClassName: "hidden lg:table-cell",
-                cell: (r) => (
-                  <span className="whitespace-nowrap text-xs text-muted-foreground">
-                    {fmtRelative(r.createdAt)}
-                  </span>
-                ),
-              },
-              {
-                id: "actions",
-                header: "",
-                cell: (r) => (
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="size-7 p-0"
-                      aria-label="编辑"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/workflows/${r.id}`);
-                      }}
-                    >
-                      <IconEdit className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="size-7 p-0"
-                      aria-label="复制"
-                      disabled={duplicatingRowId === r.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDuplicateRow(r);
-                      }}
-                    >
-                      <IconCopy className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="size-7 p-0 text-destructive hover:text-destructive"
-                      aria-label="删除"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteTarget(r);
-                      }}
-                    >
-                      <IconTrash className="size-3.5" />
-                    </Button>
-                  </div>
-                ),
-              },
-            ]}
-            empty={
-              <EmptyState
-                icon={IconSitemap}
-                title="暂无模板"
-                description="创建一个工作流模板来定义 DAG。"
-                className="border-0"
-                action={
-                  <Button size="sm" onClick={() => setCreateOpen(true)}>
-                    <IconPlus className="mr-1 size-4" />
-                    新建模板
-                  </Button>
-                }
-              />
+      <div className="flex-1 overflow-y-auto px-6 pb-6">
+        {error ? (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
+            加载工作流失败。
+          </div>
+        ) : isLoading ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            加载中…
+          </div>
+        ) : templates.length === 0 ? (
+          <EmptyState
+            icon={IconSitemap}
+            title="暂无工作流"
+            description="创建一个工作流模板来定义 DAG。"
+            className="border-0"
+            action={
+              <Button size="sm" onClick={() => setCreateOpen(true)}>
+                <IconPlus className="mr-1 size-4" />
+                新建工作流
+              </Button>
             }
           />
-          {templates.length > 0 ? (
-            <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <IconInfoCircle className="size-3.5 shrink-0" />
-              「使用中的阶段」列出引用该工作流的阶段派发配置。
+        ) : (
+          <div className="flex flex-col gap-5">
+            {groups.map((group) => (
+              <div key={group.label}>
+                <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {group.label}
+                </div>
+                <div
+                  className="grid gap-3"
+                  style={{
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(236px, 1fr))",
+                  }}
+                >
+                  {group.rows.map((row) => (
+                    <WorkflowLibraryCard
+                      key={row.id}
+                      row={row}
+                      selected={row.name === selectedName}
+                      duplicating={duplicatingRowId === row.id}
+                      onSelect={() => setSelectedName(row.name)}
+                      onView={() => navigate(`/workflows/${row.id}`)}
+                      onRun={() => setRunTemplate(row)}
+                      onDuplicate={() => handleDuplicateRow(row)}
+                      onDelete={() => setDeleteTarget(row)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {selectedName ? (
+        <div className="flex gap-5 border-t border-border bg-card px-6 py-3.5">
+          <WorkflowVersionChain
+            name={selectedName}
+            versions={versions}
+            isLoading={versionsLoading}
+            onOpenDiff={() => setDiffOpen(true)}
+          />
+          <div className="min-w-[280px] flex-1">
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              适用规则（项目级可改）
             </div>
-          ) : null}
-        </>
-      )}
+            <table className="w-full text-xs">
+              <tbody>
+                {APPLICABILITY_RULES.map(([label, value]) => (
+                  <tr
+                    key={label}
+                    className="border-b border-border last:border-0"
+                  >
+                    <td className="py-1.5 pr-2 text-muted-foreground">
+                      {label}
+                    </td>
+                    <td className="py-1.5 font-mono text-[11.5px]">{value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       {/* New workflow dialog */}
       <Dialog
@@ -485,6 +479,27 @@ export default function V3TemplatesRoute() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <WorkflowRunDialog
+        template={runTemplate}
+        onOpenChange={(open) => !open && setRunTemplate(null)}
+        onRunStarted={(runId) => navigate(`/runs/${runId}`)}
+      />
+
+      <WorkflowImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={(id) => navigate(`/workflows/${id}`)}
+      />
+
+      {selectedName ? (
+        <WorkflowDiffDialog
+          open={diffOpen}
+          onOpenChange={setDiffOpen}
+          name={selectedName}
+          versions={versions}
+        />
+      ) : null}
     </div>
   );
 }

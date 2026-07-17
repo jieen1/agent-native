@@ -3,15 +3,35 @@ import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
-import { eq, ilike, and, desc } from "drizzle-orm";
-import { z } from "zod";
-import { getV3Db, v3Schema } from "../server/db/index.js";
-import { newId } from "./_util.js";
-import { validateDag } from "../server/engine/dag-validator.js";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import type { FormatName } from "ajv-formats";
+import { eq, ilike, and, desc, gte, inArray } from "drizzle-orm";
+import { z } from "zod";
+
+import { getV3Db, v3Schema } from "../server/db/index.js";
+import { validateDag } from "../server/engine/dag-validator.js";
+import {
+  computeRunStats,
+  diffDagNodes,
+} from "../server/engine/workflow-stats.js";
 import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";
+import { newId } from "./_util.js";
+
+/** Shape of the `meta` JSONB column (s8-workflow-library migration, 04 §13). */
+interface WorkflowTemplateMeta {
+  builtin?: boolean;
+  family?: "sdlc" | "light";
+  tags?: string[];
+  changeNote?: string;
+}
+
+function readMeta(raw: unknown): WorkflowTemplateMeta {
+  if (!raw || typeof raw !== "object") return {};
+  return raw as WorkflowTemplateMeta;
+}
+
+const RECENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 const allFormats: FormatName[] = [
   "date",
@@ -43,16 +63,36 @@ const allFormats: FormatName[] = [
  * only (workflowSave never mutates in place; every save inserts a new
  * version row under the same name). Rows are ordered newest-first, so the
  * first row seen per name is already its highest version.
+ *
+ * S8 workflow library (04 §4/§13): each entry also carries `meta` (builtin
+ * flag / family / applicable-scenario tags) and `stats` — a 30-day run-count
+ * + success-rate window computed from `v3_runs` for THIS template version
+ * (not summed across the name's whole version history — see workflowVersions
+ * for per-version, all-time stats in the version chain).
  */
 export const workflowList = defineAction({
   description:
     "List V3 workflow templates, one entry per name (latest version only). " +
-    "Each entry has { id, name, version, description, nodeCount, createdAt }.",
+    "Each entry has { id, name, version, description, nodeCount, dag, createdAt, " +
+    "ownerEmail, meta: { builtin, family, tags, changeNote }, " +
+    "stats: { runCount, successRate } } — stats are a 30-day window for this version.",
   schema: z.object({}),
   readOnly: true,
   http: { method: "GET" },
   run: async () => {
     const db = getV3Db();
+    // Not owner-scoped — matches workflowGet/workflowSave/workflowDelete/
+    // workflowRun below, which have never scoped v3_workflow_templates by
+    // owner (the shared template library is meant to be visible/usable by
+    // anyone who can reach this app, unlike per-run/per-workspace V3 data).
+    // Empirically verified on the 101 dogfood DB: real templates are owned by
+    // a synthetic dogfood identity while boot-seeded rows default to
+    // "local@localhost" — scoping ONLY this new read would have made the
+    // library page show a different, incomplete slice of templates than
+    // workflowGet/Save/Delete/Run still operate on by id, which is worse than
+    // today's unscoped-everywhere behavior. Unifying ownership scoping across
+    // all six template actions is legitimate follow-up work, not something to
+    // bolt on partially as a side effect of this page rebuild.
     const rows = await db
       .select({
         id: v3Schema.v3WorkflowTemplates.id,
@@ -60,7 +100,9 @@ export const workflowList = defineAction({
         version: v3Schema.v3WorkflowTemplates.version,
         description: v3Schema.v3WorkflowTemplates.description,
         dag: v3Schema.v3WorkflowTemplates.dag,
+        meta: v3Schema.v3WorkflowTemplates.meta,
         createdAt: v3Schema.v3WorkflowTemplates.createdAt,
+        ownerEmail: v3Schema.v3WorkflowTemplates.ownerEmail,
       })
       .from(v3Schema.v3WorkflowTemplates)
       .orderBy(desc(v3Schema.v3WorkflowTemplates.createdAt));
@@ -73,15 +115,51 @@ export const workflowList = defineAction({
       latest.push(r);
     }
 
+    // One batched fetch of recent run statuses for every latest-version id,
+    // instead of one query per template (performance skill — avoid N+1).
+    const ids = latest.map((r) => r.id);
+    const recentRunsByTemplate = new Map<string, { status: string }[]>();
+    if (ids.length > 0) {
+      const since = new Date(Date.now() - RECENT_WINDOW_MS);
+      const runRows = await db
+        .select({
+          templateId: v3Schema.v3Runs.templateId,
+          status: v3Schema.v3Runs.status,
+        })
+        .from(v3Schema.v3Runs)
+        .where(
+          and(
+            inArray(v3Schema.v3Runs.templateId, ids),
+            gte(v3Schema.v3Runs.startedAt, since),
+          ),
+        );
+      for (const r of runRows) {
+        if (!r.templateId) continue;
+        const bucket = recentRunsByTemplate.get(r.templateId) ?? [];
+        bucket.push({ status: r.status });
+        recentRunsByTemplate.set(r.templateId, bucket);
+      }
+    }
+
     return latest.map((r) => {
       const nodes = (r.dag as { nodes?: unknown[] } | null)?.nodes;
+      const meta = readMeta(r.meta);
       return {
         id: r.id,
         name: r.name,
         version: r.version,
         description: r.description,
         nodeCount: Array.isArray(nodes) ? nodes.length : 0,
+        dag: r.dag,
         createdAt: r.createdAt,
+        ownerEmail: r.ownerEmail,
+        meta: {
+          builtin: meta.builtin === true,
+          family: meta.family,
+          tags: meta.tags ?? [],
+          changeNote: meta.changeNote,
+        },
+        stats: computeRunStats(recentRunsByTemplate.get(r.id) ?? []),
       };
     });
   },
@@ -142,7 +220,12 @@ export const workflowGet = defineAction({
 /** Save a V3 workflow template. Validates DAG, auto-increments version. */
 export const workflowSave = defineAction({
   description:
-    "Save a V3 workflow template. Validates the DAG and auto-increments version.",
+    "Save a V3 workflow template. Validates the DAG and auto-increments version. " +
+    "`changeNote` records what changed in THIS version (shown in the workflow " +
+    "library's version chain); `tags` (适用场景标签) override the previous " +
+    "version's tags when provided. The builtin/family flags of the previous " +
+    "version always carry forward untouched — editing a built-in template's " +
+    "DAG never strips its 内置 badge or family grouping.",
   schema: z.object({
     name: z.string(),
     dag: z.unknown(),
@@ -151,6 +234,8 @@ export const workflowSave = defineAction({
       .optional()
       .default({ type: "object", properties: {} }),
     description: z.string().optional().default(""),
+    changeNote: z.string().optional(),
+    tags: z.array(z.string()).optional(),
   }),
   run: async (args) => {
     const dagResult = validateDag(args.dag);
@@ -169,16 +254,27 @@ export const workflowSave = defineAction({
 
     const db = getV3Db();
     const existing = await db
-      .select({ version: v3Schema.v3WorkflowTemplates.version })
+      .select({
+        version: v3Schema.v3WorkflowTemplates.version,
+        meta: v3Schema.v3WorkflowTemplates.meta,
+      })
       .from(v3Schema.v3WorkflowTemplates)
       .where(eq(v3Schema.v3WorkflowTemplates.name, args.name))
       .orderBy(desc(v3Schema.v3WorkflowTemplates.version))
       .limit(1);
     const version = (existing[0]?.version ?? 0) + 1;
     const id = newId("v3wf");
+    const prevMeta = readMeta(existing[0]?.meta);
 
     const ownerEmail = getRequestUserEmail() ?? "local@localhost";
     const orgId = getRequestOrgId() ?? null;
+
+    const meta: WorkflowTemplateMeta = {
+      builtin: prevMeta.builtin === true,
+      family: prevMeta.family,
+      tags: args.tags ?? prevMeta.tags ?? [],
+      changeNote: args.changeNote,
+    };
 
     await db.insert(v3Schema.v3WorkflowTemplates).values({
       id,
@@ -187,6 +283,7 @@ export const workflowSave = defineAction({
       description: args.description,
       dag: args.dag,
       inputSchema: args.inputSchema,
+      meta,
       ownerEmail,
       orgId,
     });
@@ -396,5 +493,128 @@ export const dagValidate = defineAction({
   readOnly: true,
   run: async (args) => {
     return validateDag(args.dag);
+  },
+});
+
+/**
+ * List every saved version of a workflow template by name — the "version
+ * chain" the workflow library's detail strip renders (04 §4). Each entry
+ * carries its own all-time run stats (no 30-day window — the chain is a
+ * historical record, not a "what's active now" view like the card grid).
+ */
+export const workflowVersions = defineAction({
+  description:
+    "List every saved version of a V3 workflow template by name, newest first. " +
+    "Each entry has { id, version, description, createdAt, ownerEmail, " +
+    "meta: { builtin, family, tags, changeNote }, stats: { runCount, successRate } } — " +
+    "stats are all-time (this exact version's runs only), not a 30-day window.",
+  schema: z.object({ name: z.string() }),
+  readOnly: true,
+  http: { method: "GET" },
+  run: async (args) => {
+    // Not owner-scoped — see workflowList's comment above for why the V3
+    // template library reads stay unscoped, matching the pre-existing
+    // workflowGet/Save/Delete/Run in this file.
+    const db = getV3Db();
+    const rows = await db
+      .select({
+        id: v3Schema.v3WorkflowTemplates.id,
+        version: v3Schema.v3WorkflowTemplates.version,
+        description: v3Schema.v3WorkflowTemplates.description,
+        meta: v3Schema.v3WorkflowTemplates.meta,
+        createdAt: v3Schema.v3WorkflowTemplates.createdAt,
+        ownerEmail: v3Schema.v3WorkflowTemplates.ownerEmail,
+      })
+      .from(v3Schema.v3WorkflowTemplates)
+      .where(eq(v3Schema.v3WorkflowTemplates.name, args.name))
+      .orderBy(desc(v3Schema.v3WorkflowTemplates.version));
+
+    if (rows.length === 0) {
+      throw new Error(`Template '${args.name}' not found`);
+    }
+
+    const ids = rows.map((r) => r.id);
+    const runsByTemplate = new Map<string, { status: string }[]>();
+    const runRows = await db
+      .select({
+        templateId: v3Schema.v3Runs.templateId,
+        status: v3Schema.v3Runs.status,
+      })
+      .from(v3Schema.v3Runs)
+      .where(inArray(v3Schema.v3Runs.templateId, ids));
+    for (const r of runRows) {
+      if (!r.templateId) continue;
+      const bucket = runsByTemplate.get(r.templateId) ?? [];
+      bucket.push({ status: r.status });
+      runsByTemplate.set(r.templateId, bucket);
+    }
+
+    return rows.map((r) => {
+      const meta = readMeta(r.meta);
+      return {
+        id: r.id,
+        version: r.version,
+        description: r.description,
+        createdAt: r.createdAt,
+        ownerEmail: r.ownerEmail,
+        meta: {
+          builtin: meta.builtin === true,
+          family: meta.family,
+          tags: meta.tags ?? [],
+          changeNote: meta.changeNote,
+        },
+        stats: computeRunStats(runsByTemplate.get(r.id) ?? []),
+      };
+    });
+  },
+});
+
+/**
+ * Structural diff between two saved versions of the same template name (04
+ * §4 "任意两版图级 diff" / §13 `workflowDiff(name, v1, v2)`). Returns node ids
+ * added/removed/changed/unchanged by comparing `dag.nodes` — a full visual
+ * graph-diff (color-coded canvas) is a frontend rendering concern on top of
+ * this data, not implemented here.
+ */
+export const workflowDiff = defineAction({
+  description:
+    "Diff two saved versions of a V3 workflow template by name. Returns " +
+    "{ name, v1, v2, added, removed, changed, unchanged } — arrays of node ids.",
+  schema: z.object({
+    name: z.string(),
+    v1: z.number().int().positive(),
+    v2: z.number().int().positive(),
+  }),
+  readOnly: true,
+  http: { method: "GET" },
+  run: async (args) => {
+    // Not owner-scoped — see workflowList's comment above.
+    const db = getV3Db();
+
+    const fetchVersion = async (version: number) => {
+      const rows = await db
+        .select({ dag: v3Schema.v3WorkflowTemplates.dag })
+        .from(v3Schema.v3WorkflowTemplates)
+        .where(
+          and(
+            eq(v3Schema.v3WorkflowTemplates.name, args.name),
+            eq(v3Schema.v3WorkflowTemplates.version, version),
+          ),
+        )
+        .limit(1);
+      if (!rows.length) {
+        throw new Error(`Template '${args.name}' has no version ${version}`);
+      }
+      const nodes = (rows[0].dag as { nodes?: unknown[] } | null)?.nodes;
+      return Array.isArray(nodes) ? (nodes as { id: string }[]) : [];
+    };
+
+    const [nodesV1, nodesV2] = await Promise.all([
+      fetchVersion(args.v1),
+      fetchVersion(args.v2),
+    ]);
+
+    const diff = diffDagNodes(nodesV1, nodesV2);
+    return { name: args.name, v1: args.v1, v2: args.v2, ...diff };
   },
 });
