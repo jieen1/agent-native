@@ -6,8 +6,13 @@
 // The reconciler is initialized but does NOT auto-tick. Ticks are event-driven:
 // triggered by workflow.run action, spawn completion callbacks, etc.
 //
-// G1: Constructs a concrete V3Dispatcher(db, executor) using RemoteApiExecutor
-//     as the routing executor (framework engine handles engine routing per-node).
+// G1: Constructs a concrete V3Dispatcher(db, executor) using
+//     RoutingRuntimeExecutor as the routing executor — per node, it consults
+//     the run owner's LIVE runtime_configs rows (the same table Settings'
+//     save-runtime-config/activate-runtime/test-runtime-config read/write)
+//     and routes to the active/explicit saved runtime, falling back to
+//     RemoteApiExecutor (the framework engine registry) unchanged when
+//     nothing is configured/active — see routing-runtime-executor.ts.
 //     Exports triggerTickSafe for actions to call after state changes.
 // G30: Actually mounts the SSE/health router on the Nitro h3 app instead of
 //      only stashing it on globalThis.
@@ -21,7 +26,7 @@ import {
   V3Reconciler,
   type V3Dispatcher as IV3Dispatcher,
 } from "../engine/v3-reconciler.js";
-import { RemoteApiExecutor } from "../runtime/executors/index.js";
+import { RoutingRuntimeExecutor } from "../runtime/executors/index.js";
 import { v3HealthEventHandler } from "../utils/v3-health.js";
 import { v3SseEventHandler } from "../utils/v3-sse.js";
 
@@ -32,13 +37,20 @@ let initialized = false;
 
 /**
  * Build (or return cached) the V3Dispatcher singleton.
- * Uses RemoteApiExecutor as the runtime brain — per-node engine routing is
- * handled inside V3Dispatcher.spawn() via node.engine + node.model overrides.
+ * Uses RoutingRuntimeExecutor as the runtime brain — per-node engine routing
+ * is handled inside V3Dispatcher.spawn() via node.engine + node.model
+ * overrides, and RoutingRuntimeExecutor.run() resolves each node's owner's
+ * live runtime_configs rows before falling back to the framework engine
+ * registry (RemoteApiExecutor).
  */
 function getOrCreateDispatcher(): IV3Dispatcher {
   if (!dispatcher) {
     const db = getV3Db();
-    const executor = new RemoteApiExecutor();
+    const executor = new RoutingRuntimeExecutor();
+    // eslint-disable-next-line no-console
+    console.log(
+      "[v3-dispatcher] executor=RoutingRuntimeExecutor (routes to active runtime_configs rows, falls back to RemoteApiExecutor)",
+    );
     dispatcher = new V3Dispatcher(db as any, executor);
   }
   return dispatcher;
