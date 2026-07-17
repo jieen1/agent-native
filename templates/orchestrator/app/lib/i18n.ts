@@ -53,6 +53,8 @@ const en = {
     workspaces: "Workspaces",
     spawns: "Spawns",
     pool: "Pool",
+    health: "Health",
+    insights: "Insights",
   },
   settings: {
     title: "Settings",
@@ -761,6 +763,8 @@ const zh: typeof en = {
     workspaces: "工作区",
     spawns: "派生任务",
     pool: "资源池",
+    health: "健康",
+    insights: "洞察",
   },
   settings: {
     title: "设置",
