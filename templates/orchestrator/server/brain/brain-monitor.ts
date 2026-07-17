@@ -19,9 +19,10 @@
 // brain that is still actively polling this run must never be re-woken until it
 // returns. Modeled on engine/reap.ts (durable, unref-ed setInterval).
 
-import { eq, sql } from "drizzle-orm";
-import { getV3Db, v3Schema } from "../db/index.js";
+import { and, eq, sql } from "drizzle-orm";
+
 import { getManagedClaudeStatus } from "../claude-managed-auth.js";
+import { getV3Db, v3Schema } from "../db/index.js";
 
 /** Default periodic drift-check cadence (seconds) when a thread leaves it unset. */
 export function defaultMonitorIntervalSec(): number {
@@ -59,6 +60,29 @@ export async function stampBrainWake(threadId: string): Promise<void> {
     // Advisory — the wake still happened; a missed stamp only risks one extra
     // (harmless, overlap-guarded) periodic wake.
   }
+}
+
+/**
+ * Set a thread's periodic drift-check cadence directly (S9 Brain console
+ * "监控节奏" card's inline edit — 04 §6). 0 disables the timer (event-only
+ * wakes); omitting a call to this leaves the stored value (or the env
+ * default) unchanged. Owner-scoped: only the caller's own thread can be
+ * updated.
+ */
+export async function setMonitorIntervalSec(
+  threadId: string,
+  ownerEmail: string,
+  monitorIntervalSec: number,
+): Promise<void> {
+  await getV3Db()
+    .update(v3Schema.brainThreads)
+    .set({ monitorIntervalSec, updatedAt: new Date() })
+    .where(
+      and(
+        eq(v3Schema.brainThreads.id, threadId),
+        eq(v3Schema.brainThreads.ownerEmail, ownerEmail),
+      ),
+    );
 }
 
 /**

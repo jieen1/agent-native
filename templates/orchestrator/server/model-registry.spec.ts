@@ -20,7 +20,10 @@ vi.mock("drizzle-orm", () => ({
   desc: (a: unknown) => ({ __desc: a }),
 }));
 
-const dbMocks = vi.hoisted(() => ({ getV3Db: vi.fn(), resolveOwnerEmail: vi.fn() }));
+const dbMocks = vi.hoisted(() => ({
+  getV3Db: vi.fn(),
+  resolveOwnerEmail: vi.fn(),
+}));
 
 vi.mock("./db/index.js", () => ({
   getV3Db: dbMocks.getV3Db,
@@ -38,6 +41,7 @@ vi.mock("./db/index.js", () => ({
 import {
   upsertModel,
   resolveRealName,
+  listRecentAliasChanges,
   assertAliasAllowed,
   AliasForbiddenError,
 } from "./model-registry.js";
@@ -45,7 +49,10 @@ import {
 /** A fake DB whose `.select().from().where().limit()` returns queued results
  * in call order, and whose `.insert()`/`.update()` record every write so
  * tests can assert on them directly. Mirrors v3-dispatcher.spec.ts's
- * createMockDb — ignore the query shape, script the results. */
+ * createMockDb — ignore the query shape, script the results. Also supports
+ * the `.where().orderBy().limit()` chain listRecentAliasChanges uses
+ * (`.where().orderBy` is additive alongside the pre-existing `.where().limit`
+ * and sibling `.from().orderBy` shapes — neither prior caller is affected). */
 function createMockDb(selectResults: unknown[][] = []) {
   let selectCall = 0;
   const inserted: Array<Record<string, unknown>> = [];
@@ -55,6 +62,9 @@ function createMockDb(selectResults: unknown[][] = []) {
       from: () => ({
         where: () => ({
           limit: async () => selectResults[selectCall++] ?? [],
+          orderBy: () => ({
+            limit: async () => selectResults[selectCall++] ?? [],
+          }),
         }),
         orderBy: async () => selectResults[selectCall++] ?? [],
       }),
@@ -88,7 +98,9 @@ beforeEach(() => {
 describe("assertAliasAllowed / upsertModel — fake-name rejection (T-F7-01)", () => {
   it("pure assertAliasAllowed: claude-* requires isClaudeWeight true", () => {
     expect(() => assertAliasAllowed("claude-opus-4-8", true)).not.toThrow();
-    expect(() => assertAliasAllowed("claude-x", false)).toThrow(AliasForbiddenError);
+    expect(() => assertAliasAllowed("claude-x", false)).toThrow(
+      AliasForbiddenError,
+    );
     expect(() => assertAliasAllowed("qwen3.6", false)).not.toThrow();
   });
 
@@ -163,7 +175,11 @@ describe("upsertModel — alias drift event (T-F7-02)", () => {
   });
 
   it("same alias re-registered against the SAME realName is a no-drift update (no event)", async () => {
-    const prior = { id: "reg-1", alias: "qwen3.6", realName: "ThinkingCap-Qwen3.6-27B" };
+    const prior = {
+      id: "reg-1",
+      alias: "qwen3.6",
+      realName: "ThinkingCap-Qwen3.6-27B",
+    };
     const { db, inserted } = createMockDb([[prior]]);
     dbMocks.getV3Db.mockReturnValue(db);
 
@@ -174,7 +190,9 @@ describe("upsertModel — alias drift event (T-F7-02)", () => {
     });
 
     expect(result.aliasChanged).toBe(false);
-    expect(inserted.filter((r) => r.kind === "registry.alias-changed")).toHaveLength(0);
+    expect(
+      inserted.filter((r) => r.kind === "registry.alias-changed"),
+    ).toHaveLength(0);
   });
 });
 
@@ -206,5 +224,62 @@ describe("resolveRealName — attribution reverse-lookup (T-F7-06)", () => {
     const result = await resolveRealName(null, "local@localhost");
     expect(result.realName).toBeNull();
     expect(result.suspect).toBe(false);
+  });
+});
+
+// ── S9 model-registry card's alias-drift banner (04 §7 "别名漂移可见") ──────
+
+describe("listRecentAliasChanges — alias-drift banner (S9)", () => {
+  it("empty when there are no alias-change events", async () => {
+    const { db } = createMockDb([[]]);
+    dbMocks.getV3Db.mockReturnValue(db);
+
+    const result = await listRecentAliasChanges(7);
+    expect(result).toEqual({ events: [], recentCount: 0 });
+  });
+
+  it("maps event rows to the alias/previousRealName/newRealName/ts shape", async () => {
+    const row = {
+      id: "ev-1",
+      payload: {
+        alias: "qwen3.6",
+        previousRealName: "OldWeight",
+        newRealName: "NewWeight",
+      },
+      ts: new Date(),
+    };
+    const { db } = createMockDb([[row]]);
+    dbMocks.getV3Db.mockReturnValue(db);
+
+    const result = await listRecentAliasChanges(7);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      alias: "qwen3.6",
+      previousRealName: "OldWeight",
+      newRealName: "NewWeight",
+    });
+    expect(result.recentCount).toBe(1);
+  });
+
+  it("counts only events within the trailing windowDays as 'recent'", async () => {
+    const now = Date.now();
+    const rows = [
+      {
+        id: "ev-recent",
+        payload: { alias: "qwen3.6", previousRealName: "a", newRealName: "b" },
+        ts: new Date(now - 1 * 24 * 3600 * 1000),
+      },
+      {
+        id: "ev-old",
+        payload: { alias: "qwen3.6", previousRealName: "b", newRealName: "c" },
+        ts: new Date(now - 30 * 24 * 3600 * 1000),
+      },
+    ];
+    const { db } = createMockDb([rows]);
+    dbMocks.getV3Db.mockReturnValue(db);
+
+    const result = await listRecentAliasChanges(7);
+    expect(result.events).toHaveLength(2); // full list still returned...
+    expect(result.recentCount).toBe(1); // ...but only 1 counts as "recent"
   });
 });

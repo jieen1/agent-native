@@ -25,11 +25,13 @@ import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export default defineAction({
   description:
-    "Get the newest orchestrator brain_task's { status, runId, updatedAt } " +
-    "for a brain thread (queued | running | done | failed | cancelled). " +
-    "Owner-scoped: returns nulls when no task is found for the caller's own " +
-    "thread. Read-only replacement for the tracker's former raw-SQL read of " +
-    "brain_tasks (SDLC-034b).",
+    "Get the newest orchestrator brain_task's { status, runId, updatedAt, " +
+    "repo, baseBranch, tags } for a brain thread (queued | running | done | " +
+    "failed | cancelled). Owner-scoped: returns nulls when no task is found " +
+    "for the caller's own thread. Read-only replacement for the tracker's " +
+    "former raw-SQL read of brain_tasks (SDLC-034b). repo/baseBranch/tags " +
+    "back the S9 Brain console's top task-context bar (工作项/repo/sprint + " +
+    "run 深链).",
   schema: z.object({
     threadId: z.string().min(1),
   }),
@@ -47,6 +49,9 @@ export default defineAction({
         status: v3Schema.brainTasks.status,
         runId: v3Schema.brainTasks.runId,
         updatedAt: v3Schema.brainTasks.updatedAt,
+        repo: v3Schema.brainTasks.repo,
+        baseBranch: v3Schema.brainTasks.baseBranch,
+        tags: v3Schema.brainTasks.tags,
       })
       .from(v3Schema.brainTasks)
       .where(
@@ -58,11 +63,22 @@ export default defineAction({
       .orderBy(desc(v3Schema.brainTasks.createdAt))
       .limit(1);
 
+    const tags = (task?.tags as Record<string, string> | null) ?? null;
+
     return {
       status: task?.status ?? null,
       runId: task?.runId ?? null,
       updatedAt: task?.updatedAt
         ? new Date(task.updatedAt).toISOString()
+        : null,
+      repo: task?.repo ?? null,
+      baseBranch: task?.baseBranch ?? null,
+      // brainThreadId is an internal beacon (see brain-send.ts) — not part of
+      // the user-facing tag set the context bar renders.
+      tags: tags
+        ? Object.fromEntries(
+            Object.entries(tags).filter(([k]) => k !== "brainThreadId"),
+          )
         : null,
     };
   },

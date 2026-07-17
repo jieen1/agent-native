@@ -12,6 +12,7 @@
 // alias is only accepted when the caller also asserts `isClaudeWeight: true`.
 
 import { and, eq, desc } from "drizzle-orm";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "./db/index.js";
 
 /** Structured error for a rejected fake-name registration (04 §7). */
@@ -32,7 +33,10 @@ function uid(): string {
 }
 
 /** Reject a fake claude-* alias BEFORE any DB read/write. Pure — no I/O. */
-export function assertAliasAllowed(alias: string, isClaudeWeight: boolean): void {
+export function assertAliasAllowed(
+  alias: string,
+  isClaudeWeight: boolean,
+): void {
   if (alias.startsWith("claude-") && !isClaudeWeight) {
     throw new AliasForbiddenError(alias);
   }
@@ -211,6 +215,74 @@ export async function resolveRealName(
   const hit = rows[0];
   if (hit) return { realName: hit.realName, suspect: false };
   return { realName: modelRef, suspect: true };
+}
+
+export interface AliasChangeEvent {
+  id: string;
+  alias: string | null;
+  previousRealName: string | null;
+  newRealName: string | null;
+  ts: string | null;
+}
+
+/**
+ * Recent `registry.alias-changed` events for the S9 model-registry card's
+ * "N 条别名变更 (7 天) · 点开时间线" banner (04 §7 "别名漂移可见"). Row-fetch
+ * then filter/reduce in JS (mirrors writeback-telemetry.ts) rather than a SQL
+ * date-range aggregate — trivially unit-testable and degrades to empty on any
+ * read hiccup instead of breaking the card.
+ */
+export async function listRecentAliasChanges(
+  windowDays: number = 7,
+): Promise<{ events: AliasChangeEvent[]; recentCount: number }> {
+  const ownerEmail = resolveOwnerEmail();
+  const db = getV3Db();
+
+  let rows: Array<{
+    id: string;
+    payload: unknown;
+    ts: Date | null;
+  }> = [];
+  try {
+    rows = await db
+      .select({
+        id: v3Schema.v3Events.id,
+        payload: v3Schema.v3Events.payload,
+        ts: v3Schema.v3Events.ts,
+      })
+      .from(v3Schema.v3Events)
+      .where(
+        and(
+          eq(v3Schema.v3Events.ownerEmail, ownerEmail),
+          eq(v3Schema.v3Events.kind, "registry.alias-changed"),
+        ),
+      )
+      .orderBy(desc(v3Schema.v3Events.ts))
+      .limit(200);
+  } catch {
+    rows = [];
+  }
+
+  const since = Date.now() - windowDays * 24 * 3600 * 1000;
+  const events: AliasChangeEvent[] = rows.map((r) => {
+    const payload = r.payload as {
+      alias?: string;
+      previousRealName?: string;
+      newRealName?: string;
+    } | null;
+    return {
+      id: r.id,
+      alias: payload?.alias ?? null,
+      previousRealName: payload?.previousRealName ?? null,
+      newRealName: payload?.newRealName ?? null,
+      ts: r.ts ? new Date(r.ts).toISOString() : null,
+    };
+  });
+  const recentCount = rows.filter(
+    (r) => r.ts && new Date(r.ts).getTime() >= since,
+  ).length;
+
+  return { events, recentCount };
 }
 
 async function writeRegistryEvent(
