@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
+import { DispatchGradeBadge } from "./DispatchGradeBadge";
 import type { WorkflowListRow } from "./workflow-library-types";
 import { WorkflowDagThumbnail } from "./WorkflowDagThumbnail";
 
@@ -138,6 +139,7 @@ export function WorkflowLibraryCard({
             内置
           </Badge>
         ) : null}
+        <DispatchGradeBadge result={row.dispatchGrade} className="ml-auto" />
       </div>
 
       <WorkflowDagThumbnail nodes={nodes} />

@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { getV3Db, v3Schema } from "../server/db/index.js";
 import { validateDag } from "../server/engine/dag-validator.js";
+import { lintTemplateDispatchGrade } from "../server/engine/dispatch-grade-lint.js";
 import {
   computeRunStats,
   diffDagNodes,
@@ -18,12 +19,17 @@ import {
 import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";
 import { newId } from "./_util.js";
 
-/** Shape of the `meta` JSONB column (s8-workflow-library migration, 04 §13). */
+/** Shape of the `meta` JSONB column (s8-workflow-library migration, 04 §13).
+ *  `metaTaggedOnly` (r4 doc §4.1, task #77's `workflow-templates-seed.ts`
+ *  boot plugin): this version's `dag` was never written by this seed —
+ *  it's a real brain/human row whose `meta` got patched by the boot
+ *  script's name-collision path. Mutually exclusive with `builtin`. */
 interface WorkflowTemplateMeta {
   builtin?: boolean;
-  family?: "sdlc" | "light";
+  family?: "core" | "sdlc" | "light";
   tags?: string[];
   changeNote?: string;
+  metaTaggedOnly?: boolean;
 }
 
 function readMeta(raw: unknown): WorkflowTemplateMeta {
@@ -74,8 +80,11 @@ export const workflowList = defineAction({
   description:
     "List V3 workflow templates, one entry per name (latest version only). " +
     "Each entry has { id, name, version, description, nodeCount, dag, createdAt, " +
-    "ownerEmail, meta: { builtin, family, tags, changeNote }, " +
-    "stats: { runCount, successRate } } — stats are a 30-day window for this version.",
+    "ownerEmail, meta: { builtin, family, tags, changeNote, metaTaggedOnly }, " +
+    "stats: { runCount, successRate }, dispatchGrade: { ok, level, passCount, " +
+    "totalCount, results } } — stats are a 30-day window for this version; " +
+    "dispatchGrade is the §4.2 7-rule lint (lintTemplateDispatchGrade), computed " +
+    "fresh from this version's dag/inputSchema.",
   schema: z.object({}),
   readOnly: true,
   http: { method: "GET" },
@@ -100,6 +109,7 @@ export const workflowList = defineAction({
         version: v3Schema.v3WorkflowTemplates.version,
         description: v3Schema.v3WorkflowTemplates.description,
         dag: v3Schema.v3WorkflowTemplates.dag,
+        inputSchema: v3Schema.v3WorkflowTemplates.inputSchema,
         meta: v3Schema.v3WorkflowTemplates.meta,
         createdAt: v3Schema.v3WorkflowTemplates.createdAt,
         ownerEmail: v3Schema.v3WorkflowTemplates.ownerEmail,
@@ -158,8 +168,10 @@ export const workflowList = defineAction({
           family: meta.family,
           tags: meta.tags ?? [],
           changeNote: meta.changeNote,
+          metaTaggedOnly: meta.metaTaggedOnly === true,
         },
         stats: computeRunStats(recentRunsByTemplate.get(r.id) ?? []),
+        dispatchGrade: lintTemplateDispatchGrade(r.dag, r.inputSchema),
       };
     });
   },
@@ -497,6 +509,26 @@ export const dagValidate = defineAction({
 });
 
 /**
+ * Dispatch-grade lint (r4 doc §4.2, task #78) for a DAG + inputSchema without
+ * saving it — powers the editor's live "派发级检查" panel. Same
+ * validate-before-save pattern as `dagValidate`: re-run on every debounced
+ * edit so the panel never shows a rule result the saved version wouldn't
+ * also get from `workflowList`'s per-row `dispatchGrade`.
+ */
+export const dagDispatchGradeLint = defineAction({
+  description:
+    "Lint a DAG + inputSchema for dispatch-grade readiness (04 doc §4.2's 7 " +
+    "rules) without saving. Returns { ok, level, passCount, totalCount, results } " +
+    "— results[] has { rule, key, label, confidence: 'structural'|'heuristic', ok, " +
+    "detail, nodeIds }. Run validateDag first; this assumes a shape-valid dag.",
+  schema: z.object({ dag: z.unknown(), inputSchema: z.unknown().optional() }),
+  readOnly: true,
+  run: async (args) => {
+    return lintTemplateDispatchGrade(args.dag, args.inputSchema ?? {});
+  },
+});
+
+/**
  * List every saved version of a workflow template by name — the "version
  * chain" the workflow library's detail strip renders (04 §4). Each entry
  * carries its own all-time run stats (no 30-day window — the chain is a
@@ -506,7 +538,8 @@ export const workflowVersions = defineAction({
   description:
     "List every saved version of a V3 workflow template by name, newest first. " +
     "Each entry has { id, version, description, createdAt, ownerEmail, " +
-    "meta: { builtin, family, tags, changeNote }, stats: { runCount, successRate } } — " +
+    "meta: { builtin, family, tags, changeNote, metaTaggedOnly }, " +
+    "stats: { runCount, successRate } } — " +
     "stats are all-time (this exact version's runs only), not a 30-day window.",
   schema: z.object({ name: z.string() }),
   readOnly: true,
@@ -562,6 +595,7 @@ export const workflowVersions = defineAction({
           family: meta.family,
           tags: meta.tags ?? [],
           changeNote: meta.changeNote,
+          metaTaggedOnly: meta.metaTaggedOnly === true,
         },
         stats: computeRunStats(runsByTemplate.get(r.id) ?? []),
       };

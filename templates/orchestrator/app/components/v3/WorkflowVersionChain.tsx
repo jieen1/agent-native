@@ -1,14 +1,24 @@
-import { IconGitCompare, IconInfoCircle, IconRobot } from "@tabler/icons-react";
+import {
+  IconBrain,
+  IconDatabase,
+  IconGitCompare,
+  IconInfoCircle,
+} from "@tabler/icons-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 import {
   fmtShortDate,
-  isSystemOwner,
   ownerInitial,
+  versionLineage,
   type WorkflowVersionRow,
 } from "./workflow-library-types";
 
@@ -18,6 +28,12 @@ export interface WorkflowVersionChainProps {
   isLoading: boolean;
   onOpenDiff: () => void;
 }
+
+const LINEAGE_LABEL: Record<ReturnType<typeof versionLineage>, string> = {
+  seed: "种子",
+  brain: "brain",
+  human: "",
+};
 
 /**
  * The workflow library's detail strip — version chain + per-version stats +
@@ -63,7 +79,7 @@ export function WorkflowVersionChain({
           <div className="flex gap-2 overflow-x-auto pb-1">
             {versions.map((v, i) => {
               const isCurrent = i === 0;
-              const system = isSystemOwner(v.ownerEmail);
+              const lineage = versionLineage(v.meta, v.ownerEmail);
               return (
                 <div
                   key={v.id}
@@ -84,26 +100,51 @@ export function WorkflowVersionChain({
                       v{v.version}
                     </Badge>
                     {isCurrent ? <span>当前</span> : null}
+                    {v.meta.metaTaggedOnly ? (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button type="button" className="ml-auto">
+                            <Badge
+                              variant="outline"
+                              className="border-warning/40 bg-warning/10 text-[9.5px] text-warning"
+                            >
+                              血统混合
+                            </Badge>
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-72 text-xs" align="start">
+                          此版本的 <code className="font-mono">builtin</code>{" "}
+                          标记来自撞名 boot 脚本的 meta-patch
+                          机制,不代表种子写过这个版本 —— 真实 dag 内容来自
+                          brain/human 历史。按撞名规则,错标不回改,
+                          历史版本链只增不删(r4 doc §4.1)。
+                        </PopoverContent>
+                      </Popover>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                     <Avatar className="size-4">
                       <AvatarFallback
                         className={cn(
                           "text-[8px]",
-                          system
-                            ? "rounded-[5px] bg-agent/15 text-agent"
-                            : "bg-brand text-brand-foreground",
+                          lineage === "human"
+                            ? "bg-brand text-brand-foreground"
+                            : "rounded-[5px] bg-agent/15 text-agent",
                         )}
                       >
-                        {system ? (
-                          <IconRobot className="size-2.5" />
+                        {lineage === "seed" ? (
+                          <IconDatabase className="size-2.5" />
+                        ) : lineage === "brain" ? (
+                          <IconBrain className="size-2.5" />
                         ) : (
                           ownerInitial(v.ownerEmail)
                         )}
                       </AvatarFallback>
                     </Avatar>
                     <span>
-                      {system ? "系统/Brain" : v.ownerEmail.split("@")[0]}
+                      {lineage === "human"
+                        ? v.ownerEmail.split("@")[0]
+                        : LINEAGE_LABEL[lineage]}
                     </span>
                     <span>·</span>
                     <span>{fmtShortDate(v.createdAt)}</span>
