@@ -1318,7 +1318,7 @@ function MetricsSummary({ sprint }: { sprint: SprintDetail }) {
 // prototype's "判据 N/M" fraction does not exist for the 8 cross-phase
 // transitions; this is an honest manual override, not a fake gate check) ───
 
-function AdvancePhaseButton({
+export function AdvancePhaseButton({
   sprintId,
   phase,
 }: {

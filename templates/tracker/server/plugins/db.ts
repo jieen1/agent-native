@@ -552,6 +552,13 @@ ALTER TABLE tracker_exec_queue ADD COLUMN IF NOT EXISTS health_check_log TEXT`,
     version: 29,
     sql: `CREATE UNIQUE INDEX IF NOT EXISTS tracker_exec_queue_work_item_id_key ON tracker_exec_queue (work_item_id)`,
   },
+  {
+    // v30 (R4b.2 Sprint Studio, r4-workflow-families-planning-skills.md §5.1):
+    // studio_state — the one genuinely-new column for Studio's manual
+    // step-rail overrides + UI prefs. See schema.ts's sprints docblock.
+    version: 30,
+    sql: `ALTER TABLE tracker_sprints ADD COLUMN IF NOT EXISTS studio_state TEXT NOT NULL DEFAULT '{}'`,
+  },
 ];
 
 const coreRunMigrations = runMigrations(TRACKER_MIGRATIONS, {

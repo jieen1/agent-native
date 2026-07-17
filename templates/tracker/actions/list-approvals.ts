@@ -1,6 +1,7 @@
 import { defineAction } from "@agent-native/core";
-import { z } from "zod";
 import { eq, desc } from "drizzle-orm";
+import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope, and } from "../server/lib/access.js";
 
@@ -9,10 +10,7 @@ export default defineAction({
     "List approval records. Filter by sprintId and/or status. " +
     "Returns newest first.",
   schema: z.object({
-    sprintId: z
-      .string()
-      .optional()
-      .describe("Filter by sprint ID"),
+    sprintId: z.string().optional().describe("Filter by sprint ID"),
     status: z
       .enum(["pending", "approved", "rejected"])
       .optional()
@@ -28,7 +26,9 @@ export default defineAction({
       .where(
         and(
           ownerScope(schema.approvals),
-          args.sprintId ? eq(schema.approvals.sprintId, args.sprintId) : undefined,
+          args.sprintId
+            ? eq(schema.approvals.sprintId, args.sprintId)
+            : undefined,
           args.status ? eq(schema.approvals.status, args.status) : undefined,
         ),
       )
@@ -47,6 +47,12 @@ export default defineAction({
       reason: r.reason,
       decidedAt: r.decidedAt,
       createdAt: r.createdAt,
+      // R4b.2 Sprint Studio's stale-reconfirm banner reads these — B2's
+      // stale-marking (create-sprint-artifact.ts) already writes them, this
+      // action just wasn't surfacing them to callers before.
+      anchorArtifactId: r.anchorArtifactId,
+      anchorVersion: r.anchorVersion,
+      staleAt: r.staleAt,
     }));
   },
 });

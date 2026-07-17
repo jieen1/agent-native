@@ -1,6 +1,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
@@ -72,6 +73,13 @@ export default defineAction({
       endDate: sprint.endDate,
       createdAt: sprint.createdAt,
       updatedAt: sprint.updatedAt,
+      studioState: (() => {
+        try {
+          return JSON.parse(sprint.studioState || "{}");
+        } catch {
+          return {};
+        }
+      })(),
       items,
       stages,
       itemCount: items.length,

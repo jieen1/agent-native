@@ -104,6 +104,7 @@ beforeAll(async () => {
       end_date TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      studio_state TEXT NOT NULL DEFAULT '{}',
       owner_email TEXT NOT NULL,
       org_id TEXT,
       visibility TEXT NOT NULL DEFAULT 'private'

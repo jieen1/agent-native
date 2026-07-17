@@ -6,7 +6,15 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { createClient, type Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 
@@ -130,6 +138,7 @@ beforeAll(async () => {
       end_date TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      studio_state TEXT NOT NULL DEFAULT '{}',
       owner_email TEXT NOT NULL,
       org_id TEXT,
       visibility TEXT NOT NULL DEFAULT 'private'
@@ -193,7 +202,10 @@ async function insertItem(overrides: Record<string, unknown> = {}) {
 
 async function fetchItem(id: string) {
   return (
-    await db.select().from(trackerSchema.workItems).where(eq(trackerSchema.workItems.id, id))
+    await db
+      .select()
+      .from(trackerSchema.workItems)
+      .where(eq(trackerSchema.workItems.id, id))
   )[0];
 }
 
@@ -210,7 +222,10 @@ async function fetchActivities(id: string) {
 
 describe("T-F3-18a: advance-stage 不能推进入交付、绝不写 done", () => {
   it("自「验收」推进(下一段是交付)→ guarded noop, status/stage 均不变, 零活动行", async () => {
-    const id = await insertItem({ currentStageName: "验收", status: "running" });
+    const id = await insertItem({
+      currentStageName: "验收",
+      status: "running",
+    });
 
     const result = await asUser(() =>
       advanceStage.run(
@@ -250,7 +265,10 @@ describe("T-F3-18a: advance-stage 不能推进入交付、绝不写 done", () =>
   });
 
   it("常规推进(实施→测试)仍工作且 status 写 running, 绝不写 done", async () => {
-    const id = await insertItem({ currentStageName: "实施", status: "dispatched" });
+    const id = await insertItem({
+      currentStageName: "实施",
+      status: "dispatched",
+    });
 
     const result = await asUser(() =>
       advanceStage.run(
@@ -268,10 +286,16 @@ describe("T-F3-18a: advance-stage 不能推进入交付、绝不写 done", () =>
 
 describe("T-F3-18b: 活动行 actorKind 取真实 actor(不再硬编码 human)", () => {
   it("agent(tool-loop) 调 advance-stage → 活动行 actorKind='agent'", async () => {
-    const id = await insertItem({ currentStageName: "实施", status: "running" });
+    const id = await insertItem({
+      currentStageName: "实施",
+      status: "running",
+    });
 
     await asUser(() =>
-      advanceStage.run({ scope: "item", id, fromStage: "实施" }, ctxFor("tool")),
+      advanceStage.run(
+        { scope: "item", id, fromStage: "实施" },
+        ctxFor("tool"),
+      ),
     );
 
     const activities = await fetchActivities(id);
@@ -281,10 +305,16 @@ describe("T-F3-18b: 活动行 actorKind 取真实 actor(不再硬编码 human)",
   });
 
   it("human(frontend) 调 advance-stage → 活动行 actorKind='human'", async () => {
-    const id = await insertItem({ currentStageName: "测试", status: "running" });
+    const id = await insertItem({
+      currentStageName: "测试",
+      status: "running",
+    });
 
     await asUser(() =>
-      advanceStage.run({ scope: "item", id, fromStage: "测试" }, ctxFor("frontend")),
+      advanceStage.run(
+        { scope: "item", id, fromStage: "测试" },
+        ctxFor("frontend"),
+      ),
     );
 
     const activities = await fetchActivities(id);

@@ -6,6 +6,11 @@ import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { buildInboxGroups } from "../server/lib/inbox.js";
 import { getSchedulerState } from "../server/lib/scheduler-gate.js";
+import { parseInScopeOutcomes } from "../server/lib/sprint-doc-parse.js";
+import {
+  deriveStudioSteps,
+  STUDIO_STEPS,
+} from "../shared/studio-step-derive.js";
 import { readAppStateForCurrentTab } from "./_tab-state.js";
 
 const LIST_LIMIT = 25;
@@ -118,6 +123,92 @@ export default defineAction({
             itemCount: items.length,
             delivered: items.filter((i) => i.status === "done").length,
             items,
+          };
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // Sprint Studio focus (R4b.2, r4-workflow-families-planning-skills.md
+    // §5.4): lets planning skills perceive the current step via view-screen,
+    // the two-way anchor between the skill chain and the UI.
+    if (nav?.view === "sprint-studio" && nav?.sprintId) {
+      try {
+        const sprintRows = await db
+          .select()
+          .from(schema.sprints)
+          .where(
+            and(
+              eq(schema.sprints.id, nav.sprintId),
+              ownerScope(schema.sprints),
+            ),
+          )
+          .limit(1);
+        const sprint = sprintRows[0];
+        if (sprint) {
+          const artifactFacts: Record<
+            string,
+            { latestVersion: number | null }
+          > = {};
+          let sprintDocContent: string | undefined;
+          for (const def of STUDIO_STEPS) {
+            if (artifactFacts[def.docKey]) continue;
+            const rows = await db
+              .select({
+                version: schema.sprintArtifacts.version,
+                content: schema.sprintArtifacts.content,
+              })
+              .from(schema.sprintArtifacts)
+              .where(
+                and(
+                  eq(schema.sprintArtifacts.sprintId, nav.sprintId),
+                  eq(schema.sprintArtifacts.docKey, def.docKey),
+                  ownerScope(schema.sprintArtifacts),
+                ),
+              )
+              .orderBy(desc(schema.sprintArtifacts.version))
+              .limit(1);
+            artifactFacts[def.docKey] = {
+              latestVersion: rows[0]?.version ?? null,
+            };
+            if (def.docKey === "sprint-doc" && rows[0]) {
+              sprintDocContent = rows[0].content;
+            }
+          }
+
+          const activeStep =
+            typeof nav.activeStep === "number" ? nav.activeStep : null;
+          let stepOverrides: Record<string, string> | undefined;
+          try {
+            stepOverrides = JSON.parse(
+              sprint.studioState || "{}",
+            ).stepOverrides;
+          } catch {
+            stepOverrides = undefined;
+          }
+
+          const steps = deriveStudioSteps({
+            artifacts: artifactFacts,
+            activeStep,
+            inScopeOutcomes: sprintDocContent
+              ? parseInScopeOutcomes(sprintDocContent)
+              : [],
+            stepOverrides: stepOverrides as any,
+          });
+
+          screen.studio = {
+            sprintId: sprint.id,
+            sprintName: sprint.name,
+            phase: sprint.phase,
+            activeStep,
+            steps: steps.map((s) => ({
+              step: s.step,
+              key: s.key,
+              label: s.label,
+              state: s.state,
+              latestVersion: s.latestVersion,
+            })),
           };
         }
       } catch {
