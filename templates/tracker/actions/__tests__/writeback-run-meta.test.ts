@@ -6,7 +6,15 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { createClient, type Client } from "@libsql/client";
 import { desc, eq } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 import { recordDispatchRun } from "../../server/lib/work-item-runs.js";
@@ -32,7 +40,10 @@ function asUser(fn: () => Promise<any> | any) {
   return runWithRequestContext({ userEmail: OWNER, orgId: ORG_ID }, fn);
 }
 function asWriteback(fn: () => Promise<any> | any) {
-  return runWithRequestContext({ userEmail: WRITEBACK_EMAIL, orgId: ORG_ID }, fn);
+  return runWithRequestContext(
+    { userEmail: WRITEBACK_EMAIL, orgId: ORG_ID },
+    fn,
+  );
 }
 function mcpCtx() {
   return { caller: "mcp" as const };
@@ -166,7 +177,11 @@ describe("writeback-run-meta — runs 行回填", () => {
 
     const result = await asWriteback(() =>
       writebackRunMeta.run(
-        { workItemId: "wi-1", runId: "run_abc", branch: "orchestrator/wi-1-fix" },
+        {
+          workItemId: "wi-1",
+          runId: "run_abc",
+          branch: "orchestrator/wi-1-fix",
+        },
         mcpCtx(),
       ),
     );
@@ -203,10 +218,71 @@ describe("writeback-run-meta — runs 行回填", () => {
     expect(await fetchActivities("wi-1")).toHaveLength(1); // only the first call wrote one
   });
 
+  it("R4a.3 L2: templateDeviation writes a SEPARATE workflow.template-deviation activity", async () => {
+    await recordDispatchRun(db as any, {
+      workItemId: "wi-1",
+      threadId: "bt_1",
+      ownerEmail: OWNER,
+      orgId: ORG_ID,
+      dispatchedAt: "2026-01-01T00:00:00Z",
+    });
+
+    const result = await asWriteback(() =>
+      writebackRunMeta.run(
+        {
+          workItemId: "wi-1",
+          runId: "run_dev",
+          branch: "orchestrator/wi-1-fix",
+          templateDeviation: {
+            chosen: "quick-task",
+            suggested: "sdlc-issue-pipeline",
+            deviationReason: "改动仅 1 文件",
+          },
+        },
+        mcpCtx(),
+      ),
+    );
+    expect(result.updated).toBe(true);
+
+    const acts = await fetchActivities("wi-1");
+    expect(acts).toHaveLength(2);
+    const deviationAct = acts.find(
+      (a) => a.eventType === "workflow.template-deviation",
+    );
+    expect(deviationAct).toBeDefined();
+    const payload = JSON.parse(deviationAct!.payload as string);
+    expect(payload.chosen).toBe("quick-task");
+    expect(payload.suggested).toBe("sdlc-issue-pipeline");
+    expect(payload.deviationReason).toBe("改动仅 1 文件");
+  });
+
+  it("no templateDeviation → no workflow.template-deviation activity written", async () => {
+    await recordDispatchRun(db as any, {
+      workItemId: "wi-1",
+      threadId: "bt_1",
+      ownerEmail: OWNER,
+      orgId: ORG_ID,
+      dispatchedAt: "2026-01-01T00:00:00Z",
+    });
+    await asWriteback(() =>
+      writebackRunMeta.run(
+        { workItemId: "wi-1", runId: "run_nodev" },
+        mcpCtx(),
+      ),
+    );
+    const acts = await fetchActivities("wi-1");
+    expect(
+      acts.some((a) => a.eventType === "workflow.template-deviation"),
+    ).toBe(false);
+  });
+
   it("陈旧(已被取代)runId 回写 — 零写入, 无当前活跃行可挂", async () => {
     // No dispatch row at all for this runId to attach to.
     const result = await asWriteback(() =>
-      writebackRunMeta.run({ workItemId: "wi-1", runId: "run_orphan" }, mcpCtx()),
+      writebackRunMeta.run(
+        { workItemId: "wi-1", runId: "run_orphan" },
+        mcpCtx(),
+      ),
     );
     expect(result.updated).toBe(false);
     expect(await fetchRuns("wi-1")).toHaveLength(0);
@@ -243,7 +319,12 @@ describe("T-F9-05: 非回写身份调 writeback-run-meta", () => {
 
   it("agent tool-loop call (caller='tool') → rejected", async () => {
     await expect(
-      asUser(() => writebackRunMeta.run({ workItemId: "wi-1", runId: "run_x" }, { caller: "tool" })),
+      asUser(() =>
+        writebackRunMeta.run(
+          { workItemId: "wi-1", runId: "run_x" },
+          { caller: "tool" },
+        ),
+      ),
     ).rejects.toMatchObject({ code: "actor-denied" });
   });
 });

@@ -17,6 +17,7 @@ import {
 import { assertSchedulerNotPaused } from "../server/lib/scheduler-gate.js";
 import { actorFromCaller } from "../server/lib/transition-guard.js";
 import { recordDispatchRun } from "../server/lib/work-item-runs.js";
+import { resolveWorkflowRule } from "../server/lib/workflow-routing.js";
 
 // Dispatch a work item to the orchestrator's CC brain. Sends a STRUCTURED MCP
 // `tools/call` for `brain-send` with the requirement + the project's repo/branch
@@ -218,6 +219,33 @@ export default defineAction({
     };
     if (orgId) tags.org_id = orgId;
 
+    // R4a.3 L1 — deterministic pre-selection routing (design authority:
+    // docs/sdlc-product-design/r4-workflow-families-planning-skills.md §4.4
+    // first bullet). This is a SUGGESTION, not a mandate — the brain remains
+    // free to author its own DAG or deviate (L2 leaves a trace; see
+    // writeback-run-meta.ts's optional `templateDeviation` field).
+    let itemTags: string[] = [];
+    let itemNature: string[] = [];
+    try {
+      itemTags = JSON.parse(item.tags || "[]");
+    } catch {
+      itemTags = [];
+    }
+    try {
+      itemNature = JSON.parse(item.nature || "[]");
+    } catch {
+      itemNature = [];
+    }
+    const workflowRule = await resolveWorkflowRule(db, {
+      projectId: project.id,
+      itemType: item.type,
+      tags: itemTags,
+      natureTags: itemNature,
+      inSprint: !!item.sprintId,
+    });
+    tags.suggestedTemplate = workflowRule.templateName;
+    tags.ruleId = workflowRule.ruleId;
+
     const requirement = item.description?.trim() || item.title;
     const message =
       `Work item ${item.id} (${project.key}) — "${item.title}".\n\n` +
@@ -232,6 +260,11 @@ export default defineAction({
       repo: project.gitRemote,
       baseBranch,
       tags,
+      // L1 suggested inputs (§4.4) — a nested object, so it rides brain-send's
+      // dedicated `suggestedInputs` field rather than the string-only `tags`.
+      ...(Object.keys(workflowRule.defaultInputs).length > 0
+        ? { suggestedInputs: workflowRule.defaultInputs }
+        : {}),
       // Forward the configurable periodic drift-check cadence. Undefined lets
       // the orchestrator apply its env default (BRAIN_MONITOR_INTERVAL_SEC).
       ...(args.monitorIntervalSec !== undefined
