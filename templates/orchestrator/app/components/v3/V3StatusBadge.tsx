@@ -3,22 +3,18 @@ import { cn } from "@/lib/utils";
 
 import { StatusMarker } from "./StatusMarker";
 
+// Semantic tokens (--info/--success/--...) are theme-aware (global.css
+// :root/.dark), so a single class per status covers both themes — no `dark:`
+// variant needed the way the old literal palette required one.
 const STATUS_VARIANTS: Record<string, string> = {
-  pending:
-    "bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600",
-  running:
-    "bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-700",
-  done: "bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700",
-  failed:
-    "bg-red-100 text-red-700 border-red-300 dark:bg-red-900/40 dark:text-red-300 dark:border-red-700",
-  cancelled:
-    "bg-orange-100 text-orange-700 border-orange-300 dark:bg-orange-900/40 dark:text-orange-300 dark:border-orange-700",
-  paused:
-    "bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700",
-  skipped:
-    "bg-gray-100 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600",
-  "awaiting-approval":
-    "bg-purple-100 text-purple-700 border-purple-300 dark:bg-purple-900/40 dark:text-purple-300 dark:border-purple-700",
+  pending: "bg-muted text-muted-foreground border-border",
+  running: "bg-info/15 text-info border-info/30",
+  done: "bg-success/15 text-success border-success/30",
+  failed: "bg-destructive/15 text-destructive border-destructive/30",
+  cancelled: "bg-warning/15 text-warning border-warning/30",
+  paused: "bg-warning/15 text-warning border-warning/30",
+  skipped: "bg-muted text-muted-foreground border-border",
+  "awaiting-approval": "bg-agent/15 text-agent border-agent/30",
 };
 
 export interface V3StatusBadgeProps {
