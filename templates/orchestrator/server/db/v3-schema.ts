@@ -99,23 +99,55 @@ export const v3WorkflowTemplates = pgTable(
 
 // ─── v3_runs ────────────────────────────────────────────────────────────────
 
-export const v3Runs = pgTable("v3_runs", {
-  id: text("id").primaryKey(),
-  templateId: text("template_id"),
-  templateVersion: integer("template_version"),
-  inputs: jsonb("inputs").notNull(),
-  dag: jsonb("dag").notNull(),
-  dagVersion: integer("dag_version").notNull().default(1),
-  status: v3RunStatusEnum("status").notNull().default("pending"),
-  priority: integer("priority").notNull().default(0),
-  tags: jsonb("tags"),
-  limits: jsonb("limits"),
-  // Additive: archive flag (0/1) — hides a run from the default list (P4-A).
-  archived: integer("archived").notNull().default(0),
-  startedAt: timestamp("started_at", { withTimezone: true }),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  ...ownableColumns(),
-});
+export const v3Runs = pgTable(
+  "v3_runs",
+  {
+    id: text("id").primaryKey(),
+    templateId: text("template_id"),
+    templateVersion: integer("template_version"),
+    inputs: jsonb("inputs").notNull(),
+    dag: jsonb("dag").notNull(),
+    dagVersion: integer("dag_version").notNull().default(1),
+    status: v3RunStatusEnum("status").notNull().default("pending"),
+    priority: integer("priority").notNull().default(0),
+    tags: jsonb("tags"),
+    limits: jsonb("limits"),
+    // Additive: archive flag (0/1) — hides a run from the default list (P4-A).
+    archived: integer("archived").notNull().default(0),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    // F9-followup (task board #38, `f9-writeback-outbox` migration): the
+    // persistent writeback outbox. Replaces the old fire-and-forget-only
+    // terminal hook (server/tracker-client.ts's `onRunTerminal`, called from
+    // v3-reconciler.ts's finalizeRun) with a durable row written the MOMENT a
+    // tracker-dispatched run reaches terminal state — so a process
+    // crash/redeploy during the delivery attempt's backoff window can never
+    // silently lose the fact that a writeback is still owed. See
+    // V3Reconciler.finalizeRun/drainWritebackOutbox and
+    // server/queue/v3-writeback-outbox-sweep.ts.
+    //
+    // writebackStatus: null for a run with no tracker item_id tag (writeback
+    // not applicable — never set, never swept); 'pending' from the instant
+    // finalizeRun classifies + persists the outcome until a delivery attempt
+    // succeeds; 'done' once onRunTerminal has succeeded at least once. A row
+    // is NEVER left in a third "claimed/in-flight" state, so a crash can only
+    // ever strand it at 'pending' — always safely retryable, never stuck.
+    writebackStatus: text("writeback_status"),
+    // The classified WritebackOutcome (kind/branch/reason), captured once at
+    // finalizeRun time — NOT recomputed later from node artifacts, which may
+    // since have expired via the P4-A artifact reaper (v3_artifacts.expires_at
+    // / keep_after_run). This is what makes the persisted row self-sufficient
+    // for a sweep to drain long after the run's own artifacts are gone.
+    writebackOutcome: jsonb("writeback_outcome"),
+    // Total delivery attempts across the fast path AND every sweep drain
+    // (observability only — retries are never bounded/given-up-on; see the
+    // module doc on drainWritebackOutbox).
+    writebackAttempts: integer("writeback_attempts").notNull().default(0),
+    writebackLastError: text("writeback_last_error"),
+    ...ownableColumns(),
+  },
+  (t) => [index("idx_v3_runs_writeback_status").on(t.writebackStatus)],
+);
 
 export const projectRepos = pgTable("project_repos", {
   id: text("id").primaryKey(),

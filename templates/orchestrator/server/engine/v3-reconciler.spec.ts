@@ -141,6 +141,11 @@ interface MockRunRow {
   limits: unknown;
   startedAt: Date | null;
   completedAt: Date | null;
+  // F9-followup (task board #38) — persistent writeback outbox columns.
+  writebackStatus: string | null;
+  writebackOutcome: unknown;
+  writebackAttempts: number;
+  writebackLastError: string | null;
   ownerEmail: string;
   orgId: string | null;
 }
@@ -302,6 +307,16 @@ function createMockDb(
                   run.startedAt = data.startedAt as Date;
                 if (data.completedAt !== undefined)
                   run.completedAt = data.completedAt as Date;
+                if (data.writebackStatus !== undefined)
+                  run.writebackStatus = data.writebackStatus as string | null;
+                if (data.writebackOutcome !== undefined)
+                  run.writebackOutcome = data.writebackOutcome;
+                if (data.writebackAttempts !== undefined)
+                  run.writebackAttempts = data.writebackAttempts as number;
+                if (data.writebackLastError !== undefined)
+                  run.writebackLastError = data.writebackLastError as
+                    | string
+                    | null;
               }
             } else if (isNodesTable(table)) {
               // Apply update to all nodes (filter is opaque in mock — tests are designed
@@ -377,6 +392,10 @@ function makeRun(overrides: Partial<MockRunRow> = {}): MockRunRow {
     limits: null,
     startedAt: null,
     completedAt: null,
+    writebackStatus: null,
+    writebackOutcome: null,
+    writebackAttempts: 0,
+    writebackLastError: null,
     ownerEmail: "local@localhost",
     orgId: null,
     ...overrides,
@@ -2124,6 +2143,159 @@ describe("V3Reconciler", () => {
         });
       });
     });
+  });
+
+  // Task board #38 follow-up ("回写通道 fire-and-forget 无持久补偿(改持久
+  // outbox)"): the persistent writeback outbox. `finalizeRun` now durably
+  // enqueues a `writebackStatus`/`writebackOutcome` row BEFORE the
+  // fire-and-forget fast-path delivery attempt, and `drainWritebackOutbox`
+  // (called by the periodic sweep, server/queue/v3-writeback-outbox-sweep.ts)
+  // is the backstop that drains anything still 'pending'. The real
+  // crash/redeploy simulation (a row enqueued but never delivered, then
+  // picked up by a FRESH V3Reconciler instance's drainWritebackOutbox — the
+  // in-process stand-in for "server restarted") runs against REAL Postgres in
+  // v3-writeback-outbox-sweep.pg.spec.ts; these mock-DB tests cover the
+  // faster-to-run unit-level contract: the row is durably enqueued, done on
+  // success, left pending (never a third "gave up" state) on failure, and the
+  // sweep drain reuses the exact same delivery path as the fast path.
+  describe("F9-followup — persistent writeback outbox (task board #38)", () => {
+    beforeEach(() => {
+      vi.mocked(onRunTerminal).mockReset();
+    });
+
+    it("finalizeRun durably enqueues the outbox row (writebackStatus='pending' + classified outcome) SYNCHRONOUSLY, before the fire-and-forget delivery attempt resolves", async () => {
+      // Never resolves within this test — proves the enqueue write already
+      // landed even though delivery is still in flight (the exact ordering
+      // guarantee a crash mid-delivery depends on).
+      let releaseDelivery: () => void = () => {};
+      vi.mocked(onRunTerminal).mockImplementation(
+        () => new Promise<void>((resolve) => (releaseDelivery = resolve)),
+      );
+
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs } = createMockDb(
+        makeRun({
+          tags: { item_id: "wi-durable", org_id: "org-durable" },
+          dag: { nodes: [] },
+        }),
+        [],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      await reconciler.tick("run-1"); // empty DAG → finalizeRun("done") runs synchronously inside tick()
+
+      // tick() has returned — the enqueue write inside finalizeRun was
+      // AWAITED, so the row must already be durably 'pending' even though
+      // the fire-and-forget onRunTerminal call above is still stuck pending.
+      const run = runs.get("run-1")!;
+      expect(run.writebackStatus).toBe("pending");
+      expect(run.writebackOutcome).toMatchObject({ kind: "zero-delivery" });
+      expect(onRunTerminal).toHaveBeenCalledTimes(1); // fast path did start...
+
+      releaseDelivery(); // ...but let's confirm it can still complete normally
+      await vi.waitFor(() => {
+        expect(runs.get("run-1")!.writebackStatus).toBe("done");
+      });
+    });
+
+    it("normal path (no regression): the fast-path delivery succeeds and marks the outbox row done", async () => {
+      vi.mocked(onRunTerminal).mockResolvedValue(undefined);
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs } = createMockDb(
+        makeRun({
+          tags: { item_id: "wi-ok", org_id: "org-ok" },
+          dag: { nodes: [] },
+        }),
+        [],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      await reconciler.tick("run-1");
+
+      await vi.waitFor(() => {
+        expect(runs.get("run-1")!.writebackStatus).toBe("done");
+      });
+      expect(runs.get("run-1")!.writebackLastError).toBeNull();
+    });
+
+    it("drainWritebackOutbox delivers a pending row via the SAME delivery path and marks it done", async () => {
+      vi.mocked(onRunTerminal).mockResolvedValue(undefined);
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const outcome = {
+        kind: "zero-delivery" as const,
+        workItemId: "wi-sweep",
+        orgId: "org-sweep",
+        runId: "run-1",
+        reason: "run-done-no-delivery",
+      };
+      const { db, runs } = createMockDb(
+        makeRun({
+          status: "done",
+          writebackStatus: "pending",
+          writebackOutcome: outcome,
+          writebackAttempts: 0,
+        }),
+        [],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      const result = await reconciler.drainWritebackOutbox();
+
+      expect(result).toEqual({ processed: 1, succeeded: 1 });
+      expect(onRunTerminal).toHaveBeenCalledWith(outcome);
+      expect(runs.get("run-1")!.writebackStatus).toBe("done");
+    });
+
+    it("drainWritebackOutbox leaves the row 'pending' (never a third give-up state) when delivery keeps failing, so the NEXT sweep tick retries it", async () => {
+      vi.mocked(onRunTerminal).mockRejectedValue(new Error("tracker down"));
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const outcome = {
+        kind: "zero-delivery" as const,
+        workItemId: "wi-stuck",
+        orgId: "org-stuck",
+        runId: "run-1",
+        reason: "run-failed",
+      };
+      const { db, runs, events } = createMockDb(
+        makeRun({
+          status: "failed",
+          writebackStatus: "pending",
+          writebackOutcome: outcome,
+          writebackAttempts: 0,
+        }),
+        [],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1]);
+      const result = await reconciler.drainWritebackOutbox();
+
+      expect(result).toEqual({ processed: 1, succeeded: 0 });
+      // Never abandoned — status is 'pending' again, not e.g. 'failed'/'given-up'.
+      expect(runs.get("run-1")!.writebackStatus).toBe("pending");
+      expect(runs.get("run-1")!.writebackAttempts).toBeGreaterThan(0);
+      expect(runs.get("run-1")!.writebackLastError).toContain("tracker down");
+      expect(events.some((e) => e.kind === "writeback.failed")).toBe(true);
+
+      // A second sweep tick retries the SAME row — proving nothing marks it
+      // permanently un-retryable after one failed round.
+      vi.mocked(onRunTerminal).mockResolvedValue(undefined);
+      const result2 = await reconciler.drainWritebackOutbox();
+      expect(result2).toEqual({ processed: 1, succeeded: 1 });
+      expect(runs.get("run-1")!.writebackStatus).toBe("done");
+    });
+
+    // Note: "only writebackStatus='pending' rows are drained" (the real SQL
+    // WHERE filter) is NOT provable against this mock DB — createMockDb's
+    // select().from().where() ignores its filter for EVERY table by design
+    // (see the file header / R9 describe block's mock-DB note above), so a
+    // "no pending rows → no-op" case here would only prove the mock is
+    // filter-blind, not that the real query is correct. That real-SQL
+    // behavior is exercised against genuine Postgres in
+    // v3-writeback-outbox-sweep.pg.spec.ts instead.
   });
 
   // ── F10 — R9 spawn→node conduction invariant (SDLC-050) ──────────────────
