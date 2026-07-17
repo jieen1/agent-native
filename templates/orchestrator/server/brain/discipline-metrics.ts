@@ -17,9 +17,10 @@
 // Row-fetch-then-reduce-in-JS (mirrors writeback-telemetry.ts) for the same
 // testability reasons as harness-status.ts.
 
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 
 import { getV3Db, v3Schema } from "../db/index.js";
+import { buildTemplateDeviation } from "../tracker-client.js";
 import { brainSpawnKey } from "./tool-denied.js";
 
 export interface BrainDisciplineMetrics {
@@ -27,6 +28,16 @@ export interface BrainDisciplineMetrics {
   deniedFileEdits: number;
   /** Today's total vLLM worker tokens (input+output), owner-scoped, GLOBAL. */
   vllmTokensToday: number;
+  /**
+   * R4a.3 L2 (docs/sdlc-product-design/r4-workflow-families-planning-
+   * skills.md §4.4 second/fifth bullet) — a leave-a-trace COUNTER, not a
+   * blocking mechanism ("留痕+度量, 不是机制性禁止"): how many of this
+   * thread's terminal runs actually used a different template than the L1
+   * suggestion carried in `tags.suggestedTemplate` (or explicitly logged a
+   * `deviationReason` anyway). Recomputed live from v3_runs — does not depend
+   * on the tracker having received/persisted the writeback.
+   */
+  templateDeviationCount: number;
 }
 
 function startOfToday(): Date {
@@ -87,5 +98,28 @@ export async function getDisciplineMetrics(
     vllmTokensToday = 0;
   }
 
-  return { deniedFileEdits, vllmTokensToday };
+  let templateDeviationCount = 0;
+  try {
+    const rows = await db
+      .select({
+        tags: v3Schema.v3Runs.tags,
+        templateName: v3Schema.v3WorkflowTemplates.name,
+      })
+      .from(v3Schema.v3Runs)
+      .leftJoin(
+        v3Schema.v3WorkflowTemplates,
+        eq(v3Schema.v3WorkflowTemplates.id, v3Schema.v3Runs.templateId),
+      )
+      .where(
+        sql`${v3Schema.v3Runs.tags} @> ${JSON.stringify({ brainThreadId: threadId })}::jsonb`,
+      )
+      .limit(1000);
+    templateDeviationCount = rows.filter((r) =>
+      buildTemplateDeviation(r.templateName ?? null, r.tags),
+    ).length;
+  } catch {
+    templateDeviationCount = 0;
+  }
+
+  return { deniedFileEdits, vllmTokensToday, templateDeviationCount };
 }

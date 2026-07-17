@@ -22,10 +22,24 @@ interface MockSpawnRow {
   startedAt: Date;
 }
 
+// R4a.3 L2 (templateDeviationCount) fixtures — a run row (tags + templateId)
+// joined in JS against a template row (id + name), mirroring the leftJoin the
+// real getDisciplineMetrics query performs against Postgres.
+interface MockRunRow {
+  tags: Record<string, unknown> | null;
+  templateId: string | null;
+}
+interface MockTemplateRow {
+  id: string;
+  name: string;
+}
+
 const hoisted = vi.hoisted(() => {
   const spawnEvents: MockSpawnEventRow[] = [];
   const spawns: MockSpawnRow[] = [];
-  return { spawnEvents, spawns };
+  const runs: MockRunRow[] = [];
+  const templates: MockTemplateRow[] = [];
+  return { spawnEvents, spawns, runs, templates };
 });
 
 vi.mock("../db/index.js", async (importOriginal) => {
@@ -42,6 +56,13 @@ vi.mock("../db/index.js", async (importOriginal) => {
       "renderedPrompt" in (table as object)
     );
   }
+  function isRunsTable(table: unknown): boolean {
+    return (
+      table !== null &&
+      typeof table === "object" &&
+      "dagVersion" in (table as object)
+    );
+  }
   return {
     ...actual,
     getV3Db: vi.fn(() => ({
@@ -54,6 +75,22 @@ vi.mock("../db/index.js", async (importOriginal) => {
               if (isSpawnsTable(table)) return hoisted.spawns.slice(0, n);
               return [];
             },
+          }),
+          // Only v3Runs.leftJoin(v3WorkflowTemplates, ...) is exercised by the
+          // real code (templateDeviationCount) — join in JS against the
+          // fixture templates by id, mirroring the real SQL join's shape.
+          leftJoin: (_joinTable: unknown, _cond: unknown) => ({
+            where: (_filter: unknown) => ({
+              limit: (n: number) => {
+                if (!isRunsTable(table)) return [];
+                return hoisted.runs.slice(0, n).map((r) => ({
+                  tags: r.tags,
+                  templateName:
+                    hoisted.templates.find((t) => t.id === r.templateId)
+                      ?.name ?? null,
+                }));
+              },
+            }),
           }),
         }),
       }),
@@ -92,11 +129,17 @@ describe("getDisciplineMetrics", () => {
   beforeEach(() => {
     hoisted.spawnEvents.length = 0;
     hoisted.spawns.length = 0;
+    hoisted.runs.length = 0;
+    hoisted.templates.length = 0;
   });
 
   it("all-zero with no spawn_events / v3_spawns rows", async () => {
     const result = await getDisciplineMetrics("thread-1", "local@localhost");
-    expect(result).toEqual({ deniedFileEdits: 0, vllmTokensToday: 0 });
+    expect(result).toEqual({
+      deniedFileEdits: 0,
+      vllmTokensToday: 0,
+      templateDeviationCount: 0,
+    });
   });
 
   it("counts only tool.denied rows for THIS thread's brain: spawn key", async () => {
@@ -144,5 +187,53 @@ describe("getDisciplineMetrics", () => {
     );
     const result = await getDisciplineMetrics("thread-1", "local@localhost");
     expect(result.vllmTokensToday).toBe(200);
+  });
+
+  // R4a.3 L2 — templateDeviationCount (§4.4 second/fifth bullet: leave-a-
+  // trace counter, not a blocking mechanism).
+  describe("templateDeviationCount", () => {
+    it("counts a run whose real template differs from tags.suggestedTemplate", async () => {
+      hoisted.templates.push({ id: "tpl-1", name: "quick-task" });
+      hoisted.runs.push({
+        tags: { suggestedTemplate: "sdlc-issue-pipeline" },
+        templateId: "tpl-1",
+      });
+      const result = await getDisciplineMetrics("thread-1", "local@localhost");
+      expect(result.templateDeviationCount).toBe(1);
+    });
+
+    it("does not count a run whose real template matches the suggestion", async () => {
+      hoisted.templates.push({ id: "tpl-1", name: "hotfix" });
+      hoisted.runs.push({
+        tags: { suggestedTemplate: "hotfix" },
+        templateId: "tpl-1",
+      });
+      const result = await getDisciplineMetrics("thread-1", "local@localhost");
+      expect(result.templateDeviationCount).toBe(0);
+    });
+
+    it("does not count a run with no L1 suggestion in its tags", async () => {
+      hoisted.templates.push({ id: "tpl-1", name: "quick-task" });
+      hoisted.runs.push({ tags: {}, templateId: "tpl-1" });
+      const result = await getDisciplineMetrics("thread-1", "local@localhost");
+      expect(result.templateDeviationCount).toBe(0);
+    });
+
+    it("sums across multiple runs for the thread", async () => {
+      hoisted.templates.push(
+        { id: "tpl-1", name: "quick-task" },
+        { id: "tpl-2", name: "hotfix" },
+      );
+      hoisted.runs.push(
+        {
+          tags: { suggestedTemplate: "sdlc-issue-pipeline" },
+          templateId: "tpl-1",
+        },
+        { tags: { suggestedTemplate: "hotfix" }, templateId: "tpl-2" },
+        { tags: { suggestedTemplate: "docs-task" }, templateId: "tpl-1" },
+      );
+      const result = await getDisciplineMetrics("thread-1", "local@localhost");
+      expect(result.templateDeviationCount).toBe(2);
+    });
   });
 });

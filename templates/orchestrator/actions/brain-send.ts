@@ -14,22 +14,24 @@
 // queue. Resumes never consume a fresh slot (the thread already holds one until
 // its run goes terminal).
 
+import { randomUUID } from "node:crypto";
+
 import { defineAction } from "@agent-native/core";
 import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { startBrainTurn } from "../server/brain/brain-session.js";
-import { createLocalWorkspace } from "../server/v3-workspace-local.js";
 import { getV3Db, v3Schema } from "../server/db/index.js";
 import {
   enqueueBrainTask,
   admitBrainTasks,
   countRunningBrainTasks,
 } from "../server/queue/brain-admit.js";
+import { createLocalWorkspace } from "../server/v3-workspace-local.js";
 
 export default defineAction({
   description:
@@ -61,6 +63,18 @@ export default defineAction({
      * runsList/spawnList { tagMatch }. Additive and backward-compatible.
      */
     tags: z.record(z.string(), z.string()).optional(),
+    /**
+     * R4a.3 L1 (docs/sdlc-product-design/r4-workflow-families-planning-
+     * skills.md §4.4 first bullet) — tracker's suggested workflowRun `inputs`
+     * for the L1-suggested template (carried alongside `tags.suggestedTemplate`
+     * / `tags.ruleId`, which are plain strings and already fit `tags`). This is
+     * a nested object, so it needs its own field rather than being squeezed
+     * into the string-only `tags` map. A deterministic PRE-SELECTION, not a
+     * mandate — appended to the brain's message below as read-only context;
+     * the brain remains free to deviate (see the L2 deviation-tracking piece:
+     * writeback-run-meta.ts's optional `templateDeviation` field).
+     */
+    suggestedInputs: z.record(z.string(), z.unknown()).optional(),
     /**
      * Periodic drift-check cadence (seconds) for the brain monitor scheduler,
      * persisted on the brain thread. Omit/undefined → env default
@@ -100,6 +114,21 @@ export default defineAction({
       `EVERY workflowRun, workspaceCreate, and spawnOnce call you make so ` +
       `this work is traceable and can be auto-resumed when the run finishes: ` +
       `${JSON.stringify(tags)}`;
+
+    // R4a.3 L1 (§4.4): surface the tracker's suggested template + inputs as
+    // read-only context, not a mandate. If you dispatch with a DIFFERENT
+    // template than `tags.suggestedTemplate`, also set a `deviationReason`
+    // key in that SAME tags object on your workflowRun call (leave-a-trace
+    // L2, not mechanical enforcement — see the design doc's "留痕+度量,
+    // 不是机制性禁止").
+    if (args.suggestedInputs && Object.keys(args.suggestedInputs).length > 0) {
+      message +=
+        `\n\nL1 routing suggestion (tracker's deterministic pre-selection — ` +
+        `you may deviate; if you do, add a \`deviationReason\` key to the ` +
+        `\`tags\` object above on your workflowRun call so the deviation is ` +
+        `recorded): suggested template = ${tags.suggestedTemplate ?? "(unspecified)"}, ` +
+        `suggested inputs = ${JSON.stringify(args.suggestedInputs)}`;
+    }
 
     // ── RESUME path ───────────────────────────────────────────────────────────
     // A reply to an EXISTING thread is a resume, not a fresh dispatch: it must

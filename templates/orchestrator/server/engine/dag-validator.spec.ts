@@ -1,12 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { validateDag, type V3Dag, type V3Node } from "./dag-validator.js";
+
+import {
+  validateDag,
+  isClaudeCodeEngineRef,
+  nodeTargetsClaudeCode,
+  type V3Dag,
+  type V3Node,
+} from "./dag-validator.js";
 
 const validDag: V3Dag = {
   nodes: [
-    { type: "agent" as const, id: "research", agent: "claude", prompt: "Research the topic" },
-    { type: "agent" as const, id: "write", agent: "claude", prompt: "Write the article", deps: ["research"] },
-    { type: "parallel_over" as const, id: "fanout", deps: ["research"], body: "review_step" },
-    { type: "agent" as const, id: "review_step", agent: "claude", prompt: "Review each" },
+    {
+      type: "agent" as const,
+      id: "research",
+      agent: "claude",
+      prompt: "Research the topic",
+    },
+    {
+      type: "agent" as const,
+      id: "write",
+      agent: "claude",
+      prompt: "Write the article",
+      deps: ["research"],
+    },
+    {
+      type: "parallel_over" as const,
+      id: "fanout",
+      deps: ["research"],
+      body: "review_step",
+    },
+    {
+      type: "agent" as const,
+      id: "review_step",
+      agent: "claude",
+      prompt: "Review each",
+    },
   ],
 };
 
@@ -26,8 +54,20 @@ describe("validateDag", () => {
   it("cycle detected", () => {
     const result = validateDag({
       nodes: [
-        { type: "agent" as const, id: "a", agent: "x", prompt: "p", deps: ["b"] },
-        { type: "agent" as const, id: "b", agent: "x", prompt: "p", deps: ["a"] },
+        {
+          type: "agent" as const,
+          id: "a",
+          agent: "x",
+          prompt: "p",
+          deps: ["b"],
+        },
+        {
+          type: "agent" as const,
+          id: "b",
+          agent: "x",
+          prompt: "p",
+          deps: ["a"],
+        },
       ],
     });
     expect(result.ok).toBe(false);
@@ -37,7 +77,12 @@ describe("validateDag", () => {
   it("parallel_over with missing deps rejected", () => {
     const result = validateDag({
       nodes: [
-        { type: "parallel_over" as const, id: "p", deps: ["nonexistent"], body: "body_node" },
+        {
+          type: "parallel_over" as const,
+          id: "p",
+          deps: ["nonexistent"],
+          body: "body_node",
+        },
         { type: "agent" as const, id: "body_node", agent: "x", prompt: "p" },
       ],
     });
@@ -63,7 +108,15 @@ describe("validateDag", () => {
 
   it("invalid guard expression rejected", () => {
     const result = validateDag({
-      nodes: [{ type: "agent" as const, id: "a", agent: "x", prompt: "p", guard: "1 +" }],
+      nodes: [
+        {
+          type: "agent" as const,
+          id: "a",
+          agent: "x",
+          prompt: "p",
+          guard: "1 +",
+        },
+      ],
     });
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toContain("guard");
@@ -71,7 +124,15 @@ describe("validateDag", () => {
 
   it("invalid output_schema rejected", () => {
     const result = validateDag({
-      nodes: [{ type: "agent" as const, id: "a", agent: "x", prompt: "p", output_schema: { type: "invalid_type" } }],
+      nodes: [
+        {
+          type: "agent" as const,
+          id: "a",
+          agent: "x",
+          prompt: "p",
+          output_schema: { type: "invalid_type" },
+        },
+      ],
     });
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toContain("output_schema");
@@ -110,7 +171,13 @@ describe("validateDag", () => {
     it("rejects non-number max_summary_tokens", () => {
       const result = validateDag({
         nodes: [
-          { type: "agent" as const, id: "a", agent: "x", prompt: "p", max_summary_tokens: "2000" as any },
+          {
+            type: "agent" as const,
+            id: "a",
+            agent: "x",
+            prompt: "p",
+            max_summary_tokens: "2000" as any,
+          },
         ],
       });
       expect(result.ok).toBe(false);
@@ -120,7 +187,13 @@ describe("validateDag", () => {
     it("rejects non-number timeout_seconds", () => {
       const result = validateDag({
         nodes: [
-          { type: "agent" as const, id: "a", agent: "x", prompt: "p", timeout_seconds: "600" as any },
+          {
+            type: "agent" as const,
+            id: "a",
+            agent: "x",
+            prompt: "p",
+            timeout_seconds: "600" as any,
+          },
         ],
       });
       expect(result.ok).toBe(false);
@@ -130,7 +203,13 @@ describe("validateDag", () => {
     it("rejects retry without max field", () => {
       const result = validateDag({
         nodes: [
-          { type: "agent" as const, id: "a", agent: "x", prompt: "p", retry: { on: ["transient"] } as any },
+          {
+            type: "agent" as const,
+            id: "a",
+            agent: "x",
+            prompt: "p",
+            retry: { on: ["transient"] } as any,
+          },
         ],
       });
       expect(result.ok).toBe(false);
@@ -140,11 +219,74 @@ describe("validateDag", () => {
     it("rejects non-string engine_override", () => {
       const result = validateDag({
         nodes: [
-          { type: "agent" as const, id: "a", agent: "x", prompt: "p", engine_override: 42 as any },
+          {
+            type: "agent" as const,
+            id: "a",
+            agent: "x",
+            prompt: "p",
+            engine_override: 42 as any,
+          },
         ],
       });
       expect(result.ok).toBe(false);
       expect(result.errors[0]).toContain("engine_override");
+    });
+
+    it("rejects engine_override:'claude-code' on a worker node (CC subscription reserved for the brain)", () => {
+      const result = validateDag({
+        nodes: [
+          {
+            type: "agent" as const,
+            id: "a",
+            agent: "x",
+            prompt: "p",
+            engine_override: "claude-code",
+          },
+        ],
+      });
+      expect(result.ok).toBe(false);
+      expect(result.errors[0]).toContain(
+        "engine_override 'claude-code' is not allowed",
+      );
+    });
+
+    it("rejects engine_override:'acp:claude*' variants case-insensitively", () => {
+      const result = validateDag({
+        nodes: [
+          {
+            type: "agent" as const,
+            id: "a",
+            agent: "x",
+            prompt: "p",
+            engine_override: "ACP:Claude-Code",
+          },
+        ],
+      });
+      expect(result.ok).toBe(false);
+      expect(result.errors[0]).toContain(
+        "engine_override 'claude-code' is not allowed",
+      );
+    });
+
+    // R4a.3 §4.2 point 7 — `agent:"claude-code"` is a first-party, sanctioned
+    // review/audit worker (all 9 seed templates' REVIEW constant + production
+    // brain DAGs like sdlc-issue-pipeline v4 depend on it). The gap the design
+    // closes is resource-protection (the concurrency gate in
+    // server/queue/claude-code-admit.ts), NOT a validateDag ban — banning it
+    // here would break those sanctioned DAGs.
+    it("does NOT reject agent:'claude-code' (sanctioned review/audit worker, unlike engine_override)", () => {
+      const result = validateDag({
+        nodes: [
+          {
+            type: "agent" as const,
+            id: "review",
+            agent: "claude-code",
+            prompt: "Review the diff",
+          },
+        ],
+      });
+      expect(result.ok).toBe(true);
+      expect(result.errors).toEqual([]);
     });
   });
 
@@ -159,7 +301,11 @@ describe("validateDag", () => {
             id: "fanout",
             deps: ["src"],
             items_from: "deps.src.output.files",
-            body: { type: "agent" as const, agent: "impl", prompt: "Impl {{item}}" },
+            body: {
+              type: "agent" as const,
+              agent: "impl",
+              prompt: "Impl {{item}}",
+            },
           },
           { type: "agent" as const, id: "src", agent: "x", prompt: "p" },
         ],
@@ -286,7 +432,13 @@ describe("validateDag", () => {
       const result = validateDag({
         nodes: [
           { type: "agent" as const, id: "step", agent: "x", prompt: "p" },
-          { type: "loop" as const, id: "lp", body: "step", maxIterations: 3, max_iterations: 5 },
+          {
+            type: "loop" as const,
+            id: "lp",
+            body: "step",
+            maxIterations: 3,
+            max_iterations: 5,
+          },
         ],
       });
       expect(result.ok).toBe(false);
@@ -306,12 +458,12 @@ describe("validateDag", () => {
 
     it("rejects empty loop body array", () => {
       const result = validateDag({
-        nodes: [
-          { type: "loop" as const, id: "lp", body: [] },
-        ],
+        nodes: [{ type: "loop" as const, id: "lp", body: [] }],
       });
       expect(result.ok).toBe(false);
-      expect(result.errors.some(e => e.includes("body array must not be empty"))).toBe(true);
+      expect(
+        result.errors.some((e) => e.includes("body array must not be empty")),
+      ).toBe(true);
     });
   });
 
@@ -412,5 +564,56 @@ describe("validateDag", () => {
       expect(result.ok).toBe(false);
       expect(result.errors[0]).toContain("guard");
     });
+  });
+});
+
+// R4a.3 §4.2 point 7 — shared claude-code recognition predicate, used by both
+// this file's (unchanged) engine_override hard-reject AND the concurrency
+// admission gate (server/queue/claude-code-admit.ts) so both paths recognize
+// the SAME "targets claude-code" condition.
+describe("isClaudeCodeEngineRef", () => {
+  it("matches the literal 'claude-code' agent-def name", () => {
+    expect(isClaudeCodeEngineRef("claude-code")).toBe(true);
+  });
+
+  it("matches 'acp:claude*' variants case-insensitively", () => {
+    expect(isClaudeCodeEngineRef("acp:claude-code")).toBe(true);
+    expect(isClaudeCodeEngineRef("ACP:Claude-Code")).toBe(true);
+    expect(isClaudeCodeEngineRef("  acp:claude-code  ")).toBe(true);
+  });
+
+  it("does not match other engines/agents", () => {
+    expect(isClaudeCodeEngineRef("claude")).toBe(false);
+    expect(isClaudeCodeEngineRef("ai-sdk:anthropic")).toBe(false);
+    expect(isClaudeCodeEngineRef("vllm")).toBe(false);
+  });
+
+  it("tolerates null/undefined/empty", () => {
+    expect(isClaudeCodeEngineRef(null)).toBe(false);
+    expect(isClaudeCodeEngineRef(undefined)).toBe(false);
+    expect(isClaudeCodeEngineRef("")).toBe(false);
+  });
+});
+
+describe("nodeTargetsClaudeCode", () => {
+  it("true when agent is 'claude-code'", () => {
+    expect(
+      nodeTargetsClaudeCode({
+        agent: "claude-code",
+        engine_override: undefined,
+      }),
+    ).toBe(true);
+  });
+
+  it("true when engine_override is 'claude-code'", () => {
+    expect(
+      nodeTargetsClaudeCode({ agent: "vllm", engine_override: "claude-code" }),
+    ).toBe(true);
+  });
+
+  it("false for a plain non-claude-code worker", () => {
+    expect(
+      nodeTargetsClaudeCode({ agent: "vllm", engine_override: undefined }),
+    ).toBe(false);
   });
 });
