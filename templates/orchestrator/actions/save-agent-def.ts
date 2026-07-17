@@ -1,4 +1,4 @@
-import { defineAction } from "@agent-native/core";
+import { AgentActionStopError, defineAction } from "@agent-native/core";
 import {
   getRequestUserEmail,
   getRequestOrgId,
@@ -66,7 +66,10 @@ export default defineAction({
       const access = await resolveAccess("agent_def", ex.id);
       const canWrite = ex.builtin === 0 && !!access && access.role !== "viewer";
       if (!canWrite) {
-        throw new Error("该名称已被占用");
+        // Plain Error is masked to a generic 500 by action-routes.ts before it
+        // reaches the browser toast — this message must be an
+        // AgentActionStopError (or carry statusCode<500) to surface at all.
+        throw new AgentActionStopError("该名称已被占用");
       }
 
       await db

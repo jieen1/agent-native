@@ -1,4 +1,4 @@
-import { defineAction } from "@agent-native/core";
+import { AgentActionStopError, defineAction } from "@agent-native/core";
 import { resolveAccess } from "@agent-native/core/sharing";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -39,7 +39,10 @@ export default defineAction({
       (access.role === "owner" || access.role === "admin");
 
     if (!canDelete) {
-      throw new Error(`Agent '${args.id}' not found`);
+      // Plain Error is masked to a generic 500 by action-routes.ts before it
+      // reaches the browser toast — this message must be an
+      // AgentActionStopError (or carry statusCode<500) to surface at all.
+      throw new AgentActionStopError(`Agent '${args.id}' not found`);
     }
 
     await db.delete(schema.agentDefs).where(eq(schema.agentDefs.id, args.id));
