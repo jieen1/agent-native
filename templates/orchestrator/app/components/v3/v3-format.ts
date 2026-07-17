@@ -75,63 +75,59 @@ export function fmtDateTime(iso: string | null | undefined): string {
  * brain thread and a v3 run never disagree about what "running" looks like.
  */
 export const STATUS_DOT: Record<string, string> = {
-  running: "bg-blue-500",
-  done: "bg-emerald-500",
-  failed: "bg-red-500",
-  cancelled: "bg-orange-500",
-  skipped: "bg-zinc-400",
-  "awaiting-approval": "bg-purple-500",
-  ready: "bg-sky-400",
-  pending: "bg-zinc-500",
-  paused: "bg-amber-500",
+  running: "bg-info",
+  done: "bg-success",
+  failed: "bg-destructive",
+  cancelled: "bg-warning",
+  skipped: "bg-muted-foreground",
+  "awaiting-approval": "bg-agent",
+  ready: "bg-info",
+  pending: "bg-muted-foreground",
+  paused: "bg-warning",
   // Brain-thread-only statuses (brain_threads.status; see brain.tsx).
-  error: "bg-red-500",
-  queued: "bg-amber-500",
-  idle: "bg-zinc-400",
+  error: "bg-destructive",
+  queued: "bg-warning",
+  idle: "bg-muted-foreground",
 };
 
 /**
- * Full badge (bg/text/dark:) classes per status, derived from the SAME color
+ * Full badge (bg/text) classes per status, derived from the SAME color
  * identity as {@link STATUS_DOT} — the single mapping both the thread rail's
  * dot and any header/status badge must read from, instead of each surface
  * hardcoding its own literal Tailwind palette (a past brain.tsx inconsistency:
  * ad hoc bg-blue-100/bg-red-100/bg-emerald-100 literals with no shared source
  * of truth). Covers the statuses STATUS_DOT does; falls back to a neutral
- * muted badge for anything else.
+ * muted badge for anything else. Semantic tokens (--info/--success/--...) are
+ * already theme-aware (see global.css :root/.dark), so no separate `dark:`
+ * variant is needed the way the old literal palette required one.
  */
 export const STATUS_BADGE: Record<string, string> = {
-  running: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  done: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-  failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  error: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  cancelled:
-    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
-  queued:
-    "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  paused:
-    "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  idle: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400",
+  running: "bg-info/15 text-info",
+  done: "bg-success/15 text-success",
+  failed: "bg-destructive/15 text-destructive",
+  error: "bg-destructive/15 text-destructive",
+  cancelled: "bg-warning/15 text-warning",
+  queued: "bg-warning/15 text-warning",
+  paused: "bg-warning/15 text-warning",
+  idle: "bg-muted text-muted-foreground",
 };
 
 /** Badge classes for a status, falling back to a neutral muted style. */
 export function statusBadgeClass(status: string): string {
-  return (
-    STATUS_BADGE[status] ??
-    "bg-zinc-100 text-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400"
-  );
+  return STATUS_BADGE[status] ?? "bg-muted text-muted-foreground";
 }
 
 /** Accent ring/border color per status for high-contrast cards. */
 export const STATUS_ACCENT: Record<string, string> = {
-  running: "border-blue-500/60 bg-blue-500/5",
-  done: "border-emerald-500/50 bg-emerald-500/[0.04]",
-  failed: "border-red-500/60 bg-red-500/[0.06]",
-  cancelled: "border-orange-500/60 bg-orange-500/[0.06]",
-  skipped: "border-zinc-500/40 bg-zinc-500/[0.04]",
-  "awaiting-approval": "border-purple-500/60 bg-purple-500/[0.06]",
-  ready: "border-sky-500/50 bg-sky-500/[0.05]",
+  running: "border-info/60 bg-info/5",
+  done: "border-success/50 bg-success/[0.04]",
+  failed: "border-destructive/60 bg-destructive/[0.06]",
+  cancelled: "border-warning/60 bg-warning/[0.06]",
+  skipped: "border-muted-foreground/40 bg-muted-foreground/[0.04]",
+  "awaiting-approval": "border-agent/60 bg-agent/[0.06]",
+  ready: "border-info/50 bg-info/[0.05]",
   pending: "border-border bg-transparent",
-  paused: "border-amber-500/60 bg-amber-500/[0.06]",
+  paused: "border-warning/60 bg-warning/[0.06]",
 };
 
 export function statusLabel(status: string): string {
@@ -200,15 +196,17 @@ export function agentPresentation(
   if (key.includes("claude")) {
     return {
       label: "Claude Code",
-      className:
-        "bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400",
+      // No dedicated orange token in the Foundry set — closest existing hue
+      // is --warning (amber), same "borrow the nearest hue" call tracker made
+      // for its orange cancelled/blocked statuses.
+      className: "bg-warning/10 text-warning border-warning/30",
     };
   }
   if (key.includes("vllm")) {
     return {
       label: "vLLM",
-      className:
-        "bg-violet-500/10 text-violet-600 border-violet-500/30 dark:text-violet-400",
+      // --agent is literally the violet/purple hue this used as a raw literal.
+      className: "bg-agent/10 text-agent border-agent/30",
     };
   }
   if (key.includes("codex")) {

@@ -74,7 +74,7 @@ function PatchTimeline({ patches }: { patches: V3Patch[] }) {
           className="rounded-lg border border-border bg-card p-3"
         >
           <div className="flex items-center gap-2">
-            <span className="size-2.5 shrink-0 rounded-full bg-purple-500" />
+            <span className="size-2.5 shrink-0 rounded-full bg-agent" />
             <Badge variant="secondary" className="font-mono text-xs">
               v{patch.dagVersionBefore} → v{patch.dagVersionAfter}
             </Badge>
@@ -150,12 +150,12 @@ const NODE_STATUS_LABEL: Record<string, string> = {
 
 function NodeCountPills({ counts }: { counts: Record<string, number> }) {
   const order: Array<[string, string, typeof IconCircleCheck]> = [
-    ["done", "text-emerald-500", IconCircleCheck],
-    ["running", "text-blue-500", IconLoader2],
-    ["failed", "text-red-500", IconCircleX],
-    ["awaiting-approval", "text-purple-500", IconBox],
-    ["pending", "text-zinc-400", IconBox],
-    ["skipped", "text-zinc-400", IconBox],
+    ["done", "text-success", IconCircleCheck],
+    ["running", "text-info", IconLoader2],
+    ["failed", "text-destructive", IconCircleX],
+    ["awaiting-approval", "text-agent", IconBox],
+    ["pending", "text-muted-foreground", IconBox],
+    ["skipped", "text-muted-foreground", IconBox],
   ];
   const visible = order.filter(([k]) => (counts[k] ?? 0) > 0);
   if (visible.length === 0) return null;
@@ -439,7 +439,7 @@ export function RunView({ runId }: RunViewProps) {
             icon={IconCoin}
             label="Token 总计"
             value={totalTokens != null ? fmtTokens(totalTokens) : "—"}
-            tone="text-amber-500"
+            tone="text-warning"
           />
           <StatChip
             icon={IconStack2}
