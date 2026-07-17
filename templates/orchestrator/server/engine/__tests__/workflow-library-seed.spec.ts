@@ -1,10 +1,13 @@
-// S8 workflow library seed (04-orchestrator.md §4/§13 — "种子：九套工作流模板
-// (sdlc 族 5 套 + 轻量族 4 套)"). Proves the seed data is actually save-able
-// through the SAME validateDag() workflowSave/workflowRun enforce, so a boot-time
-// seed-plugin failure (swallowed by its best-effort try/catch) can't silently
-// mean "every entry always fails validation and nothing ever gets seeded".
+// S8 workflow library seed, R4a hardened (docs/sdlc-product-design/
+// r4-workflow-families-planning-skills.md §4.1/§4.3 — task board #77): 13
+// built-in templates (core 族 4 套，收编自 101 自举血统 + sdlc 族 5 套 + 轻量族
+// 4 套). Proves the seed data is actually save-able through the SAME
+// validateDag() workflowSave/workflowRun enforce, so a boot-time seed-plugin
+// failure (swallowed by its best-effort try/catch) can't silently mean
+// "every entry always fails validation and nothing ever gets seeded".
 
 import { describe, it, expect } from "vitest";
+
 import { validateDag } from "../dag-validator.js";
 import {
   WORKFLOW_LIBRARY_SEED,
@@ -12,8 +15,8 @@ import {
 } from "../workflow-library-seed.js";
 
 describe("WORKFLOW_LIBRARY_SEED", () => {
-  it("has exactly 9 templates: 5 sdlc + 4 light (02 §3.10 / 04 §13)", () => {
-    expect(WORKFLOW_LIBRARY_SEED).toHaveLength(9);
+  it("has exactly 13 templates: 4 core + 5 sdlc + 4 light (r4 doc §4.1/§4.3)", () => {
+    expect(WORKFLOW_LIBRARY_SEED).toHaveLength(13);
     const byFamily = WORKFLOW_LIBRARY_SEED.reduce(
       (acc, e) => {
         acc[e.family] = (acc[e.family] ?? 0) + 1;
@@ -21,8 +24,10 @@ describe("WORKFLOW_LIBRARY_SEED", () => {
       },
       {} as Record<WorkflowFamily, number>,
     );
+    expect(byFamily.core).toBe(4);
     expect(byFamily.sdlc).toBe(5);
     expect(byFamily.light).toBe(4);
+    expect(byFamily.custom).toBeUndefined();
   });
 
   it("has unique, non-empty names", () => {
