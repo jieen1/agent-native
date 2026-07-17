@@ -60,12 +60,18 @@ interface WorkflowGroup {
 }
 
 function groupByFamily(rows: WorkflowListRow[]): WorkflowGroup[] {
+  const core = rows.filter((r) => r.meta.family === "core");
   const sdlc = rows.filter((r) => r.meta.family === "sdlc");
   const light = rows.filter((r) => r.meta.family === "light");
   const other = rows.filter(
-    (r) => r.meta.family !== "sdlc" && r.meta.family !== "light",
+    (r) =>
+      r.meta.family !== "core" &&
+      r.meta.family !== "sdlc" &&
+      r.meta.family !== "light",
   );
   const groups: WorkflowGroup[] = [];
+  if (core.length > 0)
+    groups.push({ label: "Core 族 · brain 组合微工作流", rows: core });
   if (sdlc.length > 0) groups.push({ label: "SDLC 族 · 内置", rows: sdlc });
   if (light.length > 0) groups.push({ label: "轻量族 · 短流程", rows: light });
   if (other.length > 0) groups.push({ label: "自定义", rows: other });

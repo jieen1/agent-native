@@ -1,6 +1,3 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
-import { toast } from "sonner";
 import {
   useActionMutation,
   useActionQuery,
@@ -12,15 +9,19 @@ import {
   IconDeviceFloppy,
   IconAlertTriangle,
 } from "@tabler/icons-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { WorkflowNodeList } from "./WorkflowNodeList";
-import { WorkflowDagPreview } from "./WorkflowDagPreview";
-import { WorkflowNodeDetail } from "./WorkflowNodeDetail";
+
+import { DispatchGradeBadge } from "./DispatchGradeBadge";
+import { DispatchGradeCheckPanel } from "./DispatchGradeCheckPanel";
 import {
   blankNode,
   groupErrorsByNode,
@@ -29,6 +30,15 @@ import {
   type WorkflowNode,
   type WorkflowNodeType,
 } from "./workflow-dag-types";
+import type {
+  DispatchGradeLintResult,
+  WorkflowVersionRow,
+} from "./workflow-library-types";
+import { WorkflowDagPreview } from "./WorkflowDagPreview";
+import { WorkflowDiffDialog } from "./WorkflowDiffDialog";
+import { WorkflowNodeDetail } from "./WorkflowNodeDetail";
+import { WorkflowNodeList } from "./WorkflowNodeList";
+import { WorkflowVersionChain } from "./WorkflowVersionChain";
 
 interface LocationPrefill {
   name?: string;
@@ -80,6 +90,17 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
     () => agentDefs.map((a) => ({ name: a.name })),
     [agentDefs],
   );
+
+  // ── Version lineage + diff-vs-previous (r4 doc §4.5 gap #3 — same data/
+  // components the library page already renders, s8b-workflow-detail.html
+  // §7). Only meaningful once a saved template is loaded — a brand-new
+  // unsaved template has no version history yet. ───────────────────────────
+  const { data: versions = [], isLoading: versionsLoading } = useActionQuery(
+    "workflowVersions" as any,
+    { name: loaded?.name ?? "" },
+    { enabled: isEdit && !!loaded?.name },
+  ) as { data?: WorkflowVersionRow[]; isLoading: boolean };
+  const [diffOpen, setDiffOpen] = useState(false);
 
   const saveAction = useActionMutation("workflowSave" as any, {});
 
@@ -135,6 +156,34 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
       clearTimeout(timer);
     };
   }, [nodes]);
+
+  // ── Live dispatch-grade lint (debounced, 04 §4.2 — the 7-rule check) ────
+  const [dispatchGrade, setDispatchGrade] =
+    useState<DispatchGradeLintResult | null>(null);
+  const [dispatchGradeLoading, setDispatchGradeLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDispatchGradeLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const result = await callAction<DispatchGradeLintResult>(
+          "dagDispatchGradeLint" as any,
+          { dag: { nodes }, inputSchema },
+        );
+        if (!cancelled) setDispatchGrade(result);
+      } catch {
+        // Same fail-soft posture as the validateDag debounce above — a
+        // transient lint failure must not block editing.
+      } finally {
+        if (!cancelled) setDispatchGradeLoading(false);
+      }
+    }, VALIDATE_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [nodes, inputSchema]);
 
   const { byNode: errorsByNode, global: globalErrors } = useMemo(
     () => groupErrorsByNode(validation?.errors ?? []),
@@ -323,6 +372,12 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
               有效
             </Badge>
           ) : null}
+          {dispatchGrade ? (
+            <DispatchGradeBadge
+              result={dispatchGrade}
+              onLocateNode={setSelectedNodeId}
+            />
+          ) : null}
           <div className="flex-1" />
           <div className="flex items-center gap-2">
             <Button
@@ -354,6 +409,17 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
           </div>
         ) : null}
 
+        {isEdit && loaded ? (
+          <div className="border-b border-border bg-card px-4 py-3">
+            <WorkflowVersionChain
+              name={loaded.name}
+              versions={versions}
+              isLoading={versionsLoading}
+              onOpenDiff={() => setDiffOpen(true)}
+            />
+          </div>
+        ) : null}
+
         <Tabs
           value={activeTab}
           onValueChange={(v) =>
@@ -374,8 +440,8 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
             </span>
           </div>
 
-          <TabsContent value="visual" className="m-0">
-            <div className="grid h-[680px] grid-cols-[280px_minmax(0,1fr)_360px]">
+          <TabsContent value="visual" className="m-0 overflow-x-auto">
+            <div className="grid h-[680px] min-w-[900px] grid-cols-[200px_minmax(180px,1fr)_280px_240px]">
               <div className="border-r border-border">
                 <WorkflowNodeList
                   nodes={nodes}
@@ -395,7 +461,7 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
                   errorsByNode={errorsByNode}
                 />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 border-r border-border">
                 <WorkflowNodeDetail
                   node={selectedNode}
                   otherNodeIds={otherNodeIds}
@@ -407,6 +473,11 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
                   onRenameId={handleRenameId}
                 />
               </div>
+              <DispatchGradeCheckPanel
+                result={dispatchGrade}
+                isLoading={dispatchGradeLoading && !dispatchGrade}
+                onLocateNode={setSelectedNodeId}
+              />
             </div>
           </TabsContent>
 
@@ -424,6 +495,15 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
           </TabsContent>
         </Tabs>
       </div>
+
+      {isEdit && loaded ? (
+        <WorkflowDiffDialog
+          open={diffOpen}
+          onOpenChange={setDiffOpen}
+          name={loaded.name}
+          versions={versions}
+        />
+      ) : null}
     </div>
   );
 }

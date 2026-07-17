@@ -59,6 +59,10 @@ export interface WorkflowHumanGateNode {
   prompt: string;
   deps?: string[];
   guard?: string;
+  /** Choices a human may pick when resolving this gate (r4 doc §4.5) —
+   *  `nodeResolveGate` validates the human's choice against this array when
+   *  present (server/engine/dag-validator.ts's V3HumanGateNode mirror). */
+  options?: string[];
 }
 
 export type WorkflowNode =
