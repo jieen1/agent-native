@@ -13,7 +13,6 @@ import {
   IconBook,
   IconBrain,
   IconChartDots,
-  IconDatabase,
   IconDots,
   IconEdit,
   IconFolders,
@@ -100,13 +99,6 @@ const navItems = [
     label: "派生任务",
     href: "/spawns",
     view: "spawns",
-  },
-  {
-    icon: IconDatabase,
-    labelKey: "nav.pool",
-    label: "资源池",
-    href: "/pool",
-    view: "pool",
   },
   {
     icon: IconHeartRateMonitor,

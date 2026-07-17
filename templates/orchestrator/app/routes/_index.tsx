@@ -16,7 +16,6 @@ const NAV_ITEMS = [
   { to: "/agents", label: "智能体" },
   { to: "/workspaces", label: "工作区" },
   { to: "/spawns", label: "派生任务" },
-  { to: "/pool", label: "资源池" },
 ];
 
 const HEALTH_BAR_REFRESH_MS = 30_000;

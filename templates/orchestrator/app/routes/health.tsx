@@ -664,15 +664,13 @@ function CapacitySection() {
           </div>
         ) : null}
         <DataSourceNote>
-          spawn 并发上限目前是固定容量（DEFAULT_POOL_CAPACITY），调整并发的
+          spawn 并发上限（G18）目前是固定容量 `DEFAULT_POOL_CAPACITY = 8`，与
+          reconciler 的 `poolCapacity` 常量保持一致；调整并发的
           `set-concurrency` 尚未接入（server/runtime/backpressure.ts 明确标注为
           "a future set-concurrency
           wire-up"）——因此这里不提供可交互滑杆，避免呈现一个写不进去的控件。
-          完整 VM 管理见{" "}
-          <Link to="/pool" className="underline-offset-2 hover:underline">
-            资源池
-          </Link>
-          。
+          上方「忙碌」「热机空闲」「队列等待」均从当前排队/spawn 快照实时推导，
+          不是独立的 VM 预热池状态。
         </DataSourceNote>
         <DataTable<DispatchQueueItem>
           isLoading={queueLoading && queue.length === 0}
