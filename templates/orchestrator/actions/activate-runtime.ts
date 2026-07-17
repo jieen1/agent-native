@@ -1,22 +1,27 @@
 import { defineAction } from "@agent-native/core";
+import { writeAppSecret, readAppSecret } from "@agent-native/core/secrets";
 import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
 import { putSetting, deleteSetting } from "@agent-native/core/settings";
-import { writeAppSecret } from "@agent-native/core/secrets";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
-import { nowIso } from "./_util.js";
+import { nowIso, runtimeApiKeySecretKey } from "./_util.js";
 
 // Activate a saved runtime.
 //
 //  - vLLM / OpenAI-compatible → drive the framework's built-in `ai-sdk:openai`
 //    engine at the endpoint's baseUrl. We use the built-in engine (not a custom
 //    one) so the framework's engine registry, status route, and model picker all
-//    recognize it. The engine requires OPENAI_API_KEY, so we store a placeholder
-//    secret (vLLM ignores the key value) to satisfy the usability gate.
+//    recognize it. The engine requires OPENAI_API_KEY, so if this runtime never
+//    had a real key configured (save-runtime-config's optional `apiKey`), we
+//    store a placeholder (vLLM ignores the key value) to satisfy the usability
+//    gate. When a real key WAS configured for this runtime, we write that value
+//    instead so remote OpenAI-compatible providers (OpenAI, Groq, DeepSeek, a
+//    hosted vLLM behind auth) actually authenticate.
 //
 //  - Claude Code → write the `orchestrator-runtime` marker; execution routes to
 //    the Claude Code harness (the chat engine is unchanged — a harness is not an
@@ -50,11 +55,17 @@ export default defineAction({
       });
     } else {
       if (!rt.baseUrl) throw new Error("This runtime has no base URL");
-      // Placeholder key — the OpenAI-compatible engine requires OPENAI_API_KEY to
-      // be "configured", but vLLM/LM Studio ignore the value.
+      const configuredKey = await readAppSecret({
+        key: runtimeApiKeySecretKey(rt.id),
+        scope: "user",
+        scopeId: ownerEmail,
+      });
+      // Prefer the real key configured for this runtime; fall back to the
+      // placeholder — the OpenAI-compatible engine requires OPENAI_API_KEY to
+      // be "configured", but local vLLM/LM Studio ignore the value.
       await writeAppSecret({
         key: "OPENAI_API_KEY",
-        value: "local-openai-compatible",
+        value: configuredKey?.value || "local-openai-compatible",
         scope: "user",
         scopeId: ownerEmail,
       });

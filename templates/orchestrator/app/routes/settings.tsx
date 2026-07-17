@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useActionMutation, useActionQuery } from "@agent-native/core/client";
 import {
   IconBrandOpenai,
   IconCheck,
@@ -13,12 +12,24 @@ import {
   IconSparkles,
   IconTrash,
 } from "@tabler/icons-react";
-import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Spinner } from "@/components/ui/spinner";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { APP_TITLE } from "@/lib/app-config";
+
+import { ClaudeCodeCard } from "@/components/ClaudeCodeCard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useActivateRuntime,
   useDeleteRuntimeConfig,
@@ -29,17 +40,7 @@ import {
   useSaveRuntimeConfig,
   useTestRuntimeConfig,
 } from "@/hooks/use-orchestrator";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useActionMutation, useActionQuery } from "@agent-native/core/client";
-import { ClaudeCodeCard } from "@/components/ClaudeCodeCard";
+import { APP_TITLE } from "@/lib/app-config";
 
 export function meta() {
   return [{ title: `${APP_TITLE} — 设置` }];
@@ -127,7 +128,9 @@ function BrainModelTierCard() {
           refetch();
         },
         onError: (e: unknown) =>
-          toast.error(e instanceof Error ? e.message : t("common.actionFailed")),
+          toast.error(
+            e instanceof Error ? e.message : t("common.actionFailed"),
+          ),
       },
     );
   }
@@ -151,12 +154,8 @@ function BrainModelTierCard() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="sonnet">
-              {t("settings.ccTierSonnet")}
-            </SelectItem>
-            <SelectItem value="all">
-              {t("settings.ccTierAll")}
-            </SelectItem>
+            <SelectItem value="sonnet">{t("settings.ccTierSonnet")}</SelectItem>
+            <SelectItem value="all">{t("settings.ccTierAll")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -179,6 +178,7 @@ function ModelsTab() {
   const [baseUrl, setBaseUrl] = useState("http://localhost:8000/v1");
   const [model, setModel] = useState("");
   const [models, setModels] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [testResult, setTestResult] = useState<{
     id: string;
     output?: string | null;
@@ -193,23 +193,30 @@ function ModelsTab() {
       .split(",")
       .map((m) => m.trim())
       .filter((m) => m !== "");
+    const trimmedApiKey = apiKey.trim();
     saveRuntime.mutate(
       {
         name: name.trim(),
-        kind: "vllm",
+        // A real API key means a remote OpenAI-compatible provider; no key
+        // means the local vLLM/LM Studio case the UI has always covered.
+        kind: trimmedApiKey ? "openai-compatible" : "vllm",
         baseUrl: baseUrl.trim(),
         model: model.trim(),
         ...(extraModels.length > 0 ? { models: extraModels } : {}),
+        ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
       },
       {
         onSuccess: () => {
           setName("");
           setModel("");
           setModels("");
+          setApiKey("");
           toast.success(t("common.saved"));
         },
         onError: (e: unknown) =>
-          toast.error(e instanceof Error ? e.message : t("common.actionFailed")),
+          toast.error(
+            e instanceof Error ? e.message : t("common.actionFailed"),
+          ),
       },
     );
   }
@@ -220,7 +227,9 @@ function ModelsTab() {
       {
         onSuccess: () => toast.success(t("settings.active")),
         onError: (e: unknown) =>
-          toast.error(e instanceof Error ? e.message : t("common.actionFailed")),
+          toast.error(
+            e instanceof Error ? e.message : t("common.actionFailed"),
+          ),
       },
     );
   }
@@ -286,6 +295,9 @@ function ModelsTab() {
           icon={<IconBrandOpenai className="size-5" />}
           title={t("settings.vllmTitle")}
         />
+        <p className="mb-3 text-xs text-muted-foreground">
+          {t("settings.vllmSubtitle")}
+        </p>
 
         {vllmRuntimes.length > 0 ? (
           <ul className="mb-3 grid gap-2">
@@ -373,6 +385,13 @@ function ModelsTab() {
             />
           </div>
           <Input
+            type="password"
+            autoComplete="off"
+            placeholder={t("settings.vllmApiKey")}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+          />
+          <Input
             placeholder={t("settings.vllmModels")}
             value={models}
             onChange={(e) => setModels(e.target.value)}
@@ -381,7 +400,9 @@ function ModelsTab() {
             <Button
               size="sm"
               onClick={addVllm}
-              disabled={!name.trim() || !baseUrl.trim() || saveRuntime.isPending}
+              disabled={
+                !name.trim() || !baseUrl.trim() || saveRuntime.isPending
+              }
             >
               {saveRuntime.isPending ? (
                 <Spinner className="size-4" />
