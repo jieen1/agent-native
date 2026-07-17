@@ -1,0 +1,138 @@
+/**
+ * Foundry status-vocabulary primitives for the V3 run-detail surface:
+ * StatusRing (in-progress family) + StatusIcon (terminal family). Ports the
+ * geometry from docs/sdlc-product-design/design-system/foundry-components.html
+ * (§3.1 StatusRing, §3.1a StatusIcon) — same spec tracker's StatusRing/
+ * StatusIcon port from, but templates don't share component code, so this is
+ * orchestrator's own copy, prefixed `fd-` (not tracker's `tk-`) and rewired
+ * onto THIS app's tokens (see global.css). Only the two components run-detail
+ * actually needs — PriorityBars/ActorAvatar are not ported here.
+ *
+ * Do not hand-edit colors here — change the --success/--warning/--info/
+ * --evidence/--brand tokens in global.css instead.
+ */
+
+/* ===== StatusRing (§3.1) ===================================================
+   In-progress-family states. Terminal states (done/failed) render as
+   StatusIcon instead. */
+.fd-ring {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+}
+
+.fd-ring--pending {
+  border: 1.6px dashed hsl(var(--muted-foreground));
+}
+
+.fd-ring--queued {
+  border: 1.6px solid hsl(var(--warning));
+}
+.fd-ring--queued::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 9999px;
+  background: hsl(var(--warning));
+}
+
+.fd-ring--running {
+  border: 1.6px solid hsl(var(--info));
+  background: conic-gradient(hsl(var(--info)) 0 50%, transparent 50% 100%);
+  animation: fd-ring-breathe var(--fm-ambient-1, 1600ms) ease-in-out infinite;
+}
+
+.fd-ring--gate {
+  border: 1.6px solid hsl(var(--warning));
+}
+.fd-ring--gate::after {
+  content: "";
+  position: absolute;
+  left: 5.5px;
+  top: 3px;
+  width: 1.8px;
+  height: 7px;
+  background: hsl(var(--warning));
+}
+
+.fd-ring--skipped {
+  border: 1.6px solid hsl(var(--muted-foreground));
+  background: linear-gradient(
+    135deg,
+    transparent 45%,
+    hsl(var(--muted-foreground)) 45%,
+    hsl(var(--muted-foreground)) 55%,
+    transparent 55%
+  );
+}
+
+@keyframes fd-ring-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fd-ring--running {
+    animation: none;
+  }
+}
+
+/* ===== StatusIcon (§3.1a) ===================================================
+   Terminal / judgement states: solid circle + centered Tabler glyph. */
+.fd-status-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  color: #fff;
+  vertical-align: -2px;
+}
+.fd-status-icon svg {
+  width: 10px;
+  height: 10px;
+}
+
+.fd-status-icon--sm {
+  width: 12px;
+  height: 12px;
+}
+.fd-status-icon--sm svg {
+  width: 8.5px;
+  height: 8.5px;
+}
+
+.fd-status-icon--lg {
+  width: 18px;
+  height: 18px;
+}
+.fd-status-icon--lg svg {
+  width: 12.5px;
+  height: 12.5px;
+}
+
+.fd-status-icon--ok {
+  background: hsl(var(--success));
+}
+.fd-status-icon--err {
+  background: hsl(var(--destructive));
+}
+.fd-status-icon--warn {
+  background: hsl(var(--warning));
+}
+.fd-status-icon--inf {
+  background: hsl(var(--info));
+}
+.fd-status-icon--mut {
+  background: hsl(var(--muted-foreground));
+}

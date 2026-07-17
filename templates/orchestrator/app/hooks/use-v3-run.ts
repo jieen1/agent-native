@@ -33,6 +33,8 @@ export interface V3RunState {
   status: V3RunStatus;
   priority: number;
   tags: unknown;
+  /** Free-form JSONB set when the run was started (repo/baseBranch/targetBranch/brief/…). */
+  inputs: unknown;
   dagVersion: number;
   startedAt: string | null;
   completedAt: string | null;
@@ -103,17 +105,13 @@ const LIVE_POLL_MS = 1500;
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
 export function useV3RunState(runId: string | undefined) {
-  return useActionQuery(
-    "runState" as any,
-    runId ? { runId } : { runId: "" },
-    {
-      enabled: !!runId,
-      refetchInterval: (query: { state: { data?: unknown } }) => {
-        const data = query.state.data as V3RunState | undefined;
-        return isLive(data?.status) ? LIVE_POLL_MS : false;
-      },
+  return useActionQuery("runState" as any, runId ? { runId } : { runId: "" }, {
+    enabled: !!runId,
+    refetchInterval: (query: { state: { data?: unknown } }) => {
+      const data = query.state.data as V3RunState | undefined;
+      return isLive(data?.status) ? LIVE_POLL_MS : false;
     },
-  ) as {
+  }) as {
     data?: V3RunState;
     isLoading: boolean;
     error?: unknown;
@@ -137,13 +135,9 @@ export function useV3RunNodes(runId: string | undefined) {
 }
 
 export function useV3RunDag(runId: string | undefined) {
-  return useActionQuery(
-    "v3RunDag" as any,
-    runId ? { runId } : { runId: "" },
-    {
-      enabled: !!runId,
-    },
-  ) as {
+  return useActionQuery("v3RunDag" as any, runId ? { runId } : { runId: "" }, {
+    enabled: !!runId,
+  }) as {
     data?: V3DagDefinition;
     isLoading: boolean;
     error?: unknown;
@@ -254,6 +248,31 @@ export interface V3SpawnDetail {
   error: string | null;
 }
 
+/** One terminal (done/failed/skipped) node's output, from the `runSummary` roll-up. */
+export interface V3RunRollupNodeOutput {
+  nodeId: string;
+  nodeIdInDag: string;
+  type: string;
+  status: string;
+  iteration: number;
+  fanoutIndex: number;
+  error: string | null;
+  completedAt: string | null;
+  output: string | null;
+}
+
+/** Workspace diff stats for the run, or the resolution failure shape (W4). */
+export type V3RunRollupDiff =
+  | {
+      base: string;
+      baseSource: string;
+      filesChanged: number;
+      additions: number;
+      deletions: number;
+    }
+  | { error: "diff-base-unresolvable"; detail: string }
+  | null;
+
 /** Aggregate roll-up of a run: node counts + total token usage. */
 export interface V3RunRollup {
   runId: string;
@@ -277,6 +296,10 @@ export interface V3RunRollup {
     total: number;
     spawnCount: number;
   };
+  /** Terminal node outputs, one entry per done/failed/skipped node. */
+  nodeOutputs: V3RunRollupNodeOutput[];
+  /** Diff stats for the run's workspace — see V3RunRollupDiff. */
+  diff: V3RunRollupDiff;
 }
 
 /** Fetch the run roll-up (total tokens, node counts) via `runSummary`. */
@@ -338,4 +361,55 @@ export function useV3SpawnEvents(spawnId: string | null | undefined) {
       },
     },
   ) as { data?: V3SpawnEventsResult; isLoading: boolean; error?: unknown };
+}
+
+// ── Attempt timeline (all spawns for a node) ─────────────────────────────────
+
+/** One attempt's metadata + log, from the `nodeSpawnLog` action. */
+export interface V3NodeSpawnLogEntry {
+  spawnId: string;
+  attempt: number;
+  agentName: string | null;
+  runtime: string | null;
+  engineRef: string | null;
+  modelRef: string | null;
+  status: string;
+  tokensInput: number;
+  tokensOutput: number;
+  latencyMs: number | null;
+  error: string | null;
+  errorClass: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  log: string | null;
+}
+
+export interface V3NodeSpawnLogResult {
+  nodeId: string;
+  nodeIdInDag: string;
+  status: string;
+  spawns: V3NodeSpawnLogEntry[];
+  totalAttempts: number;
+}
+
+/**
+ * Fetch the full Attempt timeline for a node — every spawn/retry attempt, not
+ * just the current one (`nodeSummary` only surfaces the latest). Drives the
+ * Node Inspector's "Attempt 时间线" section (04-orchestrator.md §3).
+ */
+export function useV3NodeSpawnHistory(
+  runId: string | undefined,
+  nodeId: string | null | undefined,
+) {
+  return useActionQuery(
+    "nodeSpawnLog" as any,
+    { runId: runId ?? "", nodeId: nodeId ?? "" },
+    {
+      enabled: !!runId && !!nodeId,
+      refetchInterval: (query: { state: { data?: unknown } }) => {
+        const data = query.state.data as V3NodeSpawnLogResult | undefined;
+        return data?.status === "running" ? LIVE_POLL_MS : false;
+      },
+    },
+  ) as { data?: V3NodeSpawnLogResult; isLoading: boolean; error?: unknown };
 }

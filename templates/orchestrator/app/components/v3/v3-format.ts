@@ -97,6 +97,50 @@ export function statusLabel(status: string): string {
   return status === "awaiting-approval" ? "awaiting approval" : status;
 }
 
+// ── StatusRing / StatusIcon presentation ─────────────────────────────────────
+
+import type { StatusIconTone } from "./StatusIcon";
+import type { StatusRingStatus } from "./StatusRing";
+
+export type StatusVocabPresentation =
+  | { el: "ring"; status: StatusRingStatus }
+  | { el: "icon"; tone: StatusIconTone };
+
+/**
+ * Maps a V3 run/node status string onto the Foundry status vocabulary
+ * (StatusRing for in-progress states, StatusIcon for terminal/judgement
+ * states) — replaces the plain solid-dot status marker across the run-detail
+ * surface (04-orchestrator.md §3, DagVisualizer node cards + NodeInspector
+ * header + run header). `ready` reads as "queued" (排队执行); `awaiting-approval`
+ * reads as the human_gate "gate" ring; `paused` reads as "gate" too (waiting,
+ * not moving) since the ported vocabulary has no dedicated paused ring.
+ */
+export function statusVocabPresentation(
+  status: string,
+): StatusVocabPresentation {
+  switch (status) {
+    case "pending":
+      return { el: "ring", status: "pending" };
+    case "ready":
+      return { el: "ring", status: "queued" };
+    case "running":
+      return { el: "ring", status: "running" };
+    case "awaiting-approval":
+    case "paused":
+      return { el: "ring", status: "gate" };
+    case "skipped":
+      return { el: "ring", status: "skipped" };
+    case "done":
+      return { el: "icon", tone: "ok" };
+    case "failed":
+      return { el: "icon", tone: "err" };
+    case "cancelled":
+      return { el: "icon", tone: "mut" };
+    default:
+      return { el: "ring", status: "pending" };
+  }
+}
+
 // ── Agent presentation ───────────────────────────────────────────────────────
 
 export interface AgentPresentation {
