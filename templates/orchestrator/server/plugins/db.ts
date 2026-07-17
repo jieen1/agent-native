@@ -955,6 +955,22 @@ CREATE TABLE IF NOT EXISTS project_repos (
 )`,
     },
   },
+  {
+    // s8-workflow-library (design 04 §4 workflow library page + §13 data-model
+    // increment): `v3_workflow_templates.meta` — a per-version JSONB bag of
+    // { builtin, tags, family, changeNote } the library page's cards/version
+    // chain need (内置 badge, 适用场景 chips, sdlc/light grouping, per-version
+    // change blurb) that the DAG's own JSON has no field for. NAME-BASED for
+    // the same reason as f7-telemetry/sdlc-run-limits above — this array is
+    // extended by parallel F-track branches, so version-only gating risks a
+    // silent skip if a sibling lands a version<=4 entry first. Single ADD
+    // COLUMN IF NOT EXISTS — additive and idempotent, no catalog-race.
+    version: 5,
+    name: "s8-workflow-library",
+    sql: {
+      postgres: `ALTER TABLE v3_workflow_templates ADD COLUMN IF NOT EXISTS meta jsonb`,
+    },
+  },
 ];
 
 const migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" });

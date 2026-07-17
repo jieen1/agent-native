@@ -85,6 +85,13 @@ export const v3WorkflowTemplates = pgTable(
     dag: jsonb("dag").notNull(),
     inputSchema: jsonb("input_schema").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    // S8 workflow library (04 §4/§13, `s8-workflow-library` migration):
+    // per-version metadata the DAG itself has no field for — applicable-scenario
+    // tags, the seed "内置" flag, the workflow family grouping (sdlc|light), and
+    // a human-readable change note for THIS version (shown in the version-chain
+    // UI). Nullable/additive; absent on every pre-S8 row (workflowList/Versions
+    // treat a null meta as `{ builtin: false, tags: [], family: undefined }`).
+    meta: jsonb("meta"),
     ...ownableColumns(),
   },
   (t) => [unique("unique_v3_wf_template_name_version").on(t.name, t.version)],

@@ -16,8 +16,9 @@
 // suite stays runnable on hosts without docker; on the dev box docker is
 // available and the smoke is REAL.
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
+
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
 import { V3_MIGRATIONS } from "./db.js";
 
@@ -187,13 +188,41 @@ describe.skipIf(!canRun)(
       );
       expect(roundTrip).toBe("failed|abc123|true");
 
-      // ── idempotency: re-running the f1 named migration is a no-op ───────────
+      // ── s8-workflow-library: the `meta` column, with the correct type ───────
+      const metaCol = psql(
+        `SELECT column_name || ':' || data_type || ':' || is_nullable
+         FROM information_schema.columns
+        WHERE table_name = 'v3_workflow_templates' AND column_name = 'meta'`,
+      );
+      expect(metaCol).toBe("meta:jsonb:YES");
+
+      // ── a row exercising `meta` round-trips ─────────────────────────────────
+      psql(
+        `INSERT INTO v3_workflow_templates (id, name, version, dag, input_schema, meta)
+       VALUES ('smoke-wf', 'smoke-template', 1, '{"nodes":[]}'::jsonb,
+               '{"type":"object","properties":{}}'::jsonb,
+               '{"builtin":true,"family":"sdlc","tags":["x"]}'::jsonb)`,
+      );
+      const metaRoundTrip = psql(
+        `SELECT (meta->>'builtin') || '|' || (meta->>'family')
+         FROM v3_workflow_templates WHERE id = 'smoke-wf'`,
+      );
+      expect(metaRoundTrip).toBe("true|sdlc");
+
+      // ── idempotency: re-running the f1/s8 named migrations is a no-op ───────
       const f1 = entries.find(
         (e) => (e as { name?: string }).name === "f1-workspace-contract",
       );
       expect(f1).toBeDefined();
       const f1Sql = (f1!.sql as { postgres: string }).postgres;
       psql(f1Sql); // ADD COLUMN IF NOT EXISTS / ADD VALUE IF NOT EXISTS — must not throw
+
+      const s8 = entries.find(
+        (e) => (e as { name?: string }).name === "s8-workflow-library",
+      );
+      expect(s8).toBeDefined();
+      const s8Sql = (s8!.sql as { postgres: string }).postgres;
+      psql(s8Sql); // ADD COLUMN IF NOT EXISTS — must not throw
     }, 120_000);
   },
 );
@@ -209,6 +238,19 @@ describe("T-F1-13 static shape (always runs, docker or not)", () => {
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS ready_at");
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS ready_report");
     expect(sql).toContain("ADD VALUE IF NOT EXISTS 'failed'");
+    // Additive discipline: no destructive DDL anywhere in the entry.
+    expect(sql).not.toMatch(/\b(DROP|TRUNCATE|RENAME)\b/i);
+  });
+
+  it("s8-workflow-library entry exists, is named, additive-only, and Postgres-gated", () => {
+    const s8 = V3_MIGRATIONS.find(
+      (e) => (e as { name?: string }).name === "s8-workflow-library",
+    );
+    expect(s8).toBeDefined();
+    const sql = (s8!.sql as { postgres: string }).postgres;
+    expect(sql).toContain(
+      "ALTER TABLE v3_workflow_templates ADD COLUMN IF NOT EXISTS meta jsonb",
+    );
     // Additive discipline: no destructive DDL anywhere in the entry.
     expect(sql).not.toMatch(/\b(DROP|TRUNCATE|RENAME)\b/i);
   });

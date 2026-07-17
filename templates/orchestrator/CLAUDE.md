@@ -78,6 +78,12 @@ reaches these actions as MCP tools) authors a DAG, runs it, monitors it by
 - **Launch / run:** `launch-task` (create workspace + start template run or hand
   a task to the orchestrator), `workspaceCreate`, `workflowRun`, `workflowSave`,
   `workflowList`, `workflowPatch`, `runFork`, `spawnOnce`.
+- **Workflow library (`/workflows`, 04 §4):** `workflowList` returns one card
+  per template name (latest version, with `meta.builtin`/`family`/`tags` and a
+  30-day `stats.runCount`/`successRate`); `workflowVersions(name)` returns the
+  full version chain (each version's own all-time stats + who saved it);
+  `workflowDiff(name, v1, v2)` returns structural node
+  added/removed/changed/unchanged between two versions.
 - **Monitor (poll — no push):** `runState`, `v3RunEvents`, `runSummary`,
   `nodeSummary`.
 - **Workspace / deliver:** `workspaceDiff`, `workspaceCommitPush`.

@@ -5,7 +5,9 @@ import {
   IconShieldCheck,
   IconBox,
 } from "@tabler/icons-react";
+
 import { cn } from "@/lib/utils";
+
 import type { WorkflowNodeType } from "./workflow-dag-types";
 
 /** Icon for a DAG node type — kept in sync with DagVisualizer's run-view mapping. */
@@ -30,7 +32,9 @@ export function NodeTypeIcon({
   }
 }
 
-const DOT_COLORS: Record<WorkflowNodeType, string> = {
+/** Tailwind bg-* class per node type — also reused by WorkflowDagThumbnail so
+ * the card-grid mini graph and the full DAG preview agree on node coloring. */
+export const DOT_COLORS: Record<WorkflowNodeType, string> = {
   agent: "bg-blue-500",
   parallel_over: "bg-violet-500",
   loop: "bg-amber-500",
