@@ -152,12 +152,9 @@ function VersionSelect({
 }
 
 const DIFF_STYLES: Record<string, string> = {
-  added:
-    "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
-  removed:
-    "border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300",
-  changed:
-    "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+  added: "border-success/30 bg-success/10 text-success",
+  removed: "border-destructive/30 bg-destructive/10 text-destructive",
+  changed: "border-warning/30 bg-warning/10 text-warning",
   unchanged: "border-border bg-muted text-muted-foreground",
 };
 

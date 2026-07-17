@@ -91,8 +91,8 @@ export function WorkflowVersionChain({
                         className={cn(
                           "text-[8px]",
                           system
-                            ? "rounded-[5px] bg-violet-500/15 text-violet-600 dark:text-violet-400"
-                            : "bg-primary text-primary-foreground",
+                            ? "rounded-[5px] bg-agent/15 text-agent"
+                            : "bg-brand text-brand-foreground",
                         )}
                       >
                         {system ? (

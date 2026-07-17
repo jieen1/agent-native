@@ -131,13 +131,9 @@ export function WorkflowLibraryCard({
           v{row.version}
         </Badge>
         {row.meta.builtin ? (
-          // No dedicated --brand/badge-brand token in this template yet
-          // (orch-design-system-foundation lands it separately) — border-
-          // primary/text-primary is the closest existing semantic stand-in
-          // for the s8 prototype's "内置" brand badge.
           <Badge
             variant="outline"
-            className="border-primary/40 bg-primary/5 text-[10.5px] text-primary"
+            className="border-brand/40 bg-brand/5 text-[10.5px] text-brand"
           >
             内置
           </Badge>
