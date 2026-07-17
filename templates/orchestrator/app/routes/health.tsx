@@ -667,7 +667,7 @@ function CapacitySection() {
           的 `DEFAULT_POOL_CAPACITY = 8` 常量读取（单一出处）；调整并发的
           `set-concurrency` 尚未接入（server/runtime/backpressure.ts 标注为 "a
           future set-concurrency
-          wire-up"）——因此这里不提供可交互滑杆。上方数值均从 当前排队/spawn
+          wire-up"）——因此这里不提供可交互滑杆。上方数值均从当前排队/spawn
           快照实时推导。
         </DataSourceNote>
         <DataTable<DispatchQueueItem>
