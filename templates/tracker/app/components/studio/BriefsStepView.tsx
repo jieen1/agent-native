@@ -7,6 +7,7 @@ import {
   IconScissors,
 } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,12 +60,21 @@ export function BriefsStepView({
       { sprintId, force },
       {
         onError: (err: any) => {
+          const message = String(err?.message ?? "");
           if (
             err?.code === "design-signoff-required" ||
-            /design-signoff/.test(String(err?.message))
+            /design-signoff/.test(message)
           ) {
-            setForceNotice(String(err?.message ?? "design-signoff 未批准"));
+            setForceNotice(message || "design-signoff 未批准");
+            return;
           }
+          // Any other failure (missing tech-design, dependency cycle,
+          // unparseable §4, ...) has no dedicated inline UI — without this it
+          // fails completely silently, indistinguishable from "still idle".
+          toast.error(
+            message.replace(/^Action extract-briefs failed:\s*/, "") ||
+              "briefs 提取失败，请重试",
+          );
         },
       },
     );

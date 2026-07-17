@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { defineAction } from "@agent-native/core";
+import { AgentActionStopError, defineAction } from "@agent-native/core";
 import {
   getRequestUserEmail,
   getRequestOrgId,
@@ -134,11 +134,14 @@ export default defineAction({
         )
         .limit(1)
     )[0];
-    if (!sprint) throw new Error("Sprint not found");
+    // Plain Error is masked to a generic 500 by action-routes.ts before it
+    // reaches the browser toast — these must be AgentActionStopError (or
+    // carry statusCode<500) to surface at all.
+    if (!sprint) throw new AgentActionStopError("Sprint not found");
 
     const techDesign = await latestArtifact(db, args.sprintId, "tech-design");
     if (!techDesign) {
-      throw new Error(
+      throw new AgentActionStopError(
         "未找到 sprint 的 tech-design 产物（docKey=tech-design）：extract-briefs 需要先完成技术设计",
       );
     }
@@ -160,18 +163,17 @@ export default defineAction({
     const designSignoffApproved = !!validApproval;
 
     if (!designSignoffApproved && args.force !== true) {
-      const err = new Error(
+      throw new AgentActionStopError(
         `design-signoff 未批准：tech-design v${techDesign.version} 尚未通过签核，无法提取 briefs。` +
           "传入 force=true 可强制提取（将在 briefs-index 产物中留痕）。",
+        { errorCode: "design-signoff-required" },
       );
-      (err as Error & { code?: string }).code = "design-signoff-required";
-      throw err;
     }
     const forced = !designSignoffApproved && args.force === true;
 
     const items = parseTechDesignItems(techDesign.content);
     if (items.length === 0) {
-      throw new Error(
+      throw new AgentActionStopError(
         "tech-design §4 未解析出任何「### §4.N {itemKey} · {标题}」小节，无法提取 briefs",
       );
     }
@@ -183,7 +185,7 @@ export default defineAction({
     const { waves, cycleEdges, missingItems } = computeWaves(itemKeys, edges);
 
     if (cycleEdges.length > 0) {
-      throw new Error(
+      throw new AgentActionStopError(
         `briefs 依赖图存在环，无法拓扑分层为 Wave 顺序: ${cycleEdges.map(edgeLabel).join(", ")}`,
       );
     }
