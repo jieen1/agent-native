@@ -34,6 +34,13 @@ const VLLM_PLACEHOLDER_KEY = "sk-vllm-local";
 export interface VllmExecutorConfig {
   baseUrl?: string | null;
   model?: string | null;
+  /**
+   * The runtime_config row's saved API key (router-resolved via
+   * `runtimeApiKeySecretKey`, DESIGN §8.3 item2/#84), for a real remote
+   * OpenAI-compatible provider. Local vLLM/LM Studio rows never configure
+   * one, so `resolveApiKey` still falls through to the placeholder.
+   */
+  apiKey?: string | null;
 }
 
 /** Resolve the vLLM base URL: node env override → runtime_config row → default. */
@@ -53,11 +60,13 @@ function resolveModel(ctx: RuntimeExecCtx, cfg?: VllmExecutorConfig): string {
   return DEFAULT_VLLM_MODEL;
 }
 
-/** Resolve the API key: node env (real secret injected upstream) → placeholder. */
-function resolveApiKey(ctx: RuntimeExecCtx): string {
+/** Resolve the API key: node env (real secret injected upstream) → runtime_config row → placeholder. */
+function resolveApiKey(ctx: RuntimeExecCtx, cfg?: VllmExecutorConfig): string {
   const env = ctx.node.runtime?.env ?? {};
   const k = env.OPENAI_API_KEY ?? env.VLLM_API_KEY;
-  return k && k.trim() !== "" ? k : VLLM_PLACEHOLDER_KEY;
+  if (k && k.trim() !== "") return k;
+  if (cfg?.apiKey && cfg.apiKey.trim() !== "") return cfg.apiKey;
+  return VLLM_PLACEHOLDER_KEY;
 }
 
 export class VllmExecutor implements RuntimeExecutor {
@@ -69,7 +78,7 @@ export class VllmExecutor implements RuntimeExecutor {
   async run(ctx: RuntimeExecCtx): Promise<RuntimeExecResult> {
     const baseUrl = resolveBaseUrl(ctx, this.cfg);
     const model = resolveModel(ctx, this.cfg);
-    const apiKey = resolveApiKey(ctx);
+    const apiKey = resolveApiKey(ctx, this.cfg);
 
     // `ai-sdk:openai` engine with a custom baseUrl → OpenAI chat-completions
     // against the host vLLM (DESIGN §13: createAISDKEngine, baseUrl support).

@@ -13,15 +13,15 @@
 // `resolveNodeExecutorChoice` (executor-choice.ts); this module turns that
 // choice + the live runtime_configs rows into a concrete executor instance.
 
+import type { Node } from "../../../shared/types.js";
 import {
   resolveNodeExecutorChoice,
   type ExecutorChoice,
 } from "../executor-choice.js";
-import type { Node } from "../../../shared/types.js";
 import { ClaudeCodeExecutor } from "./claude-code-executor.js";
 import { RemoteApiExecutor } from "./remote-api-executor.js";
-import { VllmExecutor } from "./vllm-executor.js";
 import type { RuntimeExecutor } from "./types.js";
+import { VllmExecutor } from "./vllm-executor.js";
 
 export type {
   RuntimeExecCtx,
@@ -31,6 +31,12 @@ export type {
 export { VllmExecutor } from "./vllm-executor.js";
 export { RemoteApiExecutor } from "./remote-api-executor.js";
 export { ClaudeCodeExecutor } from "./claude-code-executor.js";
+export {
+  RoutingRuntimeExecutor,
+  selectRuntimeRoute,
+  type OwnerRuntimeRow,
+  type RoutingRuntimeExecutorDeps,
+} from "./routing-runtime-executor.js";
 export { parseClaudeStreamJson } from "./claude-stream.js";
 export { buildClaudeCommand } from "./claude-code-executor.js";
 export { DEFAULT_VLLM_BASE_URL, DEFAULT_VLLM_MODEL } from "./vllm-executor.js";
