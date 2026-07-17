@@ -971,6 +971,40 @@ CREATE TABLE IF NOT EXISTS project_repos (
       postgres: `ALTER TABLE v3_workflow_templates ADD COLUMN IF NOT EXISTS meta jsonb`,
     },
   },
+  {
+    // f9-writeback-outbox (task board #38 follow-up: "回写通道 fire-and-forget
+    // 无持久补偿(改持久 outbox)", deferred from the earlier F9-B review).
+    //
+    // F9's original terminal hook (v3-reconciler.ts finalizeRun ->
+    // writebackOnTerminal) fired the tracker writeback fire-and-forget, with
+    // its own retry/backoff running fully detached from the tick loop. A
+    // process crash/redeploy during that detached backoff window lost the
+    // writeback permanently — nothing persisted the fact that one was owed,
+    // so nothing ever retried it. These four columns are the persistent
+    // outbox: `finalizeRun` now writes `writeback_status='pending'` +
+    // `writeback_outcome` (the classified WritebackOutcome) in an AWAITED
+    // step the instant a tracker-dispatched run goes terminal, before the
+    // fire-and-forget fast-path delivery attempt starts. A periodic sweep
+    // (server/queue/v3-writeback-outbox-sweep.ts, mirroring the existing
+    // v3-run-reconcile-sweep.ts self-heal pattern) drains every row still
+    // 'pending' — the durable backstop across any crash. See
+    // V3Reconciler.drainWritebackOutbox for the drain logic.
+    //
+    // NAME-BASED for the same reason as every other named entry in this
+    // array (parallel branches extend V3_MIGRATIONS concurrently — version-
+    // only gating risks a silent skip). All statements are additive
+    // (ADD COLUMN IF NOT EXISTS / CREATE INDEX IF NOT EXISTS) — no catalog
+    // race, safe to re-run.
+    version: 6,
+    name: "f9-writeback-outbox",
+    sql: {
+      postgres: `ALTER TABLE v3_runs ADD COLUMN IF NOT EXISTS writeback_status text;
+ALTER TABLE v3_runs ADD COLUMN IF NOT EXISTS writeback_outcome jsonb;
+ALTER TABLE v3_runs ADD COLUMN IF NOT EXISTS writeback_attempts integer NOT NULL DEFAULT 0;
+ALTER TABLE v3_runs ADD COLUMN IF NOT EXISTS writeback_last_error text;
+CREATE INDEX IF NOT EXISTS idx_v3_runs_writeback_status ON v3_runs USING btree ("writeback_status")`,
+    },
+  },
 ];
 
 const migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" });

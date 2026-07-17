@@ -12,17 +12,18 @@
 // G30: Actually mounts the SSE/health router on the Nitro h3 app instead of
 //      only stashing it on globalThis.
 
-import {
-  defineEventHandler,
-  createRouter,
-} from "h3";
-import { v3SseEventHandler } from "../utils/v3-sse.js";
-import { v3HealthEventHandler } from "../utils/v3-health.js";
-import { V3Reconciler, type V3Dispatcher as IV3Dispatcher } from "../engine/v3-reconciler.js";
-import { V3Dispatcher } from "../engine/v3-dispatcher.js";
-import { RemoteApiExecutor } from "../runtime/executors/index.js";
-import { getV3Db } from "../db/index.js";
 import { getH3App } from "@agent-native/core/server";
+import { defineEventHandler, createRouter } from "h3";
+
+import { getV3Db } from "../db/index.js";
+import { V3Dispatcher } from "../engine/v3-dispatcher.js";
+import {
+  V3Reconciler,
+  type V3Dispatcher as IV3Dispatcher,
+} from "../engine/v3-reconciler.js";
+import { RemoteApiExecutor } from "../runtime/executors/index.js";
+import { v3HealthEventHandler } from "../utils/v3-health.js";
+import { v3SseEventHandler } from "../utils/v3-sse.js";
 
 // Singleton state — holds the reconciler and dispatcher instances.
 let reconciler: V3Reconciler | null = null;
@@ -82,6 +83,21 @@ export async function triggerTickSafe(runId: string): Promise<void> {
 }
 
 /**
+ * F9-followup (task board #38): best-effort drain of the persistent
+ * writeback outbox — the SAME "reconciler owns HOW, sweep owns WHEN" split
+ * `triggerTickSafe` establishes for run reconciliation. Called by
+ * server/queue/v3-writeback-outbox-sweep.ts on its periodic timer.
+ */
+export async function triggerWritebackDrainSafe(): Promise<void> {
+  try {
+    const r = getOrCreateReconciler();
+    await r.drainWritebackOutbox();
+  } catch {
+    // Advisory — DB may not be available yet; next sweep tick retries.
+  }
+}
+
+/**
  * Public API to access the reconciler for pause/resume/cancel.
  */
 export function getReconcilerRef(): V3Reconciler {
@@ -121,7 +137,9 @@ function createV3Router(): ReturnType<typeof createRouter> {
  * The reconciler instance is created lazily on first tick (event-driven), not
  * on plugin load.
  */
-export default async function orchestratorV3ReconcilerPlugin(nitroApp: any): Promise<void> {
+export default async function orchestratorV3ReconcilerPlugin(
+  nitroApp: any,
+): Promise<void> {
   // G30: Mount the V3 router on the Nitro h3 app so routes are reachable.
   // getH3App() returns the h3 shim; .use(path, handler) registers middleware.
   const h3App = getH3App(nitroApp);

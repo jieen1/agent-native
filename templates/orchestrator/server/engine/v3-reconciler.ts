@@ -36,8 +36,6 @@ import {
   brainThreads,
 } from "../db/v3-schema.js";
 import type { V3RunLimits } from "../db/v3-schema.js";
-import { evaluateExpression } from "./expression-parser.js";
-import type { ExpressionContext } from "./expression-parser.js";
 import {
   onRunTerminal,
   parseRunTags,
@@ -45,6 +43,8 @@ import {
   attemptWithBackoff,
   type WritebackOutcome,
 } from "../tracker-client.js";
+import { evaluateExpression } from "./expression-parser.js";
+import type { ExpressionContext } from "./expression-parser.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1859,8 +1859,13 @@ export class V3Reconciler {
   ): Promise<string | null> {
     const limits = run.limits as V3RunLimits | null;
     if (!limits) return null;
-    const { max_dispatches, max_corrections_per_node, max_review_iterations } = limits;
-    if (!max_dispatches && !max_corrections_per_node && !max_review_iterations) {
+    const { max_dispatches, max_corrections_per_node, max_review_iterations } =
+      limits;
+    if (
+      !max_dispatches &&
+      !max_corrections_per_node &&
+      !max_review_iterations
+    ) {
       return null;
     }
 
@@ -1885,7 +1890,8 @@ export class V3Reconciler {
         }
         for (const [nodeId, count] of perNode) {
           if (count > max_corrections_per_node) {
-            const dagId = nodes.find((n) => n.id === nodeId)?.nodeIdInDag ?? nodeId;
+            const dagId =
+              nodes.find((n) => n.id === nodeId)?.nodeIdInDag ?? nodeId;
             return `max_corrections_per_node exceeded on node '${dagId}': ${count} > ${max_corrections_per_node}`;
           }
         }
@@ -1955,25 +1961,49 @@ export class V3Reconciler {
       // Advisory only — never block run finalization.
     }
 
-    // F9 (docs/sdlc-impl-f5-f10.md §5A "server/engine/v3-reconciler.ts" row):
-    // the terminal-hook for the deterministic tracker writeback channel.
-    // Fire-and-forget — NOT awaited — so a slow/unreachable tracker (retried
-    // with backoff inside `writebackOnTerminal`) never blocks this tick or
-    // any later tick. `writebackOnTerminal` itself never throws (all
-    // failures are caught internally and recorded as a `writeback.failed`
-    // event); the `.catch` below is belt-and-suspenders only.
-    void this.writebackOnTerminal(runId, status, current[0]!.tags, nodes).catch(
-      () => {},
-    );
+    // F9-followup (task board #38 "回写通道 fire-and-forget 无持久补偿(改持久
+    // outbox)"): classify + durably PERSIST the writeback outbox row in this
+    // SAME awaited step that detects terminal state — before any
+    // fire-and-forget network attempt. This is the fix for the original F9
+    // gap: the old code fired `writebackOnTerminal` fire-and-forget with NO
+    // persisted record that a writeback was owed, so a process crash/redeploy
+    // during its detached backoff window lost the writeback permanently. Now
+    // the outbox row survives that crash and server/queue/
+    // v3-writeback-outbox-sweep.ts drains it later — see
+    // enqueueWritebackOutbox / drainWritebackOutbox below.
+    const { workItemId, orgId } = parseRunTags(current[0]!.tags);
+    if (workItemId) {
+      const outcome = await this.classifyWritebackOutcome(
+        status,
+        nodes,
+        runId,
+        workItemId,
+        orgId,
+      );
+      await this.enqueueWritebackOutbox(runId, outcome);
+
+      // Fast path: attempt delivery immediately so the common (no-crash)
+      // case completes on the same timescale as before this fix.
+      // Fire-and-forget — retried with backoff inside
+      // `attemptWritebackDelivery` — so a slow/unreachable tracker never
+      // blocks this tick or any later tick. The durable row enqueued above
+      // is the backstop if this attempt never finishes.
+      // `attemptWritebackDelivery` itself never throws (all failures are
+      // caught internally and recorded as a `writeback.failed` event); the
+      // `.catch` below is belt-and-suspenders only.
+      void this.attemptWritebackDelivery(runId, status, outcome).catch(
+        () => {},
+      );
+    }
   }
 
   /**
-   * F9 terminal-hook: report a tracker-dispatched run's outcome back to the
-   * tracker over the deterministic writeback channel (`tracker-client.ts`).
-   *
-   * Skips entirely (no event, no call) when the run's tags carry no
-   * `item_id` — i.e. this run was never dispatched by the tracker, so there
-   * is nothing to write back.
+   * F9-followup: classify a terminal run's writeback outcome from its node
+   * output artifacts. Pure classification, no network call — the result is
+   * what `finalizeRun` persists into the outbox row (`enqueueWritebackOutbox`)
+   * BEFORE any delivery attempt, and what a later sweep drain
+   * (`drainWritebackOutbox`) reads back out instead of recomputing (node
+   * artifacts may since have expired via the P4-A reaper).
    *
    * Outcome classification:
    *  - status="done" AND a delivery branch is detectable from the run's node
@@ -1984,12 +2014,6 @@ export class V3Reconciler {
    *    T-F3-06's async half; the tracker's own writeback-exec-state derives
    *    the `dispatch.failed` activity from target="queued").
    *
-   * Retries the whole `onRunTerminal` attempt up to `writebackBackoffMs`
-   * (default 3 backoff delays ⇒ 4 attempts) via `attemptWithBackoff`. On
-   * exhaustion, records `v3_events kind="writeback.failed"` (P13: a writeback
-   * failure must never be silent) — this shows up in the S10 health page's
-   * "调度器" card via `computeWritebackTelemetry` (`writeback-telemetry.ts`).
-   *
    * Best-effort branch detection: there is currently no durable "a delivery
    * happened" record written by `workspaceCommit`/`workspaceCommitPush`
    * (pure git-mechanics calls, no v3_events/artifact of their own) — see
@@ -1999,51 +2023,15 @@ export class V3Reconciler {
    * it with the same regex approach the tracker's own `get-activity.ts`
    * `extractDelivery` uses over the brain transcript.
    */
-  private async writebackOnTerminal(
-    runId: string,
+  private async classifyWritebackOutcome(
     status: "done" | "failed" | "cancelled",
-    tags: unknown,
     nodes: NodeRow[],
-  ): Promise<void> {
-    const { workItemId, orgId } = parseRunTags(tags);
-    if (!workItemId) return; // not a tracker-dispatched run — nothing to write back
-
-    let outcome: WritebackOutcome;
-    if (status === "done") {
-      const artifactIds = nodes
-        .map((n) => n.outputArtifactId)
-        .filter((id): id is string => !!id);
-
-      let texts: Array<string | null> = [];
-      if (artifactIds.length > 0) {
-        try {
-          const rows = await this.db
-            .select({
-              textContent: v3Artifacts.textContent,
-              objectContent: v3Artifacts.objectContent,
-            })
-            .from(v3Artifacts)
-            .where(inArray(v3Artifacts.id, artifactIds));
-          texts = rows.map(
-            (r) => r.textContent ?? (r.objectContent ? JSON.stringify(r.objectContent) : null),
-          );
-        } catch {
-          texts = []; // best-effort — never blocks writeback classification
-        }
-      }
-
-      const { branch } = extractDeliveryFromArtifactTexts(texts);
-      outcome = branch
-        ? { kind: "delivered", workItemId, orgId, runId, branch }
-        : {
-            kind: "zero-delivery",
-            workItemId,
-            orgId,
-            runId,
-            reason: "run-done-no-delivery",
-          };
-    } else {
-      outcome = {
+    runId: string,
+    workItemId: string,
+    orgId: string | null,
+  ): Promise<WritebackOutcome> {
+    if (status !== "done") {
+      return {
         kind: "zero-delivery",
         workItemId,
         orgId,
@@ -2052,21 +2040,211 @@ export class V3Reconciler {
       };
     }
 
+    const artifactIds = nodes
+      .map((n) => n.outputArtifactId)
+      .filter((id): id is string => !!id);
+
+    let texts: Array<string | null> = [];
+    if (artifactIds.length > 0) {
+      try {
+        const rows = await this.db
+          .select({
+            textContent: v3Artifacts.textContent,
+            objectContent: v3Artifacts.objectContent,
+          })
+          .from(v3Artifacts)
+          .where(inArray(v3Artifacts.id, artifactIds));
+        texts = rows.map(
+          (r) =>
+            r.textContent ??
+            (r.objectContent ? JSON.stringify(r.objectContent) : null),
+        );
+      } catch {
+        texts = []; // best-effort — never blocks writeback classification
+      }
+    }
+
+    const { branch } = extractDeliveryFromArtifactTexts(texts);
+    return branch
+      ? { kind: "delivered", workItemId, orgId, runId, branch }
+      : {
+          kind: "zero-delivery",
+          workItemId,
+          orgId,
+          runId,
+          reason: "run-done-no-delivery",
+        };
+  }
+
+  /**
+   * F9-followup: durably record "this run needs its writeback done" — the
+   * persistent outbox row (reliable-mutations pattern: a persisted row a
+   * sweep can drain, not a fire-and-forget side effect). Called AWAITED from
+   * `finalizeRun`, in the same step that detects terminal state, before any
+   * network attempt. Best-effort against the write itself (a DB hiccup here
+   * must never throw out of `tick()`) — logged, not swallowed silently.
+   */
+  private async enqueueWritebackOutbox(
+    runId: string,
+    outcome: WritebackOutcome,
+  ): Promise<void> {
+    try {
+      await this.db
+        .update(v3Runs)
+        .set({
+          writebackStatus: "pending",
+          writebackOutcome: outcome,
+          writebackAttempts: 0,
+          writebackLastError: null,
+        })
+        .where(eq(v3Runs.id, runId));
+    } catch (err) {
+      console.warn(
+        `[v3-reconciler] failed to persist writeback outbox row for run ${runId}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /**
+   * F9-followup: ONE attempt (with `attemptWithBackoff`'s own internal
+   * retries) to deliver a terminal run's outcome to the tracker over the
+   * deterministic writeback channel (`tracker-client.ts`). Called from BOTH:
+   *  - `finalizeRun`'s fire-and-forget fast path (fresh outcome, same tick), and
+   *  - `drainWritebackOutbox`'s sweep drain (persisted outcome, later tick) —
+   * this is the ONE place delivery + outbox-status bookkeeping happens; the
+   * sweep never reimplements it.
+   *
+   * On exhaustion, records `v3_events kind="writeback.failed"` (P13: a
+   * writeback failure must never be silent) — this shows up in the S10
+   * health page's "调度器" card via `computeWritebackTelemetry`
+   * (`writeback-telemetry.ts`). The outbox row is left `writebackStatus:
+   * 'pending'` (never a third "gave up" state) so the NEXT sweep tick retries
+   * it — no permanent silent loss across a crash/redeploy or a still-down
+   * tracker. Returns whether delivery succeeded (for the sweep's own count).
+   */
+  private async attemptWritebackDelivery(
+    runId: string,
+    status: "done" | "failed" | "cancelled",
+    outcome: WritebackOutcome,
+  ): Promise<boolean> {
     const result = await attemptWithBackoff(
       () => onRunTerminal(outcome),
       this.writebackBackoffMs,
     );
 
-    if (!result.ok) {
-      await this.writeEvent(runId, "writeback.failed", {
-        workItemId,
-        runStatus: status,
-        outcome: outcome.kind,
-        reason: outcome.kind === "zero-delivery" ? outcome.reason : "delivered",
-        attempts: result.attempts,
-        error: result.error instanceof Error ? result.error.message : String(result.error),
-      });
+    if (result.ok) {
+      await this.markWritebackOutboxDone(runId).catch(() => {});
+      return true;
     }
+
+    const message =
+      result.error instanceof Error
+        ? result.error.message
+        : String(result.error);
+    await this.markWritebackOutboxFailedAttempt(
+      runId,
+      result.attempts,
+      message,
+    ).catch(() => {});
+
+    await this.writeEvent(runId, "writeback.failed", {
+      workItemId: outcome.workItemId,
+      runStatus: status,
+      outcome: outcome.kind,
+      reason: outcome.kind === "zero-delivery" ? outcome.reason : "delivered",
+      attempts: result.attempts,
+      error: message,
+    });
+    return false;
+  }
+
+  /** F9-followup: mark the outbox row delivered. Guarded on `='pending'` so a
+   * late/duplicate write (e.g. the fast path and a concurrent sweep drain
+   * both eventually succeeding for the same row) can never resurrect a row
+   * that a faster writer already closed out. */
+  private async markWritebackOutboxDone(runId: string): Promise<void> {
+    await this.db
+      .update(v3Runs)
+      .set({ writebackStatus: "done", writebackLastError: null })
+      .where(and(eq(v3Runs.id, runId), eq(v3Runs.writebackStatus, "pending")));
+  }
+
+  /** F9-followup: record a failed delivery attempt and leave the row
+   * `pending` (retryable is the ONLY failure state — see the module doc on
+   * `drainWritebackOutbox`). The attempts read-then-write has a small benign
+   * race under concurrent failures (fast path + sweep at once) — worst case
+   * under-counts the observability counter by one; the row's `pending` status
+   * (what actually guarantees eventual delivery) is unaffected either way. */
+  private async markWritebackOutboxFailedAttempt(
+    runId: string,
+    attemptsThisRound: number,
+    message: string,
+  ): Promise<void> {
+    const [row] = await this.db
+      .select({ writebackAttempts: v3Runs.writebackAttempts })
+      .from(v3Runs)
+      .where(eq(v3Runs.id, runId))
+      .limit(1);
+    const totalAttempts = (row?.writebackAttempts ?? 0) + attemptsThisRound;
+
+    await this.db
+      .update(v3Runs)
+      .set({
+        writebackStatus: "pending",
+        writebackAttempts: totalAttempts,
+        writebackLastError: message,
+      })
+      .where(and(eq(v3Runs.id, runId), eq(v3Runs.writebackStatus, "pending")));
+  }
+
+  /**
+   * F9-followup (task board #38): the persistent-outbox drain sweep's core —
+   * called periodically by server/queue/v3-writeback-outbox-sweep.ts
+   * (mirroring the existing v3-run-reconcile-sweep.ts self-heal-via-sweep
+   * pattern: the sweep module only decides WHEN to drain; this method is the
+   * ONE place that decides HOW). Finds every run still
+   * `writebackStatus: 'pending'` — whether because the fast path never got a
+   * chance to run (crash before finalizeRun's fire-and-forget started), never
+   * finished (crash mid-backoff — the exact gap this fix closes), or
+   * genuinely failed (tracker was down) — and retries delivery via the SAME
+   * `attemptWritebackDelivery` the fast path uses. A row is NEVER left
+   * permanently stuck: every sweep tick retries every pending row again,
+   * uncapped (see markWritebackOutboxFailedAttempt's doc comment).
+   */
+  public async drainWritebackOutbox(
+    batchSize: number = 25,
+  ): Promise<{ processed: number; succeeded: number }> {
+    const pending = await this.db
+      .select({
+        id: v3Runs.id,
+        status: v3Runs.status,
+        writebackOutcome: v3Runs.writebackOutcome,
+      })
+      .from(v3Runs)
+      .where(eq(v3Runs.writebackStatus, "pending"))
+      .limit(batchSize);
+
+    let succeeded = 0;
+    for (const row of pending) {
+      const outcome = row.writebackOutcome as WritebackOutcome | null;
+      if (!outcome) {
+        // Malformed/legacy row with no captured outcome (should never happen
+        // — enqueueWritebackOutbox always sets outcome alongside status).
+        // Never retry forever on something that can't be classified; clear
+        // it so it doesn't jam the batch or masquerade as a stuck row.
+        await this.markWritebackOutboxDone(row.id).catch(() => {});
+        continue;
+      }
+      const ok = await this.attemptWritebackDelivery(
+        row.id,
+        row.status as "done" | "failed" | "cancelled",
+        outcome,
+      );
+      if (ok) succeeded++;
+    }
+
+    return { processed: pending.length, succeeded };
   }
 
   /**
