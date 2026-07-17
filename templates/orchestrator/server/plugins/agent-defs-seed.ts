@@ -1,4 +1,5 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+
 import { getDb, schema } from "../db/index.js";
 
 const BUILTIN_AGENTS = [
@@ -118,9 +119,28 @@ export default async function agentDefsSeedPlugin(): Promise<void> {
         capabilityProfile: JSON.stringify(def.capabilityProfile ?? {}),
         ownerEmail: "local@localhost",
         orgId: null,
-        visibility: "private",
+        visibility: "public",
       });
     }
+
+    // Legacy backfill (orchestrator-agents-pool-design-review.md §1.4.4):
+    // pre-fix deployments seeded builtin worker rows (and real dogfood-owned
+    // rows created while save-agent-def.ts still defaulted to "private") as
+    // `visibility: "private"`, making the shared worker registry invisible to
+    // every account except the row's own owner. Flip only `kind="worker"`
+    // rows still marked private to "public" — ownership/builtin stay
+    // untouched, and `kind="brain"` rows are deliberately excluded (they must
+    // never appear in list-agent-defs's default worker-only output). Runs on
+    // every boot; a no-op once every row is already public.
+    await db
+      .update(schema.agentDefs)
+      .set({ visibility: "public" })
+      .where(
+        and(
+          eq(schema.agentDefs.kind, "worker"),
+          eq(schema.agentDefs.visibility, "private"),
+        ),
+      );
   } catch {
     // best-effort seed; DB not ready yet is not fatal at boot
   }

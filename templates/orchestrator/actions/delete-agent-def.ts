@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { resolveAccess } from "@agent-native/core/sharing";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 
 // Delete a user-defined agent definition (DESIGN §7).
@@ -15,7 +16,6 @@ export default defineAction({
   run: async (args) => {
     const db = getDb();
 
-    // Confirm row exists and is not builtin
     const row = await db
       .select({
         id: schema.agentDefs.id,
@@ -26,21 +26,23 @@ export default defineAction({
       .where(eq(schema.agentDefs.id, args.id))
       .limit(1);
 
-    if (row.length === 0) throw new Error(`Agent '${args.id}' not found`);
-    if (row[0].builtin !== 0)
-      throw new Error(
-        "Builtin agent cannot be deleted",
-      );
+    // Nonexistent id, builtin row, and "exists but I'm not owner/admin" all
+    // throw the SAME message — probing must not distinguish which case
+    // applies (orchestrator-agents-pool-design-review.md §1.4.5). The access
+    // check happens before/alongside the builtin check rather than after it.
+    const access =
+      row.length > 0 ? await resolveAccess("agent_def", args.id) : null;
+    const canDelete =
+      row.length > 0 &&
+      row[0].builtin === 0 &&
+      !!access &&
+      (access.role === "owner" || access.role === "admin");
 
-    const access = await resolveAccess("agent_def", args.id);
-    if (!access) throw new Error(`Agent ${args.id} not found`);
-    if (access.role !== "owner" && access.role !== "admin") {
-      throw new Error("Only the owner can delete an agent definition");
+    if (!canDelete) {
+      throw new Error(`Agent '${args.id}' not found`);
     }
 
-    await db
-      .delete(schema.agentDefs)
-      .where(eq(schema.agentDefs.id, args.id));
+    await db.delete(schema.agentDefs).where(eq(schema.agentDefs.id, args.id));
 
     return { id: args.id, name: row[0].name, ok: true };
   },

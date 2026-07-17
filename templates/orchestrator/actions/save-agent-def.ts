@@ -6,6 +6,7 @@ import {
 import { resolveAccess } from "@agent-native/core/sharing";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { newId, nowIso } from "./_util.js";
 
@@ -58,14 +59,14 @@ export default defineAction({
     if (existing.length > 0) {
       const ex = existing[0] as any;
 
-      if (ex.builtin !== 0) {
-        throw new Error("Builtin agent is read-only");
-      }
-
+      // Builtin-read-only and "exists but I lack write access" (private,
+      // owned by someone else) must read identically — otherwise the error
+      // text tells a prober which case they hit (existence/ownership leak,
+      // orchestrator-agents-pool-design-review.md §1.4.5).
       const access = await resolveAccess("agent_def", ex.id);
-      if (!access) throw new Error(`Agent '${name}' not found`);
-      if (access.role === "viewer") {
-        throw new Error("Read-only access");
+      const canWrite = ex.builtin === 0 && !!access && access.role !== "viewer";
+      if (!canWrite) {
+        throw new Error("该名称已被占用");
       }
 
       await db
@@ -106,7 +107,12 @@ export default defineAction({
       updatedAt: now,
       ownerEmail,
       orgId,
-      visibility: "private",
+      // Worker agent defs are name-globally-unique and dispatched by name
+      // with no access filtering (server/agent-loader.ts's loadAgent) — a
+      // "private" agent would be an unkeepable promise (invisible to other
+      // users' DAG nodes that still execute it). New agents are always
+      // shared; see orchestrator-agents-pool-design-review.md §1.4.3.
+      visibility: "public",
     });
 
     return { id, name, ok: true };

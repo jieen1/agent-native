@@ -1,20 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
 import { useActionMutation, useActionQuery } from "@agent-native/core/client";
-import { cn } from "@/lib/utils";
-import { APP_TITLE } from "@/lib/app-config";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { MarkdownSourceEditor } from "@/components/skills/MarkdownSourceEditor";
-import { MarkdownPreview } from "@/components/skills/MarkdownPreview";
 import {
   IconCheck,
   IconDeviceFloppy,
@@ -25,9 +9,27 @@ import {
   IconSearch,
   IconTerminal2,
   IconTrash,
+  IconUser,
   IconWorld,
 } from "@tabler/icons-react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
+
+import { MarkdownPreview } from "@/components/skills/MarkdownPreview";
+import { MarkdownSourceEditor } from "@/components/skills/MarkdownSourceEditor";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { APP_TITLE } from "@/lib/app-config";
+import { cn } from "@/lib/utils";
 
 // ── Real engine/model/runtime mapping ────────────────────────────────────────
 //
@@ -110,7 +112,9 @@ function defaultModelForEngine(engine: string): string {
 
 /** Matches list-agent-defs.ts's actual return shape 1:1 (id, name, engine,
  * model, tools (parsed array), description, runtime, builtin, version,
- * systemPrompt, createdAt, updatedAt). */
+ * systemPrompt, createdAt, updatedAt, ownerEmail, canEdit). `canEdit` is
+ * server-computed (mirrors save-agent-def/delete-agent-def's write check) —
+ * never re-derive it client-side from `ownerEmail`. */
 interface AgentDef {
   id: string;
   name: string;
@@ -124,6 +128,8 @@ interface AgentDef {
   systemPrompt: string;
   createdAt: string;
   updatedAt: string;
+  ownerEmail: string;
+  canEdit: boolean;
 }
 
 interface SaveAgentDefInput {
@@ -205,6 +211,12 @@ export default function AgentsRoute() {
 
   const isNewMode = creatingNew;
   const isBuiltin = selectedAgent?.builtin === true;
+  // Non-builtin row created by someone else: server-computed `canEdit` is the
+  // sole source of truth (never re-derive ownership from a raw email
+  // comparison client-side).
+  const isForeignReadOnly =
+    !isNewMode && !!selectedAgent && !isBuiltin && !selectedAgent.canEdit;
+  const isReadOnly = isBuiltin || isForeignReadOnly;
 
   const handleSelect = useCallback((agent: AgentDef) => {
     setSelectedId(agent.id);
@@ -351,7 +363,15 @@ export default function AgentsRoute() {
                           内置
                         </Badge>
                       </>
-                    ) : null}
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        title={`由 ${a.ownerEmail} 创建`}
+                        className="ml-1 max-w-[110px] shrink-0 truncate border-info/30 bg-info/10 text-[10px] font-normal text-info"
+                      >
+                        由 {a.ownerEmail} 创建
+                      </Badge>
+                    )}
                   </button>
                 );
               })}
@@ -391,6 +411,24 @@ export default function AgentsRoute() {
                 </div>
               )}
 
+              {/* Foreign read-only banner — non-builtin row created by
+                  another account (server-computed canEdit === false) */}
+              {isForeignReadOnly && (
+                <div className="flex items-center gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-2 text-xs text-info">
+                  <IconLock className="size-3.5" />
+                  由他人创建，只读
+                </div>
+              )}
+
+              {/* Owner badge — non-builtin rows only (builtin already has its
+                  own "内置" identity above) */}
+              {!isNewMode && selectedAgent && !isBuiltin && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <IconUser className="size-3.5" />
+                  <span>由 {selectedAgent.ownerEmail} 创建</span>
+                </div>
+              )}
+
               {/* Name */}
               <div className="space-y-1.5">
                 <Label htmlFor="agent-name">名称</Label>
@@ -412,7 +450,7 @@ export default function AgentsRoute() {
                   <Select
                     value={form.engine}
                     onValueChange={handleEngineChange}
-                    disabled={isBuiltin}
+                    disabled={isReadOnly}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="选择引擎" />
@@ -434,7 +472,7 @@ export default function AgentsRoute() {
                       onValueChange={(v) =>
                         setForm((f) => ({ ...f, model: v }))
                       }
-                      disabled={isBuiltin}
+                      disabled={isReadOnly}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="选择模型" />
@@ -453,7 +491,7 @@ export default function AgentsRoute() {
                       onChange={(e) =>
                         setForm((f) => ({ ...f, model: e.target.value }))
                       }
-                      disabled={isBuiltin}
+                      disabled={isReadOnly}
                       placeholder="claude-sonnet-4-6"
                       className="font-mono text-xs"
                     />
@@ -488,7 +526,7 @@ export default function AgentsRoute() {
                   onChange={(e) =>
                     setForm((f) => ({ ...f, description: e.target.value }))
                   }
-                  disabled={isBuiltin}
+                  disabled={isReadOnly}
                   placeholder="智能体描述"
                 />
               </div>
@@ -510,7 +548,7 @@ export default function AgentsRoute() {
                             <button
                               key={tool}
                               type="button"
-                              disabled={isBuiltin}
+                              disabled={isReadOnly}
                               aria-pressed={selected}
                               onClick={() => toggleTool(tool)}
                               className={cn(
@@ -518,7 +556,7 @@ export default function AgentsRoute() {
                                 selected
                                   ? "border-accent bg-accent text-accent-foreground"
                                   : "border-border bg-background text-foreground hover:bg-muted",
-                                isBuiltin && "pointer-events-none opacity-60",
+                                isReadOnly && "pointer-events-none opacity-60",
                               )}
                             >
                               {tool}
@@ -553,7 +591,7 @@ export default function AgentsRoute() {
                       onChange={(v) =>
                         setForm((f) => ({ ...f, systemPrompt: v }))
                       }
-                      disabled={isBuiltin}
+                      disabled={isReadOnly}
                     />
                   </div>
                   <div className="flex min-w-0 flex-col overflow-hidden">
@@ -568,7 +606,7 @@ export default function AgentsRoute() {
               </div>
 
               {/* Actions */}
-              {!isBuiltin && (
+              {!isReadOnly && (
                 <div className="flex gap-3 pt-2">
                   <Button
                     size="sm"
