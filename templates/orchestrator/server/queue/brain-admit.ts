@@ -213,6 +213,19 @@ export async function admitBrainTasks(): Promise<string[]> {
           args: [task.id],
         })
         .catch(() => {});
+      // The task failing here means startBrainTaskTurn threw before the turn
+      // ever reached finalizeThreadStatus (brain-session.ts) — that writer
+      // never runs, so without this the linked thread is stranded at 'queued'
+      // forever with no error, no status change, nothing (brain-thread-
+      // reconcile.ts's sweep only recovers threads stuck at 'running', not
+      // 'queued' — this is a different failure mode: the turn never started).
+      // Mirror finalizeThreadStatus's error convention directly here.
+      await getDbExec()
+        .execute({
+          sql: `UPDATE brain_threads SET status = 'error', error = $2, updated_at = now() WHERE id = $1`,
+          args: [task.threadId, msg.slice(0, 800)],
+        })
+        .catch(() => {});
     }
   }
 
