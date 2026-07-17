@@ -131,6 +131,11 @@ export const runState = defineAction({
       status: run.status,
       priority: run.priority,
       tags: run.tags,
+      // Additive (s7-run-detail parity): surfaces repo/baseBranch/targetBranch/
+      // brief/tags-style run inputs for the "输入与产物" inspector tab. Free-form
+      // JSONB set by whoever started the run (workflowRun/launch-task) — render
+      // generically, never assume a fixed key set.
+      inputs: run.inputs,
       dagVersion: run.dagVersion,
       startedAt: run.startedAt,
       completedAt: run.completedAt,

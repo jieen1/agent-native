@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useActionMutation } from "@agent-native/core/client";
 import {
   IconRobot,
   IconCpu,
@@ -14,33 +14,59 @@ import {
   IconTool,
   IconBrain,
   IconListDetails,
+  IconHistory,
+  IconRotate,
+  IconPlayerSkipForward,
+  IconEdit,
+  IconShieldLock,
 } from "@tabler/icons-react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
+
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils";
-import { V3StatusBadge } from "./V3StatusBadge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import {
   useV3NodeSummary,
   useV3SpawnDetail,
   useV3SpawnEvents,
+  useV3NodeSpawnHistory,
   type V3Node,
+  type V3DagNode,
   type V3SpawnEvent,
+  type V3NodeSpawnLogEntry,
 } from "@/hooks/use-v3-run";
+import { cn } from "@/lib/utils";
+
+import { StatusMarker } from "./StatusMarker";
 import {
   durationMs,
   fmtDuration,
   fmtTokens,
+  fmtLatency,
   fmtDateTime,
   agentPresentation,
   modelDisplay,
 } from "./v3-format";
+import { V3StatusBadge } from "./V3StatusBadge";
 
 // ── Execution timeline (spawn_events) ────────────────────────────────────────
 
@@ -226,6 +252,82 @@ function ExecutionTimeline({
   );
 }
 
+// ── Attempt timeline (all spawns for this node — retries included) ──────────
+
+function AttemptRow({ spawn }: { spawn: V3NodeSpawnLogEntry }) {
+  const tokensTotal = (spawn.tokensInput ?? 0) + (spawn.tokensOutput ?? 0);
+  const dur =
+    spawn.latencyMs != null
+      ? fmtLatency(spawn.latencyMs)
+      : fmtDuration(durationMs(spawn.startedAt, spawn.completedAt));
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs",
+        spawn.status === "failed"
+          ? "border-destructive/30 bg-destructive/[0.04]"
+          : "border-border",
+      )}
+    >
+      <StatusMarker status={spawn.status} size="sm" ringSize={14} />
+      <span className="font-medium text-foreground">
+        Attempt {spawn.attempt}
+      </span>
+      {spawn.errorClass ? (
+        <Badge
+          variant="outline"
+          className="h-4.5 border-amber-500/40 px-1.5 text-[10px] text-amber-600 dark:text-amber-400"
+        >
+          {spawn.errorClass}
+        </Badge>
+      ) : null}
+      {spawn.error ? (
+        <span
+          className="max-w-[160px] truncate text-[11px] text-muted-foreground"
+          title={spawn.error}
+        >
+          {spawn.error}
+        </span>
+      ) : null}
+      <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-[10.5px] text-muted-foreground">
+        {fmtTokens(tokensTotal)} tok · {dur}
+      </span>
+    </div>
+  );
+}
+
+function AttemptTimeline({
+  history,
+  loading,
+}: {
+  history: { spawns: V3NodeSpawnLogEntry[]; totalAttempts: number } | undefined;
+  loading: boolean;
+}) {
+  if (loading && !history) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-9 w-full rounded-lg" />
+        <Skeleton className="h-9 w-full rounded-lg" />
+      </div>
+    );
+  }
+  const spawns = history?.spawns ?? [];
+  if (spawns.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-border bg-muted/10 px-3 py-4 text-center text-xs text-muted-foreground">
+        该节点尚未产生任何 attempt。
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      {spawns.map((s) => (
+        <AttemptRow key={s.spawnId} spawn={s} />
+      ))}
+    </div>
+  );
+}
+
 // ── Small stat tile ──────────────────────────────────────────────────────────
 
 function Stat({
@@ -256,6 +358,7 @@ function TextBlock({
   icon: Icon,
   title,
   meta,
+  extra,
   body,
   empty,
   loading,
@@ -263,17 +366,20 @@ function TextBlock({
   icon: typeof IconFileText;
   title: string;
   meta?: string;
+  /** Extra element rendered in the header row (e.g. the evidence badge). */
+  extra?: React.ReactNode;
   body: string | null | undefined;
   empty: string;
   loading?: boolean;
 }) {
   return (
     <section className="flex min-h-0 flex-col">
-      <div className="mb-1.5 flex items-center gap-1.5">
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
         <Icon className="size-3.5 text-muted-foreground" />
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {title}
         </h4>
+        {extra}
         {meta ? (
           <span className="ml-auto font-mono text-[10px] text-muted-foreground">
             {meta}
@@ -299,6 +405,231 @@ function TextBlock({
   );
 }
 
+// ── Node action buttons (retry / skip / edit-and-retry / human_gate) ────────
+
+interface WorkflowPatchResult {
+  ok: boolean;
+  error?: string;
+  new_dag_version?: number;
+}
+
+function NodeActionsBar({
+  runId,
+  node,
+  dagNode,
+  dagVersion,
+}: {
+  runId: string;
+  node: V3Node;
+  dagNode: V3DagNode | undefined;
+  dagVersion: number | undefined;
+}) {
+  const retryMutation = useActionMutation("nodeRetry" as any, {});
+  const skipMutation = useActionMutation("nodeSkip" as any, {});
+  const patchMutation = useActionMutation("workflowPatch" as any, {});
+  const gateMutation = useActionMutation("nodeResolveGate" as any, {});
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [promptDraft, setPromptDraft] = useState("");
+  const [modelDraft, setModelDraft] = useState("");
+
+  const status = node.status;
+  const isAgentNode = dagNode?.type === "agent";
+  const isHumanGate = dagNode?.type === "human_gate";
+  const retryDisabled = status !== "failed" || retryMutation.isPending;
+  const skipDisabled =
+    status === "done" || status === "skipped" || skipMutation.isPending;
+
+  function handleRetry() {
+    retryMutation.mutate(
+      { runId, nodeId: node.id },
+      {
+        onSuccess: () => toast.success("已重试节点，等待重新调度"),
+        onError: (err: unknown) =>
+          toast.error(err instanceof Error ? err.message : "重试失败"),
+      },
+    );
+  }
+
+  function handleSkip() {
+    skipMutation.mutate(
+      { runId, nodeId: node.id },
+      {
+        onSuccess: () => toast.success("已跳过节点"),
+        onError: (err: unknown) =>
+          toast.error(err instanceof Error ? err.message : "跳过失败"),
+      },
+    );
+  }
+
+  function openEdit() {
+    setPromptDraft("");
+    setModelDraft("");
+    setEditOpen(true);
+  }
+
+  async function submitEdit() {
+    if (!dagNode || dagVersion == null) return;
+    const set: Record<string, string> = {};
+    if (promptDraft.trim()) set.prompt = promptDraft.trim();
+    if (modelDraft.trim()) set.model_override = modelDraft.trim();
+    if (Object.keys(set).length === 0) {
+      toast.error("请填写新的提示词或模型后再提交");
+      return;
+    }
+    try {
+      // A failed node is IMMUTABLE to workflowPatch until it's reset — retry
+      // first (resets to "ready"), then patch (server/engine/v3-patcher.ts
+      // demotes "ready" to "pending" and applies the edit there).
+      if (status === "failed") {
+        await retryMutation.mutateAsync({ runId, nodeId: node.id });
+      }
+      const result = (await patchMutation.mutateAsync({
+        runId,
+        expected_dag_version: dagVersion,
+        ops: [{ op: "modify_node", node_id: dagNode.id, set }],
+        reason: "编辑后重试",
+      })) as WorkflowPatchResult;
+      if (result && result.ok === false) {
+        toast.error(
+          result.error === "node_not_patchable"
+            ? "该节点正在运行或已完成，无法编辑——如需更改已执行/运行中的节点，请使用 Fork 分叉新运行。"
+            : (result.error ?? "补丁提交失败"),
+        );
+        return;
+      }
+      toast.success("已提交补丁，节点将按新内容重新执行");
+      setEditOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "提交失败");
+    }
+  }
+
+  function resolveGate(choice: string) {
+    gateMutation.mutate(
+      { runId, nodeId: node.id, choice },
+      {
+        onSuccess: () =>
+          toast.success(
+            `节点已${choice === "approve" ? "批准" : choice === "reject" ? "驳回" : `处理为 ${choice}`}`,
+          ),
+        onError: (err: unknown) =>
+          toast.error(err instanceof Error ? err.message : "操作失败"),
+      },
+    );
+  }
+
+  const declaredOptions = (dagNode as { options?: unknown } | undefined)
+    ?.options;
+  const gateOptions =
+    Array.isArray(declaredOptions) && declaredOptions.length > 0
+      ? (declaredOptions as string[])
+      : ["approve", "reject"];
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
+      {isHumanGate && status === "awaiting-approval" ? (
+        gateOptions.map((opt) => (
+          <Button
+            key={opt}
+            size="sm"
+            variant={
+              opt === "approve"
+                ? "default"
+                : opt === "reject"
+                  ? "destructive"
+                  : "outline"
+            }
+            disabled={gateMutation.isPending}
+            onClick={() => resolveGate(opt)}
+          >
+            {opt === "approve" ? "批准" : opt === "reject" ? "驳回" : opt}
+          </Button>
+        ))
+      ) : (
+        <>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={retryDisabled}
+            onClick={handleRetry}
+          >
+            <IconRotate className="mr-1 size-3.5" />
+            重试
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={skipDisabled}
+            onClick={handleSkip}
+          >
+            <IconPlayerSkipForward className="mr-1 size-3.5" />
+            跳过
+          </Button>
+          {isAgentNode ? (
+            <Button size="sm" variant="outline" onClick={openEdit}>
+              <IconEdit className="mr-1 size-3.5" />
+              编辑后重试
+            </Button>
+          ) : null}
+        </>
+      )}
+      <span className="ml-auto max-w-[220px] text-right text-[10.5px] text-muted-foreground">
+        运行中/已完成节点不可重试或跳过；如需更改，请用 Fork 分叉新运行
+      </span>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑后重试 — {dagNode?.id}</DialogTitle>
+            <DialogDescription>
+              修改提示词或模型后提交为 DAG
+              补丁（workflowPatch）。失败节点会先自动重试为可编辑状态；运行中/已完成节点无法编辑，请改用
+              Fork。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-retry-prompt">新提示词（留空则不改）</Label>
+              <Textarea
+                id="edit-retry-prompt"
+                rows={6}
+                className="font-mono text-xs"
+                value={promptDraft}
+                onChange={(e) => setPromptDraft(e.target.value)}
+                placeholder="留空则沿用当前提示词模板"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-retry-model">模型覆盖（留空则不改）</Label>
+              <Input
+                id="edit-retry-model"
+                className="font-mono text-xs"
+                value={modelDraft}
+                onChange={(e) => setModelDraft(e.target.value)}
+                placeholder="例如 qwen3.6 / claude-sonnet-4-5"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={submitEdit}
+              disabled={patchMutation.isPending || retryMutation.isPending}
+            >
+              {patchMutation.isPending || retryMutation.isPending
+                ? "提交中…"
+                : "提交补丁"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // ── NodeInspector ────────────────────────────────────────────────────────────
 
 export interface NodeInspectorProps {
@@ -309,6 +640,12 @@ export interface NodeInspectorProps {
   dagNodeId: string | null;
   /** Agent declared on the DAG node, if any. */
   dagAgent: string | null;
+  /** Full DAG node definition (type/options/retry/etc.) for action gating. */
+  dagNode?: V3DagNode;
+  /** Current DAG version — required for workflowPatch's optimistic-concurrency check. */
+  dagVersion?: number;
+  /** Run-level tags, used to ground the payload-allowlist evidence badge in real data. */
+  runTags?: unknown;
   hasSelection: boolean;
 }
 
@@ -317,6 +654,9 @@ export function NodeInspector({
   node,
   dagNodeId,
   dagAgent,
+  dagNode,
+  dagVersion,
+  runTags,
   hasSelection,
 }: NodeInspectorProps) {
   const { data: summary, isLoading: summaryLoading } = useV3NodeSummary(
@@ -329,12 +669,29 @@ export function NodeInspector({
     useV3SpawnDetail(spawnId);
   const { data: spawnEvents, isLoading: eventsLoading } =
     useV3SpawnEvents(spawnId);
+  const { data: attemptHistory, isLoading: attemptLoading } =
+    useV3NodeSpawnHistory(runId, node?.id);
 
   const agentLabel = useMemo(
-    () =>
-      agentPresentation(summary?.spawn?.agentName ?? dagAgent),
+    () => agentPresentation(summary?.spawn?.agentName ?? dagAgent),
     [summary?.spawn?.agentName, dagAgent],
   );
+
+  // Real, non-fabricated grounding for the "载荷白名单" evidence badge (red
+  // line C2, docs/sdlc-product-design/02-workflows.md §"载荷契约表"): the
+  // dispatch protocol only ever injects brief + shared-brief + ui-spec
+  // summaries into a worker's rendered prompt — never sprint-doc/
+  // technical-design full text. The category list is the documented, fixed
+  // policy; only the item id varies per run, read from the run's real tags.
+  const evidenceItemId = useMemo(() => {
+    if (runTags && typeof runTags === "object") {
+      const v =
+        (runTags as Record<string, unknown>).item_id ??
+        (runTags as Record<string, unknown>).itemId;
+      if (typeof v === "string" && v) return v;
+    }
+    return null;
+  }, [runTags]);
 
   // ── Empty state ──
   if (!hasSelection) {
@@ -382,7 +739,10 @@ export function NodeInspector({
             {agentLabel.label}
           </Badge>
           {summary?.type ? (
-            <Badge variant="secondary" className="h-5 px-1.5 font-mono text-[11px]">
+            <Badge
+              variant="secondary"
+              className="h-5 px-1.5 font-mono text-[11px]"
+            >
               {summary.type}
             </Badge>
           ) : null}
@@ -390,6 +750,12 @@ export function NodeInspector({
             <span className="font-mono text-[11px] text-muted-foreground">
               {summary.iteration > 0 ? `iter ${summary.iteration}` : ""}
               {summary.fanoutIndex > 0 ? ` · #${summary.fanoutIndex}` : ""}
+            </span>
+          ) : null}
+          {attemptHistory && attemptHistory.totalAttempts > 0 ? (
+            <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              <IconHistory className="size-3" />
+              attempt {attemptHistory.totalAttempts}
             </span>
           ) : null}
         </div>
@@ -424,13 +790,13 @@ export function NodeInspector({
           </div>
 
           {/* Timing */}
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-            <dt className="text-muted-foreground">开始时间</dt>
-            <dd className="text-right font-mono text-foreground/80">
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
+            <dt className="shrink-0 text-muted-foreground">开始时间</dt>
+            <dd className="truncate text-right font-mono text-foreground/80">
               {fmtDateTime(node?.startedAt)}
             </dd>
-            <dt className="text-muted-foreground">完成时间</dt>
-            <dd className="text-right font-mono text-foreground/80">
+            <dt className="shrink-0 text-muted-foreground">完成时间</dt>
+            <dd className="truncate text-right font-mono text-foreground/80">
               {fmtDateTime(node?.completedAt)}
             </dd>
           </dl>
@@ -439,11 +805,27 @@ export function NodeInspector({
           {node?.error || summary?.error ? (
             <div className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/5 p-3 text-xs text-red-600 dark:text-red-400">
               <IconAlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              <span className="break-words">{node?.error ?? summary?.error}</span>
+              <span className="break-words">
+                {node?.error ?? summary?.error}
+              </span>
             </div>
           ) : null}
 
           <Separator />
+
+          {/* Attempt timeline */}
+          <section className="flex min-h-0 flex-col">
+            <div className="mb-1.5 flex items-center gap-1.5">
+              <IconHistory className="size-3.5 text-muted-foreground" />
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Attempt 时间线
+              </h4>
+            </div>
+            <AttemptTimeline
+              history={attemptHistory}
+              loading={attemptLoading}
+            />
+          </section>
 
           {/* Rendered prompt */}
           <TextBlock
@@ -452,6 +834,16 @@ export function NodeInspector({
             body={spawnDetail?.renderedPrompt}
             loading={spawnLoading && !spawnDetail}
             empty="该节点没有记录提示词。"
+            extra={
+              spawnDetail?.renderedPrompt ? (
+                <Badge className="h-4.5 gap-1 border-evidence/30 bg-evidence/10 px-1.5 text-[10px] text-evidence hover:bg-evidence/10">
+                  <IconShieldLock className="size-2.5" />
+                  载荷白名单：
+                  {evidenceItemId ? `brief:${evidenceItemId}` : "brief"} +
+                  shared-brief
+                </Badge>
+              ) : undefined
+            }
           />
 
           {/* Output */}
@@ -486,6 +878,15 @@ export function NodeInspector({
               loading={eventsLoading && !spawnEvents}
             />
           </section>
+
+          {node ? (
+            <NodeActionsBar
+              runId={runId}
+              node={node}
+              dagNode={dagNode}
+              dagVersion={dagVersion}
+            />
+          ) : null}
         </div>
       </ScrollArea>
     </div>

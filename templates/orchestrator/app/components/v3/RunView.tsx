@@ -1,8 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
 import {
   IconArrowLeft,
-  IconClockHour3,
   IconCoin,
   IconHierarchy3,
   IconBox,
@@ -16,12 +13,15 @@ import {
   IconActivity,
   IconMessageCircle,
   IconGitPullRequest,
+  IconPackage,
 } from "@tabler/icons-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
 import {
   useV3RunState,
   useV3RunNodes,
@@ -33,16 +33,28 @@ import {
   type V3Patch,
   type V3DagNode,
 } from "@/hooks/use-v3-run";
-import { V3StatusBadge } from "./V3StatusBadge";
+import { cn } from "@/lib/utils";
+
 import { DagVisualizer } from "./DagVisualizer";
-import { NodeInspector } from "./NodeInspector";
 import { EventFeed } from "./EventFeed";
-import {
-  durationMs,
-  fmtDuration,
-  fmtTokens,
-  fmtDateTime,
-} from "./v3-format";
+import { NodeInspector } from "./NodeInspector";
+import { RunHeaderActions } from "./RunHeaderActions";
+import { RunInputsArtifacts } from "./RunInputsArtifacts";
+import { durationMs, fmtDuration, fmtTokens, fmtDateTime } from "./v3-format";
+import { V3StatusBadge } from "./V3StatusBadge";
+
+/** Ticks a counter every `intervalMs` while `enabled`, forcing a re-render so
+ *  wall-clock-derived values (the header's live duration) update per second
+ *  instead of only when the next poll happens to land. */
+function useNowTick(enabled: boolean, intervalMs = 1000): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    const id = setInterval(() => setTick((t) => t + 1), intervalMs);
+    return () => clearInterval(id);
+  }, [enabled, intervalMs]);
+  return tick;
+}
 
 // ── Patch timeline ───────────────────────────────────────────────────────────
 
@@ -109,7 +121,9 @@ function StatChip({
 }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-card/50 px-3 py-1.5">
-      <Icon className={cn("size-4 shrink-0", tone ?? "text-muted-foreground")} />
+      <Icon
+        className={cn("size-4 shrink-0", tone ?? "text-muted-foreground")}
+      />
       <div className="flex flex-col leading-tight">
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
           {label}
@@ -134,11 +148,7 @@ const NODE_STATUS_LABEL: Record<string, string> = {
   ready: "就绪",
 };
 
-function NodeCountPills({
-  counts,
-}: {
-  counts: Record<string, number>;
-}) {
+function NodeCountPills({ counts }: { counts: Record<string, number> }) {
   const order: Array<[string, string, typeof IconCircleCheck]> = [
     ["done", "text-emerald-500", IconCircleCheck],
     ["running", "text-blue-500", IconLoader2],
@@ -158,11 +168,7 @@ function NodeCountPills({
           title={`${counts[k]} ${NODE_STATUS_LABEL[k] ?? k}`}
         >
           <Icon
-            className={cn(
-              "size-3.5",
-              tone,
-              k === "running" && "animate-spin",
-            )}
+            className={cn("size-3.5", tone, k === "running" && "animate-spin")}
           />
           <span className="font-mono font-medium text-foreground">
             {counts[k]}
@@ -183,8 +189,11 @@ export interface RunViewProps {
 }
 
 export function RunView({ runId }: RunViewProps) {
-  const { data: runState, isLoading: stateLoading, error } =
-    useV3RunState(runId);
+  const {
+    data: runState,
+    isLoading: stateLoading,
+    error,
+  } = useV3RunState(runId);
   const { data: nodes } = useV3RunNodes(runId);
   const { data: dag } = useV3RunDag(runId);
   const { data: patches } = useV3RunPatches(runId);
@@ -192,9 +201,9 @@ export function RunView({ runId }: RunViewProps) {
   const { data: rollup } = useV3RunSummary(runId);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"dag" | "events" | "patches">(
-    "dag",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "dag" | "events" | "patches" | "io"
+  >("dag");
 
   // Auto-select the first DAG node once it loads so the inspector is never an
   // empty panel on arrival — the run's output is visible immediately.
@@ -280,6 +289,16 @@ export function RunView({ runId }: RunViewProps) {
     );
   }
 
+  const isLive =
+    runState?.status === "running" ||
+    runState?.status === "pending" ||
+    runState?.status === "paused";
+
+  // Per-second header timer (s7-run-detail parity gap #1): `tick` has no
+  // value of its own, it exists purely to force `duration` to recompute every
+  // second while the run is live instead of only on the next 1.5s poll.
+  const tick = useNowTick(isLive);
+
   const duration = useMemo(
     () =>
       fmtDuration(
@@ -288,7 +307,8 @@ export function RunView({ runId }: RunViewProps) {
           runState?.completedAt ?? new Date().toISOString(),
         ),
       ),
-    [runState?.startedAt, runState?.completedAt],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runState?.startedAt, runState?.completedAt, tick],
   );
 
   const totalTokens = rollup?.tokens.total ?? null;
@@ -327,10 +347,38 @@ export function RunView({ runId }: RunViewProps) {
               运行列表
             </Link>
           </Button>
-          <h1 className="truncate font-mono text-sm font-semibold sm:text-base">
-            {runId}
+          <h1 className="flex items-center gap-1.5 truncate text-sm font-semibold sm:text-base">
+            <span>{runState.templateId ?? "—"}</span>
+            {runState.templateVersion != null ? (
+              <Badge
+                variant="secondary"
+                className="h-5 px-1.5 font-mono text-xs"
+              >
+                @v{runState.templateVersion}
+              </Badge>
+            ) : null}
           </h1>
+          <span className="truncate font-mono text-xs text-muted-foreground sm:text-sm">
+            {runId}
+          </span>
           <V3StatusBadge status={runState.status} />
+          <span
+            className={cn(
+              "font-mono text-xs",
+              isLive ? "text-info" : "text-muted-foreground",
+            )}
+            title="运行耗时"
+          >
+            {duration}
+          </span>
+          <Badge
+            variant="secondary"
+            className="h-5 gap-1 px-1.5 font-mono text-xs"
+            title="DAG 版本"
+          >
+            <IconHierarchy3 className="size-3" />
+            DAG v{runState.dagVersion}
+          </Badge>
           {workspaceId ? (
             <Button
               asChild
@@ -374,15 +422,19 @@ export function RunView({ runId }: RunViewProps) {
               </a>
             </Button>
           ) : null}
+
+          <div className="ml-auto">
+            <RunHeaderActions
+              runId={runId}
+              runState={runState}
+              dagNodes={dag?.nodes ?? []}
+              nodes={nodes ?? []}
+            />
+          </div>
         </div>
 
         {/* Stats row */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <StatChip
-            icon={IconClockHour3}
-            label="耗时"
-            value={duration}
-          />
           <StatChip
             icon={IconCoin}
             label="Token 总计"
@@ -396,19 +448,19 @@ export function RunView({ runId }: RunViewProps) {
           />
           <div className="mx-1 hidden h-8 w-px bg-border sm:block" />
           <NodeCountPills counts={runState.nodeCounts} />
-          <Badge
-            variant="secondary"
-            className="ml-auto hidden font-mono text-xs sm:inline-flex"
-            title="DAG 版本"
-          >
-            <IconHierarchy3 className="mr-1 size-3" />
-            DAG v{runState.dagVersion}
-          </Badge>
         </div>
       </header>
 
-      {/* ── Body: node flow (left) + tabbed detail (right) ── */}
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(300px,380px)_1fr]">
+      {/* ── Body: node flow (left) + tabbed detail (right) ──
+          The right column uses `minmax(0,1fr)` (not a bare `1fr`) — the
+          established guarded-flex-track idiom used by every other template's
+          fluid grid columns (e.g. templates/content/DatabaseView.tsx,
+          templates/clips/editor-layout.tsx). A bare `1fr` lets the column's
+          CONTENT set an intrinsic min-width floor, which is what let long
+          text/dates get clipped instead of wrapped once the default-open
+          AgentSidebar (a real flex sibling, ~380px) narrowed the space left
+          for this grid (s7-run-detail parity gap #8). */}
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]">
         {/* Left: node flow */}
         <div className="flex min-h-0 flex-col border-b border-r-0 border-border lg:border-b-0 lg:border-r">
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
@@ -449,15 +501,19 @@ export function RunView({ runId }: RunViewProps) {
               <TabsList className="h-8">
                 <TabsTrigger value="dag" className="gap-1.5 text-xs">
                   <IconBox className="size-3.5" />
-                  节点详情
+                  节点
                 </TabsTrigger>
                 <TabsTrigger value="events" className="gap-1.5 text-xs">
                   <IconActivity className="size-3.5" />
-                  事件
+                  事件流
                 </TabsTrigger>
                 <TabsTrigger value="patches" className="gap-1.5 text-xs">
                   <IconHistory className="size-3.5" />
-                  补丁
+                  时间线
+                </TabsTrigger>
+                <TabsTrigger value="io" className="gap-1.5 text-xs">
+                  <IconPackage className="size-3.5" />
+                  输入与产物
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -471,6 +527,9 @@ export function RunView({ runId }: RunViewProps) {
                 node={selectedNode}
                 dagNodeId={selectedNodeId}
                 dagAgent={dagAgent}
+                dagNode={selectedDagNode}
+                dagVersion={runState.dagVersion}
+                runTags={runState.tags}
                 hasSelection={!!selectedNodeId}
               />
             </TabsContent>
@@ -495,6 +554,13 @@ export function RunView({ runId }: RunViewProps) {
               className="m-0 min-h-0 flex-1 overflow-auto data-[state=inactive]:hidden"
             >
               <PatchTimeline patches={patches ?? []} />
+            </TabsContent>
+
+            <TabsContent
+              value="io"
+              className="m-0 min-h-0 flex-1 overflow-auto data-[state=inactive]:hidden"
+            >
+              <RunInputsArtifacts runId={runId} runState={runState} />
             </TabsContent>
           </Tabs>
         </div>
