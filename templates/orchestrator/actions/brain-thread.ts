@@ -7,6 +7,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq, asc } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export default defineAction({
@@ -64,6 +65,12 @@ export default defineAction({
         workspaceId: thread.workspaceId,
         cwd: thread.cwd,
         error: thread.error,
+        // F7 turn-terminal-state contract (04 §6, SDLC-060): non-null only when
+        // a delivered turn's closing race reported error_during_execution — the
+        // thread stayed `done` and the raw anomaly text landed here instead of
+        // misclassifying the turn as failed.
+        closingAnomaly: thread.closingAnomaly,
+        monitorIntervalSec: thread.monitorIntervalSec,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
       },

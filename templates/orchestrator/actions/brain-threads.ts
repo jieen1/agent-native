@@ -16,10 +16,12 @@
 // sort order, and include-archived. Archived threads are hidden by default.
 
 import { defineAction } from "@agent-native/core";
+import { isPostgres } from "@agent-native/core/db";
 import { and, eq, or, ilike, sql } from "drizzle-orm";
 import { z } from "zod";
+
+import { getDegradedThreadIds } from "../server/brain/harness-status.js";
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
-import { isPostgres } from "@agent-native/core/db";
 
 export default defineAction({
   description:
@@ -86,6 +88,7 @@ export default defineAction({
         workspaceId: v3Schema.brainThreads.workspaceId,
         archived: v3Schema.brainThreads.archived,
         archivedAt: v3Schema.brainThreads.archivedAt,
+        closingAnomaly: v3Schema.brainThreads.closingAnomaly,
         createdAt: v3Schema.brainThreads.createdAt,
         updatedAt: v3Schema.brainThreads.updatedAt,
       })
@@ -97,6 +100,10 @@ export default defineAction({
     if (args.limit) q = q.limit(args.limit);
 
     const rows = await q;
+
+    // 04 §7 "受影响线程带 degraded 徽标": mark rows a capability.degraded event
+    // was recorded against, so the rail can badge them without a per-row query.
+    const degradedIds = await getDegradedThreadIds(ownerEmail);
 
     return rows.map((r) => ({
       id: r.id,
@@ -112,6 +119,8 @@ export default defineAction({
       workspaceId: r.workspaceId ?? null,
       archived: r.archived === true,
       archivedAt: r.archivedAt ?? null,
+      closingAnomaly: r.closingAnomaly ?? null,
+      degraded: degradedIds.has(r.id),
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }));

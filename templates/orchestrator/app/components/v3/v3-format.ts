@@ -67,7 +67,13 @@ export function fmtDateTime(iso: string | null | undefined): string {
 
 // ── Status presentation ──────────────────────────────────────────────────────
 
-/** Solid status dot color, readable on any background. */
+/**
+ * Solid status dot color, readable on any background. Covers BOTH the v3 run
+ * vocabulary (running/done/failed/...) and the brain-thread vocabulary
+ * (running/done/error/queued/idle) — the two overlap on running/done and
+ * share the same color identity for the statuses they hold in common, so a
+ * brain thread and a v3 run never disagree about what "running" looks like.
+ */
 export const STATUS_DOT: Record<string, string> = {
   running: "bg-blue-500",
   done: "bg-emerald-500",
@@ -78,7 +84,42 @@ export const STATUS_DOT: Record<string, string> = {
   ready: "bg-sky-400",
   pending: "bg-zinc-500",
   paused: "bg-amber-500",
+  // Brain-thread-only statuses (brain_threads.status; see brain.tsx).
+  error: "bg-red-500",
+  queued: "bg-amber-500",
+  idle: "bg-zinc-400",
 };
+
+/**
+ * Full badge (bg/text/dark:) classes per status, derived from the SAME color
+ * identity as {@link STATUS_DOT} — the single mapping both the thread rail's
+ * dot and any header/status badge must read from, instead of each surface
+ * hardcoding its own literal Tailwind palette (a past brain.tsx inconsistency:
+ * ad hoc bg-blue-100/bg-red-100/bg-emerald-100 literals with no shared source
+ * of truth). Covers the statuses STATUS_DOT does; falls back to a neutral
+ * muted badge for anything else.
+ */
+export const STATUS_BADGE: Record<string, string> = {
+  running: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+  done: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+  failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+  error: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+  cancelled:
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+  queued:
+    "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+  paused:
+    "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+  idle: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400",
+};
+
+/** Badge classes for a status, falling back to a neutral muted style. */
+export function statusBadgeClass(status: string): string {
+  return (
+    STATUS_BADGE[status] ??
+    "bg-zinc-100 text-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400"
+  );
+}
 
 /** Accent ring/border color per status for high-contrast cards. */
 export const STATUS_ACCENT: Record<string, string> = {
