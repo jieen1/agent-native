@@ -21,7 +21,7 @@ import { Link } from "react-router";
 import { DataTable } from "@/components/board/DataTable";
 import { EmptyState } from "@/components/board/EmptyState";
 import {
-  DataSourceNote,
+  DataHint,
   HealthDot,
   fmtDateTime,
   fmtRelative,
@@ -30,6 +30,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Slider } from "@/components/ui/slider";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { APP_TITLE } from "@/lib/app-config";
 import { cn } from "@/lib/utils";
 
@@ -294,7 +300,9 @@ function VllmCard() {
             健康检查
           </Button>
           {probeAt && !probe.isPending && !probe.data ? (
-            <DataSourceNote>探测中未收到结果，端点可能不可达。</DataSourceNote>
+            <p className="text-amber-600 dark:text-amber-400">
+              探测中未收到结果，端点可能不可达。
+            </p>
           ) : null}
         </>
       ) : (
@@ -318,11 +326,25 @@ function VllmCard() {
               </>
             ) : null}
           </p>
-          <DataSourceNote>
-            未在「设置」中登记为 runtime_config
-            行（很可能是环境变量直接配置的）， 因此没有可用于一键探测的
-            id——这里展示的是真实生效的对话引擎，不提供 健康检查按钮。
-          </DataSourceNote>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex w-fit">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled
+                  className="h-6 w-fit cursor-not-allowed gap-1 px-2 text-[11px]"
+                >
+                  <IconRefresh className="size-3" />
+                  健康检查
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-64 text-xs">
+              未在「设置」中登记为 runtime_config
+              行（可能是环境变量直接配置的），没有可用于探测的 id。
+            </TooltipContent>
+          </Tooltip>
         </>
       )}
     </HealthCard>
@@ -462,10 +484,16 @@ function SchedulerCard({ telemetry }: { telemetry?: HealthTelemetry }) {
       dotTitle={ok ? "回写正常" : "存在回写失败"}
     >
       <p>
-        reconciler 心跳 <span className="italic">待接入</span>
+        reconciler 心跳{" "}
+        <DataHint trigger={<span className="italic">待接入</span>}>
+          tick 心跳暂无对外 action，驱动器自身心跳见「Brain 槽」卡。
+        </DataHint>
       </p>
       <p>
-        上次恢复 <span className="italic">待接入</span>
+        上次恢复{" "}
+        <DataHint trigger={<span className="italic">待接入</span>}>
+          恢复计数暂无对外 action。
+        </DataHint>
       </p>
       <p>
         回写：成功{" "}
@@ -492,11 +520,6 @@ function SchedulerCard({ telemetry }: { telemetry?: HealthTelemetry }) {
           (近 {telemetry?.windowHours ?? 24}h)
         </span>
       </p>
-      <DataSourceNote>
-        reconciler tick 心跳 / 上次恢复计数暂无对外 action（仅 brain
-        驱动器自身的 心跳可见，见「Brain 槽」卡）；回写行为读自 health-telemetry
-        真实数据。
-      </DataSourceNote>
     </HealthCard>
   );
 }
@@ -524,7 +547,9 @@ function TelemetryTrustCard({ telemetry }: { telemetry?: HealthTelemetry }) {
       dotTitle={confirmedNonZero ? "存在可疑用量/漂移/降级事件" : "全零"}
     >
       <p>
-        suspect spawn{" "}
+        <DataHint trigger="suspect spawn">
+          suspect 数据不计入 metric 聚合。
+        </DataHint>{" "}
         <b
           className={cn(
             "font-mono",
@@ -580,10 +605,6 @@ function TelemetryTrustCard({ telemetry }: { telemetry?: HealthTelemetry }) {
           <span className="text-[10.5px]"> (生产者未接入)</span>
         ) : null}
       </p>
-      <DataSourceNote>
-        suspect 数据不入度量聚合；R9 传导修正 /
-        配置未生效两项计数的事件生产者尚未接入， 当前恒为 0（非"确认为零"）。
-      </DataSourceNote>
     </HealthCard>
   );
 }
@@ -645,31 +666,43 @@ function CapacitySection() {
         {poolLoading && !vms ? (
           <Skeleton className="h-10 w-full" />
         ) : vms ? (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px]">
-            <span>
-              spawn 并发上限{" "}
-              <b className="font-mono text-foreground">{vms.capacity}</b>
-            </span>
-            <span>
-              忙碌 <b className="font-mono text-foreground">{vms.busy}</b>
-            </span>
-            <span>
-              可用 <b className="font-mono text-foreground">{vms.available}</b>
-            </span>
-            <span>
-              队列等待{" "}
-              <b className="font-mono text-foreground">{vms.queue_waiting}</b>
-            </span>
+          <div className="flex flex-col gap-3">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex cursor-not-allowed items-center gap-3 text-[12px]">
+                  <span className="shrink-0">spawn 并发上限</span>
+                  <Slider
+                    value={[vms.capacity]}
+                    max={Math.max(vms.capacity, 8)}
+                    step={1}
+                    disabled
+                    className="max-w-40"
+                  />
+                  <b className="w-4 shrink-0 text-right font-mono text-foreground">
+                    {vms.capacity}
+                  </b>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-72 text-xs">
+                固定容量，来自 DEFAULT_POOL_CAPACITY 常量；set-concurrency
+                尚未接入，暂不可调整。
+              </TooltipContent>
+            </Tooltip>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px]">
+              <span>
+                忙碌 <b className="font-mono text-foreground">{vms.busy}</b>
+              </span>
+              <span>
+                可用{" "}
+                <b className="font-mono text-foreground">{vms.available}</b>
+              </span>
+              <span>
+                队列等待{" "}
+                <b className="font-mono text-foreground">{vms.queue_waiting}</b>
+              </span>
+            </div>
           </div>
         ) : null}
-        <DataSourceNote>
-          spawn 并发上限（G18）目前是固定容量，从 server/engine/v3-reconciler.ts
-          的 `DEFAULT_POOL_CAPACITY = 8` 常量读取（单一出处）；调整并发的
-          `set-concurrency` 尚未接入（server/runtime/backpressure.ts 标注为 "a
-          future set-concurrency
-          wire-up"）——因此这里不提供可交互滑杆。上方数值均从当前排队/spawn
-          快照实时推导。
-        </DataSourceNote>
         <DataTable<DispatchQueueItem>
           isLoading={queueLoading && queue.length === 0}
           rows={queue}
