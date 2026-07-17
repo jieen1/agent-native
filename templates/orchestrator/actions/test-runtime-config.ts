@@ -1,10 +1,13 @@
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
-import { runAgentLoop, type AgentChatEvent } from "@agent-native/core/server";
 import { createAISDKEngine } from "@agent-native/core/agent/engine";
+import { readAppSecret } from "@agent-native/core/secrets";
+import { runAgentLoop, type AgentChatEvent } from "@agent-native/core/server";
+import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
+import { runtimeApiKeySecretKey } from "./_util.js";
 
 // test-runtime-config (DESIGN §8.3 item2). A ONE-SHOT REAL test of a saved
 // runtime — parity with the Claude Code "Test run". It actually hits the
@@ -75,12 +78,22 @@ export default defineAction({
       );
     }
 
+    // Prefer the real key configured for this runtime (save-runtime-config's
+    // optional `apiKey`) so the probe actually authenticates against a real
+    // remote OpenAI-compatible provider; local vLLM/LM Studio never configure
+    // one, so they keep getting the placeholder they always ignore.
+    const configuredKey = await readAppSecret({
+      key: runtimeApiKeySecretKey(rt.id),
+      scope: "user",
+      scopeId: ownerEmail,
+    });
+
     // Built-in `ai-sdk:openai` with a custom baseUrl → OpenAI chat-completions
     // against the endpoint (DESIGN §8.2). `allowEnvFallback:false` keeps this
     // request-scoped test from leaking the host process env's real OpenAI key
     // into a local endpoint call.
     const engine = createAISDKEngine("openai", {
-      apiKey: PLACEHOLDER_KEY,
+      apiKey: configuredKey?.value || PLACEHOLDER_KEY,
       baseUrl,
       model,
       allowEnvFallback: false,
