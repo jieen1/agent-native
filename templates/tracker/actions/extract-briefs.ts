@@ -119,6 +119,13 @@ export default defineAction({
       ),
   }),
   http: { method: "POST" },
+  audit: {
+    target: (args) => ({ type: "sprint", id: args.sprintId }),
+    summary: (args, result) => {
+      const r = result as { briefs?: unknown[]; forced?: boolean } | undefined;
+      return `Extracted ${r?.briefs?.length ?? 0} brief(s) for sprint ${args.sprintId}${r?.forced ? " (forced, signoff bypassed)" : ""}`;
+    },
+  },
   run: async (args) => {
     const ownerEmail = getRequestUserEmail();
     if (!ownerEmail) throw new Error("Not authenticated");

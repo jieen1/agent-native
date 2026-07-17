@@ -42,6 +42,16 @@ export default defineAction({
       .optional(),
   }),
   http: { method: "POST" },
+  audit: {
+    target: (args) => ({ type: "work-item", id: args.workItemId }),
+    summary: (args, result) => {
+      const r = result as { updated?: boolean } | undefined;
+      const base = `回写通道: run ${args.runId} 回填${r?.updated ? "" : "(no-op)"}`;
+      return args.templateDeviation
+        ? `${base}, brain 改用 ${args.templateDeviation.chosen}${args.templateDeviation.suggested ? ` 而非建议的 ${args.templateDeviation.suggested}` : ""}`
+        : base;
+    },
+  },
   run: async (args, ctx) => {
     assertWritebackCaller({
       caller: ctx?.caller,
