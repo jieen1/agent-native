@@ -94,6 +94,8 @@ vi.mock("@agent-native/core/server", () => ({
 
 import {
   createLocalWorkspace,
+  commitAndPush,
+  bareMirrorDir,
   WorkspaceNotReadyError,
 } from "./v3-workspace-local.js";
 import {
@@ -253,5 +255,114 @@ describe("createLocalWorkspace readiness sequencing (W1→W2→W3)", () => {
 
     expect(hoisted.rows[0].state).toBe("failed");
     expect(vi.mocked(runTestCmdSmoke)).not.toHaveBeenCalled();
+  });
+});
+
+// ── Unborn-HEAD incident regression (writeback-drain root cause) ───────────
+//
+// Root cause: ensureBareMirror's shared-mirror refresh used to fetch upstream
+// with `--prune … +refs/heads/*:refs/heads/*` — mirroring the remote's branch
+// set EXACTLY into the SAME `refs/heads/*` namespace where each workspace's
+// own not-yet-pushed run branch also lives (created by `worktree add -B`).
+// Since a run branch is by definition absent upstream until pushed, the very
+// next mirror refresh (ANY other workspace being created/refreshed for the
+// same repo, or a W4 diff/runSummary poll via refreshMirror) pruned it away,
+// silently reverting an already-`ready` workspace's HEAD to unborn (`git log`
+// → "does not have any commits yet") while its checkout's files/index stayed
+// untouched — the writeback-drain incident (108+ failed retries against the
+// same broken workspace). The fix keeps upstream tracking under
+// `refs/remotes/origin/*` (safe to prune) disjoint from `refs/heads/*`
+// (reserved for workspace-owned branches).
+
+describe("unborn-HEAD incident regression", () => {
+  it("prevention: a second workspace's mirror refresh never prunes another still-ready workspace's own run branch", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    const wsA = await createLocalWorkspace({
+      repoUrl: f.upstream,
+      ownerKind: "run",
+      ownerId: "run-a",
+      baseRef: "main",
+    });
+
+    // A second workspace for the SAME repo drives ensureBareMirror's
+    // "existing mirror" refresh path — the exact trigger for the real
+    // incident (any concurrent workspace creation, or a runSummary/diff poll
+    // via refreshMirror, refreshes this SAME shared bare mirror).
+    const wsB = await createLocalWorkspace({
+      repoUrl: f.upstream,
+      ownerKind: "run",
+      ownerId: "run-b",
+      baseRef: "main",
+    });
+    expect(wsB.dir).not.toBe(wsA.dir);
+
+    // wsA's own branch must still be a real, non-unborn HEAD after wsB's
+    // creation refreshed the shared mirror.
+    expect(requireOk(wsA.dir, ["rev-parse", "--verify", "-q", "HEAD"])).toBe(
+      f.c0,
+    );
+    const bare = bareMirrorDir(f.upstream);
+    expect(
+      requireOk(bare, ["rev-parse", "--verify", `refs/heads/${wsA.branch}`]),
+    ).toBe(f.c0);
+  });
+
+  it("detection/self-heal: commitAndPush recreates an unborn HEAD's branch ref from the recorded base_sha before committing, preserving the staged fix", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    const ws = await createLocalWorkspace({
+      repoUrl: f.upstream,
+      ownerKind: "run",
+      ownerId: "run-heal",
+      baseRef: "main",
+    });
+
+    // Simulate the incident directly: delete the workspace's own branch ref
+    // straight out of the shared bare mirror (what an unfixed concurrent
+    // mirror refresh used to do), leaving an unborn HEAD while the checkout's
+    // files/index (a real, uncommitted fix) survive untouched.
+    const bare = bareMirrorDir(f.upstream);
+    requireOk(bare, ["update-ref", "-d", `refs/heads/${ws.branch}`]);
+    expect(() =>
+      requireOk(ws.dir, ["rev-parse", "--verify", "-q", "HEAD"]),
+    ).toThrow();
+
+    writeFileSync(join(ws.dir, "fix.txt"), "the real fix\n");
+
+    const result = await commitAndPush({
+      id: ws.id,
+      message: "fix: the real change",
+    });
+
+    expect(result.committed).toBe(true);
+    expect(result.pushed).toBe(true);
+    expect(requireOk(ws.dir, ["rev-parse", "--verify", "-q", "HEAD"])).not.toBe(
+      "",
+    );
+
+    // Decisive proof this is a real heal (branch ref recreated at base_sha),
+    // not just a coincidentally-matching tree: the new commit's PARENT must
+    // be f.c0. A naive `git commit` straight onto an unborn HEAD (the old,
+    // unfixed behavior) instead creates a disconnected ROOT commit (zero
+    // parents) — its tree would happen to diff identically against f.c0 (all
+    // file content matches except the new fix.txt), which is why a bare
+    // tree-diff assertion alone can't tell the two apart.
+    expect(requireOk(ws.dir, ["rev-parse", "HEAD^"])).toBe(f.c0);
+    expect(requireOk(ws.dir, ["rev-list", "--count", "HEAD"])).toBe("2");
+
+    // The diff against that real base is ONLY the intended new file, never a
+    // wholesale re-add of the whole repo.
+    const changed = requireOk(ws.dir, [
+      "diff",
+      "--name-only",
+      f.c0,
+      "HEAD",
+    ])
+      .split("\n")
+      .filter(Boolean);
+    expect(changed).toEqual(["fix.txt"]);
   });
 });
