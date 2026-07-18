@@ -413,3 +413,48 @@ export function useV3NodeSpawnHistory(
     },
   ) as { data?: V3NodeSpawnLogResult; isLoading: boolean; error?: unknown };
 }
+
+// ── Workspace PR / CI / merge status ────────────────────────────────────────
+
+export interface V3CiCheckStatus {
+  name: string;
+  status: string | null;
+  conclusion: string | null;
+  detailsUrl?: string | null;
+}
+
+/** Result shape of the `workspaceCiWatch` action (server: CiWatchResult). */
+export interface V3CiWatchResult {
+  workspaceId: string;
+  state: "green" | "red" | "pending" | "none";
+  prUrl: string | null;
+  /** Real PR lifecycle state from `gh pr view` ("OPEN"/"MERGED"/"CLOSED"), or
+   *  null when it couldn't be read. */
+  prState: string | null;
+  checks: V3CiCheckStatus[];
+  summary: string;
+}
+
+/**
+ * Fetch real CI + PR lifecycle status for a run's workspace (`workspaceCiWatch`
+ * — single snapshot per call, no server-side polling loop). Polls on the
+ * client while the PR is still open and not yet known-merged, so the merge
+ * control's CI gate and "already merged" state stay current without a manual
+ * refresh; stops once the PR is MERGED/CLOSED.
+ */
+export function useV3WorkspaceCi(workspaceId: string | null | undefined) {
+  return useActionQuery(
+    "workspaceCiWatch" as any,
+    { workspaceId: workspaceId ?? "" },
+    {
+      enabled: !!workspaceId,
+      refetchInterval: (query: { state: { data?: unknown } }) => {
+        const data = query.state.data as V3CiWatchResult | undefined;
+        if (!data) return LIVE_POLL_MS;
+        return data.prState === "MERGED" || data.prState === "CLOSED"
+          ? false
+          : 5000;
+      },
+    },
+  ) as { data?: V3CiWatchResult; isLoading: boolean; error?: unknown };
+}

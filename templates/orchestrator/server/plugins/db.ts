@@ -546,6 +546,58 @@ CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_skill_overrides_path_idx ON orche
       sql: `ALTER TABLE orchestrator_agent_defs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'worker';
 ALTER TABLE orchestrator_agent_defs ADD COLUMN IF NOT EXISTS capability_profile TEXT NOT NULL DEFAULT '{}'`,
     },
+    {
+      // Deploy runs (ship-it control) — one row per real backup→build→sync→
+      // restart→verify(→rollback) attempt against a configured host target.
+      // No owner_email/org_id/visibility columns: deliberately workspace-wide
+      // shared operator state, same reasoning as orchestrator_skill_overrides
+      // (version 21) above, not a personal ownableColumns() resource.
+      version: 23,
+      name: "orchestrator-deploy-runs-table",
+      sql: `CREATE TABLE IF NOT EXISTS orchestrator_deploy_runs (
+    id TEXT PRIMARY KEY,
+    target TEXT NOT NULL DEFAULT '101',
+    apps TEXT NOT NULL DEFAULT '["orchestrator","tracker"]',
+    status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','succeeded','failed','rolled_back')),
+    stage TEXT NOT NULL DEFAULT 'queued',
+    stage_log TEXT NOT NULL DEFAULT '[]',
+    commit_sha TEXT,
+    backup_ref TEXT,
+    health_check_result TEXT,
+    error TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    triggered_by TEXT
+  );
+CREATE INDEX IF NOT EXISTS orchestrator_deploy_runs_target_idx ON orchestrator_deploy_runs (target, created_at)`,
+    },
+    {
+      // Fixes a TOCTOU race in trigger-deploy.ts: the action's own
+      // select-active-then-insert check has a window between the check and
+      // the insert where two concurrent triggers can both pass the check and
+      // both insert a 'queued' row for the same target. A partial UNIQUE
+      // index — only over the non-terminal statuses — is the DB-level
+      // backstop: at most one 'queued'/'running' row per target can ever
+      // exist, so the loser of the race gets a real constraint-violation
+      // error from the INSERT itself (which trigger-deploy catches and turns
+      // into the same friendly "already in progress" message), not a silent
+      // second deploy. Standard partial-index syntax (`CREATE UNIQUE INDEX
+      // ... WHERE ...`) is identical on SQLite and Postgres, so this is a
+      // single shared statement like the other unique indexes in this array
+      // (v10's node_runs_journal_key_idx, v19's orchestrator_agent_defs_name_idx,
+      // v21's orchestrator_skill_overrides_path_idx) — no postgres/sqlite
+      // split needed. Safe to add now: orchestrator_deploy_runs is a
+      // brand-new table (v23, this same PR) that has never taken a real
+      // production row yet, so there is no pre-existing duplicate-active-row
+      // data that could make this CREATE UNIQUE INDEX fail on an existing
+      // deployment (mirrors the empirical-safety note on tracker's v29
+      // tracker_exec_queue_work_item_id_key precedent).
+      version: 24,
+      name: "orchestrator-deploy-runs-active-guard",
+      sql: `CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_deploy_runs_active_target_idx ON orchestrator_deploy_runs (target) WHERE status IN ('queued', 'running')`,
+    },
   ],
   { table: "orchestrator_migrations" },
 );

@@ -157,6 +157,21 @@ const en = {
     credsRegistered: "Registered",
     credsMissing: "Not set",
     credsMountedBy: "Mounted by",
+    // Deploy tab (ship-it control) — real backup->build->restart->verify.
+    tabDeploy: "Deploy",
+    deployTitle: "Deploy to production",
+    deploySubtitle:
+      "Runs a real backup, rebuild, restart, and health check against the configured host — rolls back automatically if verification fails. Configure DEPLOY_* credentials in the Credentials tab first.",
+    deployTarget: "Target",
+    deployTrigger: "Deploy now",
+    deployAlreadyRunning: "A deploy is already in progress",
+    deployConfirmTitle: "Deploy to production?",
+    deployConfirmDesc:
+      "This will really back up, rebuild, restart, and health-check {{apps}} on the configured host. It rolls back automatically if the health check fails after restart.",
+    deployConfirmAction: "Deploy",
+    deployStarted: "Deploy started.",
+    deployHistoryTitle: "Recent deploys",
+    deployHistoryEmpty: "No deploys yet.",
   },
   common: {
     create: "Create",
@@ -868,6 +883,21 @@ const zh: typeof en = {
     ccTierSonnet: "仅 Sonnet / Haiku（屏蔽 Opus）",
     ccTierAll: "全部模型（允许 Opus）",
     ccTierSaved: "模型档次已更新。",
+    // 部署页（ship-it 控制）—— 真实 备份→重建→重启→验证。
+    tabDeploy: "部署",
+    deployTitle: "部署到生产环境",
+    deploySubtitle:
+      "对配置的主机执行真实的备份、重新构建、重启与健康检查 —— 验证失败会自动回滚。请先在「凭据」页配置 DEPLOY_* 凭据。",
+    deployTarget: "目标",
+    deployTrigger: "立即部署",
+    deployAlreadyRunning: "已有一次部署正在进行中",
+    deployConfirmTitle: "部署到生产环境？",
+    deployConfirmDesc:
+      "这会对配置主机上的 {{apps}} 执行真实的备份、重新构建、重启与健康检查。重启后健康检查失败会自动回滚。",
+    deployConfirmAction: "部署",
+    deployStarted: "部署已开始。",
+    deployHistoryTitle: "最近的部署",
+    deployHistoryEmpty: "还没有部署记录。",
   },
   common: {
     create: "创建",
