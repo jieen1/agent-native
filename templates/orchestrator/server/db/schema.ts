@@ -400,3 +400,35 @@ export const skillOverrides = table("orchestrator_skill_overrides", {
   updatedAt: text("updated_at").notNull(),
   updatedBy: text("updated_by"),
 });
+
+// ─── Deploy runs (ship-it: backup → build → sync → restart → verify) ───────
+//
+// One row per deploy attempt against a configured host target (today just
+// "101", the single real self-hosted target — see settings.tsx's Deploy tab).
+// Deliberately workspace-wide, no ownableColumns()/shares — same reasoning as
+// orchestrator_skill_overrides above: this is shared operator state for the
+// one deployed orchestrator+tracker pair, not a personal per-user resource.
+// `stageLog` is the append-only JSON timeline
+// ({stage,startedAt,completedAt,ok,detail}[]) the settings UI polls via
+// `deployStatus` for live progress — never a lying spinner.
+export const deployRuns = table("orchestrator_deploy_runs", {
+  id: text("id").primaryKey(),
+  target: text("target").notNull().default("101"),
+  apps: text("apps").notNull().default('["orchestrator","tracker"]'), // JSON string[]
+  status: text("status", {
+    enum: ["queued", "running", "succeeded", "failed", "rolled_back"],
+  })
+    .notNull()
+    .default("queued"),
+  stage: text("stage").notNull().default("queued"),
+  stageLog: text("stage_log").notNull().default("[]"), // JSON DeployStageEntry[]
+  commitSha: text("commit_sha"),
+  backupRef: text("backup_ref"),
+  healthCheckResult: text("health_check_result"), // JSON {ok, status, detail}
+  error: text("error"),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  triggeredBy: text("triggered_by"),
+});

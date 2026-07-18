@@ -86,7 +86,20 @@ reaches these actions as MCP tools) authors a DAG, runs it, monitors it by
   added/removed/changed/unchanged between two versions.
 - **Monitor (poll — no push):** `runState`, `v3RunEvents`, `runSummary`,
   `nodeSummary`.
-- **Workspace / deliver:** `workspaceDiff`, `workspaceCommitPush`.
+- **Workspace / deliver:** `workspaceDiff`, `workspaceCommitPush`,
+  `workspaceCiWatch` (real CI status), `workspaceMergePr` (real `gh pr merge`,
+  fails closed on non-green CI/conflicts — no force-merge). A human can also
+  trigger the same merge directly from the run-detail page's "合并到 main"
+  control (`RunMergeControl`) — you don't need to merge PRs the human can see
+  and merge themselves; use `workspaceMergePr` when acting autonomously on
+  their behalf.
+- **Ship-it deploy:** `trigger-deploy` (real backup → build → restart →
+  health-check → rollback-on-failure against the configured host, see
+  Settings → Deploy), `deploy-status`, `list-deploy-runs`. `trigger-deploy` has
+  `needsApproval:true` — calling it yourself pauses for human Approve/Deny in
+  chat (the framework gate only fires for agent-initiated tool calls, not the
+  human's own Settings-page button). Prefer telling the human to use the
+  Settings → Deploy button over calling this yourself.
 
 Read the **`orchestrating-v3`** skill for the decomposition recipe, the channel
 contract (`{{deps.<id>.output}}` — no auto-injection), the canonical

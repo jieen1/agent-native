@@ -25,6 +25,7 @@
 // repo URLs are supported token-less (for cloning a local path with no token).
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   readFile,
   readdir,
@@ -34,10 +35,15 @@ import {
   mkdir,
 } from "node:fs/promises";
 import { join, normalize, relative, sep } from "node:path";
-import { createHash } from "node:crypto";
+
 import { eq } from "drizzle-orm";
 
-import { getV3Db, v3Schema, LOCAL_DEFAULT_OWNER, getDbExec } from "./db/index.js";
+import {
+  getV3Db,
+  v3Schema,
+  LOCAL_DEFAULT_OWNER,
+  getDbExec,
+} from "./db/index.js";
 import {
   WorkspaceNotReadyError,
   DiffBaseUnresolvableError,
@@ -601,7 +607,8 @@ async function provisionWorktree(opts: {
       // whatever default branch the mirror has (refs/remotes/origin/* —
       // see resolveBareBaseRef/ensureBareMirror's doc comments).
       const fallback = await resolveBareBaseRef(bare);
-      baseRef = fallback === "HEAD" ? "HEAD" : `refs/remotes/origin/${fallback}`;
+      baseRef =
+        fallback === "HEAD" ? "HEAD" : `refs/remotes/origin/${fallback}`;
     }
     // The caller explicitly asked to track `wanted` — track it regardless of
     // which ref `worktree add` actually cut from, so a genuinely-missing
@@ -1849,6 +1856,9 @@ export interface CiCheckStatus {
 export interface CiWatchResult {
   state: "green" | "red" | "pending" | "none";
   prUrl: string | null;
+  /** Real PR lifecycle state from `gh pr view` ("OPEN"/"MERGED"/"CLOSED"), or
+   *  null when it couldn't be read (ciMode=none, gh unavailable, view failed). */
+  prState: string | null;
   checks: CiCheckStatus[];
   summary: string;
 }
@@ -1867,8 +1877,10 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
     return {
       state: "none",
       prUrl: null,
+      prState: null,
       checks: [],
-      summary: "ciMode=none — no CI configured for this repo; treated as green.",
+      summary:
+        "ciMode=none — no CI configured for this repo; treated as green.",
     };
   }
 
@@ -1894,8 +1906,10 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
     return {
       state: "pending",
       prUrl: null,
+      prState: null,
       checks: [],
-      summary: "gh CLI unavailable — cannot query CI status; treating as pending.",
+      summary:
+        "gh CLI unavailable — cannot query CI status; treating as pending.",
     };
   }
 
@@ -1909,6 +1923,7 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
     return {
       state: "pending",
       prUrl: null,
+      prState: null,
       checks: [],
       summary: `gh pr view failed (exit ${res.code}): ${redact(res.stderr.trim(), token)}`,
     };
@@ -1925,6 +1940,7 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
     return {
       state: "pending",
       prUrl: null,
+      prState: null,
       checks: [],
       summary: "gh pr view returned non-JSON output.",
     };
@@ -1935,7 +1951,9 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
     name: String(c.name ?? c.context ?? "check"),
     status: c.status != null ? String(c.status) : null,
     conclusion:
-      (c.conclusion ?? c.state) != null ? String(c.conclusion ?? c.state) : null,
+      (c.conclusion ?? c.state) != null
+        ? String(c.conclusion ?? c.state)
+        : null,
     detailsUrl: c.detailsUrl != null ? String(c.detailsUrl) : null,
   }));
 
@@ -1943,6 +1961,7 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
     return {
       state: "pending",
       prUrl: info.url ?? null,
+      prState: info.state ?? null,
       checks: [],
       summary: "No CI checks reported yet.",
     };
@@ -1957,6 +1976,7 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
     return {
       state: "red",
       prUrl: info.url ?? null,
+      prState: info.state ?? null,
       checks,
       summary: `${failing.length} check(s) failing: ${failing.map((c) => c.name).join(", ")}`,
     };
@@ -1965,6 +1985,7 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
     return {
       state: "pending",
       prUrl: info.url ?? null,
+      prState: info.state ?? null,
       checks,
       summary: "CI checks still running.",
     };
@@ -1972,6 +1993,7 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
   return {
     state: "green",
     prUrl: info.url ?? null,
+    prState: info.state ?? null,
     checks,
     summary: `All ${checks.length} check(s) passing.`,
   };
@@ -2018,7 +2040,9 @@ export interface MergePrResult {
 export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
   const dir = await getLocalWorkspaceDir(opts.id);
   if (!dir) {
-    throw new Error(`mergePr: workspace '${opts.id}' not found or has no host_path`);
+    throw new Error(
+      `mergePr: workspace '${opts.id}' not found or has no host_path`,
+    );
   }
 
   const db = getV3Db();
@@ -2040,16 +2064,23 @@ export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
     throw new Error(`mergePr: workspace '${opts.id}' has no repo_url`);
   }
   const base =
-    opts.baseBranch && opts.baseBranch.trim() !== "" ? opts.baseBranch.trim() : "main";
+    opts.baseBranch && opts.baseBranch.trim() !== ""
+      ? opts.baseBranch.trim()
+      : "main";
 
   if (!(await hasGh())) {
-    return { merged: false, reason: "gh CLI unavailable — cannot merge safely" };
+    return {
+      merged: false,
+      reason: "gh CLI unavailable — cannot merge safely",
+    };
   }
 
   const token = await resolveGithubToken();
   const env: Record<string, string> = token ? { GH_TOKEN: token } : {};
   const slug = parseGithubSlug(remote);
-  const lockKey = slug ? `${slug.owner}/${slug.repo}:${base}` : `${remote}:${base}`;
+  const lockKey = slug
+    ? `${slug.owner}/${slug.repo}:${base}`
+    : `${remote}:${base}`;
 
   return getDbExec().transaction!(async (tx) => {
     const { rows } = await tx.execute({
@@ -2057,7 +2088,10 @@ export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
       args: [lockKey],
     });
     if (!(rows[0]?.locked ?? false)) {
-      return { merged: false, reason: `another merge is in progress for '${lockKey}'` };
+      return {
+        merged: false,
+        reason: `another merge is in progress for '${lockKey}'`,
+      };
     }
 
     const viewRes = await gh(
@@ -2102,9 +2136,14 @@ export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
     const failing = rollup.filter((c) => {
       const status = c.status != null ? String(c.status) : null;
       const conclusion =
-        (c.conclusion ?? c.state) != null ? String(c.conclusion ?? c.state) : null;
+        (c.conclusion ?? c.state) != null
+          ? String(c.conclusion ?? c.state)
+          : null;
       const stillRunning = status != null && status !== "COMPLETED";
-      return stillRunning || (conclusion != null && !CI_PASSING_CONCLUSIONS.has(conclusion));
+      return (
+        stillRunning ||
+        (conclusion != null && !CI_PASSING_CONCLUSIONS.has(conclusion))
+      );
     });
     if (failing.length > 0) {
       return {
@@ -2124,14 +2163,19 @@ export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
     if (info.mergeStateStatus === "BEHIND") {
       return {
         merged: false,
-        reason: "rebase_needed: branch is behind base — update needed before merge",
+        reason:
+          "rebase_needed: branch is behind base — update needed before merge",
         prUrl: info.url ?? null,
       };
     }
 
     const method = opts.mergeMethod ?? "merge";
     const methodFlag =
-      method === "squash" ? "--squash" : method === "rebase" ? "--rebase" : "--merge";
+      method === "squash"
+        ? "--squash"
+        : method === "rebase"
+          ? "--rebase"
+          : "--merge";
     // No force/admin-override flag by design — a merge that gh refuses stays
     // unmerged and is reported back, never overridden.
     const mergeRes = await gh(
@@ -2153,7 +2197,11 @@ export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
     const head = await git(["rev-parse", `origin/${base}`], { cwd: dir }).catch(
       () => null,
     );
-    return { merged: true, sha: head?.stdout?.trim() ?? null, prUrl: info.url ?? null };
+    return {
+      merged: true,
+      sha: head?.stdout?.trim() ?? null,
+      prUrl: info.url ?? null,
+    };
   });
 }
 

@@ -40,6 +40,7 @@ import { EventFeed } from "./EventFeed";
 import { NodeInspector } from "./NodeInspector";
 import { RunHeaderActions } from "./RunHeaderActions";
 import { RunInputsArtifacts } from "./RunInputsArtifacts";
+import { RunMergeControl } from "./RunMergeControl";
 import { durationMs, fmtDuration, fmtTokens, fmtDateTime } from "./v3-format";
 import { V3StatusBadge } from "./V3StatusBadge";
 
@@ -422,6 +423,11 @@ export function RunView({ runId }: RunViewProps) {
               </a>
             </Button>
           ) : null}
+          <RunMergeControl
+            workspaceId={workspaceId}
+            prUrl={prUrl}
+            runStatus={runState.status}
+          />
 
           <div className="ml-auto">
             <RunHeaderActions

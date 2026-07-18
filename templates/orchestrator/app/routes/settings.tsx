@@ -8,6 +8,7 @@ import {
   IconPhoto,
   IconPlayerPlay,
   IconPlus,
+  IconRocket,
   IconServer2,
   IconSparkles,
   IconTrash,
@@ -17,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ClaudeCodeCard } from "@/components/ClaudeCodeCard";
+import { DeployTab } from "@/components/settings/DeployTab";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,6 +73,10 @@ export default function SettingsRoute() {
             <IconKey className="size-4" />
             {t("settings.tabCredentials")}
           </TabsTrigger>
+          <TabsTrigger value="deploy" className="gap-1.5">
+            <IconRocket className="size-4" />
+            {t("settings.tabDeploy")}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="claude">
@@ -84,6 +90,9 @@ export default function SettingsRoute() {
         </TabsContent>
         <TabsContent value="credentials">
           <CredentialsTab />
+        </TabsContent>
+        <TabsContent value="deploy">
+          <DeployTab />
         </TabsContent>
       </Tabs>
     </div>
