@@ -15,19 +15,61 @@
 // never bound to a node (`node_id IS NULL`) — left from a killed test — sits at
 // 'pending' forever and pollutes the Pool's `queue_waiting`.
 //
-// This sweep is the recovery, judged on parent-terminality + VM liveness + age,
+// This sweep is the recovery, judged on parent-terminality + liveness + age,
 // NEVER on the status flag alone, so a genuinely-running spawn is never reset:
 //
-//   • RUNNING is reset only when there is demonstrably no live microVM behind it:
+//   • RUNNING is reset only when there is demonstrably no live work behind it:
 //       (1) its parent node OR parent run is already TERMINAL
 //           (node: done/failed/skipped; run: done/failed/cancelled), OR
-//       (2) it has no live VM — runtime is not a microVM, or vm_name is NULL —
-//           AND it is older than a short grace, OR
+//       (2) it has NO liveness signal at all — a microVM runtime with no
+//           vm_name yet AND no spawn_events heartbeat yet, e.g. a HOST-NATIVE
+//           runtime (vLLM "none" / ACP "acp:claude-code" — there is no
+//           vm_name concept for these at all, see §"host-native liveness" fix
+//           note below) that has not yet emitted a single step — AND it is
+//           older than a short grace, OR
 //       (3) it is older than a GENEROUS hard grace (default 30 min — longer than
 //           any real spawn) regardless of the above, as a crashed-isolate
 //           backstop.
-//     A spawn whose parent is still active AND that has a live VM AND is within
-//     grace is left alone.
+//     A spawn whose parent is still active AND that has EITHER a live VM OR a
+//     real spawn_events heartbeat AND is within grace is left alone.
+//
+//   Host-native liveness fix (production incident 2026-07-18, task board
+//   review of #95's `sdlc-merge-review`): this file used to gate the
+//   heartbeat-based stall check on `liveVm` (runtime === "microvm") ONLY,
+//   because at the time every non-microVM spawn was assumed short-lived. That
+//   assumption broke once `acp:claude-code` host-native nodes (no VM, ever —
+//   the container's own managed `claude` CLI login, see
+//   server/runtime/claude-code-worker.ts) started doing real, multi-minute
+//   work: a genuinely-running claude-code review streaming a live
+//   `spawn_events` heartbeat the entire time was reset as "no live microVM"
+//   at its flat 2-minute mark regardless of that heartbeat, because
+//   `noVmAndAged` never checked it. Confirmed in production: 3/3 real
+//   `mergeReviewStart` dispatches (spawn ids 2b1d6409-.../849a7851-.../
+//   58e67ba0-...) were reset by this sweep at ~2 minutes while each had 90+
+//   live `spawn_events` rows continuing for several more minutes — the real
+//   `claude` process kept running host-native in the background (nothing
+//   ever kills the child process on a DB-level reconcile) and later
+//   overwrote the row with an unrelated terminal error, masking the true
+//   cause. The same pattern was hitting `vllm` ("none" runtime) nodes across
+//   other templates throughout the day. Fixed by treating "has emitted at
+//   least one real spawn_events heartbeat" as a liveness signal for ANY
+//   runtime, not just a live microVM — see `hostNativeAlive` below.
+//
+//   Host-native stall threshold follow-up (same incident, same day): after
+//   the fix above landed, a live production re-verification of
+//   `sdlc-merge-review` still got reset — this time via the heartbeat-STALL
+//   path, not the no-VM-grace path — because a single real `git diff`/`gh pr
+//   diff` Bash tool call legitimately blocked for 126s with zero
+//   intermediate `spawn_events` (the CLI only emits a step at each stream-
+//   json line; there is no "still working" ping mid-tool-call). More events
+//   kept arriving for minutes after the reset, proving the process was still
+//   genuinely alive. `ORCH_SPAWN_STALL_MS` (120s) was tuned for a live
+//   microVM's finer-grained heartbeat and network-black-hole detection, not
+//   for a host-native CLI that can go quiet for a real multi-minute tool
+//   call. Fixed with a SEPARATE, more generous `ORCH_SPAWN_HOST_NATIVE_STALL_MS`
+//   (default 8 min) applied only when `liveVm` is false — see
+//   `effectiveStallMs` below. `ORCH_SPAWN_STALL_MS` itself is unchanged for
+//   microVM spawns.
 //
 //   • PENDING orphans (never bound to a node: `node_id IS NULL`) older than the
 //     hard grace are cancelled — a created-but-never-dispatched spawn from a
@@ -56,10 +98,14 @@ import { getDbExec } from "../db/index.js";
 import { triggerTickSafe } from "../plugins/v3-reconciler.js";
 
 /**
- * A 'running' spawn with no live VM (non-microVM runtime / NULL vm_name) is
+ * A 'running' spawn with NO liveness signal at all — no live VM (non-microVM
+ * runtime / NULL vm_name) AND no spawn_events heartbeat ever emitted — is
  * eligible for reconcile only after this short grace — long enough that a spawn
- * mid-provision (vm_name not yet written) is never reset, far shorter than the
- * hard backstop. Env-overridable via V3_SPAWN_NOVM_GRACE_MS (default 2 min).
+ * mid-provision (vm_name not yet written) or a host-native spawn that hasn't
+ * emitted its first step yet is never reset, far shorter than the hard
+ * backstop. A spawn that HAS emitted a heartbeat (host-native or microVM) is
+ * governed by the stall check (`ORCH_SPAWN_STALL_MS`) instead, not this grace.
+ * Env-overridable via V3_SPAWN_NOVM_GRACE_MS (default 2 min).
  */
 export const V3_SPAWN_NOVM_GRACE_MS = (() => {
   const raw = Number(process.env.V3_SPAWN_NOVM_GRACE_MS);
@@ -96,15 +142,44 @@ export const V3_SPAWN_STALE_GRACE_MS = (() => {
  * genuinely emitted steps) AND the most recent one is older than this
  * threshold. A spawn with no spawn_events rows yet (mid first generation) is
  * NEVER judged stalled here — it is left to the no-VM-grace / hard-stale
- * backstops. This uniquely targets a live-looking microVM (vm_name set) whose
- * transcript went silent — a network black-hole between orchestrator and
- * worker — catching it far faster than the 30-minute hard backstop while
- * never shrinking the safety window for a genuinely-busy spawn.
+ * backstops. This targets ANY spawn that has ever proven itself alive via a
+ * heartbeat — a live-looking microVM (vm_name set) OR a host-native spawn
+ * (vLLM "none" / ACP "acp:claude-code", which have no vm_name concept at all
+ * — see `hostNativeAlive` below) — whose transcript went silent: a network
+ * black-hole, or a hung child process, between orchestrator and worker.
+ * Catching it far faster than the 30-minute hard backstop while never
+ * shrinking the safety window for a genuinely-busy spawn of either kind.
  * Env-overridable via ORCH_SPAWN_STALL_MS (default 120s).
  */
 export const ORCH_SPAWN_STALL_MS = (() => {
   const raw = Number(process.env.ORCH_SPAWN_STALL_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : 2 * 60_000; // 120s default
+})();
+
+/**
+ * Host-native stall threshold — SEPARATE from `ORCH_SPAWN_STALL_MS` (used for
+ * a live microVM's heartbeat). A host-native spawn (vLLM "none" / ACP
+ * "acp:claude-code") streams one `spawn_events` row per stream-json line the
+ * CLI itself emits (reasoning text / tool_use / tool_result) — there is NO
+ * incremental progress emitted WHILE a single tool call is executing, only
+ * after it returns. A real `git diff` / `gh pr diff` / test run against an
+ * actual repo can legitimately block for several minutes with zero
+ * intermediate events, which is entirely different from a microVM's
+ * network-black-hole failure mode `ORCH_SPAWN_STALL_MS` was tuned for.
+ * Confirmed in production (2026-07-18): re-verifying the `hostNativeAlive`
+ * fix below, a genuinely-healthy `sdlc-merge-review` claude-code spawn hit a
+ * single real 126s gap (one Bash tool call) and was wrongly reset by the
+ * 120s threshold — more `spawn_events` kept arriving for minutes afterward,
+ * proving the process was still alive and working. Real production evidence
+ * across today's completed (non-reconciled) acp:claude-code spawns shows
+ * inter-event gaps up to 60s in the normal case; this default gives wide
+ * headroom above the observed 126s single-tool-call outlier while staying
+ * well short of the 30-minute hard-stale backstop. Env-overridable via
+ * ORCH_SPAWN_HOST_NATIVE_STALL_MS (default 8 min).
+ */
+export const ORCH_SPAWN_HOST_NATIVE_STALL_MS = (() => {
+  const raw = Number(process.env.ORCH_SPAWN_HOST_NATIVE_STALL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 8 * 60_000; // 8 min default
 })();
 
 /** A reconciled (reset) v3 spawn, for caller observability. */
@@ -124,6 +199,7 @@ export async function reconcileV3SpawnsOnce(
   noVmGraceMs: number = V3_SPAWN_NOVM_GRACE_MS,
   staleGraceMs: number = V3_SPAWN_STALE_GRACE_MS,
   stallMs: number = ORCH_SPAWN_STALL_MS,
+  hostNativeStallMs: number = ORCH_SPAWN_HOST_NATIVE_STALL_MS,
 ): Promise<ReconciledV3Spawn[]> {
   if (!isPostgres()) return [];
 
@@ -190,26 +266,45 @@ export async function reconcileV3SpawnsOnce(
       runStatus === "failed" ||
       runStatus === "cancelled";
     const liveVm = runtime === "microvm" && !!vmName;
+    // HOST-NATIVE liveness (see file header "Host-native liveness fix"): a
+    // non-microvm runtime (vLLM "none", ACP "acp:claude-code") has no
+    // vm_name concept at all, so it can never satisfy `liveVm` — but it
+    // writes the EXACT SAME spawn_events heartbeat a microVM node does
+    // (v3-dispatcher.ts wires the same `onStep` sink for both the engine
+    // executor and `runClaudeCodeWorker`). Once it has emitted at least one
+    // real step, treat it as alive too, so it gets the SAME heartbeat-based
+    // stall protection a live microVM spawn gets below — instead of the flat,
+    // heartbeat-blind 2-minute no-VM grace killing it outright.
+    const hostNativeAlive = !liveVm && runtime !== "microvm" && hasHeartbeat;
+    const anyLiveSignal = liveVm || hostNativeAlive;
 
     // Reset only when there is demonstrably no live work behind this spawn:
     //   (1) parent node/run already terminal, OR
-    //   (2) no live VM AND older than the short no-VM grace, OR
-    //   (3) a LIVE VM whose transcript went silent — it HAS emitted steps
-    //       (hasHeartbeat) but the most recent is older than the stall
-    //       threshold (a dead microVM / network black-hole; the R9 "运行期
-    //       判活" signal). Scoped to liveVm because every non-live-VM spawn is
-    //       already covered by (2) at the 2-min no-VM grace; and gated on
-    //       hasHeartbeat so a live VM with no step yet (mid first generation)
-    //       is left to the hard-stale backstop — a genuinely-busy spawn is
-    //       NEVER reset for merely being old, OR
+    //   (2) NO liveness signal at all (no live VM, and no spawn_events
+    //       heartbeat ever emitted) AND older than the short no-VM grace, OR
+    //   (3) a live signal (VM or host-native heartbeat) whose transcript went
+    //       silent — it HAS emitted steps (hasHeartbeat) but the most recent
+    //       is older than the stall threshold (a dead microVM / network
+    //       black-hole / hung host-native process; the R9 "运行期判活"
+    //       signal). Gated on hasHeartbeat so a spawn with no step yet (mid
+    //       first generation) is left to the hard-stale backstop — a
+    //       genuinely-busy spawn is NEVER reset for merely being old. Uses
+    //       `hostNativeStallMs` (default 8 min) for a host-native spawn and
+    //       `stallMs` (default 120s) for a live microVM — a host-native CLI
+    //       emits no incremental progress WHILE a single tool call (git
+    //       diff / gh pr diff / test run) is executing, so it can go quiet
+    //       for several real minutes with nothing wrong; a microVM's own
+    //       heartbeat is expected to be far more granular, so a much shorter
+    //       threshold is still the right failure signal there, OR
     //   (4) older than the hard stale backstop regardless.
     const parentTerminal = nodeTerminal || runTerminal;
-    const noVmAndAged = !liveVm && startedAt < Date.now() - noVmGraceMs;
+    const noVmAndAged = !anyLiveSignal && startedAt < Date.now() - noVmGraceMs;
+    const effectiveStallMs = liveVm ? stallMs : hostNativeStallMs;
     const eventStalled =
       !parentTerminal &&
-      liveVm &&
+      anyLiveSignal &&
       hasHeartbeat &&
-      Date.now() - lastEventAt > stallMs;
+      Date.now() - lastEventAt > effectiveStallMs;
     const hardStale = startedAt < Date.now() - staleGraceMs;
     if (!parentTerminal && !noVmAndAged && !eventStalled && !hardStale)
       continue;
@@ -223,7 +318,7 @@ export async function reconcileV3SpawnsOnce(
       : noVmAndAged
         ? `no live microVM (runtime=${runtime ?? "?"}) for ~${ageMin}m`
         : eventStalled
-          ? `no spawn_events heartbeat for ~${silentMin}m (live-VM stall)`
+          ? `no spawn_events heartbeat for ~${silentMin}m (${liveVm ? "live-VM" : "host-native"} stall)`
           : `stale running spawn (~${ageMin}m)`;
     const reason = `reconciled: stranded running spawn — ${why}`;
 
