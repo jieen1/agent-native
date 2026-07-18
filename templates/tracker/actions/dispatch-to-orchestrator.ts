@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { resolveDispatchPayload } from "../server/lib/brief-payload.js";
 import { resolveDispatchGate } from "../server/lib/dispatch-gate.js";
 import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
 import {
@@ -246,6 +247,20 @@ export default defineAction({
     tags.suggestedTemplate = workflowRule.templateName;
     tags.ruleId = workflowRule.ruleId;
 
+    // R4b.3 (§5.5 payload contract): inject the item's OWN structured
+    // sprint-studio brief — never another item's, never tech-design/
+    // sprint-doc full text — as this dispatch's suggestedInputs, keyed by
+    // the L1-suggested template above. Best-effort: {} whenever the item has
+    // no sprint or no brief has been extracted yet, so a pre-Studio dispatch
+    // is byte-for-byte unchanged from before (raw description prose only).
+    const briefPayload = item.sprintId
+      ? await resolveDispatchPayload(db, {
+          sprintId: item.sprintId,
+          itemKey: item.itemKey,
+          templateName: workflowRule.templateName,
+        })
+      : {};
+
     const requirement = item.description?.trim() || item.title;
     const message =
       `Work item ${item.id} (${project.key}) — "${item.title}".\n\n` +
@@ -260,10 +275,15 @@ export default defineAction({
       repo: project.gitRemote,
       baseBranch,
       tags,
-      // L1 suggested inputs (§4.4) — a nested object, so it rides brain-send's
-      // dedicated `suggestedInputs` field rather than the string-only `tags`.
-      ...(Object.keys(workflowRule.defaultInputs).length > 0
-        ? { suggestedInputs: workflowRule.defaultInputs }
+      // L1 suggested inputs (§4.4) merged with the R4b.3 §5.5 brief payload
+      // (briefPayload wins on key overlap — it's the more specific, item-own
+      // content) — rides brain-send's dedicated `suggestedInputs` field
+      // rather than the string-only `tags`.
+      ...(Object.keys(workflowRule.defaultInputs).length > 0 ||
+      Object.keys(briefPayload).length > 0
+        ? {
+            suggestedInputs: { ...workflowRule.defaultInputs, ...briefPayload },
+          }
         : {}),
       // Forward the configurable periodic drift-check cadence. Undefined lets
       // the orchestrator apply its env default (BRAIN_MONITOR_INTERVAL_SEC).

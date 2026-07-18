@@ -180,6 +180,40 @@ beforeAll(async () => {
       org_id TEXT,
       visibility TEXT NOT NULL DEFAULT 'private'
     );
+    CREATE TABLE tracker_sprints (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      goal TEXT DEFAULT '',
+      status TEXT DEFAULT '规划',
+      phase TEXT NOT NULL DEFAULT 'planning',
+      executor_thread_id TEXT,
+      branch TEXT DEFAULT '',
+      start_date TEXT DEFAULT '',
+      end_date TEXT DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      studio_state TEXT NOT NULL DEFAULT '{}',
+      owner_email TEXT NOT NULL,
+      org_id TEXT,
+      visibility TEXT NOT NULL DEFAULT 'private'
+    );
+    CREATE TABLE tracker_sprint_artifacts (
+      id TEXT PRIMARY KEY,
+      sprint_id TEXT NOT NULL,
+      doc_key TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      supersedes TEXT,
+      produced_by_kind TEXT NOT NULL DEFAULT 'agent',
+      content TEXT NOT NULL DEFAULT '',
+      content_ref TEXT,
+      created_at TEXT NOT NULL,
+      owner_email TEXT NOT NULL,
+      org_id TEXT,
+      visibility TEXT NOT NULL DEFAULT 'private'
+    );
   `);
 
   const mod = await import("../dispatch-to-orchestrator.js");
@@ -203,6 +237,8 @@ beforeEach(async () => {
     DELETE FROM tracker_projects;
     DELETE FROM tracker_links;
     DELETE FROM tracker_work_item_runs;
+    DELETE FROM tracker_sprint_artifacts;
+    DELETE FROM tracker_sprints;
   `);
   await db.insert(trackerSchema.projects).values({
     id: "proj-1",
@@ -755,5 +791,125 @@ describe("T-F8-03 (bulk 镜像): bulk-dispatch-to-orchestrator 同样写 tracker
     expect(runs[0]!.threadId).toBe("bt_bulk_2");
     expect(runs[0]!.superseded).toBe(0);
     expect(runs[1]!.superseded).toBe(1);
+  });
+});
+
+// ============================================================================
+// R4b.3 — §5.5 payload contract: dispatch-to-orchestrator's suggestedInputs
+// must carry the item's OWN structured sprint-studio brief (not raw
+// description prose) once one has been extracted, and must fall back to the
+// pre-existing behavior (no suggestedInputs.spec override) otherwise.
+// ============================================================================
+
+async function seedSprint(id: string) {
+  const now = new Date().toISOString();
+  await db.insert(trackerSchema.sprints).values({
+    id,
+    projectId: "proj-1",
+    name: "R4b3 sprint",
+    goal: "",
+    status: "进行中",
+    phase: "designing",
+    startDate: "",
+    endDate: "",
+    createdAt: now,
+    updatedAt: now,
+    ownerEmail: OWNER,
+    orgId: ORG_ID,
+  });
+}
+
+async function seedSprintArtifact(
+  sprintId: string,
+  docKey: string,
+  content: string,
+) {
+  await db.insert(trackerSchema.sprintArtifacts).values({
+    id: `art_${docKey.replace(/[^a-zA-Z0-9]/g, "_")}_${Math.random().toString(36).slice(2, 6)}`,
+    sprintId,
+    docKey,
+    kind: "文档",
+    name: docKey,
+    version: 1,
+    producedByKind: "agent",
+    content,
+    createdAt: new Date().toISOString(),
+    ownerEmail: OWNER,
+    orgId: ORG_ID,
+  });
+}
+
+const BRIEF_MD = [
+  "# Brief: F3-1 · 测试项",
+  "",
+  "实现某功能。",
+  "",
+  "## 涉及文件",
+  "",
+  "| 文件路径 | 操作 | 说明 |",
+  "| --- | --- | --- |",
+  "| `actions/some-file.ts` | MODIFY | 说明 |",
+].join("\n");
+
+describe("R4b.3: dispatch-to-orchestrator carries the item's structured brief as suggestedInputs", () => {
+  it("brief:{itemKey} + shared-brief exist → suggestedInputs.spec/scopeGlobs come from the brief, not the raw description", async () => {
+    await seedSprint("sprint-r4b3-1");
+    await seedSprintArtifact("sprint-r4b3-1", "brief:F3-1", BRIEF_MD);
+    await seedSprintArtifact("sprint-r4b3-1", "shared-brief", "共享约定文本。");
+
+    const id = await insertItem({
+      itemKey: "F3-1",
+      sprintId: "sprint-r4b3-1",
+      description:
+        "raw description prose — must NOT reach suggestedInputs.spec",
+    });
+    mockCallOrchestratorTool.mockResolvedValue({
+      data: { threadId: "bt_r4b3_1", workspaceId: "ws_1" },
+    });
+
+    await asUser(() => dispatchToOrchestrator.run({ workItemId: id }));
+
+    expect(mockCallOrchestratorTool).toHaveBeenCalledTimes(1);
+    const payload = mockCallOrchestratorTool.mock.calls[0]![2] as any;
+    expect(payload.suggestedInputs.spec).toContain("实现某功能");
+    expect(payload.suggestedInputs.spec).toContain("共享约定文本");
+    expect(payload.suggestedInputs.spec).not.toContain("raw description prose");
+    expect(payload.suggestedInputs.scopeGlobs).toEqual([
+      "actions/some-file.ts",
+    ]);
+  });
+
+  it("item has no sprintId → suggestedInputs has no brief-derived spec override (pre-R4b.3 behavior unchanged)", async () => {
+    const id = await insertItem({
+      itemKey: "F3-2",
+      description: "raw description prose",
+    });
+    mockCallOrchestratorTool.mockResolvedValue({
+      data: { threadId: "bt_r4b3_2", workspaceId: null },
+    });
+
+    await asUser(() => dispatchToOrchestrator.run({ workItemId: id }));
+
+    const payload = mockCallOrchestratorTool.mock.calls[0]![2] as any;
+    // defaultInputs is always {} today and no brief payload applies without
+    // a sprint — suggestedInputs must be entirely absent, exactly as before.
+    expect(payload).not.toHaveProperty("suggestedInputs");
+  });
+
+  it("item has a sprintId but extract-briefs hasn't run yet → falls back to no suggestedInputs.spec override", async () => {
+    await seedSprint("sprint-r4b3-3");
+    const id = await insertItem({
+      itemKey: "F3-3",
+      sprintId: "sprint-r4b3-3",
+      description: "raw description prose",
+    });
+    mockCallOrchestratorTool.mockResolvedValue({
+      data: { threadId: "bt_r4b3_3", workspaceId: null },
+    });
+
+    await asUser(() => dispatchToOrchestrator.run({ workItemId: id }));
+
+    const payload = mockCallOrchestratorTool.mock.calls[0]![2] as any;
+    expect(payload).not.toHaveProperty("suggestedInputs");
   });
 });

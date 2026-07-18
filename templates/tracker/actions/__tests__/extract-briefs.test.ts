@@ -536,3 +536,189 @@ describe("extract-briefs — scale flagging", () => {
     expect(notFlagged.scaleFlagged).toBe(false);
   });
 });
+
+// ============================================================================
+// R4b.3 — §5.1 顶部相位条: extract-briefs completing (step ⑦, the last of
+// the 7-step planning-domain chain) is the second automatic phase-write
+// point (after advance-stage.ts's "executing"). Forward-only, idempotent.
+// ============================================================================
+
+const SINGLE_ITEM_TECH_DESIGN = `# Planning-sprint 技术设计
+
+## §4 工作项设计
+
+### §4.1 PRJ-001 · 队列重排序
+
+- **依赖**: 无
+
+实现 exec_queue.position 持久化。
+
+## §5 数据模型
+
+exec_queue 增加 position 列。
+
+## §6 API 表
+
+| 方法 | 路径 | 生产方 | 消费方 | 说明 |
+| --- | --- | --- | --- | --- |
+
+## §7 文件变更矩阵
+
+| 文件路径 | 操作 | 所属工作项 | 说明 | 依赖文件 |
+| --- | --- | --- | --- | --- |
+| \`actions/reorder-queue.ts\` | MODIFY | PRJ-001 | 持久化顺序 | |
+
+## §8 测试策略
+
+黑盒覆盖。
+`;
+
+describe("extract-briefs — R4b.3 phase auto-advance (planning → designing)", () => {
+  async function seedPlanningSprint(id: string) {
+    await db.insert(trackerSchema.sprints).values({
+      id,
+      projectId: "proj-1",
+      name: "Planning-phase sprint",
+      goal: "",
+      status: "规划",
+      phase: "planning",
+      startDate: "",
+      endDate: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ownerEmail: OWNER,
+      orgId: ORG_ID,
+    });
+  }
+
+  async function fetchSprintPhase(id: string) {
+    const row = (
+      await db
+        .select({ phase: trackerSchema.sprints.phase })
+        .from(trackerSchema.sprints)
+        .where(eq(trackerSchema.sprints.id, id))
+    )[0]!;
+    return row.phase;
+  }
+
+  it("advances a 'planning' sprint to 'designing' on successful extraction", async () => {
+    await seedPlanningSprint("sprint-planning-1");
+    await db.insert(trackerSchema.workItems).values({
+      id: "wi-plan-PRJ-001",
+      projectId: "proj-1",
+      type: "task",
+      title: "PRJ-001",
+      description: "",
+      status: "open",
+      priority: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ownerEmail: OWNER,
+      orgId: ORG_ID,
+      sprintId: "sprint-planning-1",
+      itemKey: "PRJ-001",
+      currentStageName: "设计",
+    });
+    const td = await asUser(() =>
+      createSprintArtifact.run({
+        sprintId: "sprint-planning-1",
+        docKey: "tech-design",
+        kind: "设计",
+        name: "技术设计",
+        content: SINGLE_ITEM_TECH_DESIGN,
+      }),
+    );
+    await db.insert(trackerSchema.approvals).values({
+      id: `appr-plan-${td.id}`,
+      sprintId: "sprint-planning-1",
+      gateKey: "design-signoff",
+      status: "approved",
+      requestedBy: OWNER,
+      anchorArtifactId: td.id,
+      anchorVersion: td.version,
+      createdAt: new Date().toISOString(),
+      decidedAt: new Date().toISOString(),
+      decidedBy: OWNER,
+      ownerEmail: OWNER,
+      orgId: ORG_ID,
+    });
+
+    expect(await fetchSprintPhase("sprint-planning-1")).toBe("planning");
+
+    const result = await asUser(() =>
+      extractBriefs.run({ sprintId: "sprint-planning-1" }),
+    );
+    expect(result.phaseAdvancedTo).toBe("designing");
+    expect(await fetchSprintPhase("sprint-planning-1")).toBe("designing");
+  });
+
+  it("is idempotent — re-extracting an already-'designing' sprint does not report another advance", async () => {
+    await seedPlanningSprint("sprint-planning-2");
+    await db.insert(trackerSchema.workItems).values({
+      id: "wi-plan2-PRJ-001",
+      projectId: "proj-1",
+      type: "task",
+      title: "PRJ-001",
+      description: "",
+      status: "open",
+      priority: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ownerEmail: OWNER,
+      orgId: ORG_ID,
+      sprintId: "sprint-planning-2",
+      itemKey: "PRJ-001",
+      currentStageName: "设计",
+    });
+    const td = await asUser(() =>
+      createSprintArtifact.run({
+        sprintId: "sprint-planning-2",
+        docKey: "tech-design",
+        kind: "设计",
+        name: "技术设计",
+        content: SINGLE_ITEM_TECH_DESIGN,
+      }),
+    );
+    await db.insert(trackerSchema.approvals).values({
+      id: `appr-plan2-${td.id}`,
+      sprintId: "sprint-planning-2",
+      gateKey: "design-signoff",
+      status: "approved",
+      requestedBy: OWNER,
+      anchorArtifactId: td.id,
+      anchorVersion: td.version,
+      createdAt: new Date().toISOString(),
+      decidedAt: new Date().toISOString(),
+      decidedBy: OWNER,
+      ownerEmail: OWNER,
+      orgId: ORG_ID,
+    });
+
+    const first = await asUser(() =>
+      extractBriefs.run({ sprintId: "sprint-planning-2" }),
+    );
+    expect(first.phaseAdvancedTo).toBe("designing");
+
+    // Re-run (idempotent content — nothing changed) now that the sprint is
+    // already 'designing': must NOT report another advance or regress it.
+    const second = await asUser(() =>
+      extractBriefs.run({ sprintId: "sprint-planning-2" }),
+    );
+    expect(second.phaseAdvancedTo).toBeNull();
+    expect(await fetchSprintPhase("sprint-planning-2")).toBe("designing");
+  });
+
+  it("a sprint already past 'planning' (existing sprint-1 fixture, phase='designing') is left untouched", async () => {
+    await insertWorkItem("PRJ-001");
+    await insertWorkItem("PRJ-002");
+    const td = await seedTechDesign();
+    await approveDesignSignoff(td.id, td.version);
+
+    expect(await fetchSprintPhase("sprint-1")).toBe("designing");
+    const result = await asUser(() =>
+      extractBriefs.run({ sprintId: "sprint-1" }),
+    );
+    expect(result.phaseAdvancedTo).toBeNull();
+    expect(await fetchSprintPhase("sprint-1")).toBe("designing");
+  });
+});

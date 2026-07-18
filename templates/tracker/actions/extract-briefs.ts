@@ -25,6 +25,7 @@ import {
   summarizeScreen,
 } from "../server/lib/ui-spec-parse.js";
 import createSprintArtifact from "./create-sprint-artifact.js";
+import updateSprint from "./update-sprint.js";
 
 // R4b.1 `extract-briefs` — docs/sdlc-product-design/
 // r4-workflow-families-planning-skills.md §5.3. Deterministic, zero-LLM:
@@ -134,7 +135,7 @@ export default defineAction({
 
     const sprint = (
       await db
-        .select({ id: schema.sprints.id })
+        .select({ id: schema.sprints.id, phase: schema.sprints.phase })
         .from(schema.sprints)
         .where(
           and(eq(schema.sprints.id, args.sprintId), ownerScope(schema.sprints)),
@@ -384,6 +385,22 @@ export default defineAction({
       indexBody,
     );
 
+    // R4b.3 (§5.1 顶部相位条 / §5.6 phase-transition): extract-briefs (step
+    // ⑦, the last of the 7-step planning-domain chain) reaching this DAG's
+    // own natural completion is the objective, forward-only signal that
+    // "planning" is done and the sprint is ready for "designing" (§5.1 notes
+    // the value domain has 8 phases but only `executing` — advance-stage.ts —
+    // has ever had an automatic write point; this is the second one, not a
+    // criteria engine for the other 6 phases, which stay manual via
+    // AdvancePhaseButton per §5.1's explicit recommendation). Idempotent:
+    // only fires from "planning" so a later re-extraction (e.g. a new item
+    // added mid-sprint) never regresses a sprint already further along.
+    let phaseAdvancedTo: string | null = null;
+    if (sprint.phase === "planning") {
+      await updateSprint.run({ id: args.sprintId, phase: "designing" });
+      phaseAdvancedTo = "designing";
+    }
+
     return {
       sprintId: args.sprintId,
       techDesignVersion: techDesign.version,
@@ -398,6 +415,7 @@ export default defineAction({
         dependencies: edges,
       },
       scaleWarnings,
+      phaseAdvancedTo,
     };
   },
 });
