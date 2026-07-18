@@ -174,8 +174,24 @@ blocking→from-audit 单；3 轮超限→escalation/audit-deferral。
 
 ### 3.4 `sdlc-promote` — 晋升
 
-依赖拓扑序逐仓：COMMITS_AHEAD=0 跳过（幂等）→ sprint-end PR → ci-watch →
-merge-pr（**merge-commit** 保留 sprint 边界）→ 全部晋升后删 sprint 分支。
+依赖拓扑序逐仓，单节点 vllm agent 在 workspace 内直接操作 git
+（不经过 PR/CI，生产验证过的直接 merge 方式）：
+
+```
+git fetch origin --prune                          # prune 让已删分支本地也不可见
+→ 幂等检查：origin/<sprint> 已不存在？            # 上次晋升已完成并清了分支
+    是 → already-promoted（分支不存在），跳过不报错
+    否 → COMMITS_AHEAD = rev-list --count origin/<base>..origin/<sprint>
+       =0 → already-promoted（无领先提交），跳过，不删分支
+       >0 → checkout <base> && merge --no-ff origin/<sprint>   # merge-commit 保留 sprint 边界
+            冲突 → 报告冲突并停止（顺序合并红线：不自动解、不 force push）
+            成功 → push origin <base> → git push origin --delete <sprint>   # 删远程 sprint 分支
+                  删除失败（如权限不足）→ 报告，但不回滚已完成的合并
+```
+
+报告口径：COMMITS_AHEAD 数、是否晋升、merge-commit sha 或 skip 原因
+（区分"分支不存在"与"无领先提交"）、是否有冲突、sprint 分支是否已删除。
+绝不 force push，绝不自动解冲突。
 
 ### 3.5 `sdlc-ui-build` — UI 原型流水线（新增）
 

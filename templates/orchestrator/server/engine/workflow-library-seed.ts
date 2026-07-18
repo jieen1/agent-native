@@ -941,9 +941,9 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
     family: "sdlc",
     tags: ["promoting 相位", "顺序锁"],
     description:
-      "Phase G promotion: merge the sprint branch into the base branch with a merge-commit (preserving the sprint boundary). Idempotent: if the sprint branch has no commits ahead of base, skip. The vLLM agent performs the git operations in the workspace.",
+      "Phase G promotion: merge the sprint branch into the base branch with a merge-commit (preserving the sprint boundary), push base, then delete the remote sprint branch. Idempotent: if the sprint branch no longer exists (already promoted+cleaned) or has no commits ahead of base, skip without error. The vLLM agent performs the git operations in the workspace.",
     changeNote:
-      "此条目此前是种子自行编写的 4 节点 pr→ci→merge→cleanup 死代码——`workflow-templates-seed.ts` 撞名机制下从未真正写入生产(r4 doc §1.2)。现替换为 101 生产 v1 的真实 dag(brain 于 2026-07-04 所建,单节点 vllm 微工作流,内含幂等 COMMITS_AHEAD 检查 + merge-commit 保留 sprint 边界 + 冲突时停止不自动解决,run 实绩 done 2 次)。这份内容是从生产只读查询取得,不是本文件原创设计——本表 4 节点方案(pr/ci/merge/cleanup 全部越权承诺 worker 做不到的事)已判定不如生产的 1 节点方案,弃用。",
+      "此条目此前是种子自行编写的 4 节点 pr→ci→merge→cleanup 死代码——`workflow-templates-seed.ts` 撞名机制下从未真正写入生产(r4 doc §1.2)。现替换为 101 生产 v1 的真实 dag(brain 于 2026-07-04 所建,单节点 vllm 微工作流,内含幂等 COMMITS_AHEAD 检查 + merge-commit 保留 sprint 边界 + 冲突时停止不自动解决,run 实绩 done 2 次)。这份内容是从生产只读查询取得,不是本文件原创设计——本表 4 节点方案(pr/ci/merge/cleanup 全部越权承诺 worker 做不到的事)已判定不如生产的 1 节点方案,弃用。本次补齐:合并 push 成功后 `git push origin --delete` 删除远程 sprint 分支(合并边界已保留在 merge-commit 里,分支本体无需保留);并把幂等检查前置为 fetch --prune 后先判 `origin/<sprint>` 是否仍存在——旧实现只查 COMMITS_AHEAD,在分支已被删的重跑里会因 rev-list 找不到 sprint 远端引用而报错,并非真正幂等。",
     dag: {
       nodes: [
         {
@@ -952,7 +952,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           agent: "vllm",
           deps: [],
           prompt:
-            '你是发布工程师,执行 Phase G 晋升:把 sprint 分支以 merge-commit 合入 base 分支。用 Bash 在当前 workspace 的 git 仓库操作:\n1. sprintBranch = {{inputs.sprintBranch}} ; baseBranch = {{inputs.baseBranch}}\n2. git fetch origin\n3. 幂等检查:COMMITS_AHEAD=$(git rev-list --count origin/{{inputs.baseBranch}}..origin/{{inputs.sprintBranch}})。若为 0,说明无需晋升(sprint 分支不领先 base),直接报告 already-promoted 并结束,不做任何操作。\n4. 若 >0:git checkout {{inputs.baseBranch}} && git merge --no-ff origin/{{inputs.sprintBranch}} -m "Promote sprint {{inputs.sprintBranch}} into {{inputs.baseBranch}}"(保留 sprint 边界的 merge-commit)。若有冲突,不要自动解决,报告冲突并停止(顺序合并红线:永不自动解冲突)。\n5. 成功后 git push origin {{inputs.baseBranch}}。\n报告:COMMITS_AHEAD 数、是否晋升、merge-commit sha 或 skip 原因、是否有冲突。绝不 force push,绝不自动解冲突。',
+            '你是发布工程师,执行 Phase G 晋升:把 sprint 分支以 merge-commit 合入 base 分支,push 后删除远程 sprint 分支。用 Bash 在当前 workspace 的 git 仓库操作:\n1. sprintBranch = {{inputs.sprintBranch}} ; baseBranch = {{inputs.baseBranch}}\n2. git fetch origin --prune(prune 让已在远端删除的分支在本地也不再可见,这是后续识别"已完成晋升"的关键)。\n3. 幂等检查 1(分支存在性):若 `origin/{{sprintBranch}}` 在 fetch --prune 之后已不存在(说明上一次晋升已完成并清理了分支),报告 already-promoted(skip 原因:分支不存在,视为已完成),不报错,直接结束,不做任何操作。\n4. 幂等检查 2(领先提交数):若分支存在,COMMITS_AHEAD=$(git rev-list --count origin/{{baseBranch}}..origin/{{sprintBranch}})。若为 0,报告 already-promoted(skip 原因:无领先提交),直接结束,不删除分支。\n5. 若 COMMITS_AHEAD > 0:git checkout {{baseBranch}} && git merge --no-ff origin/{{sprintBranch}} -m "Promote sprint {{inputs.sprintBranch}} into {{inputs.baseBranch}}"(保留 sprint 边界的 merge-commit)。若有冲突,不要自动解决,报告冲突并停止(顺序合并红线:永不自动解冲突,不 force push)。\n6. 合并成功后 git push origin {{baseBranch}}。\n7. push 成功后 git push origin --delete {{sprintBranch}} 删除远程 sprint 分支(合并边界已保留在 merge-commit 里,不再需要保留分支本体)。若删除失败(如权限不足),报告删除失败但不回滚已完成的合并。\n8. 报告:COMMITS_AHEAD 数、是否晋升、merge-commit sha 或 skip 原因(区分"分支不存在"和"无领先提交"两种 skip)、是否有冲突、sprint 分支是否已删除。绝不 force push,绝不自动解冲突。',
           workspace: "{{inputs.workspaceId}}",
         },
       ],
