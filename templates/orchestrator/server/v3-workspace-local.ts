@@ -625,6 +625,24 @@ async function provisionWorktree(opts: {
     baseRef = resolved === "HEAD" ? "HEAD" : `refs/remotes/origin/${resolved}`;
   }
 
+  // Board #87 — reusing the base branch's own name as the NEW work `branch`
+  // (e.g. passing `branch: "main"` when "main" is what you meant as the base)
+  // collides under this shared-bare-mirror model: every workspace for the
+  // same repo shares ONE `refs/heads/*` namespace, so a repeat/concurrent
+  // create for the same base fails with a raw git worktree/fetch error
+  // ("already used by worktree" / "refusing to fetch into branch ... checked
+  // out at ...") that gives the caller no idea what to change. Fail fast with
+  // an actionable message instead — BEFORE the git call, and even on the
+  // first-ever create for a repo (deterministic, not just a race).
+  if (branch === resolvedBranchName) {
+    throw new Error(
+      `workspaceCreate: branch ('${branch}') must not equal the base branch it is being cut from ('${resolvedBranchName}'). ` +
+        `'branch' names the NEW work branch to check out (a fresh branch cut FROM the base) — it must differ from the base. ` +
+        `Pass the base via 'baseRef' (e.g. baseRef: '${resolvedBranchName}') and either omit 'branch' (defaults to a unique ` +
+        `per-run name) or choose a distinct branch name.`,
+    );
+  }
+
   // 3) Add the worktree on a fresh branch from the base ref. -B is idempotent on
   //    the branch; the worktree dir must not pre-exist.
   await mkdir(WORKSPACE_ROOT, { recursive: true }).catch(() => {});

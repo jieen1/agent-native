@@ -22,6 +22,9 @@ import {
   assertDependenciesWarm,
   runTestCmdSmoke,
   resolvePnpmStoreDir,
+  resolveProbeTimeoutMs,
+  resolveInstallTimeoutMs,
+  resolveSmokeTimeoutMs,
   resolveTestCmdSmoke,
   resolveVitestProjectDir,
   DEFAULT_TEST_CMD_SMOKE,
@@ -41,6 +44,9 @@ afterEach(() => {
   for (const d of tempDirs.splice(0))
     rmSync(d, { recursive: true, force: true });
   delete process.env.ORCH_PNPM_STORE;
+  delete process.env.ORCH_PNPM_PROBE_TIMEOUT_MS;
+  delete process.env.ORCH_PNPM_INSTALL_TIMEOUT_MS;
+  delete process.env.ORCH_SMOKE_TIMEOUT_MS;
 });
 
 function ok(stdout = "ok"): ExecResult {
@@ -506,4 +512,84 @@ describe("W2 real end-to-end reproduction (SDLC-0xx dogfood false positive)", ()
     },
     180_000,
   );
+});
+
+// ── W2/W3 timeout resolution (board #88 — large monorepo installs need more ─
+// headroom than a single-app repo's hardcoded 15s probe / 120s install / 120s
+// smoke bounds allowed for. Distinct from board #72 (WHERE the probe/smoke
+// command's cwd resolves — resolveVitestProjectDir, tested above): this is
+// HOW LONG W2/W3 are allowed to run. Mirrors resolveGitTimeoutMs's env-var
+// override pattern in v3-workspace-local.ts.
+
+describe("W2/W3 timeout resolution (board #88)", () => {
+  it("resolveProbeTimeoutMs defaults to 30s and honours ORCH_PNPM_PROBE_TIMEOUT_MS", () => {
+    delete process.env.ORCH_PNPM_PROBE_TIMEOUT_MS;
+    expect(resolveProbeTimeoutMs()).toBe(30_000);
+    process.env.ORCH_PNPM_PROBE_TIMEOUT_MS = "45000";
+    expect(resolveProbeTimeoutMs()).toBe(45_000);
+  });
+
+  it("resolveInstallTimeoutMs defaults to 300s (raised from the old 120s — a large monorepo's whole-workspace install + postinstall builds is heavier than a bare git fetch) and honours ORCH_PNPM_INSTALL_TIMEOUT_MS", () => {
+    delete process.env.ORCH_PNPM_INSTALL_TIMEOUT_MS;
+    expect(resolveInstallTimeoutMs()).toBe(300_000);
+    process.env.ORCH_PNPM_INSTALL_TIMEOUT_MS = "600000";
+    expect(resolveInstallTimeoutMs()).toBe(600_000);
+  });
+
+  it("resolveSmokeTimeoutMs defaults to 180s and honours ORCH_SMOKE_TIMEOUT_MS", () => {
+    delete process.env.ORCH_SMOKE_TIMEOUT_MS;
+    expect(resolveSmokeTimeoutMs()).toBe(180_000);
+    process.env.ORCH_SMOKE_TIMEOUT_MS = "240000";
+    expect(resolveSmokeTimeoutMs()).toBe(240_000);
+  });
+
+  it("a non-numeric/zero/negative env value falls back to the default (never NaN or a hung 0ms bound)", () => {
+    process.env.ORCH_PNPM_INSTALL_TIMEOUT_MS = "not-a-number";
+    expect(resolveInstallTimeoutMs()).toBe(300_000);
+    process.env.ORCH_PNPM_INSTALL_TIMEOUT_MS = "0";
+    expect(resolveInstallTimeoutMs()).toBe(300_000);
+    process.env.ORCH_PNPM_INSTALL_TIMEOUT_MS = "-5";
+    expect(resolveInstallTimeoutMs()).toBe(300_000);
+  });
+
+  it("assertDependenciesWarm uses the resolved (env-overridable) probe/install timeouts when the caller passes none — production's actual call shape (assertWorkspaceReady never passes explicit timeouts)", async () => {
+    process.env.ORCH_PNPM_PROBE_TIMEOUT_MS = "9999";
+    process.env.ORCH_PNPM_INSTALL_TIMEOUT_MS = "8888";
+    const root = tempDir("f1-w2-timeout-resolve-");
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "^4.1.5" } }),
+    );
+
+    const exec = vi.fn(async (command: string, _execOpts: { timeoutMs: number }) =>
+      command.includes("install") ? fail(1, "offline") : ok("4.1.5"),
+    );
+    // First probe misses (forces the install path), so both probeTimeoutMs
+    // (the initial probe) AND installTimeoutMs get exercised in one call.
+    exec.mockImplementationOnce(async (_command: string, _execOpts: { timeoutMs: number }) =>
+      fail(1, "cold"),
+    );
+
+    await assertDependenciesWarm(root, { exec });
+
+    const probeCalls = exec.mock.calls.filter(
+      (c) => !String(c[0]).includes("install"),
+    );
+    const installCalls = exec.mock.calls.filter((c) =>
+      String(c[0]).includes("install"),
+    );
+    expect(probeCalls.every((c) => c[1].timeoutMs === 9999)).toBe(true);
+    expect(installCalls.every((c) => c[1].timeoutMs === 8888)).toBe(true);
+  });
+
+  it("runTestCmdSmoke uses the resolved (env-overridable) smoke timeout when the caller passes none", async () => {
+    process.env.ORCH_SMOKE_TIMEOUT_MS = "7777";
+    const exec = vi.fn(async (_command: string, _execOpts: { timeoutMs: number }) =>
+      ok("Tests 1 passed"),
+    );
+
+    await runTestCmdSmoke(process.cwd(), { exec });
+
+    expect(exec.mock.calls[0]?.[1]).toMatchObject({ timeoutMs: 7777 });
+  });
 });

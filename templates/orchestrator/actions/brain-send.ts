@@ -143,9 +143,16 @@ export default defineAction({
       if (existing) {
         let workspaceId = args.workspaceId;
         if (!workspaceId && args.repo && args.repo.trim()) {
+          // Board #87 — do NOT pass `baseBranch` as the worktree `branch`:
+          // that tries to check out the base branch (e.g. `main`) itself,
+          // which collides under the shared git-worktree model once another
+          // worktree already holds it (mirrors the fix already applied in
+          // brain-admit.ts's startBrainTaskTurn). Cut the fresh run branch
+          // FROM baseBranch via `baseRef` instead, letting `branch` default
+          // to a unique per-run name.
           const ws = await createLocalWorkspace({
             repoUrl: args.repo.trim(),
-            branch: args.baseBranch?.trim() || undefined,
+            baseRef: args.baseBranch?.trim() || undefined,
             ownerKind: "user",
             ownerId: ownerEmail,
             createdBy: ownerEmail,

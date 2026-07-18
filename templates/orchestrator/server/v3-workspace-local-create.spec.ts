@@ -366,3 +366,110 @@ describe("unborn-HEAD incident regression", () => {
     expect(changed).toEqual(["fix.txt"]);
   });
 });
+
+// ── Board #87: branch/baseRef collision guard ───────────────────────────────
+//
+// The `workspaceCreate` action's `branch` param names the NEW work branch to
+// cut and check out — NOT the base branch it's cut FROM (that's `baseRef`).
+// The `orchestrating-v3` skill's own doc example used to show
+// `workspaceCreate({ repo, branch: baseBranch, ... })`, which passes the
+// intended BASE branch's name into `branch`. Under this app's shared
+// git-worktree isolation (one bare mirror + one refs/heads namespace per
+// repo), that collides with ANY workspace already checked out on that branch
+// name — surfacing as a raw git error ("... already used by worktree ..." /
+// "refusing to fetch into branch ... checked out at ...") instead of an
+// actionable one. These tests prove the fix fails FAST with a clear message
+// instead — deterministically, even on the very first workspace for a repo,
+// not just once a collision race actually happens.
+
+describe("board #87 — branch must not equal the base branch it's cut from", () => {
+  it("branch equal to the auto-resolved default base (no explicit baseRef) → clear actionable error, no git ever invoked", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    await expect(
+      createLocalWorkspace({
+        repoUrl: f.upstream,
+        branch: "main", // the exact historical trap: branch === the repo's real base
+        ownerKind: "user",
+        ownerId: "person@example.test",
+      }),
+    ).rejects.toThrow(
+      /branch \('main'\) must not equal the base branch.*\('main'\).*Pass the base via 'baseRef'/s,
+    );
+
+    // Never a raw git "already used by worktree" / "refusing to fetch" message.
+    await expect(
+      createLocalWorkspace({
+        repoUrl: f.upstream,
+        branch: "main",
+        ownerKind: "user",
+        ownerId: "person@example.test2",
+      }),
+    ).rejects.not.toThrow(/already used by worktree|refusing to fetch/);
+  });
+
+  it("branch explicitly equal to baseRef → same clear actionable error", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    await expect(
+      createLocalWorkspace({
+        repoUrl: f.upstream,
+        branch: "main",
+        baseRef: "main",
+        ownerKind: "user",
+        ownerId: "person@example.test",
+      }),
+    ).rejects.toThrow(/must not equal the base branch/);
+  });
+
+  it("the row is marked 'error' (provisioning failure), never left dangling as 'ready'", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    await expect(
+      createLocalWorkspace({
+        repoUrl: f.upstream,
+        branch: "main",
+        ownerKind: "user",
+        ownerId: "person@example.test",
+      }),
+    ).rejects.toThrow();
+
+    expect(hoisted.rows[0].state).toBe("error");
+  });
+
+  it("control: a DIFFERENT branch name from the same base (the correct usage) succeeds and cuts an isolated worktree", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    const ws = await createLocalWorkspace({
+      repoUrl: f.upstream,
+      branch: "feature/my-work",
+      baseRef: "main",
+      ownerKind: "user",
+      ownerId: "person@example.test",
+    });
+
+    expect(ws.branch).toBe("feature/my-work");
+    expect(existsSync(ws.dir)).toBe(true);
+    expect(hoisted.rows[0].state).toBe("ready");
+  });
+
+  it("control: omitting branch entirely still defaults to a unique per-run name distinct from baseRef (never collides)", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    const ws = await createLocalWorkspace({
+      repoUrl: f.upstream,
+      baseRef: "main",
+      ownerKind: "user",
+      ownerId: "person@example.test",
+    });
+
+    expect(ws.branch).not.toBe("main");
+    expect(ws.branch).toMatch(/^orchestrator\/run-/);
+    expect(hoisted.rows[0].state).toBe("ready");
+  });
+});
