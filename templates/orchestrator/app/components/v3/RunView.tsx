@@ -427,6 +427,7 @@ export function RunView({ runId }: RunViewProps) {
             workspaceId={workspaceId}
             prUrl={prUrl}
             runStatus={runState.status}
+            runId={runId}
           />
 
           <div className="ml-auto">

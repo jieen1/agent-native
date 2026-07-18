@@ -22,13 +22,23 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useV3WorkspaceCi, type V3RunStatus } from "@/hooks/use-v3-run";
+import {
+  useMergeReviewGate,
+  useV3WorkspaceCi,
+  type V3RunStatus,
+} from "@/hooks/use-v3-run";
 import { cn } from "@/lib/utils";
+
+import { MergeReviewGate } from "./MergeReviewGate";
 
 export interface RunMergeControlProps {
   workspaceId: string | null;
   prUrl: string | null;
   runStatus: V3RunStatus;
+  /** The run whose diff the independent review (task board #95) should
+   *  cover — used to pull the original spec/goal for review context when a
+   *  human starts one. */
+  runId: string;
 }
 
 interface MergePrActionResult {
@@ -84,9 +94,11 @@ export function RunMergeControl({
   workspaceId,
   prUrl,
   runStatus,
+  runId,
 }: RunMergeControlProps) {
   const [lastResult, setLastResult] = useState<LastMergeResult | null>(null);
   const { data: ci } = useV3WorkspaceCi(workspaceId);
+  const { data: reviewGate } = useMergeReviewGate(workspaceId);
   const mergeMutation = useActionMutation("workspaceMergePr" as any, {});
 
   // Nothing to merge yet — no workspace, or no PR opened.
@@ -97,6 +109,10 @@ export function RunMergeControl({
   const prClosed = prState === "CLOSED";
   const ciRed = ci?.state === "red";
   const isDone = runStatus === "done";
+  // Task board #95 — mandatory independent-review gate. Fails CLOSED: an
+  // unloaded/absent gate result blocks merge the same as an explicit
+  // "blocked" verdict, never defaults to "allowed" while unknown.
+  const reviewBlocks = !reviewGate || !reviewGate.canMerge;
 
   const disabledReason = !isDone
     ? "运行尚未完成，暂不能合并"
@@ -106,7 +122,9 @@ export function RunMergeControl({
         ? "此 PR 已关闭，未合并"
         : ciRed
           ? "CI 未通过，无法合并"
-          : null;
+          : reviewBlocks
+            ? (reviewGate?.reason ?? "正在加载独立复核状态…")
+            : null;
 
   function handleMerge() {
     mergeMutation.mutate(
@@ -177,6 +195,12 @@ export function RunMergeControl({
             {PR_STATE_LABEL[prState] ?? prState}
           </Badge>
         ) : null}
+
+        <MergeReviewGate
+          workspaceId={workspaceId}
+          runId={runId}
+          gate={reviewGate}
+        />
 
         <AlertDialog>
           <AlertDialogTrigger asChild>

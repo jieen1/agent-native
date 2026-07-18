@@ -369,6 +369,34 @@ export const v3Workspaces = pgTable(
   ],
 );
 
+// ─── v3_merge_overrides ─────────────────────────────────────────────────────
+// Task board #95 — mandatory independent-review gate ahead of `workspaceMergePr`.
+// A human's explicit "I saw the independent review's findings and choose to
+// merge anyway" decision. This is the ONLY thing that needs its own row: the
+// review verdict itself lives on the (separately dispatched) review run's own
+// v3_nodes output — see server/engine/merge-review-gate.ts, which reads that
+// run via `v3_runs.tags @> {"mergeReviewFor": workspaceId}` rather than a
+// second copy of the verdict. `reviewRunId` pins an override to the SPECIFIC
+// review it was granted against (nullable — a human may override before any
+// review has ever run); a later, different review run for the same workspace
+// makes an old override stop matching (computeMergeGate below only honors an
+// override whose reviewRunId equals the CURRENT latest review, or is null and
+// no review has ever run), so the gate never silently re-applies a stale
+// human decision to a new, unseen diff.
+export const v3MergeOverrides = pgTable(
+  "v3_merge_overrides",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    reviewRunId: text("review_run_id"),
+    reason: text("reason").notNull(),
+    overriddenBy: text("overridden_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    ...ownableColumns(),
+  },
+  (t) => [index("idx_v3_merge_overrides_workspace").on(t.workspaceId)],
+);
+
 // ─── v3_patches ─────────────────────────────────────────────────────────────
 
 export const v3Patches = pgTable(

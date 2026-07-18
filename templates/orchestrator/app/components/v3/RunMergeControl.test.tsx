@@ -6,9 +6,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RunMergeControl } from "./RunMergeControl";
 
+// A passing default for the independent-review gate (task board #95) — most
+// of these tests exercise the pre-existing CI/PR-state disabling logic and
+// don't care about the review gate, so it defaults to already-passed rather
+// than forcing every existing test to also stub a review. The dedicated
+// "independent review gate" describe block below overrides this per test.
+const PASSED_REVIEW_GATE = {
+  workspaceId: "ws1",
+  review: {
+    reviewRunId: "v3r_review1",
+    status: "done" as const,
+    verdict: "safe_to_merge" as const,
+    summary: "No blocking issues found.",
+    findings: [] as unknown[],
+    startedAt: "2026-07-18T00:00:00.000Z",
+    completedAt: "2026-07-18T00:05:00.000Z",
+    error: null,
+  },
+  override: null,
+  canMerge: true,
+  source: "review-passed" as const,
+  reason: "独立复核通过：未发现需要阻塞合并的问题",
+};
+
 const mocks = vi.hoisted(() => ({
   ciData: undefined as Record<string, unknown> | undefined,
-  mutate: vi.fn(),
+  reviewGateData: undefined as Record<string, unknown> | undefined,
+  mergeMutate: vi.fn(),
+  reviewStartMutate: vi.fn(),
+  reviewOverrideMutate: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
@@ -17,11 +43,31 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@agent-native/core/client", () => ({
   cn: (...values: Array<string | false | null | undefined>) =>
     values.filter(Boolean).join(" "),
-  useActionQuery: () => ({ data: mocks.ciData, isLoading: false }),
-  useActionMutation: () => ({
-    mutate: (...args: unknown[]) => mocks.mutate(...args),
-    isPending: false,
-  }),
+  useActionQuery: (name: string) => {
+    if (name === "workspaceCiWatch")
+      return { data: mocks.ciData, isLoading: false };
+    if (name === "mergeReviewGet")
+      return { data: mocks.reviewGateData, isLoading: false };
+    return { data: undefined, isLoading: false };
+  },
+  useActionMutation: (name: string) => {
+    if (name === "workspaceMergePr")
+      return {
+        mutate: (...args: unknown[]) => mocks.mergeMutate(...args),
+        isPending: false,
+      };
+    if (name === "mergeReviewStart")
+      return {
+        mutate: (...args: unknown[]) => mocks.reviewStartMutate(...args),
+        isPending: false,
+      };
+    if (name === "mergeReviewOverride")
+      return {
+        mutate: (...args: unknown[]) => mocks.reviewOverrideMutate(...args),
+        isPending: false,
+      };
+    return { mutate: vi.fn(), isPending: false };
+  },
 }));
 
 vi.mock("sonner", () => ({
@@ -40,7 +86,10 @@ beforeEach(() => {
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.ciData = undefined;
-  mocks.mutate.mockReset();
+  mocks.reviewGateData = PASSED_REVIEW_GATE;
+  mocks.mergeMutate.mockReset();
+  mocks.reviewStartMutate.mockReset();
+  mocks.reviewOverrideMutate.mockReset();
   mocks.toastSuccess.mockReset();
   mocks.toastError.mockReset();
   mocks.toastInfo.mockReset();
@@ -59,10 +108,11 @@ async function render(props: {
   workspaceId: string | null;
   prUrl: string | null;
   runStatus: "done" | "running" | "failed" | "cancelled" | "pending" | "paused";
+  runId?: string;
 }) {
   root = createRoot(container);
   await act(async () => {
-    root.render(<RunMergeControl {...props} />);
+    root.render(<RunMergeControl {...props} runId={props.runId ?? "run-1"} />);
   });
 }
 
@@ -145,7 +195,7 @@ describe("RunMergeControl", () => {
       checks: [],
       summary: "ok",
     };
-    mocks.mutate.mockImplementation((_args, opts) => {
+    mocks.mergeMutate.mockImplementation((_args, opts) => {
       opts?.onSuccess?.({
         workspaceId: "ws1",
         merged: true,
@@ -168,7 +218,7 @@ describe("RunMergeControl", () => {
       confirmBtn!.click();
     });
 
-    expect(mocks.mutate).toHaveBeenCalledWith(
+    expect(mocks.mergeMutate).toHaveBeenCalledWith(
       { workspaceId: "ws1" },
       expect.anything(),
     );
@@ -185,7 +235,7 @@ describe("RunMergeControl", () => {
       checks: [],
       summary: "failing",
     };
-    mocks.mutate.mockImplementation((_args, opts) => {
+    mocks.mergeMutate.mockImplementation((_args, opts) => {
       opts?.onSuccess?.({
         workspaceId: "ws1",
         merged: false,
@@ -227,7 +277,7 @@ describe("RunMergeControl", () => {
       checks: [],
       summary: "ok",
     };
-    mocks.mutate.mockImplementation((_args, opts) => {
+    mocks.mergeMutate.mockImplementation((_args, opts) => {
       opts?.onSuccess?.({
         workspaceId: "ws1",
         merged: false,
@@ -249,5 +299,214 @@ describe("RunMergeControl", () => {
     expect(mocks.toastInfo).toHaveBeenCalled();
     expect(mocks.toastError).not.toHaveBeenCalled();
     expect(container.textContent).toContain("已经合并过了");
+  });
+});
+
+function setTextareaValue(el: HTMLTextAreaElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    "value",
+  )!.set!;
+  setter.call(el, value);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+describe("RunMergeControl — independent review gate (task board #95)", () => {
+  const CI_GREEN_OPEN = {
+    state: "green",
+    prUrl: "u",
+    prState: "OPEN",
+    checks: [],
+    summary: "ok",
+  };
+
+  it("blocks merge when no independent review has ever run, even with CI green and an open PR", async () => {
+    mocks.ciData = CI_GREEN_OPEN;
+    mocks.reviewGateData = {
+      workspaceId: "ws1",
+      review: null,
+      override: null,
+      canMerge: false,
+      source: "blocked",
+      reason: "尚未运行独立复核，无法合并",
+    };
+    await render({
+      workspaceId: "ws1",
+      prUrl: "https://github.com/x/y/pull/1",
+      runStatus: "done",
+    });
+
+    const mergeBtn = findButton("合并到 main");
+    expect(mergeBtn?.disabled).toBe(true);
+    expect(mergeBtn?.title).toContain("尚未运行独立复核");
+    expect(container.textContent).toContain("未独立复核");
+    expect(findButton("运行独立复核")).toBeTruthy();
+  });
+
+  it("starting a review calls mergeReviewStart with the workspace and origin run id", async () => {
+    mocks.ciData = CI_GREEN_OPEN;
+    mocks.reviewGateData = {
+      workspaceId: "ws1",
+      review: null,
+      override: null,
+      canMerge: false,
+      source: "blocked",
+      reason: "尚未运行独立复核，无法合并",
+    };
+    await render({
+      workspaceId: "ws1",
+      prUrl: "https://github.com/x/y/pull/1",
+      runStatus: "done",
+      runId: "run-42",
+    });
+
+    await act(async () => {
+      findButton("运行独立复核")!.click();
+    });
+
+    expect(mocks.reviewStartMutate).toHaveBeenCalledWith(
+      { workspaceId: "ws1", runId: "run-42" },
+      expect.anything(),
+    );
+  });
+
+  it("blocks merge and surfaces the findings when the review flags concerns with no override", async () => {
+    mocks.ciData = CI_GREEN_OPEN;
+    mocks.reviewGateData = {
+      workspaceId: "ws1",
+      review: {
+        reviewRunId: "v3r_review1",
+        status: "done",
+        verdict: "concerns_found",
+        summary: "Missing tests for the new branch.",
+        findings: ["no unit test for the new gate", "hardcoded timeout"],
+        startedAt: "2026-07-18T00:00:00.000Z",
+        completedAt: "2026-07-18T00:05:00.000Z",
+        error: null,
+      },
+      override: null,
+      canMerge: false,
+      source: "blocked",
+      reason: "独立复核发现问题，需人工确认后才能合并",
+    };
+    await render({
+      workspaceId: "ws1",
+      prUrl: "https://github.com/x/y/pull/1",
+      runStatus: "done",
+    });
+
+    expect(findButton("合并到 main")?.disabled).toBe(true);
+    expect(container.textContent).toContain("发现问题");
+
+    await act(async () => {
+      findButton("发现问题")!.click();
+    });
+    // The Dialog's content portals to document.body, outside `container`.
+    expect(document.body.textContent).toContain(
+      "Missing tests for the new branch",
+    );
+    expect(document.body.textContent).toContain(
+      "no unit test for the new gate",
+    );
+    expect(document.body.textContent).toContain("hardcoded timeout");
+  });
+
+  it("lets a human override a flagged review with a reason, calling mergeReviewOverride", async () => {
+    mocks.ciData = CI_GREEN_OPEN;
+    mocks.reviewGateData = {
+      workspaceId: "ws1",
+      review: {
+        reviewRunId: "v3r_review1",
+        status: "done",
+        verdict: "concerns_found",
+        summary: "Missing tests for the new branch.",
+        findings: ["no unit test for the new gate"],
+        startedAt: "2026-07-18T00:00:00.000Z",
+        completedAt: "2026-07-18T00:05:00.000Z",
+        error: null,
+      },
+      override: null,
+      canMerge: false,
+      source: "blocked",
+      reason: "独立复核发现问题，需人工确认后才能合并",
+    };
+    await render({
+      workspaceId: "ws1",
+      prUrl: "https://github.com/x/y/pull/1",
+      runStatus: "done",
+    });
+
+    await act(async () => {
+      findButton("发现问题")!.click();
+    });
+
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea).toBeTruthy();
+    await act(async () => {
+      setTextareaValue(
+        textarea,
+        "verified manually, findings are false positives",
+      );
+    });
+
+    const overrideBtn = findButton("人工确认：仍然合并");
+    expect(overrideBtn?.disabled).toBe(false);
+    await act(async () => {
+      overrideBtn!.click();
+    });
+
+    expect(mocks.reviewOverrideMutate).toHaveBeenCalledWith(
+      {
+        workspaceId: "ws1",
+        reason: "verified manually, findings are false positives",
+      },
+      expect.anything(),
+    );
+  });
+
+  it("enables merge once a human override is recorded against the current review", async () => {
+    mocks.ciData = CI_GREEN_OPEN;
+    mocks.reviewGateData = {
+      workspaceId: "ws1",
+      review: {
+        reviewRunId: "v3r_review1",
+        status: "done",
+        verdict: "concerns_found",
+        summary: "flagged",
+        findings: ["x"],
+        startedAt: null,
+        completedAt: null,
+        error: null,
+      },
+      override: {
+        reviewRunId: "v3r_review1",
+        reason: "reviewed manually, fine to merge",
+        overriddenBy: "human@example.com",
+        createdAt: "2026-07-18T01:00:00.000Z",
+      },
+      canMerge: true,
+      source: "human-override",
+      reason: "已人工确认合并：reviewed manually, fine to merge",
+    };
+    await render({
+      workspaceId: "ws1",
+      prUrl: "https://github.com/x/y/pull/1",
+      runStatus: "done",
+    });
+
+    expect(findButton("合并到 main")?.disabled).toBe(false);
+    expect(container.textContent).toContain("已人工确认合并");
+  });
+
+  it("fails closed: blocks merge while the review gate result is still loading", async () => {
+    mocks.ciData = CI_GREEN_OPEN;
+    mocks.reviewGateData = undefined;
+    await render({
+      workspaceId: "ws1",
+      prUrl: "https://github.com/x/y/pull/1",
+      runStatus: "done",
+    });
+
+    expect(findButton("合并到 main")?.disabled).toBe(true);
   });
 });

@@ -93,6 +93,26 @@ reaches these actions as MCP tools) authors a DAG, runs it, monitors it by
   control (`RunMergeControl`) — you don't need to merge PRs the human can see
   and merge themselves; use `workspaceMergePr` when acting autonomously on
   their behalf.
+- **Independent pre-merge review gate (task board #95):** `RunMergeControl`'s
+  merge button additionally requires a PASSING mandatory independent review —
+  `workspaceMergePr`'s own CI/conflict checks are unchanged, but the UI now
+  fails closed until either a genuine second-pass verdict or an explicit human
+  override exists. `mergeReviewStart({ workspaceId, runId })` dispatches the
+  dedicated `sdlc-merge-review` DAG template as its OWN separate run (a fresh
+  `agent:"claude-code"` node scoped to the workspace that re-fetches the real
+  diff itself via `git`/`gh pr diff` — not a re-read of the original dev/review
+  nodes' verdict); it goes through the normal `workflowRun` dispatch path, so
+  the existing claude-code-node concurrency gate
+  (`server/queue/claude-code-admit.ts`) applies automatically. `mergeReviewGet({
+  workspaceId })` reads the latest review run's live verdict/summary/findings
+  plus any recorded human override and returns the computed
+  `{ canMerge, source, reason }` gate. `mergeReviewOverride` (`agentTool:
+  false` — human/UI-only, never agent-callable) records an explicit "I saw the
+  findings, merge anyway" reason; it is pinned to the specific review run it
+  overrides, so a later NEW review for the same workspace is never silently
+  covered by a stale override. Prefer calling `mergeReviewStart` yourself when
+  preparing a PR for a human to merge, rather than leaving them to discover the
+  gate is unmet — but never call `mergeReviewOverride` on the human's behalf.
 - **Ship-it deploy:** `trigger-deploy` (real backup → build → restart →
   health-check → rollback-on-failure against the configured host, see
   Settings → Deploy), `deploy-status`, `list-deploy-runs`. `trigger-deploy` has

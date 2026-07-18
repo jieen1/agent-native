@@ -1057,6 +1057,32 @@ ALTER TABLE v3_runs ADD COLUMN IF NOT EXISTS writeback_last_error text;
 CREATE INDEX IF NOT EXISTS idx_v3_runs_writeback_status ON v3_runs USING btree ("writeback_status")`,
     },
   },
+  {
+    // merge-review-gate (task board #95): mandatory independent-review gate
+    // ahead of `workspaceMergePr`. The review verdict itself needs no new
+    // storage — it's read live off the dedicated `sdlc-merge-review` DAG run
+    // (see workflow-library-seed.ts) via `v3_runs.tags`. The ONE new fact that
+    // needs a durable row is a human's explicit "I saw the findings, merge
+    // anyway" override (server/engine/merge-review-gate.ts). NAME-BASED for
+    // the same reason as every other named entry in this array (parallel
+    // branches extend V3_MIGRATIONS concurrently). Single CREATE TABLE IF NOT
+    // EXISTS — additive, no catalog race.
+    version: 7,
+    name: "merge-review-gate",
+    sql: {
+      postgres: `CREATE TABLE IF NOT EXISTS v3_merge_overrides (
+  id text PRIMARY KEY,
+  workspace_id text NOT NULL,
+  review_run_id text,
+  reason text NOT NULL,
+  overridden_by text,
+  created_at timestamp with time zone DEFAULT now(),
+  owner_email text NOT NULL DEFAULT 'local@localhost',
+  org_id text
+);
+CREATE INDEX IF NOT EXISTS idx_v3_merge_overrides_workspace ON v3_merge_overrides USING btree ("workspace_id")`,
+    },
+  },
 ];
 
 const migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" });
