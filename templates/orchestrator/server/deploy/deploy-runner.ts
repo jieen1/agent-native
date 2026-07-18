@@ -151,6 +151,35 @@ function outputDir(cfg: DeployConfig, app: DeployApp): string {
 }
 
 /**
+ * Prefix a remote command with a working Node/pnpm toolchain. `ssh user@host
+ * "command"` runs a NON-interactive, NON-login shell, which on this host
+ * sources neither `~/.bashrc` nor `~/.profile` — verified directly: a bare
+ * `ssh ... "which node"` resolves to nothing (`PATH` is just the system
+ * default, no nvm, no corepack shim), even though an interactive login shell
+ * has both. Every build/install command MUST go through this — without it,
+ * `pnpm`/`node` are simply not found and the whole stage fails before it
+ * does anything, regardless of what the command itself is.
+ *
+ * `nvm install` (no version arg) reads the target repo's own `.nvmrc` once
+ * `cd`'d into it and installs-or-switches accordingly — self-healing if the
+ * pinned version ever changes, and a fast no-op once it's already present.
+ * `corepack enable` creates a real `pnpm` shim for whichever Node version
+ * `nvm install` just selected; required because `pnpm`'s own root
+ * `postinstall` (scripts/prebuild-workspace-packages.ts) spawns the literal
+ * `pnpm` binary via `child_process`, not through corepack, so a bare
+ * `corepack pnpm` prefix on the OUTER command would not help that inner spawn
+ * resolve it.
+ */
+function withNodeToolchain(cfg: DeployConfig, command: string): string {
+  return (
+    `cd '${cfg.remoteBasePath}' && ` +
+    `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm install && ` +
+    `corepack enable && ` +
+    command
+  );
+}
+
+/**
  * Backup ONE app's `.output` dir. Fails closed: a real `cp -r` failure (disk
  * full, permissions, anything) throws and propagates — it is NEVER masked by
  * a trailing `|| true`. "Source directory doesn't exist" (legitimate on a
@@ -380,15 +409,27 @@ export async function runDeployJob(
       //      times `pnpm --filter <app> build` re-runs.
       // `--frozen-lockfile` fails loud on any lockfile/package.json mismatch
       // instead of silently rewriting the lockfile on a production host.
+      // `CI=true` is required too, not just nice-to-have: pnpm's own install
+      // prompts an interactive "remove node_modules?" confirmation whenever
+      // it decides a from-scratch reinstall is needed, and aborts outright
+      // (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY) on a non-interactive ssh
+      // session with no TTY to prompt on — verified by hitting this exact
+      // abort during manual testing.
       await sshExec(
         cfg,
-        `cd '${cfg.remoteBasePath}' && git fetch origin main && git checkout main && git reset --hard origin/main && pnpm install --frozen-lockfile`,
+        withNodeToolchain(
+          cfg,
+          `git fetch origin main && git checkout main && git reset --hard origin/main && CI=true pnpm install --frozen-lockfile`,
+        ),
         15 * 60_000,
       );
       for (const app of apps) {
         const { stdout } = await sshExec(
           cfg,
-          `cd '${cfg.remoteBasePath}' && APP_BASE_PATH=/${app} VITE_APP_BASE_PATH=/${app} pnpm --filter ${app} build`,
+          withNodeToolchain(
+            cfg,
+            `APP_BASE_PATH=/${app} VITE_APP_BASE_PATH=/${app} pnpm --filter ${app} build`,
+          ),
           20 * 60_000,
         );
         results.push(stdout.slice(-2000));
