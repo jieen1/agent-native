@@ -121,6 +121,40 @@ function isLiveSyncCopy(cmd: string): boolean {
   );
 }
 
+/** Matches the pre-reset checkout guard's dirty-working-tree probe (Bug #93). */
+function isGitStatusProbe(cmd: string): boolean {
+  return cmd.includes("git status --porcelain");
+}
+
+/** Matches the pre-reset checkout guard's ahead-of-origin/main count (Bug #93). */
+function isAheadCountProbe(cmd: string): boolean {
+  return cmd.includes("git rev-list --count origin/main..HEAD");
+}
+
+/** A clean, up-to-date checkout — the default for every test that isn't specifically exercising Bug #93. */
+function cleanCheckoutBranch(
+  cmd: string,
+): { stdout: string; stderr: string } | null {
+  if (isGitStatusProbe(cmd)) return { stdout: "", stderr: "" };
+  if (isAheadCountProbe(cmd)) return { stdout: "0\n", stderr: "" };
+  return null;
+}
+
+/** Matches the deploy-version marker endpoint the health check fetches (Bug #94). */
+function isDeployVersionUrl(url: string): boolean {
+  return url.includes("/api/deploy-version");
+}
+
+/** A `global.fetch` mock where the base health-check URL and the deploy-version marker both report `commitSha`. */
+function healthyFetchWithMarker(commitSha: string): typeof fetch {
+  return vi.fn(async (url: string) => {
+    if (isDeployVersionUrl(url)) {
+      return { ok: true, status: 200, json: async () => ({ commitSha }) };
+    }
+    return { ok: true, status: 200 };
+  }) as unknown as typeof fetch;
+}
+
 beforeEach(() => {
   hoisted.execCalls.length = 0;
   // Health-check retries use a real setTimeout backoff between attempts
@@ -145,6 +179,8 @@ describe("runDeployJob", () => {
   it("succeeds through every real stage and records a completed, ok stage log", async () => {
     seedRun("deploy_ok");
     hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
       if (cmd.includes("git rev-parse HEAD"))
         return { stdout: "abc123\n", stderr: "" };
       if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
@@ -152,9 +188,7 @@ describe("runDeployJob", () => {
         return { stdout: "BACKUP_OK\n", stderr: "" };
       return { stdout: "ok", stderr: "" };
     };
-    global.fetch = vi
-      .fn()
-      .mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch;
+    global.fetch = healthyFetchWithMarker("abc123");
 
     await runDeployJob("deploy_ok", CFG, ["orchestrator"]);
 
@@ -176,6 +210,8 @@ describe("runDeployJob", () => {
   it("rolls back and restores the backup when a failure happens AFTER backup was taken", async () => {
     seedRun("deploy_fail_after_backup");
     hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
       if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
       if (isBackupVerifyProbe(cmd))
         return { stdout: "BACKUP_OK\n", stderr: "" };
@@ -205,6 +241,8 @@ describe("runDeployJob", () => {
   it("fails closed WITHOUT attempting a rollback when the failure happens before any backup exists", async () => {
     seedRun("deploy_fail_before_backup");
     hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
       if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
       if (cmd.includes("cp -r")) throw new Error("ssh connection refused");
       return { stdout: "ok", stderr: "" };
@@ -234,6 +272,8 @@ describe("runDeployJob", () => {
     seedRun("deploy_backup_fails_for_real");
     let sawCopyCommand: string | null = null;
     hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
       if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
       if (cmd.startsWith("rm -rf") && cmd.includes("cp -r")) {
         sawCopyCommand = cmd;
@@ -304,6 +344,8 @@ describe("runDeployJob", () => {
       { code: 255 },
     );
     hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
       if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
       if (isBackupVerifyProbe(cmd))
         return { stdout: "BACKUP_OK\n", stderr: "" };
@@ -341,6 +383,8 @@ describe("runDeployJob", () => {
     };
     let sawSyncCopy: string | null = null;
     hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
       if (cmd.includes("git rev-parse HEAD"))
         return { stdout: "abc123\n", stderr: "" };
       if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
@@ -351,9 +395,7 @@ describe("runDeployJob", () => {
       }
       return { stdout: "ok", stderr: "" };
     };
-    global.fetch = vi
-      .fn()
-      .mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch;
+    global.fetch = healthyFetchWithMarker("abc123");
 
     await runDeployJob("deploy_split_paths", SPLIT_CFG, ["orchestrator"]);
 
@@ -386,6 +428,8 @@ describe("runDeployJob", () => {
     seedRun("deploy_same_path");
     let sawSyncCopy = false;
     hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
       if (cmd.includes("git rev-parse HEAD"))
         return { stdout: "abc123\n", stderr: "" };
       if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
@@ -394,9 +438,7 @@ describe("runDeployJob", () => {
       if (isLiveSyncCopy(cmd)) sawSyncCopy = true;
       return { stdout: "ok", stderr: "" };
     };
-    global.fetch = vi
-      .fn()
-      .mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch;
+    global.fetch = healthyFetchWithMarker("abc123");
 
     // CFG has no liveBasePath set — falls back to remoteBasePath, so build
     // and live directories coincide and the copy is a redundant no-op to skip.
@@ -410,6 +452,8 @@ describe("runDeployJob", () => {
   it("rolls back when the post-restart health check fails, preserving the real failure reason", async () => {
     seedRun("deploy_health_fail");
     hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
       if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
       if (isBackupVerifyProbe(cmd))
         return { stdout: "BACKUP_OK\n", stderr: "" };
@@ -424,5 +468,113 @@ describe("runDeployJob", () => {
     const row = hoisted.rows.get("deploy_health_fail")!;
     expect(row.status).toBe("rolled_back");
     expect(row.error).toContain("health check failed");
+  }, 20_000);
+
+  // ── Bug #93: the build checkout itself is never backed up, so a bare
+  // `git reset --hard origin/main` has no recovery path if the checkout ever
+  // legitimately drifts (this project has hit exactly that once for real).
+  // Both cases below would have run the destructive reset unconditionally
+  // and reported a phantom success under the OLD (pre-guard) logic.
+
+  it("refuses to run `git reset --hard` over an ambiguous checkout with uncommitted local changes, instead of silently destroying them (Bug #93 regression)", async () => {
+    seedRun("deploy_dirty_checkout");
+    hoisted.execImpl = async (cmd: string) => {
+      if (isGitStatusProbe(cmd))
+        return { stdout: " M some/uncommitted-file.ts\n", stderr: "" };
+      if (isAheadCountProbe(cmd)) return { stdout: "0\n", stderr: "" };
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "deadbeef\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch;
+
+    await runDeployJob("deploy_dirty_checkout", CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_dirty_checkout")!;
+    // Backup already succeeded before the guard fires, so this is a normal
+    // rollback — but it must NEVER be "succeeded": that's exactly what the
+    // old, guard-less code would have reported after silently resetting over
+    // real work.
+    expect(row.status).toBe("rolled_back");
+    expect(row.error).toContain("uncommitted");
+    expect(row.error).toContain("deadbeef");
+    expect(
+      hoisted.execCalls.some((c) => c.includes("git reset --hard origin/main")),
+    ).toBe(false);
+  });
+
+  it("refuses to run `git reset --hard` when the checkout has local commits never pushed to origin/main (Bug #93 regression)", async () => {
+    seedRun("deploy_unpushed_commits");
+    hoisted.execImpl = async (cmd: string) => {
+      if (isGitStatusProbe(cmd)) return { stdout: "", stderr: "" };
+      if (isAheadCountProbe(cmd)) return { stdout: "2\n", stderr: "" };
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "cafefeed\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch;
+
+    await runDeployJob("deploy_unpushed_commits", CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_unpushed_commits")!;
+    expect(row.status).toBe("rolled_back");
+    expect(row.error).toContain("not yet pushed");
+    expect(row.error).toContain("cafefeed");
+    expect(
+      hoisted.execCalls.some((c) => c.includes("git reset --hard origin/main")),
+    ).toBe(false);
+  });
+
+  // ── Bug #94: `checkHealth` must not treat a bare `res.ok` 200 as proof the
+  // NEW build is live — this app's own AGENTS.md documents SSR responses as
+  // "hard-cached at the CDN for every visitor", so a stale cached 200 has to
+  // be distinguishable from a genuinely fresh build via the never-cached
+  // deploy-version marker.
+
+  it("rolls back on a healthy-looking 200 that still carries the PREVIOUS build's version marker — a stale CDN-cached response, not a real success (Bug #94 regression)", async () => {
+    seedRun("deploy_stale_marker");
+    hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "new-sha-123\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = vi.fn(async (url: string) => {
+      if (isDeployVersionUrl(url)) {
+        // The base URL 200s fine, but this never-cached marker endpoint is
+        // itself (hypothetically) still fronted by a stale cache layer and
+        // keeps reporting the OLD build — exactly the case a bare `res.ok`
+        // check on the old code could never catch.
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ commitSha: "old-sha-000" }),
+        };
+      }
+      return { ok: true, status: 200 };
+    }) as unknown as typeof fetch;
+
+    await runDeployJob("deploy_stale_marker", CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_stale_marker")!;
+    // Old logic (bare `res.ok`) would have reported "succeeded" here — this
+    // regression test exists precisely because a 200 alone must not pass.
+    expect(row.status).toBe("rolled_back");
+    expect(row.error).toContain("health check failed");
+    expect(row.error).toContain("stale cached response");
   }, 20_000);
 });

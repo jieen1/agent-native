@@ -261,6 +261,56 @@ async function backupApp(
   return "backed-up";
 }
 
+/**
+ * Guard the destructive `git reset --hard origin/main` in the "building"
+ * stage below. Unlike the `.output` directory `backupApp` snapshots, the git
+ * checkout at `remoteBasePath` itself is never backed up — if it ever
+ * legitimately drifts from origin/main (this project has hit exactly that: a
+ * real checkout once diverged and needed manual reconciliation), a bare
+ * `git reset --hard` would silently destroy that work with no recovery path.
+ * Mirrors `backupApp`'s fail-loud-on-ambiguity discipline: refuse — loudly,
+ * before the reset ever runs — when the checkout has uncommitted changes or
+ * local commits not yet reachable from `origin/main`, rather than silently
+ * resetting over them. `headSha` is passed in (not returned) so the caller
+ * already has the one recoverable reference recorded even if this throws.
+ */
+async function assertCheckoutSafeToReset(
+  cfg: DeployConfig,
+  headSha: string,
+): Promise<void> {
+  const { stdout: statusOut } = await sshExec(
+    cfg,
+    `cd '${cfg.remoteBasePath}' && git status --porcelain`,
+    15_000,
+  );
+  if (statusOut.trim().length > 0) {
+    throw new Error(
+      `remote checkout at '${cfg.remoteBasePath}' has uncommitted local changes ` +
+        `(HEAD ${headSha}) — refusing to run 'git reset --hard' over real, ` +
+        `unrecorded work. Reconcile the checkout by hand first.`,
+    );
+  }
+
+  await sshExec(
+    cfg,
+    `cd '${cfg.remoteBasePath}' && git fetch origin main`,
+    60_000,
+  );
+  const { stdout: aheadOut } = await sshExec(
+    cfg,
+    `cd '${cfg.remoteBasePath}' && git rev-list --count origin/main..HEAD`,
+    15_000,
+  );
+  const ahead = Number.parseInt(aheadOut.trim(), 10) || 0;
+  if (ahead > 0) {
+    throw new Error(
+      `remote checkout at '${cfg.remoteBasePath}' has ${ahead} local commit(s) ` +
+        `(HEAD ${headSha}) not yet pushed to origin/main — refusing to run ` +
+        `'git reset --hard' over unpushed work. Push or discard them by hand first.`,
+    );
+  }
+}
+
 // ── Stage-log persistence ────────────────────────────────────────────────────
 
 async function readRun(runId: string) {
@@ -361,11 +411,55 @@ async function completeStage(
 
 // ── Health check ─────────────────────────────────────────────────────────────
 
+/**
+ * Derive the deploy-version marker endpoint (`server/routes/api/
+ * deploy-version.get.ts`) from the configured health-check URL's own
+ * origin/base-path, rather than hardcoding a host — keeps this working for
+ * whatever base path Settings → Deploy is configured with (see
+ * `APP_BASE_PATH` in the "building" stage below).
+ */
+function deployVersionCheckUrl(healthCheckUrl: string): string {
+  const base = healthCheckUrl.endsWith("/")
+    ? healthCheckUrl
+    : `${healthCheckUrl}/`;
+  return new URL("api/deploy-version", base).toString();
+}
+
+/** Fetch the build/version marker; `null` on any non-2xx, network error, or malformed body. */
+async function fetchDeployVersionMarker(
+  markerUrl: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(markerUrl, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { commitSha?: unknown };
+    return typeof body?.commitSha === "string" ? body.commitSha : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Health check for gap #94: a plain `res.ok` check cannot tell a genuinely
+ * new build apart from a stale CDN-cached response — this app's own
+ * AGENTS.md documents that "every SSR HTML ... response is ... hard-cached at
+ * the CDN for every visitor". When `expectedCommitSha` is given, a 200 alone
+ * is no longer enough: the deploy is only considered verified once the
+ * never-cached `deploy-version` marker (see `deployVersionCheckUrl`) actually
+ * matches the commit THIS run is shipping, retrying on mismatch exactly like
+ * a real connection failure so a slow-to-invalidate cache still has the
+ * existing backoff window to catch up before the deploy is called failed.
+ */
 async function checkHealth(
   url: string,
-  attempts = 6,
-  delayMs = 5000,
+  options: {
+    attempts?: number;
+    delayMs?: number;
+    expectedCommitSha?: string;
+  } = {},
 ): Promise<{ ok: boolean; status?: number; detail: string }> {
+  const { attempts = 6, delayMs = 5000, expectedCommitSha } = options;
+  const versionUrl = expectedCommitSha ? deployVersionCheckUrl(url) : undefined;
   let lastDetail = "not attempted";
   for (let i = 0; i < attempts; i++) {
     try {
@@ -373,9 +467,31 @@ async function checkHealth(
         signal: AbortSignal.timeout(10_000),
       });
       if (res.ok) {
-        return { ok: true, status: res.status, detail: `HTTP ${res.status}` };
+        if (versionUrl) {
+          const marker = await fetchDeployVersionMarker(versionUrl);
+          if (marker === expectedCommitSha) {
+            return {
+              ok: true,
+              status: res.status,
+              detail: `HTTP ${res.status}, build ${marker}`,
+            };
+          }
+          lastDetail = marker
+            ? `HTTP ${res.status} but still serving build '${marker}' ` +
+              `(expected '${expectedCommitSha}') — likely a stale cached ` +
+              `response, not yet the new build`
+            : `HTTP ${res.status} but no build marker returned from ` +
+              `${versionUrl} (expected '${expectedCommitSha}')`;
+        } else {
+          return {
+            ok: true,
+            status: res.status,
+            detail: `HTTP ${res.status}`,
+          };
+        }
+      } else {
+        lastDetail = `HTTP ${res.status}`;
       }
-      lastDetail = `HTTP ${res.status}`;
     } catch (err) {
       lastDetail = err instanceof Error ? err.message : String(err);
     }
@@ -410,6 +526,16 @@ export async function runDeployJob(
   // by `backupApp` (post-copy non-empty check), never assumed from a
   // no-throw ssh call. Gates whether a later failure attempts rollback.
   let backedUp = false;
+  // The checkout's HEAD *before* `git reset --hard` runs (see
+  // `assertCheckoutSafeToReset`) — the one recoverable reference for gap #93,
+  // and reused below as the EXPECTED build marker when verifying a rollback
+  // actually restored the previous build (gap #94's marker check, applied
+  // symmetrically).
+  let preDeployCommitSha: string | undefined;
+  // The commit THIS run is deploying, captured once the build stage's
+  // `git reset --hard origin/main` has landed — the expected build marker
+  // `checkHealth` verifies against post-restart (gap #94).
+  let commitSha: string | undefined;
   try {
     await withStage(runId, "backing-up", cfg, async () => {
       const results: string[] = [];
@@ -453,6 +579,19 @@ export async function runDeployJob(
       // (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY) on a non-interactive ssh
       // session with no TTY to prompt on — verified by hitting this exact
       // abort during manual testing.
+      //
+      // Gap #93: record the checkout's current HEAD and refuse to proceed
+      // (see `assertCheckoutSafeToReset`) if it has uncommitted changes or
+      // unpushed local commits — `git reset --hard` below has no backup of
+      // its own and would silently destroy either.
+      const { stdout: headOut } = await sshExec(
+        cfg,
+        `cd '${cfg.remoteBasePath}' && git rev-parse HEAD`,
+        15_000,
+      );
+      preDeployCommitSha = headOut.trim();
+      await assertCheckoutSafeToReset(cfg, preDeployCommitSha);
+
       await sshExec(
         cfg,
         withNodeToolchain(
@@ -462,11 +601,17 @@ export async function runDeployJob(
         15 * 60_000,
       );
       for (const app of apps) {
+        // Gap #94: stamp the exact commit THIS build embeds into a small
+        // generated constant (`server/deploy-version.generated.ts`) BEFORE
+        // building, so the compiled server bundle serves it back from the
+        // never-cached `/api/deploy-version` route — `checkHealth` below
+        // compares this against `commitSha` to tell a genuinely new build
+        // apart from a stale CDN-cached response.
         const { stdout } = await sshExec(
           cfg,
           withNodeToolchain(
             cfg,
-            `APP_BASE_PATH=/${app} VITE_APP_BASE_PATH=/${app} pnpm --filter ${app} build`,
+            `SHA=$(git rev-parse HEAD) && printf 'export const DEPLOY_COMMIT_SHA = "%s";\\n' "$SHA" > templates/${app}/server/deploy-version.generated.ts && APP_BASE_PATH=/${app} VITE_APP_BASE_PATH=/${app} pnpm --filter ${app} build`,
           ),
           20 * 60_000,
         );
@@ -477,7 +622,8 @@ export async function runDeployJob(
         `cd '${cfg.remoteBasePath}' && git rev-parse HEAD`,
         15_000,
       );
-      await setStatus(runId, { commitSha: shaOut.trim() });
+      commitSha = shaOut.trim();
+      await setStatus(runId, { commitSha });
       return results.join("\n---\n");
     });
 
@@ -513,7 +659,12 @@ export async function runDeployJob(
     });
 
     const health = await withStage(runId, "verifying", cfg, async () => {
-      const result = await checkHealth(cfg.healthCheckUrl);
+      // `expectedCommitSha` is what makes this gap #94's fix rather than the
+      // old bare `res.ok` check: a 200 alone no longer passes if the
+      // never-cached deploy-version marker still reports the PREVIOUS build.
+      const result = await checkHealth(cfg.healthCheckUrl, {
+        expectedCommitSha: commitSha,
+      });
       if (!result.ok) throw new Error(`health check failed: ${result.detail}`);
       return result;
     });
@@ -550,7 +701,14 @@ export async function runDeployJob(
           );
         }
         await sshExec(cfg, cfg.restartCommand, 60_000);
-        const health = await checkHealth(cfg.healthCheckUrl, 3, 5000);
+        // Symmetric with the forward verify above: confirm the restore
+        // actually brought back the PREVIOUS build's marker, not just a 200
+        // (which a stale cache could still return during the transition).
+        const health = await checkHealth(cfg.healthCheckUrl, {
+          attempts: 3,
+          delayMs: 5000,
+          expectedCommitSha: preDeployCommitSha,
+        });
         return `restored previous .output for ${apps.join(", ")}; post-rollback health: ${health.ok ? "ok" : health.detail}`;
       });
       await setStatus(runId, {
