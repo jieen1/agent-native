@@ -63,8 +63,8 @@ describe("writebackActorEmail", () => {
 });
 
 describe("trackerBaseUrl", () => {
-  it("defaults to the same-network container hostname", () => {
-    expect(trackerBaseUrl()).toBe("http://an-tracker:3002");
+  it("defaults to the same-network container hostname on its OWN real port (3013 — never 3002, which is the orchestrator's own port)", () => {
+    expect(trackerBaseUrl()).toBe("http://an-tracker:3013");
   });
 
   it("is overridable via TRACKER_BASE_URL and strips a trailing slash", () => {
@@ -128,9 +128,15 @@ describe("callTrackerTool", () => {
     expect(result.data).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("http://an-tracker:3002/tracker/_agent-native/mcp");
+    expect(url).toBe("http://an-tracker:3013/tracker/_agent-native/mcp");
     expect(init.method).toBe("POST");
     expect(init.headers.Authorization).toMatch(/^Bearer /);
+    // packages/core's MCP server defaults every caller to the compact tool
+    // catalog, which does not include narrow F9 actions like
+    // writeback-run-meta/writeback-exec-state — without this header every
+    // writeback call failed with "Unknown tool: <name>" (958 writeback.failed
+    // events, zero successful writebacks ever, confirmed on production).
+    expect(init.headers["X-Agent-Native-Mcp-Full-Catalog"]).toBe("1");
     const jwt = init.headers.Authorization.slice("Bearer ".length);
     const payload = jose.decodeJwt(jwt);
     expect(payload.sub).toBe("writeback@orchestrator.internal");

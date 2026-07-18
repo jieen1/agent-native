@@ -594,19 +594,28 @@ async function provisionWorktree(opts: {
     await git(["-C", bare, "remote", "set-url", "origin", repoUrl]).catch(
       () => {},
     );
-    baseRef =
-      fetched.code === 0
-        ? "FETCH_HEAD"
-        : // Fetch failed (e.g. branch not on remote) — fall back gracefully.
-          await resolveBareBaseRef(bare);
+    if (fetched.code === 0) {
+      baseRef = "FETCH_HEAD";
+    } else {
+      // Fetch failed (e.g. branch not on remote) — fall back gracefully to
+      // whatever default branch the mirror has (refs/remotes/origin/* —
+      // see resolveBareBaseRef/ensureBareMirror's doc comments).
+      const fallback = await resolveBareBaseRef(bare);
+      baseRef = fallback === "HEAD" ? "HEAD" : `refs/remotes/origin/${fallback}`;
+    }
     // The caller explicitly asked to track `wanted` — track it regardless of
     // which ref `worktree add` actually cut from, so a genuinely-missing
     // upstream branch surfaces as an explicit W1/W4 failure later rather than
     // silently tracking a different branch.
     resolvedBranchName = wanted;
   } else {
-    baseRef = await resolveBareBaseRef(bare);
-    resolvedBranchName = baseRef;
+    const resolved = await resolveBareBaseRef(bare);
+    resolvedBranchName = resolved;
+    // resolveBareBaseRef returns a BARE name (e.g. "main") tracked upstream
+    // under refs/remotes/origin/* (never refs/heads/* — that namespace is
+    // reserved for each workspace's own branch, added by `worktree add`
+    // below); "HEAD" is the sentinel for "nothing resolvable at all".
+    baseRef = resolved === "HEAD" ? "HEAD" : `refs/remotes/origin/${resolved}`;
   }
 
   // 3) Add the worktree on a fresh branch from the base ref. -B is idempotent on
@@ -635,10 +644,31 @@ async function provisionWorktree(opts: {
 
 /**
  * Ensure a bare mirror exists at `bare` for `repoUrl`. Creates it with
- * `git clone --bare` (auth URL, then origin reset to the clean URL) on first
- * use; refreshes it with `git fetch origin` (auth URL one-shot) when it already
- * exists, so a second task sees recent upstream commits. Best-effort fetch — a
- * fetch failure on an existing mirror is non-fatal (we still have objects).
+ * `git init --bare` + `remote add origin` on first use, then (both first use
+ * AND every later refresh) fetches upstream's branches into
+ * `refs/remotes/origin/*` — auth URL one-shot, origin reset to the clean URL
+ * after. Best-effort on refresh (a fetch failure on an already-usable mirror
+ * is non-fatal — we still have the objects from last time); the FIRST fetch
+ * on a brand-new mirror is NOT best-effort — a mirror with no upstream data
+ * at all must not be silently treated as usable.
+ *
+ * IMPORTANT — never fetch upstream into `refs/heads/*`: this bare mirror is
+ * SHARED across every workspace for the same repo, and each workspace's own
+ * (not-yet-pushed) run branch lives under `refs/heads/<branch>` (created by
+ * `git worktree add -B`, below). An earlier version of this function fetched
+ * upstream with `--prune … +refs/heads/*:refs/heads/*`, which mirrors the
+ * remote's branch set EXACTLY — including pruning any local `refs/heads/*`
+ * ref absent from the remote. Because a workspace's run branch is, by
+ * definition, absent from the remote until it's pushed, the very next
+ * refresh (triggered by ANY other workspace being created/refreshed for the
+ * same repo, or by a W4 diff/runSummary poll — see `refreshMirror`) deleted
+ * it out from under an already-`ready`, already-committed-to workspace,
+ * silently reverting its HEAD to unborn (`git log` → "does not have any
+ * commits yet") while leaving the checkout's files/index untouched — the
+ * unborn-HEAD writeback-drain incident (108+ failed retries). Keeping
+ * upstream state in `refs/remotes/origin/*` and workspace branches in
+ * `refs/heads/*` disjoint makes `--prune` safe again: it can only ever prune
+ * a stale `refs/remotes/origin/*` entry.
  */
 async function ensureBareMirror(opts: {
   repoUrl: string;
@@ -661,55 +691,81 @@ async function ensureBareMirror(opts: {
     ).stdout.trim() === "true";
 
   if (!isRepo) {
-    const cloneUrl = withToken(repoUrl, token);
-    const cloned = await git(["clone", "--bare", cloneUrl, bare]);
-    if (cloned.code !== 0) {
-      // Clean up a partial bare dir so a retry starts fresh.
+    const init = await git(["init", "--bare", bare]);
+    if (init.code !== 0) {
       await rm(bare, { recursive: true, force: true }).catch(() => {});
       throw new Error(
-        `git clone --bare failed (exit ${cloned.code}): ` +
-          redact(`${cloned.stdout}\n${cloned.stderr}`.trim(), token),
+        `git init --bare failed (exit ${init.code}): ` +
+          redact(`${init.stdout}\n${init.stderr}`.trim(), token),
       );
     }
-    // Drop the token from the mirror's persisted remote.
-    await git(["-C", bare, "remote", "set-url", "origin", repoUrl.trim()]);
-    // Make origin/HEAD resolvable so resolveBareBaseRef can find the default.
-    await git(["-C", bare, "remote", "set-head", "origin", "-a"]).catch(
-      () => {},
-    );
-    return;
+    const cloneUrl = withToken(repoUrl, token);
+    await git(["-C", bare, "remote", "add", "origin", cloneUrl]);
   }
 
-  // Existing mirror — refresh from upstream (one-shot auth URL, never persisted).
+  // First fetch (brand-new mirror) AND every later refresh: mirror upstream's
+  // branches into refs/remotes/origin/* — never refs/heads/* (see above).
   const fetchUrl = withToken(repoUrl, token);
-  await git([
+  const fetched = await git([
     "-C",
     bare,
     "fetch",
     "--prune",
     fetchUrl,
-    "+refs/heads/*:refs/heads/*",
-  ]).catch(() => {});
+    "+refs/heads/*:refs/remotes/origin/*",
+  ]);
+  if (!isRepo && fetched.code !== 0) {
+    // A brand-new mirror with no upstream data at all is not a usable
+    // mirror — never best-effort this one.
+    await rm(bare, { recursive: true, force: true }).catch(() => {});
+    throw new Error(
+      `git fetch (initial mirror populate) failed (exit ${fetched.code}): ` +
+        redact(`${fetched.stdout}\n${fetched.stderr}`.trim(), token),
+    );
+  }
+  // Make refs/remotes/origin/HEAD resolvable so resolveBareBaseRef can find
+  // the default branch. Best-effort on refresh (existing mirror still usable
+  // even if this one auxiliary call fails).
   await git(["-C", bare, "remote", "set-head", "origin", "-a"]).catch(() => {});
+  // Drop the token from the mirror's persisted remote (never leaves it in
+  // .git/config beyond this function's own auth fetch above).
+  await git(["-C", bare, "remote", "set-url", "origin", repoUrl.trim()]).catch(
+    () => {},
+  );
 }
 
-/** Resolve the base ref for a new worktree branch from the bare mirror. */
+/**
+ * Resolve the base ref for a new worktree branch from the bare mirror. Reads
+ * upstream's default branch from `refs/remotes/origin/HEAD` (set by
+ * `ensureBareMirror`'s `remote set-head -a`) — NEVER the bare repo's own
+ * top-level `HEAD` or a local `refs/heads/*` ref, both of which are either
+ * meaningless (a mirror created via `git init --bare` has no real top-level
+ * HEAD target) or reserved for workspace-owned branches (see
+ * `ensureBareMirror`'s doc comment) after the refs/remotes/origin/* rework.
+ * Returns a BARE branch name (e.g. `"main"`, never `"origin/main"`) — this is
+ * the external contract every caller (tags.base_ref, W1/W4 target-branch
+ * tracking) already depends on.
+ */
 async function resolveBareBaseRef(bare: string): Promise<string> {
-  // Prefer the mirror's default branch (origin/HEAD → e.g. refs/heads/main).
   const head = await git(
-    ["-C", bare, "symbolic-ref", "--short", "HEAD"],
+    ["-C", bare, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
     {},
   ).catch(() => null);
   if (head && head.code === 0 && head.stdout.trim()) {
-    return head.stdout.trim();
+    const short = head.stdout.trim().replace(/^origin\//, "");
+    if (short) return short;
   }
   for (const ref of ["main", "master"]) {
-    const ok = await git(["-C", bare, "rev-parse", "--verify", ref]).catch(
-      () => null,
-    );
+    const ok = await git([
+      "-C",
+      bare,
+      "rev-parse",
+      "--verify",
+      `refs/remotes/origin/${ref}`,
+    ]).catch(() => null);
     if (ok && ok.code === 0) return ref;
   }
-  // Last resort — current HEAD of the bare repo.
+  // Last resort sentinel — nothing resolvable upstream at all.
   return "HEAD";
 }
 
@@ -717,21 +773,24 @@ async function resolveBareBaseRef(bare: string): Promise<string> {
 
 /**
  * Refresh the shared bare mirror from its real upstream (`git fetch --prune`,
- * mapping `refs/heads/*` directly — matches {@link ensureBareMirror}'s
- * mirroring convention). Bounded by {@link resolveGitTimeoutMs} (default
- * 180s, overridable via `GIT_TIMEOUT_MS` for a fast-fail test/injection —
- * T-F1-16). Called AT CALL TIME by both {@link assertWorkspaceReady} (W1) and
- * {@link resolveDiffBase} (W4) — never a cached/static freshness check.
- * Throws a plain `Error` on failure (timeout or non-zero exit); callers
- * reclassify it (`WorkspaceNotReadyError` for W1, `DiffBaseUnresolvableError`
- * for W4) in their own context.
+ * mapping into `refs/remotes/origin/*` — matches {@link ensureBareMirror}'s
+ * mirroring convention; NEVER `refs/heads/*`, which this same mirror also
+ * uses to store each workspace's own not-yet-pushed run branch — see that
+ * function's doc comment for why mixing the two namespaces is the
+ * unborn-HEAD incident's root cause). Bounded by {@link resolveGitTimeoutMs}
+ * (default 180s, overridable via `GIT_TIMEOUT_MS` for a fast-fail
+ * test/injection — T-F1-16). Called AT CALL TIME by both
+ * {@link assertWorkspaceReady} (W1) and {@link resolveDiffBase} (W4) — never
+ * a cached/static freshness check. Throws a plain `Error` on failure (timeout
+ * or non-zero exit); callers reclassify it (`WorkspaceNotReadyError` for W1,
+ * `DiffBaseUnresolvableError` for W4) in their own context.
  */
 export async function refreshMirror(mirrorDir: string): Promise<void> {
   const timeoutMs = resolveGitTimeoutMs();
   let res: GitResult;
   try {
     res = await git(
-      ["fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*"],
+      ["fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"],
       {
         cwd: mirrorDir,
         timeoutMs,
@@ -760,19 +819,32 @@ export async function refreshMirror(mirrorDir: string): Promise<void> {
  * {@link assertWorkspaceReady} don't need mode-specific merge-base logic.
  * Throws `DiffBaseUnresolvableError` when the branch isn't fetchable (the
  * W4/T-F1-02 "target branch doesn't exist" case).
+ *
+ * Worktree isolation's `source` is the shared bare-mirror PATH, whose own
+ * upstream copy of `targetBranch` lives under `refs/remotes/origin/<name>`
+ * (never `refs/heads/<name>` — {@link ensureBareMirror}'s doc comment), so
+ * the SOURCE-side ref must name that path explicitly; a bare short name like
+ * `"main"` would resolve against the mirror's OWN `refs/heads/main` /
+ * `refs/remotes/main` (unrelated remote literally named "main") per git's
+ * short-ref disambiguation order, never `refs/remotes/origin/main`. Clone
+ * isolation's `source==="origin"` is a real remote name (the workspace's own
+ * normal, non-bare clone), where the plain branch name already resolves
+ * exactly as the remote advertises it — no prefix needed there.
  */
 async function fetchTargetIntoOriginRef(
   dir: string,
   source: string,
   targetBranch: string,
 ): Promise<void> {
+  const sourceRef =
+    source === "origin" ? targetBranch : `refs/remotes/origin/${targetBranch}`;
   let res: GitResult;
   try {
     // `+` (force) — this ref mirrors the target branch TIP; a rewritten
     // upstream (force push) must update it rather than fail the local
     // fast-forward check and misreport "branch unfetchable".
     res = await git(
-      ["fetch", source, `+${targetBranch}:refs/remotes/origin/${targetBranch}`],
+      ["fetch", source, `+${sourceRef}:refs/remotes/origin/${targetBranch}`],
       { cwd: dir },
     );
   } catch (err: unknown) {
@@ -1421,6 +1493,62 @@ export async function destroyLocalWorkspace(id: string): Promise<void> {
 }
 
 /**
+ * Detect an unborn HEAD (`git rev-parse --verify HEAD` fails — no commit
+ * exists on the current branch yet, e.g. `git log` reporting "does not have
+ * any commits yet") and self-heal it from `baseSha` (the workspace's OWN
+ * recorded readiness baseline, `v3_workspaces.base_sha`) before any commit
+ * attempt. Uses `git update-ref refs/heads/<branch> <baseSha>` — a low-level
+ * ref write that touches ONLY the ref, never the index or working tree — so
+ * whatever is already staged/edited in the checkout is preserved exactly.
+ * No-op when HEAD already resolves. Throws when unborn AND there's no
+ * `baseSha` to heal from, or the current branch name can't be read, or the
+ * ref update itself fails — never silently proceeds to commit a disconnected
+ * root commit onto an empty history.
+ */
+async function ensureBranchNotUnborn(
+  dir: string,
+  baseSha: string | null,
+): Promise<void> {
+  const healthy = await git(["rev-parse", "--verify", "-q", "HEAD"], {
+    cwd: dir,
+  });
+  if (healthy.code === 0) return;
+
+  const branchRes = await git(["symbolic-ref", "--short", "HEAD"], {
+    cwd: dir,
+  });
+  const branchName = branchRes.stdout.trim();
+  if (branchRes.code !== 0 || !branchName) {
+    throw new Error(
+      `commitAndPush: workspace at '${dir}' has an unborn HEAD and its current branch name could not be read (${branchRes.stderr.trim() || branchRes.stdout.trim()})`,
+    );
+  }
+  if (!baseSha || !baseSha.trim()) {
+    throw new Error(
+      `commitAndPush: workspace at '${dir}' has an unborn HEAD (branch '${branchName}') and no recorded base_sha to self-heal from — refusing to commit a disconnected root commit`,
+    );
+  }
+  const repaired = await git(
+    ["update-ref", `refs/heads/${branchName}`, baseSha.trim()],
+    { cwd: dir },
+  );
+  if (repaired.code !== 0) {
+    throw new Error(
+      `commitAndPush: self-heal of unborn HEAD (branch '${branchName}' -> ${baseSha.trim()}) failed (exit ${repaired.code}): ` +
+        (repaired.stderr.trim() || repaired.stdout.trim()),
+    );
+  }
+  const reverified = await git(["rev-parse", "--verify", "-q", "HEAD"], {
+    cwd: dir,
+  });
+  if (reverified.code !== 0) {
+    throw new Error(
+      `commitAndPush: workspace at '${dir}' still has an unborn HEAD after self-heal to ${baseSha.trim()}`,
+    );
+  }
+}
+
+/**
  * Stage everything, commit, push the workspace branch, and optionally open a PR.
  *
  *  • `git add -A` then `git commit -m <message>` — a clean tree yields
@@ -1446,6 +1574,7 @@ export async function commitAndPush(
       repoUrl: v3Schema.v3Workspaces.repoUrl,
       branch: v3Schema.v3Workspaces.branch,
       state: v3Schema.v3Workspaces.state,
+      baseSha: v3Schema.v3Workspaces.baseSha,
     })
     .from(v3Schema.v3Workspaces)
     .where(eq(v3Schema.v3Workspaces.id, opts.id))
@@ -1468,6 +1597,20 @@ export async function commitAndPush(
     row.branch && row.branch.trim() !== ""
       ? row.branch.trim()
       : defaultRunBranch(opts.id);
+
+  // Detection/self-heal safety net (b) for the unborn-HEAD incident: even
+  // with the ensureBareMirror/refreshMirror fix (prevention (a) — never
+  // prune a workspace's own refs/heads/<branch> again), a workspace HEAD
+  // could in principle still end up unborn (an older mirror created before
+  // the fix, a manual ref delete, …). Never silently `git commit` onto that
+  // — the resulting root commit would carry the ENTIRE checkout as "added"
+  // (a false diff of the whole repo, not just this run's real change) — the
+  // exact class of failure W4's DiffBaseUnresolvableError exists to prevent
+  // elsewhere. Recreate the branch ref from the workspace's own recorded
+  // `base_sha` (a plain `update-ref`, which touches ONLY the ref — never the
+  // index/working tree, so any already-staged/uncommitted work survives) and
+  // proceed; fail loud if there is no recorded base to heal from.
+  await ensureBranchNotUnborn(dir, row.baseSha);
 
   // Safety: never push delivery commits onto the PR base branch. A workspace
   // checked out directly on the base (e.g. "main") would otherwise push

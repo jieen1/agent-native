@@ -49,10 +49,22 @@ export function writebackActorEmail(): string {
 /** Base URL of the tracker, reachable from the orchestrator container. Prefer
  * the same-docker-network service hostname; fall back to the gateway route.
  * Override with TRACKER_BASE_URL. Mirrors the tracker's own
- * `orchestratorBaseUrl()` / `contentBaseUrl()` conventions. */
+ * `orchestratorBaseUrl()` / `contentBaseUrl()` conventions.
+ *
+ * The fallback port (3013) matches this deployment's real per-app port
+ * allocation (an-tracker's own PORT env) — NOT this service's own port
+ * (3002, orchestrator's), which the fallback wrongly used before. Because
+ * `TRACKER_BASE_URL` was also never set in the orchestrator container's
+ * deploy config, every writeback fetch silently dialed the orchestrator
+ * container itself instead of the tracker, failing at the network level
+ * (`fetch failed`) — the confirmed cause of the writeback-outbox-sweep's
+ * 108+ retry drain (`docker exec an-orchestrator env` had no
+ * TRACKER_BASE_URL; 101's deploy compose now sets it explicitly — this
+ * fallback is only the second line of defense if that ever regresses).
+ */
 export function trackerBaseUrl(): string {
   return (
-    process.env.TRACKER_BASE_URL?.replace(/\/$/, "") || "http://an-tracker:3002"
+    process.env.TRACKER_BASE_URL?.replace(/\/$/, "") || "http://an-tracker:3013"
   );
 }
 
@@ -130,6 +142,22 @@ export async function callTrackerTool(
       // header on the static-token/dev-open path) — kept for parity with the
       // tracker's own sibling-app clients and as a debugging breadcrumb.
       "X-Agent-Native-Owner-Email": writebackActorEmail(),
+      // packages/core's MCP server defaults EVERY caller to the "compact"
+      // tool catalog (server.ts's build of MCPRequestMeta) — a curated
+      // subset meant to keep an LLM-driven client's tool list small. A
+      // narrow F9 writeback action like `writeback-run-meta` is deliberately
+      // NOT in that curated set, so without this header every writeback
+      // `tools/call` here failed with "Unknown tool: <name>" — a systemic,
+      // all-time-100%-failure bug (958 writeback.failed events, zero
+      // successful writebacks ever, confirmed on production 2026-07-18).
+      // This channel is a deterministic system-to-system JSON-RPC call, not
+      // an LLM tool-list consumer (it never calls tools/list) — the
+      // documented opt-in header (mcp/server.ts) is exactly the intended
+      // way for a caller like this to reach its own actions regardless of
+      // the compact-catalog curation; access control is still fully
+      // enforced by each action's own caller check (assertWritebackCaller)
+      // and `ownerScope()`, not by hiding the tool name.
+      "X-Agent-Native-Mcp-Full-Catalog": "1",
     },
     body: JSON.stringify(body),
   });
