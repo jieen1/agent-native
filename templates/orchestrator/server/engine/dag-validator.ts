@@ -264,6 +264,32 @@ export function validateDag(dag: unknown): { ok: boolean; errors: string[] } {
           errors.push(
             `Node '${id}': guard expression: ${gResult.error ?? "syntax error"}`,
           );
+        } else {
+          // Task board #83: `v3-dispatcher.ts`'s `getNodeDeps()` /
+          // `v3-reconciler.ts`'s `buildGuardContext()` resolve `deps.<depId>`
+          // ONLY from THIS node's own direct `deps` array — never
+          // transitively, and there is no supported transitive-dependency
+          // pattern (see orchestrating-v3 skill's channel contract: no
+          // auto-injection). A guard referencing `deps.<id>` for an `id` not
+          // in this node's own `deps` silently resolves to `undefined`
+          // instead of erroring at save time — catch it here instead.
+          const ownDeps = new Set(
+            Array.isArray((node as any).deps) ? (node as any).deps : [],
+          );
+          const referenced = sharedGuard.matchAll(
+            /\bdeps\.([A-Za-z_][A-Za-z0-9_]*)/g,
+          );
+          for (const m of referenced) {
+            const depId = m[1];
+            if (!ownDeps.has(depId)) {
+              errors.push(
+                `Node '${id}': guard references deps.${depId}, but '${depId}' is not a ` +
+                  `direct dependency of this node (own deps: ${
+                    ownDeps.size ? [...ownDeps].join(", ") : "none"
+                  }) — deps.<id> only resolves from a node's own direct deps, never transitively`,
+              );
+            }
+          }
         }
       }
     }

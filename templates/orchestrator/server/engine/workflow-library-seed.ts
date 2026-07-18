@@ -53,22 +53,37 @@
  * `workspaceCommitPush`/`workspaceCiWatch`/`workspaceMergePr` can actually do)
  * are removed from the DAG — that responsibility moves to brain's own turn.
  *
- * Guard-chain correctness note (discovered while transcribing the REAL
- * production core-lineage dags for this task): `v3-dispatcher.ts`'s
- * `getNodeDeps()` / `v3-reconciler.ts`'s `buildGuardContext()` both resolve
- * `deps.<id>` ONLY from a node's OWN direct `deps` array — never
- * transitively. Production's `sdlc-review` v4 / `sdlc-audit` v2 / `sdlc-full`
- * v1 guard chains have a real, faithfully-preserved-here quirk: their SECOND
- * guard hop (e.g. audit v2's `audit2` node) references `deps.audit1...`
- * even though `audit1` is NOT in `audit2`'s own `deps` (only `close1` is) —
- * this is copied verbatim below because this task's job for the 4 core
- * entries is faithful adoption, not correction, and it is plausibly why
- * these templates' real run stats include failures (`sdlc-review` v4: done
- * 1 / failed 2; `sdlc-audit` v2: done 1 / failed 2). The freshly-authored
- * `sdlc-gap-analysis` entry below deliberately does NOT repeat this pattern:
- * its multi-round guard chain relies on the reconciler's own cascade-skip
- * (a pending node auto-skips once ALL of its direct deps are skipped) so
- * only the FIRST hop of each round needs an explicit guard.
+ * Guard-chain correctness fix (task board #83, closed out after being flagged
+ * non-blocking/out-of-scope during R4a.2 dispatch-grade-lint review):
+ * `v3-dispatcher.ts`'s `getNodeDeps()` / `v3-reconciler.ts`'s
+ * `buildGuardContext()` both resolve `deps.<id>` ONLY from a node's OWN
+ * direct `deps` array — never transitively — by design (no auto-injection,
+ * see `orchestrating-v3` skill's channel contract). There is no supported
+ * transitive-dependency pattern; `dag-validator.ts` now enforces this (a
+ * node's `guard`/`prompt`/`items_from` may only reference `deps.<id>` for an
+ * `id` in that node's own `deps` array).
+ *
+ * The REAL production `sdlc-review` v4 / `sdlc-audit` v2 / `sdlc-full` v1 /
+ * `sdlc-issue-pipeline` v4 core-lineage dags transcribed into this file
+ * originally carried this exact bug: their SECOND guard hop (e.g. audit v2's
+ * `audit2` node) referenced `deps.audit1...` even though `audit1` was not in
+ * `audit2`'s own `deps` (only `close1` was) — resolving to `undefined` at
+ * guard-evaluation time. In practice this was harmless-by-accident: the
+ * custom expression evaluator's `!=` against an unresolved path is always
+ * `true`, and the reconciler's cascade-skip (a pending node auto-skips once
+ * ALL of its direct deps are skipped) already fires BEFORE guard evaluation,
+ * so the correct skip/run outcome happened either way — but it was a landmine
+ * (fragile, unintentionally-correct, and un-validated) and not, on inspection,
+ * the actual cause of those templates' real run stats including failures
+ * (`sdlc-review` v4: done 1 / failed 2; `sdlc-audit` v2: done 1 / failed 2).
+ * Fixed here by adding the referenced ancestor node to the guard's own node's
+ * `deps` array (e.g. `audit2.deps: ["audit1", "close1"]`) — this doesn't
+ * change execution order (the ancestor was already guaranteed to resolve
+ * first via the intermediate node) but makes the reference genuinely
+ * resolve instead of accidentally-true-by-`undefined`. The freshly-authored
+ * `sdlc-gap-analysis` entry below never had this bug: its multi-round guard
+ * chain relies on the same cascade-skip so only the FIRST hop of each round
+ * needs an explicit guard.
  */
 
 export type WorkflowFamily = "core" | "sdlc" | "light" | "custom";
@@ -175,7 +190,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "review2",
           agent: "reviewer",
-          deps: ["fix1"],
+          deps: ["review1", "fix1"],
           guard: "deps.review1.output.verdict != 'approved'",
           prompt:
             "开发者已按第1轮意见修复。再次审查当前 workspace 改动,对照规格找剩余缺陷。规格:\n{{inputs.spec}}\n只审查不改代码。",
@@ -207,7 +222,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "review3",
           agent: "reviewer",
-          deps: ["fix2"],
+          deps: ["review2", "fix2"],
           guard: "deps.review2.output.verdict != 'approved'",
           prompt:
             "第3轮(最终)审查当前 workspace 改动,对照规格给最终结论。规格:\n{{inputs.spec}}\n只审查不改代码。",
@@ -277,7 +292,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "audit2",
           agent: "auditor",
-          deps: ["close1"],
+          deps: ["audit1", "close1"],
           guard: "deps.audit1.output.verdict != 'NO_GAPS'",
           prompt:
             "开发者已按第1轮审计补齐 gap。再次做目标审计(核实证据)。\n目标:\n{{inputs.goal}}\n给出结构化 verdict 与证据。",
@@ -306,7 +321,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "audit3",
           agent: "auditor",
-          deps: ["close2"],
+          deps: ["audit2", "close2"],
           guard: "deps.audit2.output.verdict != 'NO_GAPS'",
           prompt:
             "第3轮(最终)目标审计。核实证据后给最终 verdict。若仍 GAPS_FOUND,说明需升级人工。\n目标:\n{{inputs.goal}}",
@@ -385,7 +400,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "review2",
           agent: "reviewer",
-          deps: ["reviewfix"],
+          deps: ["review1", "reviewfix"],
           guard: "deps.review1.output.verdict != 'approved'",
           prompt:
             "开发者已按意见修复。再次审查当前 workspace 改动,对照规格给结论。规格:\n{{inputs.spec}}\n只审查不改代码。",
@@ -434,7 +449,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "audit2",
           agent: "auditor",
-          deps: ["auditclose"],
+          deps: ["audit", "auditclose"],
           guard: "deps.audit.output.verdict != 'NO_GAPS'",
           prompt:
             "开发者已补齐 gap。最终目标审计,核实证据后给最终 verdict。目标:\n{{inputs.goal}}",
@@ -554,7 +569,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           type: "agent",
           id: "qa2",
           agent: "vllm",
-          deps: ["devFix"],
+          deps: ["qa", "devFix"],
           guard: "deps.qa.output.verdict != 'pass'",
           prompt:
             "开发者已修复上一轮 QA 发现的问题。重新运行端到端测试并验证,给出最终结论。",

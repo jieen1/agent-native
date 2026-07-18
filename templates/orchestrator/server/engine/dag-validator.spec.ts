@@ -565,6 +565,122 @@ describe("validateDag", () => {
       expect(result.errors[0]).toContain("guard");
     });
   });
+
+  // ── Task board #83 — guard deps.<id> must be a direct dependency ───────────
+  // `v3-dispatcher.ts`'s getNodeDeps() / `v3-reconciler.ts`'s
+  // buildGuardContext() only ever populate deps.<id> from a node's OWN
+  // direct `deps` array — never transitively. A guard referencing an
+  // ancestor's output that isn't directly depended on silently resolves to
+  // `undefined` at runtime instead of erroring at save time; validateDag()
+  // must catch this at author time.
+  describe("guard deps must be direct dependencies", () => {
+    it("guard referencing its own direct dep passes", () => {
+      const result = validateDag({
+        nodes: [
+          { type: "agent" as const, id: "review1", agent: "x", prompt: "p" },
+          {
+            type: "agent" as const,
+            id: "fix1",
+            agent: "x",
+            prompt: "p",
+            deps: ["review1"],
+            guard: "deps.review1.output.verdict != 'approved'",
+          },
+        ],
+      });
+      expect(result.ok).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("guard referencing a non-direct (transitive) dep is rejected", () => {
+      // review2 depends only on fix1, but its guard reaches past fix1 to
+      // review1 (a dep of fix1, not of review2 itself) — the exact R4a
+      // core-lineage bug found in sdlc-review/sdlc-audit/sdlc-full.
+      const result = validateDag({
+        nodes: [
+          { type: "agent" as const, id: "review1", agent: "x", prompt: "p" },
+          {
+            type: "agent" as const,
+            id: "fix1",
+            agent: "x",
+            prompt: "p",
+            deps: ["review1"],
+          },
+          {
+            type: "agent" as const,
+            id: "review2",
+            agent: "x",
+            prompt: "p",
+            deps: ["fix1"],
+            guard: "deps.review1.output.verdict != 'approved'",
+          },
+        ],
+      });
+      expect(result.ok).toBe(false);
+      expect(
+        result.errors.some(
+          (e) =>
+            e.includes("review2") &&
+            e.includes("deps.review1") &&
+            e.includes("not a"),
+        ),
+      ).toBe(true);
+    });
+
+    it("guard referencing a dep not in an empty/missing deps array is rejected", () => {
+      const result = validateDag({
+        nodes: [
+          { type: "agent" as const, id: "a", agent: "x", prompt: "p" },
+          {
+            type: "agent" as const,
+            id: "b",
+            agent: "x",
+            prompt: "p",
+            guard: "deps.a.output.verdict == 'ok'",
+          },
+        ],
+      });
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((e) => e.includes("deps.a"))).toBe(true);
+    });
+
+    it("guard referencing only inputs.* (no deps.*) is unaffected", () => {
+      const result = validateDag({
+        nodes: [
+          {
+            type: "agent" as const,
+            id: "a",
+            agent: "x",
+            prompt: "p",
+            guard: "inputs.enabled == true",
+          },
+        ],
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it("guard referencing one of several direct deps passes, flags only the missing one", () => {
+      const result = validateDag({
+        nodes: [
+          { type: "agent" as const, id: "a", agent: "x", prompt: "p" },
+          { type: "agent" as const, id: "b", agent: "x", prompt: "p" },
+          { type: "agent" as const, id: "c", agent: "x", prompt: "p" },
+          {
+            type: "agent" as const,
+            id: "d",
+            agent: "x",
+            prompt: "p",
+            deps: ["a", "b"],
+            guard: "deps.a.output.ok == true && deps.c.output.ok == true",
+          },
+        ],
+      });
+      expect(result.ok).toBe(false);
+      expect(result.errors.length).toBe(1);
+      expect(result.errors[0]).toContain("deps.c");
+      expect(result.errors[0]).not.toContain("deps.a");
+    });
+  });
 });
 
 // R4a.3 §4.2 point 7 — shared claude-code recognition predicate, used by both
