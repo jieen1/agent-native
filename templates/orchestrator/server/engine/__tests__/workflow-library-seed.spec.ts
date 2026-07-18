@@ -15,8 +15,8 @@ import {
 } from "../workflow-library-seed.js";
 
 describe("WORKFLOW_LIBRARY_SEED", () => {
-  it("has exactly 13 templates: 4 core + 5 sdlc + 4 light (r4 doc §4.1/§4.3)", () => {
-    expect(WORKFLOW_LIBRARY_SEED).toHaveLength(13);
+  it("has exactly 14 templates: 5 core + 5 sdlc + 4 light (r4 doc §4.1/§4.3 + task board #95's sdlc-merge-review)", () => {
+    expect(WORKFLOW_LIBRARY_SEED).toHaveLength(14);
     const byFamily = WORKFLOW_LIBRARY_SEED.reduce(
       (acc, e) => {
         acc[e.family] = (acc[e.family] ?? 0) + 1;
@@ -24,7 +24,7 @@ describe("WORKFLOW_LIBRARY_SEED", () => {
       },
       {} as Record<WorkflowFamily, number>,
     );
-    expect(byFamily.core).toBe(4);
+    expect(byFamily.core).toBe(5);
     expect(byFamily.sdlc).toBe(5);
     expect(byFamily.light).toBe(4);
     expect(byFamily.custom).toBeUndefined();

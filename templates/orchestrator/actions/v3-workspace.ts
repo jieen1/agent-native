@@ -289,13 +289,25 @@ export const workspaceCreate = defineAction({
   description:
     "Create a V3 workspace. Host-native: git-clones the repo into a directory on " +
     "the workspace volume and checks out the run branch (no microVM). Agent " +
-    "workers cwd into the returned directory.",
+    "workers cwd into the returned directory. `branch` names the NEW work " +
+    "branch to cut and check out — leave it unset to get a unique auto-generated " +
+    "name (`orchestrator/run-<id>`); do NOT pass your intended BASE branch (e.g. " +
+    "'main') as `branch` — that collides with any other workspace already " +
+    "checked out on it under the shared git-worktree model. Use `baseRef` to name " +
+    "the base to cut the new branch FROM (e.g. baseRef: 'main').",
   schema: z.object({
     // Accept https:// and file:// (a local path clone). z.string().url() admits
     // both; not constrained to .url() so a bare path is still rejected cleanly
     // by git rather than the schema.
     repo: z.string().min(1),
+    // The NEW work branch's name (cut fresh off `baseRef`). Omit to default to
+    // a unique `orchestrator/run-<id>` — never pass the base branch's own name
+    // here (see `baseRef`).
     branch: z.string().optional(),
+    // The base ref to cut `branch` FROM (e.g. "main", or a feature branch).
+    // NOT checked out itself, so it never collides under concurrency. Defaults
+    // to the repo's resolved default branch (origin/HEAD) when omitted.
+    baseRef: z.string().optional(),
     // "user" (default): a person created this workspace — the owner is that
     // real requesting user. "run": a workflow run owns it (ownerId is the run
     // id). "cc" is the legacy agent-on-behalf-of-user value, treated as "user".
@@ -326,6 +338,7 @@ export const workspaceCreate = defineAction({
     const ws = await createLocalWorkspace({
       repoUrl: args.repo,
       branch: args.branch,
+      baseRef: args.baseRef,
       ownerKind,
       ownerId,
       createdBy: requesterEmail,

@@ -703,14 +703,26 @@ describe("lintTemplateDispatchGrade against the real WORKFLOW_LIBRARY_SEED corpu
     );
   });
 
-  it("rule 6 (timeout/retry) fails uniformly — zero seed templates declare timeout_seconds/retry yet", () => {
+  it("rule 6 (timeout/retry) fails uniformly for every dev/qa-class template — zero seed templates declare timeout_seconds/retry yet", () => {
     for (const [name, result] of linted) {
+      // sdlc-merge-review (task board #95) is a deliberate exception: its
+      // ONLY node is itself a judgment node (output_schema.verdict enum), so
+      // rule 6's dev/qa-class filter (isDevQaClassNode: has workspace AND NOT
+      // a judgment node) finds zero applicable nodes — a vacuous pass, not a
+      // declared timeout_seconds/retry. See the dedicated assertion below.
+      if (name === "sdlc-merge-review") continue;
       const r6 = findRule(result, 6);
       expect(
         r6.ok,
         `${name} unexpectedly passed rule 6 — corpus assumption changed, update this test`,
       ).toBe(false);
     }
+  });
+
+  it("rule 6 passes vacuously for sdlc-merge-review — its single node is pure judgment, no dev/qa-class node to lack timeout/retry", () => {
+    const r6 = findRule(linted.get("sdlc-merge-review")!, 6);
+    expect(r6.ok).toBe(true);
+    expect(r6.detail).toContain("无 dev/qa 类节点");
   });
 
   it("rule 2 (judgment structure) and rule 3 (bounded loops) are clean across the corpus — R4a.1 hardened output_schema/guard-unrolling everywhere", () => {
@@ -739,10 +751,16 @@ describe("lintTemplateDispatchGrade against the real WORKFLOW_LIBRARY_SEED corpu
     expect(r1.detail).toContain("gateMode");
   });
 
-  it("no template reaches full dispatch-grade (7/7) yet — rule 6 alone caps every template at 6/7 today", () => {
-    for (const [, result] of linted) {
+  it("no dev/qa-bearing template reaches full dispatch-grade (7/7) yet — rule 6 alone caps every OTHER template at 6/7 today", () => {
+    for (const [name, result] of linted) {
+      if (name === "sdlc-merge-review") continue;
       expect(result.passCount).toBeLessThanOrEqual(6);
       expect(result.level).toBe("card-grade");
     }
+  });
+
+  it("sdlc-merge-review is the first template to reach 7/7 — a single pure-judgment node has no dev/qa-class gap for rule 6 to catch", () => {
+    const result = linted.get("sdlc-merge-review")!;
+    expect(result.passCount).toBe(7);
   });
 });

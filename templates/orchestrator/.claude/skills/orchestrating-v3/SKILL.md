@@ -160,10 +160,15 @@ commit from the brain.
 
 ## Run
 
-1. `workspaceCreate({ repo, branch: baseBranch, ownerKind: "cc", tags })` →
-   `{ workspaceId }`. (When launched from the `/launch` page in `auto` mode, the
-   workspace is already created for you and its id is in your first message — do
-   NOT create a second one.)
+1. `workspaceCreate({ repo, baseRef: baseBranch, ownerKind: "cc", tags })` →
+   `{ workspaceId }`. `baseRef` is the base to cut FROM; leave `branch` unset so
+   it defaults to a unique per-run name. Do NOT pass `baseBranch` as `branch` —
+   that checks the base branch itself out under this app's shared git-worktree
+   model, which collides with any other workspace already on it (fails a W1/
+   provisioning check with a confusing git-level error instead of a clear one).
+   (When launched from the `/launch` page in `auto` mode, the workspace is
+   already created for you and its id is in your first message — do NOT create
+   a second one.)
 2. `workflowRun({ dag, inputs: { requirement, workspaceId, repo, baseBranch }, tags })`
    → `{ runId }`. Pass the SAME `tags` on every call (`workspaceCreate`,
    `workflowRun`, `spawnOnce`) so the activity stream is reassemblable

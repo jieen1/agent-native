@@ -458,3 +458,73 @@ export function useV3WorkspaceCi(workspaceId: string | null | undefined) {
     },
   ) as { data?: V3CiWatchResult; isLoading: boolean; error?: unknown };
 }
+
+// ── Independent pre-merge review gate (task board #95) ───────────────────────
+
+export type MergeReviewVerdict = "safe_to_merge" | "concerns_found";
+
+export type MergeReviewStatus =
+  | "pending"
+  | "running"
+  | "paused"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+/** A snapshot of the latest `sdlc-merge-review` DAG run for a workspace. */
+export interface V3MergeReviewSnapshot {
+  reviewRunId: string;
+  status: MergeReviewStatus;
+  verdict: MergeReviewVerdict | null;
+  summary: string | null;
+  findings: unknown[] | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+}
+
+/** A human's recorded "I saw the findings, merge anyway" decision. */
+export interface V3MergeOverrideSnapshot {
+  reviewRunId: string | null;
+  reason: string;
+  overriddenBy: string | null;
+  createdAt: string | null;
+}
+
+export type MergeGateSource = "review-passed" | "human-override" | "blocked";
+
+/** Result shape of the `mergeReviewGet` action. */
+export interface V3MergeReviewGateResult {
+  workspaceId: string;
+  review: V3MergeReviewSnapshot | null;
+  override: V3MergeOverrideSnapshot | null;
+  canMerge: boolean;
+  source: MergeGateSource;
+  reason: string;
+}
+
+/**
+ * Fetch the independent-review gate state for a workspace (`mergeReviewGet`).
+ * Purely on-demand from the human's perspective (no review auto-starts) —
+ * this hook only POLLS while a review is already in flight, so mounting
+ * RunMergeControl never itself triggers wasted review dispatches; it just
+ * keeps a running review's badge live once a human has started one.
+ */
+export function useMergeReviewGate(workspaceId: string | null | undefined) {
+  return useActionQuery(
+    "mergeReviewGet" as any,
+    { workspaceId: workspaceId ?? "" },
+    {
+      enabled: !!workspaceId,
+      refetchInterval: (query: { state: { data?: unknown } }) => {
+        const data = query.state.data as V3MergeReviewGateResult | undefined;
+        const status = data?.review?.status;
+        return status === "pending" ||
+          status === "running" ||
+          status === "paused"
+          ? LIVE_POLL_MS
+          : false;
+      },
+    },
+  ) as { data?: V3MergeReviewGateResult; isLoading: boolean; error?: unknown };
+}

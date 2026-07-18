@@ -260,6 +260,67 @@ export function resolvePnpmStoreDir(): string {
   return raw && raw !== "" ? raw : "/workspaces/.pnpm-store";
 }
 
+// ── W2/W3 timeout bounds (board #88) ────────────────────────────────────────
+//
+// A large monorepo checkout (the SDLC自举 dogfood repo — a mirror of THIS
+// monorepo) makes W2's `pnpm install` a materially heavier operation than the
+// original single-app-repo shape assumed: the whole-workspace install also
+// runs several packages' postinstall builds (core, pinpoint, scheduling,
+// dispatch, locale-kit, …), and installs that race for the SAME shared
+// `--store-dir` (resolvePnpmStoreDir() above — one store for every workspace,
+// not one per repo) queue up under concurrent workspace creation instead of
+// running in parallel. Reproduced directly against a real disposable checkout
+// of this repo (board #88): a solo cold install completed in ~36s, but the
+// SAME install run 3-way concurrently against the shared store-dir stretched
+// to ~55s each — on a slower/busier host (or with more concurrent workspace
+// creates, which V3 routinely does) that curve crosses the OLD 120s default.
+// Notably `v3-workspace-provision.spec.ts`'s own real end-to-end reproduction
+// against this repo's monorepo root already had to pass explicit
+// `probeTimeoutMs`/`installTimeoutMs` overrides larger than the (until now)
+// hardcoded production defaults just to pass reliably — evidence this gap was
+// already being routed around in tests, never actually fixed in the path
+// `assertWorkspaceReady` calls in production.
+//
+// Distinct from board #72 (which fixed WHERE `pnpm exec vitest` runs — the
+// monorepo-root-lacks-its-own-vitest cwd problem, `resolveVitestProjectDir`
+// above): this is HOW LONG W2/W3 are allowed to run, an independent axis. Both
+// are real, both are specifically triggered by the large dogfood monorepo.
+//
+// Configurable via env (mirrors `resolveGitTimeoutMs` in
+// v3-workspace-local.ts) so an operator can widen these for a demonstrably
+// slower/larger checkout without a code change; an explicit call-site
+// `opts.probeTimeoutMs`/`installTimeoutMs`/`timeoutMs` still wins over both.
+
+const DEFAULT_PROBE_TIMEOUT_MS = 30_000;
+const DEFAULT_INSTALL_TIMEOUT_MS = 300_000;
+const DEFAULT_SMOKE_TIMEOUT_MS = 180_000;
+
+function resolveTimeoutMsEnv(envVar: string, fallback: number): number {
+  const raw = Number(process.env[envVar]);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+/** W2 warm-probe timeout (`pnpm exec vitest --version`). `ORCH_PNPM_PROBE_TIMEOUT_MS` overrides. */
+export function resolveProbeTimeoutMs(): number {
+  return resolveTimeoutMsEnv(
+    "ORCH_PNPM_PROBE_TIMEOUT_MS",
+    DEFAULT_PROBE_TIMEOUT_MS,
+  );
+}
+
+/** W2 `pnpm install` timeout. `ORCH_PNPM_INSTALL_TIMEOUT_MS` overrides. */
+export function resolveInstallTimeoutMs(): number {
+  return resolveTimeoutMsEnv(
+    "ORCH_PNPM_INSTALL_TIMEOUT_MS",
+    DEFAULT_INSTALL_TIMEOUT_MS,
+  );
+}
+
+/** W3 `test_cmd_smoke` timeout. `ORCH_SMOKE_TIMEOUT_MS` overrides. */
+export function resolveSmokeTimeoutMs(): number {
+  return resolveTimeoutMsEnv("ORCH_SMOKE_TIMEOUT_MS", DEFAULT_SMOKE_TIMEOUT_MS);
+}
+
 export interface DepWarmReport {
   ok: boolean;
   /** True when a `pnpm install` had to run (the fast probe missed). */
@@ -303,8 +364,8 @@ export async function assertDependenciesWarm(
   opts: DepWarmOptions = {},
 ): Promise<DepWarmReport> {
   const exec = opts.exec ?? execCmd;
-  const probeTimeoutMs = opts.probeTimeoutMs ?? 15_000;
-  const installTimeoutMs = opts.installTimeoutMs ?? 120_000;
+  const probeTimeoutMs = opts.probeTimeoutMs ?? resolveProbeTimeoutMs();
+  const installTimeoutMs = opts.installTimeoutMs ?? resolveInstallTimeoutMs();
   const startedAt = Date.now();
   const probeDir = await resolveVitestProjectDir(dir);
 
@@ -399,9 +460,10 @@ function parseTestsRun(output: string): number | null {
 }
 
 /**
- * W3 — run `test_cmd_smoke` (real subprocess, 120s default timeout per
- * DESIGN §7). A non-zero exit (including a timeout) throws
- * `WorkspaceNotReadyError('W3', …)`; the workspace never reaches `ready_at`.
+ * W3 — run `test_cmd_smoke` (real subprocess, bounded by
+ * {@link resolveSmokeTimeoutMs} per DESIGN §7). A non-zero exit (including a
+ * timeout) throws `WorkspaceNotReadyError('W3', …)`; the workspace never
+ * reaches `ready_at`.
  *
  * The DEFAULT command shells out to `pnpm exec vitest`, which hits the exact
  * same monorepo-root resolution problem as W2 (see
@@ -418,7 +480,7 @@ export async function runTestCmdSmoke(
   const exec = opts.exec ?? execCmd;
   const usingDefault = !opts.command || opts.command.trim() === "";
   const command = resolveTestCmdSmoke(opts.command);
-  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const timeoutMs = opts.timeoutMs ?? resolveSmokeTimeoutMs();
   const execDir = usingDefault ? await resolveVitestProjectDir(dir) : dir;
   const res = await exec(command, { cwd: execDir, timeoutMs });
   const output = `${res.stdout}\n${res.stderr}`.trim();
