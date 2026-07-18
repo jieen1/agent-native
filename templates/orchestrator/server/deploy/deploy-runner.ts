@@ -33,13 +33,30 @@ export interface DeployConfig {
   user: string;
   keyPath: string;
   /**
-   * Directory on the deploy host holding a git checkout of THIS SAME
-   * monorepo — each app's build lives at `<remoteBasePath>/templates/<app>`,
-   * mirroring this repo's own layout (the deploy host is assumed to be a
-   * checkout of the same repo, per docs/agent-native-alignment-audit.md §5:
-   * "以 main 为准，101 的 orchestrator/tracker .output 从 main 重建部署").
+   * Directory on the deploy host holding a REAL git checkout of THIS SAME
+   * monorepo — the build stage runs `git fetch`/`reset --hard`/`pnpm build`
+   * here, at `<remoteBasePath>/templates/<app>`, mirroring this repo's own
+   * layout, per docs/agent-native-alignment-audit.md §5: "以 main 为准，101
+   * 的 orchestrator/tracker .output 从 main 重建部署". This is the BUILD
+   * source only — it is NOT assumed to be where the running containers
+   * serve from (see `liveBasePath`); on 101 today the real git checkout
+   * lives at a separate path from the containers' bind-mounted directory.
    */
   remoteBasePath: string;
+  /**
+   * Directory the running app containers actually bind-mount their
+   * `.output` from — `docker inspect an-orchestrator` is the ground truth,
+   * not an assumption. May be a plain rsync/copy target with no `.git` at
+   * all (confirmed true for 101: `remoteBasePath` and this are DIFFERENT
+   * directories there). The "syncing" stage below copies each app's
+   * freshly-built `.output` from `remoteBasePath` to here before restart —
+   * without that copy, a build that succeeds in `remoteBasePath` would
+   * never actually reach the containers `restartCommand` bounces, and the
+   * deploy would silently report success while shipping nothing. Falls back
+   * to `remoteBasePath` when unset/blank (single-directory setups, where the
+   * copy is skipped because source and destination already coincide).
+   */
+  liveBasePath?: string;
   healthCheckUrl: string;
   restartCommand: string;
 }
@@ -53,15 +70,23 @@ const DEFAULT_RESTART_COMMAND = "docker restart an-orchestrator an-tracker";
  * detached background job below is running on its own.
  */
 export async function loadDeployConfig(): Promise<DeployConfig> {
-  const [host, user, keyPath, remoteBasePath, healthCheckUrl, restartCommand] =
-    await Promise.all([
-      resolveSecret("DEPLOY_SSH_HOST"),
-      resolveSecret("DEPLOY_SSH_USER"),
-      resolveSecret("DEPLOY_SSH_KEY_PATH"),
-      resolveSecret("DEPLOY_REMOTE_BASE_PATH"),
-      resolveSecret("DEPLOY_HEALTH_CHECK_URL"),
-      resolveSecret("DEPLOY_RESTART_COMMAND"),
-    ]);
+  const [
+    host,
+    user,
+    keyPath,
+    remoteBasePath,
+    liveBasePath,
+    healthCheckUrl,
+    restartCommand,
+  ] = await Promise.all([
+    resolveSecret("DEPLOY_SSH_HOST"),
+    resolveSecret("DEPLOY_SSH_USER"),
+    resolveSecret("DEPLOY_SSH_KEY_PATH"),
+    resolveSecret("DEPLOY_REMOTE_BASE_PATH"),
+    resolveSecret("DEPLOY_LIVE_BASE_PATH"),
+    resolveSecret("DEPLOY_HEALTH_CHECK_URL"),
+    resolveSecret("DEPLOY_RESTART_COMMAND"),
+  ]);
   const missing = [
     ["DEPLOY_SSH_HOST", host],
     ["DEPLOY_SSH_USER", user],
@@ -81,6 +106,7 @@ export async function loadDeployConfig(): Promise<DeployConfig> {
     user: user as string,
     keyPath: keyPath as string,
     remoteBasePath: remoteBasePath as string,
+    liveBasePath: (liveBasePath as string) || undefined,
     healthCheckUrl: healthCheckUrl as string,
     restartCommand: (restartCommand as string) || DEFAULT_RESTART_COMMAND,
   };
@@ -146,8 +172,18 @@ async function sshExec(
   }
 }
 
-function outputDir(cfg: DeployConfig, app: DeployApp): string {
+/** Where the app gets BUILT — the git checkout at `remoteBasePath`. */
+function buildOutputDir(cfg: DeployConfig, app: DeployApp): string {
   return `${cfg.remoteBasePath}/templates/${app}/.output`;
+}
+
+/** Where the app actually gets SERVED from — see `DeployConfig.liveBasePath`. */
+function liveBase(cfg: DeployConfig): string {
+  return cfg.liveBasePath?.trim() ? cfg.liveBasePath : cfg.remoteBasePath;
+}
+
+function liveOutputDir(cfg: DeployConfig, app: DeployApp): string {
+  return `${liveBase(cfg)}/templates/${app}/.output`;
 }
 
 /**
@@ -194,7 +230,9 @@ async function backupApp(
   cfg: DeployConfig,
   app: DeployApp,
 ): Promise<"backed-up" | "no-source"> {
-  const dir = outputDir(cfg, app);
+  // Backs up the LIVE served directory (what rollback must restore), not the
+  // build checkout — the two can be different paths (see liveOutputDir).
+  const dir = liveOutputDir(cfg, app);
 
   const { stdout: existsOut } = await sshExec(
     cfg,
@@ -444,19 +482,29 @@ export async function runDeployJob(
     });
 
     await withStage(runId, "syncing", cfg, async () => {
-      // Build happens in place on the deploy host (see DeployConfig doc
-      // comment) — there is no separate artifact transfer today, since 101 is
-      // the only real target and it IS the build host. This stage verifies
-      // the freshly-built server bundle actually exists before restart, so a
-      // silent build failure never reaches "restarting".
+      // Build happens in the git checkout at remoteBasePath; the running
+      // containers may bind-mount a DIFFERENT directory (liveBasePath) — see
+      // DeployConfig's doc comments. Copy each app's freshly-built .output
+      // across before restart so the containers actually pick up the new
+      // code; skipped when the two paths coincide (single-directory setups).
+      // No `|| true` masking (Bug #1 precedent, see deploy-runner.spec.ts) —
+      // a real copy failure here must propagate and trigger rollback, not
+      // report a phantom success.
+      const results: string[] = [];
       for (const app of apps) {
-        await sshExec(
-          cfg,
-          `test -f '${outputDir(cfg, app)}/server/index.mjs'`,
-          15_000,
-        );
+        const buildDir = buildOutputDir(cfg, app);
+        const liveDir = liveOutputDir(cfg, app);
+        if (buildDir !== liveDir) {
+          await sshExec(
+            cfg,
+            `rm -rf '${liveDir}' && cp -r '${buildDir}' '${liveDir}'`,
+            5 * 60_000,
+          );
+        }
+        await sshExec(cfg, `test -f '${liveDir}/server/index.mjs'`, 15_000);
+        results.push(`${app}: live output ready at ${liveDir}`);
       }
-      return `verified build output for ${apps.join(", ")}`;
+      return results.join("; ");
     });
 
     await withStage(runId, "restarting", cfg, async () => {
@@ -494,7 +542,7 @@ export async function runDeployJob(
     try {
       await withStage(runId, "rolling-back", cfg, async () => {
         for (const app of apps) {
-          const dir = outputDir(cfg, app);
+          const dir = liveOutputDir(cfg, app);
           await sshExec(
             cfg,
             `test -d '${dir}.bak' && rm -rf '${dir}' && mv '${dir}.bak' '${dir}'`,

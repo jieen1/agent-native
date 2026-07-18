@@ -110,6 +110,17 @@ function isBackupVerifyProbe(cmd: string): boolean {
   return cmd.includes("echo BACKUP_OK ||");
 }
 
+/**
+ * Matches the "syncing" stage's build->live copy, NOT the "backing-up"
+ * stage's dir->dir.bak copy — both are `rm -rf ... && cp -r ...`, but only
+ * the backup copy's destination ends in `.bak`.
+ */
+function isLiveSyncCopy(cmd: string): boolean {
+  return (
+    cmd.startsWith("rm -rf") && cmd.includes("cp -r") && !cmd.includes(".bak")
+  );
+}
+
 beforeEach(() => {
   hoisted.execCalls.length = 0;
   // Health-check retries use a real setTimeout backoff between attempts
@@ -319,6 +330,81 @@ describe("runDeployJob", () => {
     // discarded" fix that would also erase real build/remote-command errors.
     expect(row.error).toContain("[redacted]");
     expect(row.error).toContain("Connection timed out");
+  });
+
+  it("copies build output to the live base path when they differ, and never masks a copy failure (loose-end #2 regression)", async () => {
+    seedRun("deploy_split_paths");
+    const SPLIT_CFG: DeployConfig = {
+      ...CFG,
+      remoteBasePath: "/home/claudeuser/project/agent-native",
+      liveBasePath: "/home/claudeuser/agent-native",
+    };
+    let sawSyncCopy: string | null = null;
+    hoisted.execImpl = async (cmd: string) => {
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "abc123\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      if (isLiveSyncCopy(cmd)) {
+        sawSyncCopy = cmd;
+      }
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch;
+
+    await runDeployJob("deploy_split_paths", SPLIT_CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_split_paths")!;
+    expect(row.status).toBe("succeeded");
+    // The sync stage must copy from the build checkout to the live
+    // bind-mounted directory — without this, a build that succeeds in
+    // remoteBasePath never actually reaches the containers restartCommand
+    // bounces, and the deploy would silently report success shipping nothing.
+    expect(sawSyncCopy).not.toBeNull();
+    expect(sawSyncCopy as unknown as string).toContain(
+      "/home/claudeuser/project/agent-native/templates/orchestrator/.output",
+    );
+    expect(sawSyncCopy as unknown as string).toContain(
+      "/home/claudeuser/agent-native/templates/orchestrator/.output",
+    );
+    // Same no-`|| true`-masking invariant as the backup copy (Bug #1).
+    expect(sawSyncCopy as unknown as string).not.toMatch(/\|\|\s*true\s*$/);
+    // Backup/rollback must target the LIVE directory, not the build checkout.
+    expect(
+      hoisted.execCalls.some(
+        (c) =>
+          isExistsProbe(c) &&
+          c.includes("/home/claudeuser/agent-native/templates/orchestrator"),
+      ),
+    ).toBe(true);
+  });
+
+  it("skips the copy when build and live base paths are the same directory", async () => {
+    seedRun("deploy_same_path");
+    let sawSyncCopy = false;
+    hoisted.execImpl = async (cmd: string) => {
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "abc123\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      if (isLiveSyncCopy(cmd)) sawSyncCopy = true;
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch;
+
+    // CFG has no liveBasePath set — falls back to remoteBasePath, so build
+    // and live directories coincide and the copy is a redundant no-op to skip.
+    await runDeployJob("deploy_same_path", CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_same_path")!;
+    expect(row.status).toBe("succeeded");
+    expect(sawSyncCopy).toBe(false);
   });
 
   it("rolls back when the post-restart health check fails, preserving the real failure reason", async () => {

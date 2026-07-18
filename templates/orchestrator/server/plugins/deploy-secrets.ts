@@ -40,10 +40,29 @@ export default async function deploySecretsPlugin(): Promise<void> {
     key: "DEPLOY_REMOTE_BASE_PATH",
     label: "Deploy remote base path",
     description:
-      "Base directory on the deploy host each app's built .output lives under (e.g. /home/user).",
+      "Base directory on the deploy host holding a real git checkout of this " +
+      "monorepo — the build stage runs `git fetch/reset --hard` + `pnpm build` " +
+      "here (e.g. /home/user/project/agent-native). This is the BUILD source, " +
+      "not necessarily where the running containers serve from — see Deploy " +
+      "live base path below.",
     scope: "workspace",
     kind: "api-key",
     required: true,
+  });
+  registerRequiredSecret({
+    key: "DEPLOY_LIVE_BASE_PATH",
+    label: "Deploy live base path",
+    description:
+      "Base directory the running app containers actually bind-mount their " +
+      "`.output` from (e.g. 101's containers bind-mount /home/user/agent-native, " +
+      "a plain rsync target with no .git — separate from the git build checkout " +
+      "above). The sync stage copies each app's freshly built `.output` here " +
+      "before restart. Optional: defaults to Deploy remote base path when unset, " +
+      "for setups where the build checkout and the live served directory are " +
+      "the same path. Set this explicitly whenever they differ.",
+    scope: "workspace",
+    kind: "api-key",
+    required: false,
   });
   registerRequiredSecret({
     key: "DEPLOY_HEALTH_CHECK_URL",

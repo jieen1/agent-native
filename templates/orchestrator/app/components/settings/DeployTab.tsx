@@ -42,7 +42,7 @@ const STAGE_LABEL: Record<DeployStage, string> = {
   queued: "Queued",
   "backing-up": "Backing up",
   building: "Building",
-  syncing: "Verifying build",
+  syncing: "Syncing build",
   restarting: "Restarting",
   verifying: "Health check",
   "rolling-back": "Rolling back",
