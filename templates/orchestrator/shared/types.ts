@@ -142,6 +142,20 @@ export interface Node {
   engine?: string;
   /** Per-node model id, e.g. "claude-opus-4-8". */
   model?: string;
+  /**
+   * Task #89: the DAG node's EXPLICIT `model_override`, carried separately
+   * from `model`. `v3-dispatcher.ts` flattens `model` to
+   * `model_override ?? agentConfig.model` before a node ever reaches a
+   * `RuntimeExecutor`, so `model` alone cannot tell "the DAG author picked
+   * this on purpose" apart from "this is just the agent-def's static
+   * default" (e.g. `vllm`'s seeded `qwen3.6`). `RoutingRuntimeExecutor` /
+   * `VllmExecutor.resolveModel` need that distinction: an explicit override
+   * must win even when the node is routed to a `runtime_configs` row, but a
+   * row's own configured model should win over the agent-def default when
+   * there is NO explicit override. Unset when the DAG node has no
+   * `model_override`.
+   */
+  modelOverride?: string;
   /** Reasoning-effort hint (§1.6). */
   effort?: NodeEffort;
   /** Instruction template; supports {{deps.<id>.output}} refs. */
@@ -359,4 +373,3 @@ export function parseGraph(raw: unknown): WorkflowGraph {
 
   return { nodes, edges };
 }
-

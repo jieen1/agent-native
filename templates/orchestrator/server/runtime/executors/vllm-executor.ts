@@ -7,7 +7,11 @@
 // (localhost, always reachable) and its tools act in the VM — the VM needs NO
 // public egress for a vLLM node.
 //
-// Model: the node's `model`, defaulting to `qwen3.6` (the host vLLM model).
+// Model (task #89): node.modelOverride (explicit) → runtime_configs row's own
+// model (cfg, when RoutingRuntimeExecutor matched one) → node.model (the
+// agent-def's static default, e.g. `qwen3.6`) → DEFAULT_VLLM_MODEL. See
+// `resolveModel` below — routing to a real remote provider row must not keep
+// requesting a model name that row doesn't serve.
 // baseUrl/apiKey come from node env (`OPENAI_BASE_URL`/`OPENAI_API_KEY`) or the
 // built-in default — vLLM accepts any non-empty key, so a placeholder is fine.
 
@@ -52,11 +56,33 @@ function resolveBaseUrl(ctx: RuntimeExecCtx, cfg?: VllmExecutorConfig): string {
   return DEFAULT_VLLM_BASE_URL;
 }
 
-/** Resolve the model: node.model → runtime_config row → default vLLM model. */
-function resolveModel(ctx: RuntimeExecCtx, cfg?: VllmExecutorConfig): string {
+/**
+ * Resolve the model (task #89 fix). Precedence, most specific first:
+ *   1. `node.modelOverride` — an EXPLICIT `model_override` the DAG author set
+ *      on this node. A deliberate per-node choice always wins, even when the
+ *      node is routed to a `runtime_configs` row (e.g. a user's "aliyun"
+ *      remote provider).
+ *   2. `cfg.model` — the resolved `runtime_configs` ROW's own configured
+ *      model. Only present when `RoutingRuntimeExecutor` actually matched a
+ *      row; this is what makes a remote provider actually work, since that
+ *      row's baseUrl/key almost never serve the agent-def's static model
+ *      name (e.g. `vllm`'s seeded `qwen3.6`).
+ *   3. `node.model` — the agent-def's static default model. Used only when
+ *      there is NO explicit override AND NO matched row (`cfg` undefined) —
+ *      i.e. routing fell through to the default env-var-bound vLLM, exactly
+ *      the pre-existing behavior for a user who has never configured a
+ *      custom runtime.
+ *   4. `DEFAULT_VLLM_MODEL` — last resort.
+ */
+export function resolveModel(
+  ctx: RuntimeExecCtx,
+  cfg?: VllmExecutorConfig,
+): string {
+  const override = ctx.node.modelOverride;
+  if (override && override.trim() !== "") return override;
+  if (cfg?.model && cfg.model.trim() !== "") return cfg.model;
   const m = ctx.node.model;
   if (m && m.trim() !== "") return m;
-  if (cfg?.model && cfg.model.trim() !== "") return cfg.model;
   return DEFAULT_VLLM_MODEL;
 }
 

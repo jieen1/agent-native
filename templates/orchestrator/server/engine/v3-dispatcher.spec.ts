@@ -721,6 +721,194 @@ describe("Workspace readiness gate", () => {
   });
 });
 
+describe("model_override threading onto Node.modelOverride (task #89)", () => {
+  // Task #89 root cause: RoutingRuntimeExecutor correctly forwards a node to
+  // the right baseUrl+API key when routed to a real runtime_configs row, but
+  // did NOT align the requested MODEL NAME to that row's configured `model`
+  // — the agent-def's static model (e.g. vllm's seeded "qwen3.6") always won
+  // unless the DAG node set an explicit model_override, because by the time
+  // a node reaches a RuntimeExecutor, `Node.model` is already flattened to
+  // `model_override ?? agentConfig.model` (this very block) and the two
+  // cases are indistinguishable. The fix threads the RAW explicit override
+  // onto a SEPARATE `Node.modelOverride` field so VllmExecutor.resolveModel
+  // can tell them apart. These tests lock in THIS half of the fix — that
+  // `spawn()` actually populates `modelOverride` correctly — the model
+  // PRECEDENCE itself is covered by vllm-executor.spec.ts's `resolveModel`
+  // tests.
+
+  function createDagMockDb(dag: unknown) {
+    const artifacts: Array<Record<string, unknown>> = [];
+    const spawnsById = new Map<string, Record<string, unknown>>();
+    const events: Array<Record<string, unknown>> = [];
+    const runRow = { id: "run-1", dag };
+
+    const db = {
+      select: () => ({
+        from: (table: unknown) => ({
+          where: async () => (table === v3Runs ? [runRow] : []),
+        }),
+      }),
+      update: () => ({ set: () => ({ where: async () => ({}) }) }),
+      insert: (table: unknown) => ({
+        values: (row: Record<string, unknown>) => {
+          let recorded = false;
+          const commit = async () => {
+            if (!recorded) {
+              recorded = true;
+              if (table === v3Events) events.push(row);
+              else if (row.kind && row.textContent !== undefined)
+                artifacts.push(row);
+              else if (row.renderedPrompt !== undefined) {
+                spawnsById.set(String(row.id), {
+                  ...(spawnsById.get(String(row.id)) ?? {}),
+                  ...row,
+                });
+              }
+            }
+            return {};
+          };
+          return {
+            onConflictDoNothing: () => commit(),
+            onConflictDoUpdate: () => commit(),
+            then: (
+              resolve: (v: unknown) => void,
+              reject: (e: unknown) => void,
+            ) => commit().then(resolve, reject),
+          };
+        },
+      }),
+    } as unknown as PostgresJsDatabase;
+
+    return { db, artifacts, spawnsById, events };
+  }
+
+  function makeNodeRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: "node-dev",
+      runId: "run-1",
+      nodeIdInDag: "dev",
+      type: "agent",
+      status: "running",
+      iteration: 0,
+      fanoutIndex: 0,
+      currentSpawnId: null,
+      outputArtifactId: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      ownerEmail: "local@localhost",
+      orgId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(renderTemplate).mockImplementation(
+      (template: string) => template,
+    );
+    // The vllm agent-def's real seeded shape (agent-defs-seed.ts): engine
+    // "vllm", static model "qwen3.6".
+    vi.mocked(loadAgent).mockResolvedValue({
+      name: "vllm",
+      description: "",
+      runtime: "none" as const,
+      engine: "vllm",
+      model: "qwen3.6",
+      tools: [],
+      systemPrompt: "worker",
+    });
+  });
+
+  it("no model_override on the DAG node → Node.model is the agent-def's static model, Node.modelOverride stays unset", async () => {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+
+    const runSpy = vi
+      .spyOn(hoisted.MockNodeRunner.prototype, "run")
+      .mockResolvedValue({
+        output: "done",
+        tokensSpent: 1,
+        toolCallCount: 0,
+        model: "qwen3.6",
+        vmName: null,
+        durationMs: 1,
+        attempts: 1,
+      } as any);
+
+    const dag = {
+      nodes: [{ id: "dev", type: "agent", agent: "vllm", prompt: "do work" }],
+    };
+    const mockDb = createDagMockDb(dag);
+    const executor: RuntimeExecutor = {
+      kind: "test",
+      run: vi.fn().mockResolvedValue({} as any),
+    };
+    const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+    await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+    // `vi.spyOn` re-wraps the SAME MockNodeRunner.prototype.run across every
+    // test in this file without clearing prior calls, so `.mock.calls`
+    // accumulates — read the LAST call (this test's), not the first.
+    // `hoisted.MockNodeRunner.prototype.run` is declared with zero params
+    // (`run() {}`), so vitest infers `mock.calls` as an array of 0-length
+    // tuples — cast to inspect the REAL runtime args the spy was actually
+    // called with (`this.runner.run(input, signal)` in v3-dispatcher.ts).
+    const calls = runSpy.mock.calls as unknown as Array<
+      [{ node: Record<string, unknown> }]
+    >;
+    const capturedNode = calls[calls.length - 1][0].node;
+    expect(capturedNode.model).toBe("qwen3.6");
+    expect(capturedNode.modelOverride).toBeUndefined();
+  });
+
+  it("an explicit model_override on the DAG node survives onto Node.modelOverride (and still flattens onto Node.model too)", async () => {
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+
+    const runSpy = vi
+      .spyOn(hoisted.MockNodeRunner.prototype, "run")
+      .mockResolvedValue({
+        output: "done",
+        tokensSpent: 1,
+        toolCallCount: 0,
+        model: "qwen-max",
+        vmName: null,
+        durationMs: 1,
+        attempts: 1,
+      } as any);
+
+    const dag = {
+      nodes: [
+        {
+          id: "dev",
+          type: "agent",
+          agent: "vllm",
+          prompt: "do work",
+          model_override: "qwen-max",
+        },
+      ],
+    };
+    const mockDb = createDagMockDb(dag);
+    const executor: RuntimeExecutor = {
+      kind: "test",
+      run: vi.fn().mockResolvedValue({} as any),
+    };
+    const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+    await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+    // `hoisted.MockNodeRunner.prototype.run` is declared with zero params
+    // (`run() {}`), so vitest infers `mock.calls` as an array of 0-length
+    // tuples — cast to inspect the REAL runtime args the spy was actually
+    // called with (`this.runner.run(input, signal)` in v3-dispatcher.ts).
+    const calls = runSpy.mock.calls as unknown as Array<
+      [{ node: Record<string, unknown> }]
+    >;
+    const capturedNode = calls[calls.length - 1][0].node;
+    expect(capturedNode.model).toBe("qwen-max");
+    expect(capturedNode.modelOverride).toBe("qwen-max");
+  });
+});
+
 describe("F7 usage capture + suspect flagging", () => {
   function makeMockNodeRunnerResult(result: Record<string, unknown>) {
     vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(

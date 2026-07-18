@@ -33,6 +33,19 @@
 // a `VllmExecutor` pointed at the row's baseUrl/model, with the row's saved
 // API key, so a real remote provider (e.g. Aliyun) is actually reached.
 //
+// Task #89 fix: reaching the right baseUrl/key is not enough — the MODEL NAME
+// requested must also match what that row actually serves. A node's engine
+// almost always resolves through its agent-def's own static `model` (e.g.
+// `vllm`'s seeded `qwen3.6`), which a real remote provider row rarely serves,
+// so `VllmExecutor.resolveModel` now prefers the matched row's own `model`
+// over that static default — UNLESS the DAG node set an explicit
+// `model_override` (threaded onto `Node.modelOverride`, `v3-dispatcher.ts`),
+// which still wins as a deliberate per-node choice. See
+// `vllm-executor.ts`'s `resolveModel` for the full precedence order; the
+// RemoteApiExecutor fallback path (no row matched) is unaffected — it never
+// sees a `cfg`, so it keeps using the agent-def's static model exactly as
+// before.
+//
 // NOTE: `executor-choice.ts` / `routing-node-executor.ts` already solved this
 // exact routing decision — but for a DIFFERENT seam (the scheduler-facing
 // `NodeExecutor`/`RoutingNodeExecutor`, which is not instantiated ANYWHERE in

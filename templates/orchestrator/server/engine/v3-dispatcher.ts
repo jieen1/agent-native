@@ -613,6 +613,15 @@ export class V3Dispatcher {
     }
     if (modelOverride) {
       runnerNode.model = modelOverride;
+      // Task #89: also carry the RAW explicit override on its own field.
+      // `runnerNode.model` above is already flattened (override ?? agent-def
+      // static default) for every existing RuntimeExecutor that reads `model`
+      // directly (RemoteApiExecutor, ClaudeCodeExecutor) — leave that
+      // unchanged. `modelOverride` lets RoutingRuntimeExecutor/VllmExecutor
+      // tell a deliberate per-node choice apart from the agent-def default,
+      // so it can still win even when the node routes to a runtime_configs
+      // row whose own `model` would otherwise apply.
+      runnerNode.modelOverride = modelOverride;
     } else if (agentConfig.model) {
       runnerNode.model = agentConfig.model;
     }
