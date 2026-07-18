@@ -2266,13 +2266,30 @@ export function findInstalledResvgPackages(
  * `import`/`require` of a literal specifier. Nitro's file tracer (nf3) builds
  * its "what to copy into `.output/*\/node_modules`" set from the statically
  * reachable import/require graph, so a package that is only ever named via a
- * `createRequire(import.meta.url).resolve(...)` call — exactly like the
- * platform-native binaries below — never enters that set and is silently
- * absent from the deployed bundle. Same class of bug as the libsql/resvg/
- * ffmpeg-static gaps above; listed exhaustively (not inferred) for the same
- * reason. See `copyInstalledAcpHarnessPackages`.
+ * `createRequire(import.meta.url).resolve(...)` call never enters that set
+ * and is silently absent from the deployed bundle. Same class of bug as the
+ * libsql/resvg/ffmpeg-static gaps above.
+ *
+ * Unlike those, though, this isn't just 1-2 known native packages: these
+ * three packages' OWN real runtime dependencies (zod, @anthropic-ai/sdk,
+ * @modelcontextprotocol/sdk, and THAT package's own sizeable dependency tree
+ * — express, hono, ajv, cors, ...) — and `@anthropic-ai/claude-agent-sdk`'s
+ * platform-native optional binary — are equally untraced, since they're only
+ * ever reached through these packages' own un-bundled, filesystem-copied
+ * `import`/`require` calls, never through Nitro's bundler at all.
+ * Hand-listing that whole tree (and keeping it current across version bumps)
+ * would be exactly the fragile whack-a-mole this fix is supposed to end.
+ * Instead, `collectPnpmDependencyClosure` walks pnpm's OWN already-resolved
+ * store structure outward from these three root packages: each pnpm-store
+ * package folder keeps its resolved dependencies (regular AND peer, and —
+ * for the current platform — matching optionalDependencies) as real sibling
+ * entries in the SAME per-instance node_modules folder, which is exactly
+ * what lets Node's ordinary upward node_modules walk find them from the
+ * package's own code in the first place. Walking those siblings transitively
+ * reconstructs the complete closure pnpm already computed, with no
+ * package.json semver parsing of our own.
  */
-const ACP_HARNESS_EXACT_PACKAGE_NAMES: ReadonlyArray<{
+const ACP_HARNESS_ROOT_PACKAGES: ReadonlyArray<{
   scope: string;
   name: string;
 }> = [
@@ -2280,10 +2297,6 @@ const ACP_HARNESS_EXACT_PACKAGE_NAMES: ReadonlyArray<{
   { scope: "@agentclientprotocol", name: "claude-agent-acp" },
   { scope: "@anthropic-ai", name: "claude-agent-sdk" },
 ];
-
-/** `@anthropic-ai/claude-agent-sdk`'s own platform-native optionalDependencies scope/prefix. */
-const CLAUDE_AGENT_SDK_NATIVE_SCOPE = "@anthropic-ai";
-const CLAUDE_AGENT_SDK_NATIVE_PREFIX = "claude-agent-sdk-";
 
 function findInstalledExactScopedPackage(
   nodeModulesRoots: string[],
@@ -2309,52 +2322,91 @@ function findInstalledExactScopedPackage(
   return null;
 }
 
-function findInstalledClaudeAgentSdkNativePackages(
-  nodeModulesRoots: string[],
-): Array<{ packageName: string; packageDir: string }> {
-  const found = new Map<string, string>();
+/**
+ * The node_modules folder holding `realPackageDir`'s OWN resolved
+ * dependencies as siblings — pnpm's per-instance store layout keeps a
+ * package's dependencies next to it (not nested inside it), which is what
+ * lets Node's ordinary upward node_modules walk find them from the
+ * package's own code.
+ */
+function pnpmResolutionFolderOf(realPackageDir: string): string {
+  const parent = path.dirname(realPackageDir);
+  return path.basename(parent).startsWith("@")
+    ? path.dirname(parent)
+    : parent;
+}
 
-  for (const root of nodeModulesRoots) {
-    const directScope = path.join(root, CLAUDE_AGENT_SDK_NATIVE_SCOPE);
-    if (fs.existsSync(directScope)) {
-      for (const entry of fs.readdirSync(directScope)) {
-        if (!entry.startsWith(CLAUDE_AGENT_SDK_NATIVE_PREFIX)) continue;
-        const packageDir = path.join(directScope, entry);
-        if (fs.existsSync(path.join(packageDir, "package.json"))) {
-          found.set(entry, packageDir);
-        }
+/** Every package entry (scoped or not) directly inside a resolution folder. */
+function listResolutionFolderPackages(resolutionFolder: string): string[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(resolutionFolder, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const results: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === ".bin" || entry.name === ".modules.yaml") continue;
+    const entryPath = path.join(resolutionFolder, entry.name);
+    if (entry.name.startsWith("@")) {
+      let scopedEntries: fs.Dirent[];
+      try {
+        scopedEntries = fs.readdirSync(entryPath, { withFileTypes: true });
+      } catch {
+        continue;
       }
-    }
-
-    const pnpmRoot = path.join(root, ".pnpm");
-    if (!fs.existsSync(pnpmRoot)) continue;
-    for (const entry of fs.readdirSync(pnpmRoot)) {
-      const match = entry.match(/^@anthropic-ai\+(claude-agent-sdk-[^@]+)@/);
-      if (!match) continue;
-      const packageName = match[1];
-      const packageDir = path.join(
-        pnpmRoot,
-        entry,
-        "node_modules",
-        CLAUDE_AGENT_SDK_NATIVE_SCOPE,
-        packageName,
-      );
-      if (fs.existsSync(path.join(packageDir, "package.json"))) {
-        found.set(packageName, packageDir);
+      for (const scopedEntry of scopedEntries) {
+        results.push(path.join(entryPath, scopedEntry.name));
       }
+    } else {
+      results.push(entryPath);
     }
   }
+  return results;
+}
 
-  return [...found.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([packageName, packageDir]) => ({ packageName, packageDir }));
+/**
+ * BFS outward from `rootDirs` (each a package directory, possibly a
+ * pnpm-store symlink) through pnpm's own resolved-sibling structure,
+ * collecting every package in the transitive closure. Returns a map of
+ * `<scope>/<name>` (or `<name>`) destination path -> real source directory.
+ */
+function collectPnpmDependencyClosure(
+  rootDirs: string[],
+): Map<string, string> {
+  const collected = new Map<string, string>();
+  const visitedReal = new Set<string>();
+  const queue: string[] = [...rootDirs];
+
+  while (queue.length > 0) {
+    const candidate = queue.shift();
+    if (!candidate) continue;
+    let real: string;
+    try {
+      real = fs.realpathSync(candidate);
+    } catch {
+      continue;
+    }
+    if (visitedReal.has(real)) continue;
+    visitedReal.add(real);
+    if (!fs.existsSync(path.join(real, "package.json"))) continue;
+
+    const resolutionFolder = pnpmResolutionFolderOf(real);
+    const relDestPath = path.relative(resolutionFolder, real);
+    if (!collected.has(relDestPath)) collected.set(relDestPath, real);
+
+    queue.push(...listResolutionFolderPackages(resolutionFolder));
+  }
+
+  return collected;
 }
 
 /**
  * Copy the ACP Claude Code harness packages (`@agentclientprotocol/sdk`,
- * `@agentclientprotocol/claude-agent-acp`, `@anthropic-ai/claude-agent-sdk`,
- * and whichever of claude-agent-sdk's own platform-native optional binaries
- * are actually installed on this build host) into the server bundle.
+ * `@agentclientprotocol/claude-agent-acp`, `@anthropic-ai/claude-agent-sdk`)
+ * AND their complete transitive runtime dependency closure — including
+ * whichever of claude-agent-sdk's own platform-native optional binaries are
+ * actually installed on this build host — into the server bundle.
  *
  * Required for ANY preset that runs the harness by resolving these packages
  * from the deployed bundle's own `node_modules` at runtime — currently only
@@ -2362,40 +2414,30 @@ function findInstalledClaudeAgentSdkNativePackages(
  * `evaluateBrainHarness` in templates/orchestrator/server/brain/
  * brain-session.ts, and the V3 ACP worker adapter) — since Nitro's tracer
  * never includes them on its own (see the doc comment on
- * `ACP_HARNESS_EXACT_PACKAGE_NAMES`). No-op wherever none of these packages
- * are installed (e.g. templates that don't depend on the ACP harness).
+ * `ACP_HARNESS_ROOT_PACKAGES`). No-op wherever none of these packages are
+ * installed (e.g. templates that don't depend on the ACP harness).
  */
 function copyInstalledAcpHarnessPackages(serverDir: string | undefined) {
   if (!serverDir || !fs.existsSync(serverDir)) return;
   const nodeModulesRoots = nodeModulesAncestors(cwd);
-  let copied = 0;
 
-  for (const { scope, name } of ACP_HARNESS_EXACT_PACKAGE_NAMES) {
+  const rootDirs: string[] = [];
+  for (const { scope, name } of ACP_HARNESS_ROOT_PACKAGES) {
     const src = findInstalledExactScopedPackage(nodeModulesRoots, scope, name);
-    if (!src) continue;
-    copyDir(src, path.join(serverDir, "node_modules", scope, name));
-    copied += 1;
+    if (src) rootDirs.push(src);
   }
+  if (rootDirs.length === 0) return;
 
-  const nativePackages = findInstalledClaudeAgentSdkNativePackages(
-    nodeModulesRoots,
-  );
-  for (const { packageName, packageDir } of nativePackages) {
-    copyDir(
-      packageDir,
-      path.join(
-        serverDir,
-        "node_modules",
-        CLAUDE_AGENT_SDK_NATIVE_SCOPE,
-        packageName,
-      ),
-    );
+  const closure = collectPnpmDependencyClosure(rootDirs);
+  let copied = 0;
+  for (const [relDestPath, realSrcDir] of closure) {
+    copyDir(realSrcDir, path.join(serverDir, "node_modules", relDestPath));
     copied += 1;
   }
 
   if (copied > 0) {
     console.log(
-      `[deploy] Copied ${copied} ACP Claude Code harness package(s) (@agentclientprotocol/*, @anthropic-ai/claude-agent-sdk*) into the server bundle.`,
+      `[deploy] Copied ${copied} ACP Claude Code harness package(s) — @agentclientprotocol/*, @anthropic-ai/claude-agent-sdk*, and their full transitive runtime dependency closure — into the server bundle.`,
     );
   }
 }
