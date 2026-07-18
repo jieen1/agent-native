@@ -2296,7 +2296,10 @@ function findInstalledExactScopedPackage(
 
     const pnpmRoot = path.join(root, ".pnpm");
     if (!fs.existsSync(pnpmRoot)) continue;
-    const pnpmPrefix = `${scope.slice(1)}+${name}@`;
+    // pnpm's flat store keeps the scope's "@" in the directory name itself
+    // (e.g. `@anthropic-ai+claude-agent-sdk@0.3.198_<peerDepsHash>`) — unlike
+    // the destination path segments above, which split scope/name apart.
+    const pnpmPrefix = `${scope}+${name}@`;
     for (const entry of fs.readdirSync(pnpmRoot)) {
       if (!entry.startsWith(pnpmPrefix)) continue;
       const nested = path.join(pnpmRoot, entry, "node_modules", scope, name);
