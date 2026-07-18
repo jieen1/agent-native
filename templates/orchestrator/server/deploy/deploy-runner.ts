@@ -363,10 +363,32 @@ export async function runDeployJob(
 
     await withStage(runId, "building", cfg, async () => {
       const results: string[] = [];
+      // `pnpm install` runs ONCE here, before any app's build, not inside the
+      // per-app loop below — two things depend on it that a stale
+      // node_modules/dist silently skips:
+      //   1. New/changed dependencies (package.json + lockfile just moved
+      //      under us via git reset) actually get installed.
+      //   2. Workspace packages like `@agent-native/core` get their `dist/`
+      //      rebuilt (via its `postinstall` -> prebuild-workspace-packages.ts
+      //      hook). `agent-native build`'s Nitro post-build step resolves
+      //      `@agent-native/core`'s COMPILED dist unconditionally whenever it
+      //      exists (packages/core/src/cli/deploy-build.ts has no freshness
+      //      check, unlike bin/agent-native.js's own dist-vs-source check) —
+      //      so without this, a core-level fix (e.g. the ACP harness package
+      //      tracing fix in packages/core/src/deploy/build.ts) would silently
+      //      keep running the OLD pre-fix dist forever, no matter how many
+      //      times `pnpm --filter <app> build` re-runs.
+      // `--frozen-lockfile` fails loud on any lockfile/package.json mismatch
+      // instead of silently rewriting the lockfile on a production host.
+      await sshExec(
+        cfg,
+        `cd '${cfg.remoteBasePath}' && git fetch origin main && git checkout main && git reset --hard origin/main && pnpm install --frozen-lockfile`,
+        15 * 60_000,
+      );
       for (const app of apps) {
         const { stdout } = await sshExec(
           cfg,
-          `cd '${cfg.remoteBasePath}' && git fetch origin main && git checkout main && git reset --hard origin/main && APP_BASE_PATH=/${app} VITE_APP_BASE_PATH=/${app} pnpm --filter ${app} build`,
+          `cd '${cfg.remoteBasePath}' && APP_BASE_PATH=/${app} VITE_APP_BASE_PATH=/${app} pnpm --filter ${app} build`,
           20 * 60_000,
         );
         results.push(stdout.slice(-2000));

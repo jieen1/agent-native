@@ -118,6 +118,17 @@ const custom = resolveAgentHarness("acp", {
 
 - Keep harness packages optional. Use dynamic imports in adapters and expose an
   install hint through `installPackage`.
+- A harness package resolved only through `require.resolve()`/`createRequire()`
+  (not a static top-level `import`/`require` of a literal specifier) — e.g. the
+  `acp:claude-code` packages (`@agentclientprotocol/sdk`,
+  `@agentclientprotocol/claude-agent-acp`, `@anthropic-ai/claude-agent-sdk` and
+  its per-platform native optional deps) — is invisible to Nitro's file tracer
+  and will be silently missing from a deployed `.output/server` unless it is
+  explicitly copied in. `packages/core/src/deploy/build.ts`'s
+  `copyInstalledAcpHarnessPackages` (called for the self-hosted `node` preset,
+  alongside the equivalent libsql/resvg/ffmpeg-static copy steps for serverless
+  presets) is where that lives — add a new harness's packages there rather than
+  reinstalling by hand after every deploy.
 - Use the AI SDK harness adapter as one implementation, not as Agent Native's
   public abstraction.
 - For bridge-backed coding harnesses, require a real sandbox/workspace provider.

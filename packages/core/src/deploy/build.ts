@@ -2260,6 +2260,144 @@ export function findInstalledResvgPackages(
 }
 
 /**
+ * Packages the `acp:claude-code` harness resolves purely through
+ * `require.resolve()` (brain-session.ts's `resolveClaudeAgentAcpEntry`,
+ * templates/*'s V3 ACP worker adapter) rather than a static top-level
+ * `import`/`require` of a literal specifier. Nitro's file tracer (nf3) builds
+ * its "what to copy into `.output/*\/node_modules`" set from the statically
+ * reachable import/require graph, so a package that is only ever named via a
+ * `createRequire(import.meta.url).resolve(...)` call — exactly like the
+ * platform-native binaries below — never enters that set and is silently
+ * absent from the deployed bundle. Same class of bug as the libsql/resvg/
+ * ffmpeg-static gaps above; listed exhaustively (not inferred) for the same
+ * reason. See `copyInstalledAcpHarnessPackages`.
+ */
+const ACP_HARNESS_EXACT_PACKAGE_NAMES: ReadonlyArray<{
+  scope: string;
+  name: string;
+}> = [
+  { scope: "@agentclientprotocol", name: "sdk" },
+  { scope: "@agentclientprotocol", name: "claude-agent-acp" },
+  { scope: "@anthropic-ai", name: "claude-agent-sdk" },
+];
+
+/** `@anthropic-ai/claude-agent-sdk`'s own platform-native optionalDependencies scope/prefix. */
+const CLAUDE_AGENT_SDK_NATIVE_SCOPE = "@anthropic-ai";
+const CLAUDE_AGENT_SDK_NATIVE_PREFIX = "claude-agent-sdk-";
+
+function findInstalledExactScopedPackage(
+  nodeModulesRoots: string[],
+  scope: string,
+  name: string,
+): string | null {
+  for (const root of nodeModulesRoots) {
+    const direct = path.join(root, scope, name);
+    if (fs.existsSync(path.join(direct, "package.json"))) return direct;
+
+    const pnpmRoot = path.join(root, ".pnpm");
+    if (!fs.existsSync(pnpmRoot)) continue;
+    const pnpmPrefix = `${scope.slice(1)}+${name}@`;
+    for (const entry of fs.readdirSync(pnpmRoot)) {
+      if (!entry.startsWith(pnpmPrefix)) continue;
+      const nested = path.join(pnpmRoot, entry, "node_modules", scope, name);
+      if (fs.existsSync(path.join(nested, "package.json"))) return nested;
+    }
+  }
+  return null;
+}
+
+function findInstalledClaudeAgentSdkNativePackages(
+  nodeModulesRoots: string[],
+): Array<{ packageName: string; packageDir: string }> {
+  const found = new Map<string, string>();
+
+  for (const root of nodeModulesRoots) {
+    const directScope = path.join(root, CLAUDE_AGENT_SDK_NATIVE_SCOPE);
+    if (fs.existsSync(directScope)) {
+      for (const entry of fs.readdirSync(directScope)) {
+        if (!entry.startsWith(CLAUDE_AGENT_SDK_NATIVE_PREFIX)) continue;
+        const packageDir = path.join(directScope, entry);
+        if (fs.existsSync(path.join(packageDir, "package.json"))) {
+          found.set(entry, packageDir);
+        }
+      }
+    }
+
+    const pnpmRoot = path.join(root, ".pnpm");
+    if (!fs.existsSync(pnpmRoot)) continue;
+    for (const entry of fs.readdirSync(pnpmRoot)) {
+      const match = entry.match(/^@anthropic-ai\+(claude-agent-sdk-[^@]+)@/);
+      if (!match) continue;
+      const packageName = match[1];
+      const packageDir = path.join(
+        pnpmRoot,
+        entry,
+        "node_modules",
+        CLAUDE_AGENT_SDK_NATIVE_SCOPE,
+        packageName,
+      );
+      if (fs.existsSync(path.join(packageDir, "package.json"))) {
+        found.set(packageName, packageDir);
+      }
+    }
+  }
+
+  return [...found.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([packageName, packageDir]) => ({ packageName, packageDir }));
+}
+
+/**
+ * Copy the ACP Claude Code harness packages (`@agentclientprotocol/sdk`,
+ * `@agentclientprotocol/claude-agent-acp`, `@anthropic-ai/claude-agent-sdk`,
+ * and whichever of claude-agent-sdk's own platform-native optional binaries
+ * are actually installed on this build host) into the server bundle.
+ *
+ * Required for ANY preset that runs the harness by resolving these packages
+ * from the deployed bundle's own `node_modules` at runtime — currently only
+ * the self-hosted "node" preset (`resolveClaudeAgentAcpEntry` /
+ * `evaluateBrainHarness` in templates/orchestrator/server/brain/
+ * brain-session.ts, and the V3 ACP worker adapter) — since Nitro's tracer
+ * never includes them on its own (see the doc comment on
+ * `ACP_HARNESS_EXACT_PACKAGE_NAMES`). No-op wherever none of these packages
+ * are installed (e.g. templates that don't depend on the ACP harness).
+ */
+function copyInstalledAcpHarnessPackages(serverDir: string | undefined) {
+  if (!serverDir || !fs.existsSync(serverDir)) return;
+  const nodeModulesRoots = nodeModulesAncestors(cwd);
+  let copied = 0;
+
+  for (const { scope, name } of ACP_HARNESS_EXACT_PACKAGE_NAMES) {
+    const src = findInstalledExactScopedPackage(nodeModulesRoots, scope, name);
+    if (!src) continue;
+    copyDir(src, path.join(serverDir, "node_modules", scope, name));
+    copied += 1;
+  }
+
+  const nativePackages = findInstalledClaudeAgentSdkNativePackages(
+    nodeModulesRoots,
+  );
+  for (const { packageName, packageDir } of nativePackages) {
+    copyDir(
+      packageDir,
+      path.join(
+        serverDir,
+        "node_modules",
+        CLAUDE_AGENT_SDK_NATIVE_SCOPE,
+        packageName,
+      ),
+    );
+    copied += 1;
+  }
+
+  if (copied > 0) {
+    console.log(
+      `[deploy] Copied ${copied} ACP Claude Code harness package(s) (@agentclientprotocol/*, @anthropic-ai/claude-agent-sdk*) into the server bundle.`,
+    );
+  }
+}
+
+/**
  * Deploy-time gate for emitting the second `-background` Netlify function.
  * Reads the same env flag the runtime gate uses
  * (`AGENT_CHAT_DURABLE_BACKGROUND`).
@@ -3408,6 +3546,17 @@ export default bundle;
     copyInstalledFfmpegStaticPackage(nitro.options.output.serverDir);
     sanitizeServerlessFunctionPackageManifest(nitro.options.output.serverDir);
     bundleYjsRuntimeForServerlessOutput(nitro.options.output.serverDir, cwd);
+  }
+
+  // The self-hosted "node" preset's `.output/server` is just as much a
+  // self-contained node_modules-based bundle as the serverless outputs above
+  // (edge presets are the only ones with no node_modules at runtime at all —
+  // see `nitroNoExternalsForPreset`) — so it has the exact same tracer gap for
+  // the ACP harness packages. This is the preset orchestrator/tracker's real
+  // production deploy (101) actually builds with (deploy-runner.ts never sets
+  // NITRO_PRESET), which is where this was first hit in practice.
+  if (preset === "node") {
+    copyInstalledAcpHarnessPackages(nitro.options.output.serverDir);
   }
 
   // Durable background agent runs (default-OFF / opt-in; enable with a truthy
