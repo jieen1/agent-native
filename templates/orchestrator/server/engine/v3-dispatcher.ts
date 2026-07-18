@@ -250,7 +250,7 @@ function v3ToNodeRunnerInput(
  * not the raw NodeRunnerResult.output object, so that schema-less nodes
  * yield bare text instead of JSON.stringify({text,...}).
  */
-function classifyOutput(
+export function classifyOutput(
   output: unknown,
   outputSchema?: unknown,
 ): V3SpawnOutput {
@@ -262,16 +262,21 @@ function classifyOutput(
     };
   }
 
-  // Schema present — if output is a string, try to parse it as JSON first.
+  // Schema present — if output is a string, try to extract JSON from it first.
   // LLMs typically return JSON as text, so we need to deserialize it before
-  // validating against the schema.
+  // validating against the schema. Judgment nodes are told to answer with bare
+  // JSON, but real dispatches routinely ignore that and wrap the payload in
+  // prose and/or a fenced code block anyway — extractJsonFromText recovers
+  // that shape deterministically instead of every occurrence needing the
+  // costly attemptSchemaCorrection re-prompt below.
   let coerced: unknown = output;
   if (typeof output === "string") {
-    try {
-      coerced = JSON.parse(output.trim());
-    } catch {
-      // Not valid JSON — will fall through to schema-violation below.
+    const extracted = extractJsonFromText(output);
+    if (extracted !== undefined) {
+      coerced = extracted;
     }
+    // else: leave `coerced` as the raw string — falls through to the
+    // schema-violation "bare string" branch below.
   }
 
   // Schema present — must be a plain object (not array, not null)
@@ -344,6 +349,106 @@ function classifyOutput(
       Array.isArray(coerced) ? "array" : typeof coerced
     }`,
   };
+}
+
+/**
+ * Extract a JSON value from LLM output that may be wrapped in prose and/or
+ * markdown code fences. Every `output_schema` judgment node is instructed to
+ * answer with bare JSON, but models routinely explain their reasoning first
+ * and/or fence the final payload anyway (task #95 production incident: a
+ * real merge-review verdict, ~9.5KB, was written as markdown prose with the
+ * actual JSON object in a trailing ```json fence — the schema validator saw
+ * only a "bare string" and the node was marked failed even though the
+ * verdict itself was correct). This is the ONE shared recovery path for
+ * every schema-typed node — do not special-case it per template.
+ *
+ * Tried in order, returning the first that parses:
+ *   1. The whole trimmed string, in case it is already bare JSON.
+ *   2. The LAST ```json (or unlabeled ```) fenced block in the text — LAST,
+ *      because a "preamble, then the real answer" response puts the payload
+ *      at the end, and an earlier fence may just be an illustrative snippet.
+ *   3. The LAST balanced top-level `{...}` object found anywhere in the text
+ *      with no fences at all (string-aware brace matching, so braces inside
+ *      quoted string values — e.g. a finding that quotes a code snippet —
+ *      never desync the scan).
+ *
+ * Returns `undefined` if no strategy yields parseable JSON, so callers can
+ * fall through to their existing bare-string / schema-violation handling.
+ */
+export function extractJsonFromText(text: string): unknown {
+  const trimmed = text.trim();
+
+  const direct = tryParseJson(trimmed);
+  if (direct !== undefined) return direct;
+
+  const fenceMatches = [
+    ...trimmed.matchAll(/```(?:json)?[ \t]*\r?\n?([\s\S]*?)```/gi),
+  ];
+  for (let i = fenceMatches.length - 1; i >= 0; i--) {
+    const candidate = tryParseJson(fenceMatches[i][1].trim());
+    if (candidate !== undefined) return candidate;
+  }
+
+  const braceObject = extractLastBalancedObject(trimmed);
+  if (braceObject !== undefined) {
+    const candidate = tryParseJson(braceObject);
+    if (candidate !== undefined) return candidate;
+  }
+
+  return undefined;
+}
+
+/** `JSON.parse` that reports failure as `undefined` instead of throwing. */
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Find the LAST balanced top-level `{...}` substring in `text`. Tracks
+ * quoted-string state (with backslash-escape handling) so braces that appear
+ * inside JSON string values never desync the depth count.
+ */
+function extractLastBalancedObject(text: string): string | undefined {
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  let lastCandidate: string | undefined;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          lastCandidate = text.slice(start, i + 1);
+        }
+      }
+    }
+  }
+
+  return lastCandidate;
 }
 
 /** Create an AJV instance with all standard formats. */
@@ -1094,13 +1199,12 @@ export class V3Dispatcher {
           ? (rawCorrected as Record<string, unknown>).text
           : rawCorrected;
 
-      // Try to parse as JSON if the output is a string.
+      // Extract JSON if the output is a string — same shared strategy as the
+      // first-pass classifyOutput (bare / fenced / trailing-object), since a
+      // corrective re-prompt can just as easily come back prose-wrapped.
       if (typeof correctedText === "string") {
-        try {
-          return JSON.parse(correctedText.trim());
-        } catch {
-          return correctedText;
-        }
+        const extracted = extractJsonFromText(correctedText);
+        return extracted !== undefined ? extracted : correctedText;
       }
       return correctedText;
     } catch {

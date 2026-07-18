@@ -88,6 +88,8 @@ import {
   errorClassToOnFailurePolicy,
   computeUsageSuspect,
   formatCheckpointInjection,
+  classifyOutput,
+  extractJsonFromText,
 } from "./v3-dispatcher.js";
 import { getWorkspace } from "./v3-workspace.js";
 
@@ -441,6 +443,224 @@ describe("Output classification", () => {
       classifyNodeError(new Error("schema-violation: missing field")),
     ).toBe("permanent");
     expect(errorClassToOnFailurePolicy("permanent")).toBe("keep");
+  });
+});
+
+// ── Tests: extractJsonFromText / classifyOutput prose-recovery (task #95 ────
+// production incident, 2026-07-18) ──────────────────────────────────────────
+//
+// Real production failure: `sdlc-merge-review`'s claude-code node did
+// substantive real review work (read the diff, ran tests, cross-referenced
+// usages) but wrote its final answer as markdown prose with the actual
+// verdict in a trailing ```json fenced block, instead of a bare JSON object.
+// The old classifyOutput only tried `JSON.parse(output.trim())` on the WHOLE
+// string, so it rejected this as "expected a JSON object but the agent
+// returned a bare string" and the node was marked failed — the correct,
+// substantively-verified verdict (concerns_found, one real finding about an
+// out-of-sync doc mirror) was never stored and had to be hand-recovered from
+// raw spawn_events. These tests reproduce that exact shape and lock in the
+// fix, plus guard the cases the fix must NOT start silently swallowing.
+
+const MERGE_REVIEW_OUTPUT_SCHEMA = {
+  type: "object",
+  required: ["verdict", "summary"],
+  properties: {
+    findings: { type: "array" },
+    summary: { type: "string" },
+    verdict: { type: "string", enum: ["safe_to_merge", "concerns_found"] },
+  },
+};
+
+const REAL_VERDICT = {
+  verdict: "concerns_found",
+  summary:
+    "Diff genuinely resolves the spec'd behavior and is covered by real, non-vacuous tests; one real but non-blocking-adjacent issue found in the docs mirror.",
+  findings: [
+    {
+      file: "docs/sdlc-product-design/r4-workflow-families-planning-skills.md",
+      issue:
+        "The locale mirror under docs/sdlc-product-design/locales/en/ was not " +
+        "updated alongside this change, so the English mirror is now out of " +
+        "sync with the source-of-truth Chinese doc.",
+    },
+  ],
+};
+
+/**
+ * Build a realistic, production-scale (~9.5KB) prose review that narrates
+ * real verification work — reading the diff, running tests, cross-checking
+ * call sites — before landing the real verdict in a trailing fenced block.
+ * Mirrors the exact shape of the task #95 incident, not just a toy string.
+ */
+function buildProseWrappedReview(fence: "json" | "bare" | "none"): string {
+  const section = (title: string, body: string) => `## ${title}\n\n${body}\n\n`;
+
+  let prose = "";
+  prose += section(
+    "Independent Merge Review",
+    "I am reviewing this change independently of the original developer and " +
+      "reviewer. I re-fetched the real diff myself via `git --no-pager diff " +
+      "$(git merge-base origin/main HEAD)..HEAD` rather than trusting any " +
+      "existing review summary, then read every changed file end to end.",
+  );
+  prose += section(
+    "1) Requirement coverage",
+    "The spec asked for the merge-review gate to block on any concern found " +
+      "by the independent reviewer. I traced every requirement line against " +
+      "the diff and confirmed each one is implemented: the gate reads the " +
+      "latest review run, computes canMerge from verdict, and exposes an " +
+      "explicit human override path scoped to the specific run it overrides " +
+      "so a later new review is never silently covered by a stale approval. " +
+      "No requirement gaps found.".repeat(5),
+  );
+  prose += section(
+    "2) Test coverage",
+    "I ran the full test suite for the touched files (`pnpm vitest run " +
+      "server/engine/merge-review-gate.spec.ts actions/merge-review.spec.ts`) " +
+      "and confirmed all cases pass. I then reverted the gate's canMerge " +
+      "computation locally and re-ran the suite to confirm the tests " +
+      "actually fail when the behavior regresses — they do, so this is real " +
+      "coverage, not a vacuous assertion that always passes.".repeat(5),
+  );
+  prose += section(
+    "3) Code quality and reuse",
+    "The new resolver reuses the existing accessFilter/ownerScope helpers " +
+      "rather than hand-rolling a new scoping check, and the override " +
+      "recording path reuses the same audit-log seam as every other action " +
+      "in this file. No meaningful duplication found.".repeat(5),
+  );
+  prose += section(
+    "4) Security",
+    "No hardcoded secrets, tokens, or credential-looking literals in the " +
+      "diff. The override action is correctly marked agentTool:false so it " +
+      "cannot be called by the agent on the human's behalf, and the merge " +
+      "button itself fails closed when neither a passing review nor an " +
+      "override exists.".repeat(5),
+  );
+  prose += section(
+    "5) Schema changes",
+    "No destructive schema changes in this diff — no DROP, RENAME, or " +
+      "truncation, and the one new column is added with " +
+      "ADD COLUMN IF NOT EXISTS, additive and provider-agnostic.".repeat(5),
+  );
+  prose += section(
+    "6) Leftover debug code / doc drift",
+    "One real issue: docs/sdlc-product-design/r4-workflow-families-planning-" +
+      "skills.md was updated with the new gate behavior, but the English " +
+      "locale mirror under docs/sdlc-product-design/locales/en/ was not " +
+      "touched in the same change, so it is now stale relative to the " +
+      "Chinese source of truth. This should be fixed before merge but does " +
+      "not by itself make the change unsafe to ship.".repeat(4),
+  );
+  prose += "## Conclusion\n\nStructured verdict below.\n\n";
+
+  const payload = JSON.stringify(REAL_VERDICT, null, 2);
+  if (fence === "json") return prose + "```json\n" + payload + "\n```\n";
+  if (fence === "bare") return prose + "```\n" + payload + "\n```\n";
+  return prose + payload + "\n";
+}
+
+describe("extractJsonFromText (task #95 prose-wrapped schema recovery)", () => {
+  it("parses an already-bare JSON string unchanged", () => {
+    const text = JSON.stringify({ verdict: "safe_to_merge", summary: "ok" });
+    expect(extractJsonFromText(text)).toEqual({
+      verdict: "safe_to_merge",
+      summary: "ok",
+    });
+  });
+
+  it("extracts JSON from a trailing ```json fenced block after prose (the real task #95 shape, ~9.5KB scale)", () => {
+    const text = buildProseWrappedReview("json");
+    expect(text.length).toBeGreaterThan(2000);
+    expect(extractJsonFromText(text)).toEqual(REAL_VERDICT);
+  });
+
+  it("extracts JSON from a trailing UNLABELED ``` fenced block after prose", () => {
+    const text = buildProseWrappedReview("bare");
+    expect(extractJsonFromText(text)).toEqual(REAL_VERDICT);
+  });
+
+  it("falls back to a trailing bare {...} object with no fences at all", () => {
+    const text = buildProseWrappedReview("none");
+    expect(extractJsonFromText(text)).toEqual(REAL_VERDICT);
+  });
+
+  it("picks the LAST fenced block when the answer contains an earlier illustrative fence", () => {
+    const text =
+      "Here is an example of the shape I mean:\n```json\n" +
+      JSON.stringify({ verdict: "safe_to_merge", summary: "example only" }) +
+      "\n```\n\nBut my actual conclusion is:\n```json\n" +
+      JSON.stringify(REAL_VERDICT) +
+      "\n```\n";
+    expect(extractJsonFromText(text)).toEqual(REAL_VERDICT);
+  });
+
+  it("does not desync brace counting when a finding quotes code containing braces", () => {
+    const withBraces = {
+      verdict: "concerns_found",
+      summary: "one issue",
+      findings: [
+        { file: "a.ts", issue: "uses `{ foo: 1 }` instead of a named type" },
+      ],
+    };
+    const text =
+      "Some prose about the change.\n```json\n" +
+      JSON.stringify(withBraces) +
+      "\n```\n";
+    expect(extractJsonFromText(text)).toEqual(withBraces);
+  });
+
+  it("returns undefined for genuine prose with no embedded JSON anywhere (must not fabricate a result)", () => {
+    const text =
+      "I reviewed the change and it looks fine overall, no structured " +
+      "verdict was produced in this response.";
+    expect(extractJsonFromText(text)).toBeUndefined();
+  });
+});
+
+describe("classifyOutput (task #95 prose-wrapped schema recovery)", () => {
+  it("classifies a prose + trailing ```json-fenced real merge-review verdict as a valid schema object (the exact production bug)", () => {
+    const output = buildProseWrappedReview("json");
+    const result = classifyOutput(output, MERGE_REVIEW_OUTPUT_SCHEMA);
+    expect(result.path).toBe("object");
+    if (result.path === "object") {
+      expect(result.value).toEqual(REAL_VERDICT);
+    }
+  });
+
+  it("classifies a trailing bare {...} verdict with no fences as a valid schema object", () => {
+    const output = buildProseWrappedReview("none");
+    const result = classifyOutput(output, MERGE_REVIEW_OUTPUT_SCHEMA);
+    expect(result.path).toBe("object");
+    if (result.path === "object") {
+      expect(result.value).toEqual(REAL_VERDICT);
+    }
+  });
+
+  it("still reports schema-violation for genuine prose with no embedded JSON (recovery must not mask real violations)", () => {
+    const output =
+      "I reviewed the change and it looks fine overall, no structured " +
+      "verdict was produced in this response.";
+    const result = classifyOutput(output, MERGE_REVIEW_OUTPUT_SCHEMA);
+    expect(result.path).toBe("schema-violation");
+  });
+
+  it("still reports schema-violation when the only embedded JSON object does not satisfy the schema", () => {
+    const output =
+      "Here's my note:\n```json\n" +
+      JSON.stringify({ note: "not a verdict at all" }) +
+      "\n```\n";
+    const result = classifyOutput(output, MERGE_REVIEW_OUTPUT_SCHEMA);
+    expect(result.path).toBe("schema-violation");
+  });
+
+  it("still classifies already-bare JSON as object (no regression on the happy path)", () => {
+    const output = JSON.stringify(REAL_VERDICT);
+    const result = classifyOutput(output, MERGE_REVIEW_OUTPUT_SCHEMA);
+    expect(result.path).toBe("object");
+    if (result.path === "object") {
+      expect(result.value).toEqual(REAL_VERDICT);
+    }
   });
 });
 
