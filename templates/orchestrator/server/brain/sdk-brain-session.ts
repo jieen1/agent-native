@@ -18,6 +18,7 @@ import { eq, sql } from "drizzle-orm";
 import { getV3Db, v3Schema } from "../db/index.js";
 import { mintBrainToken } from "./brain-mcp-config.js";
 import { BRAIN_PROMPT } from "./brain-prompt.js";
+import { deriveContextWindow } from "../../actions/brain-usage.js";
 
 const MCP_URL = "http://localhost:3002/_agent-native/mcp";
 const MAX_STEPS = 50;
@@ -444,6 +445,23 @@ export async function runSdkBrainTurn(
     text: `${engineLabel} turn started — model: ${resolvedModel}, endpoint: ${resolvedBaseUrl}, tools: ${mcpTools.length}`,
   });
 
+  // Persist the resolved model + a derived context-window estimate immediately
+  // (mirrors brain-session.ts's early system/init capture). Without this the
+  // brain-usage action's `actualModel` stays NULL for every runtime-override
+  // turn, so it falls back to configuredModel (DEFAULT_BRAIN_MODEL =
+  // "claude-sonnet-5[1m]") and reports a Claude-tier 1M context window for
+  // whatever model actually ran.
+  const earlyWindow = deriveContextWindow(resolvedModel);
+  await db
+    .update(v3Schema.brainThreads)
+    .set({
+      model: resolvedModel,
+      ...(earlyWindow != null ? { contextWindow: earlyWindow } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(v3Schema.brainThreads.id, threadId))
+    .catch(() => {});
+
   // Run the agentic loop.
   let step = 0;
   let currentMessages = [...messages];
@@ -462,6 +480,11 @@ export async function runSdkBrainTurn(
         input: Record<string, unknown>;
       }>;
       finishReason: string;
+      usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        totalTokens?: number;
+      };
     }>;
     let createOpenAI: (opts: {
       apiKey: string;
@@ -503,6 +526,20 @@ export async function runSdkBrainTurn(
         text: msg,
       });
       return { ok: false, error: msg };
+    }
+
+    // Persist the live context fill from this call's real usage — AI SDK v6's
+    // `inputTokens` is the OpenAI-compatible TOTAL prompt/context size for this
+    // call (unlike Anthropic's usage shape, it already includes any
+    // cached-read tokens, so it must NOT be summed with a separate cache
+    // subfield or the fill would be double-counted).
+    const stepInputTokens = result.usage?.inputTokens;
+    if (typeof stepInputTokens === "number" && stepInputTokens > 0) {
+      await db
+        .update(v3Schema.brainThreads)
+        .set({ contextUsed: stepInputTokens, updatedAt: new Date() })
+        .where(eq(v3Schema.brainThreads.id, threadId))
+        .catch(() => {});
     }
 
     // Emit assistant text if present.
