@@ -1,8 +1,9 @@
+import { getOrgContext } from "@agent-native/core/org";
 import {
   createAgentChatPlugin,
   loadActionsFromStaticRegistry,
 } from "@agent-native/core/server";
-import { getOrgContext } from "@agent-native/core/org";
+
 import actionsRegistry from "../../.generated/actions-registry.js";
 import { registerOrchestratorRuntime } from "../register-runtime.js";
 import { registerVllmEngine, getVllmEngine } from "../vllm-engine.js";
@@ -18,10 +19,69 @@ const vllmEngine = getVllmEngine();
 
 const INITIAL_TOOL_NAMES = ["view-screen", "navigate"];
 
+// Curated MCP tool surface for the orchestrator brain (and any other MCP
+// caller that doesn't opt into `catalog_scope: "full"`) — see
+// `server/brain/brain-mcp-config.ts`'s `mintBrainToken`. Without this the MCP
+// endpoint serves its full ~187-tool catalog to every caller, which (a) is
+// architecturally the wrong default per `connectorCatalog`'s own design
+// intent (packages/core/src/mcp/build-server.ts), and (b) is what caused a
+// real production failure: a stricter function-calling schema validator on an
+// Aliyun OpenAI-compatible endpoint rejected one of the 187 tools' JSON schema
+// (`list_apps`), killing the entire brain turn.
+//
+// This list is the brain's REAL, evidenced tool surface — cross-checked
+// against `server/brain/brain-prompt.ts`'s "# Your tools" section and every
+// literal `mcp__orchestrator__<name>` reference in `server/brain/*.ts` and
+// `server/engine/v3-reconciler.ts` (the wake-message builders that name tools
+// directly), not just the `orchestrating-v3` skill prose. Keep it in sync
+// with `brain-prompt.ts` when the brain's tool set changes — an omitted name
+// here is not just hidden from `tools/list`, it becomes fully uncallable
+// ("Unknown tool") even if the brain's own prompt tells it to call it.
+// `tool-search` / `list_apps` / `ask_app` / `open_app` need no entry here —
+// `COMPACT_MCP_APP_CATALOG_BUILTINS` always includes them.
+const ORCHESTRATOR_BRAIN_CONNECTOR_CATALOG = [
+  // Navigation/context (also the sidebar chat's INITIAL_TOOL_NAMES above).
+  "navigate",
+  "view-screen",
+  // Author + run a DAG.
+  "workflowRun",
+  "workflowList",
+  "workflowSave",
+  "workflowPatch",
+  // One-shot / iterate.
+  "spawnOnce",
+  "runFork",
+  // Monitor (poll — the engine never pushes).
+  "runState",
+  "v3RunEvents",
+  "v3RunNodes",
+  "runSummary",
+  "nodeSummary",
+  // Inspect.
+  "runsList",
+  "workspaceList",
+  "workspaceDiff",
+  "workspaceFiles",
+  "workspaceRead",
+  // Review verdict (the run-level evidence trail).
+  "runVerdict",
+  // Deliver.
+  "workspaceCreate",
+  "workspaceCommitPush",
+  "workspaceCommit",
+  "workspaceCiWatch",
+  "workspaceMergePr",
+  // Independent pre-merge review gate (mergeReviewOverride stays
+  // agentTool:false / human-only — never add it here).
+  "mergeReviewStart",
+  "mergeReviewGet",
+];
+
 export default createAgentChatPlugin({
   appId: "orchestrator",
   actions: loadActionsFromStaticRegistry(actionsRegistry),
   initialToolNames: INITIAL_TOOL_NAMES,
+  connectorCatalog: ORCHESTRATOR_BRAIN_CONNECTOR_CATALOG,
   // SECURITY: do NOT expose the raw DB tools (db-query/db-exec/db-patch/db-schema)
   // on the agent + MCP/A2A surface. The framework default is "write", but this
   // app's MCP catalog is reached by the brain and any A2A/MCP caller holding the

@@ -7,10 +7,24 @@
 // jose.jwtVerify — no issuer/audience requirement (see
 // packages/core/src/mcp/build-server.ts verifyA2AJwtForMcp). The token MUST NOT
 // carry a `scope` claim: verifyAuth rejects any A2A token whose `scope` is not
-// the connect scope. `sub` becomes the scoped user; `catalog_scope: "full"`
-// bypasses the connector-catalog tier filter so the full action surface is
-// exposed. We sign with node:crypto HMAC-SHA256 (no jose dependency in the
-// template) — the framework verifies with the same secret.
+// the connect scope. `sub` becomes the scoped user. We sign with node:crypto
+// HMAC-SHA256 (no jose dependency in the template) — the framework verifies
+// with the same secret.
+//
+// NO `catalog_scope: "full"` claim: this token deliberately stays on the
+// default compact/connector MCP catalog — `createAgentChatPlugin`'s
+// `connectorCatalog` (server/plugins/agent-chat.ts) declares the brain's real
+// tool surface (~30 tools) instead of dumping the full ~187-tool catalog into
+// every turn. A `catalog_scope: "full"` claim here previously bypassed that
+// tier filter entirely (see packages/core/src/mcp/build-server.ts
+// explicitlyRequestsFullMcpCatalog) and was the root cause of a production
+// failure: an Aliyun OpenAI-compatible endpoint's stricter function-calling
+// schema validator rejected one of the 187 tools' JSON schema (`list_apps`),
+// killing the entire brain turn with a real `400 InternalError.Algo.InvalidParameter`
+// (thread bt_0edbab39-c061-4eb4-a681-4f0ee1ef0bb4). Do not reintroduce
+// `catalog_scope: "full"` here without re-curating `connectorCatalog` to cover
+// whatever new tool the brain needs — see the `orchestrating-v3` skill and
+// `brain-prompt.ts`'s "# Your tools" section for the authoritative list.
 
 import { createHmac } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -41,9 +55,12 @@ function base64url(input: Buffer | string): string {
 
 /**
  * Mint the brain's MCP bearer: an HS256 JWT signed with A2A_SECRET, payload
- * `{ sub: <ownerEmail>, iat, exp (+24h), catalog_scope: "full" }`. No `scope`
- * claim (would be rejected). Throws if A2A_SECRET is unset — the brain cannot
- * authenticate to the MCP endpoint without it.
+ * `{ sub: <ownerEmail>, iat, exp (+24h) }`. Deliberately NO `catalog_scope:
+ * "full"` claim — the brain gets the curated `connectorCatalog` tool set
+ * declared in `server/plugins/agent-chat.ts`, not the full ~187-tool catalog
+ * (see the module comment above). No `scope` claim either (would be
+ * rejected). Throws if A2A_SECRET is unset — the brain cannot authenticate to
+ * the MCP endpoint without it.
  */
 export function mintBrainToken(ownerEmail: string): string {
   const secret = process.env.A2A_SECRET?.trim();
@@ -60,7 +77,6 @@ export function mintBrainToken(ownerEmail: string): string {
     sub: ownerEmail,
     iat: now,
     exp: now + TOKEN_TTL_SECONDS,
-    catalog_scope: "full",
   };
   const signingInput = `${base64url(JSON.stringify(header))}.${base64url(
     JSON.stringify(payload),
@@ -107,7 +123,8 @@ export function writeBrainMcpConfig(
   // Sanitize the session key into a single safe path segment so it can never
   // escape the managed root (no slashes, no `..`).
   const safeKey =
-    sessionKey.replace(/[^A-Za-z0-9._-]/g, "-").replace(/^\.+/, "") || "default";
+    sessionKey.replace(/[^A-Za-z0-9._-]/g, "-").replace(/^\.+/, "") ||
+    "default";
   const dir = join(BRAIN_MCP_CONFIG_ROOT, safeKey);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, ".mcp.json");
@@ -135,7 +152,10 @@ export function buildBrainMcpServers(
       name: "orchestrator",
       url: MCP_URL,
       headers: [
-        { name: "Authorization", value: `Bearer ${mintBrainToken(ownerEmail)}` },
+        {
+          name: "Authorization",
+          value: `Bearer ${mintBrainToken(ownerEmail)}`,
+        },
         { name: "X-Agent-Native-Owner-Email", value: ownerEmail },
       ],
     },
