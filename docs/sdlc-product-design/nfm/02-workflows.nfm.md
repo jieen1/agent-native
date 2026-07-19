@@ -237,7 +237,7 @@ UI 类工作项附加：dev 节点 prompt 注入对应 ui-spec 屏规格与原�
 
 ### 3.4 sdlc-promote：晋升
 
-依赖拓扑序逐仓执行：领先提交数为零则跳过（幂等）· sprint 收尾 PR · ci-watch · merge-pr 用 **merge-commit** 保留 sprint 边界（回滚时单个 revert 即可撤销整个 sprint）· 全部晋升后删除 sprint 分支。
+依赖拓扑序逐仓，单节点 vLLM agent 在 workspace 内直接操作 git（不经过 PR/CI/merge-pr，生产验证过的直接合并方式）：`git fetch origin --prune` 后先判断 `origin/<sprint>` 是否已不存在（视为上次已晋升并清理，跳过不报错）；仍存在则计算领先提交数，为零则跳过（幂等，不删分支）；大于零则 checkout base 并以 **merge-commit**（保留 sprint 边界）合入，冲突则报告并停止（顺序合并红线：不自动解、不 force push）；push base 成功后 `git push origin --delete` 删除远程 sprint 分支（删除失败仅报告，不回滚已完成的合并）。
 
 ### 3.5 sdlc-ui-build：UI 原型流水线（新增）
 
