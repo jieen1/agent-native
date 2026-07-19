@@ -168,8 +168,18 @@ describe("dedupeLegacyItemKeys", () => {
   it("two duplicate rows: older keeps its key, newer is reassigned a fresh non-colliding key with exactly one activity + one comment", async () => {
     await setup();
     await insertProject("proj-1", "PAY");
-    await insertWorkItem("wi-old", "proj-1", "PAY-001", "2026-01-01T00:00:00.000Z");
-    await insertWorkItem("wi-new", "proj-1", "PAY-001", "2026-02-01T00:00:00.000Z");
+    await insertWorkItem(
+      "wi-old",
+      "proj-1",
+      "PAY-001",
+      "2026-01-01T00:00:00.000Z",
+    );
+    await insertWorkItem(
+      "wi-new",
+      "proj-1",
+      "PAY-001",
+      "2026-02-01T00:00:00.000Z",
+    );
 
     const { dedupeLegacyItemKeys } = await import("../item-key-dedup.js");
     const result = await dedupeLegacyItemKeys();
@@ -198,9 +208,24 @@ describe("dedupeLegacyItemKeys", () => {
   it("a 3-way collision: 1 authoritative + 2 reassigned, all 3 rows still present (none deleted)", async () => {
     await setup();
     await insertProject("proj-1", "PAY");
-    await insertWorkItem("wi-a", "proj-1", "PAY-005", "2026-01-01T00:00:00.000Z");
-    await insertWorkItem("wi-b", "proj-1", "PAY-005", "2026-02-01T00:00:00.000Z");
-    await insertWorkItem("wi-c", "proj-1", "PAY-005", "2026-03-01T00:00:00.000Z");
+    await insertWorkItem(
+      "wi-a",
+      "proj-1",
+      "PAY-005",
+      "2026-01-01T00:00:00.000Z",
+    );
+    await insertWorkItem(
+      "wi-b",
+      "proj-1",
+      "PAY-005",
+      "2026-02-01T00:00:00.000Z",
+    );
+    await insertWorkItem(
+      "wi-c",
+      "proj-1",
+      "PAY-005",
+      "2026-03-01T00:00:00.000Z",
+    );
 
     const { dedupeLegacyItemKeys } = await import("../item-key-dedup.js");
     const result = await dedupeLegacyItemKeys();
@@ -221,8 +246,18 @@ describe("dedupeLegacyItemKeys", () => {
     await setup();
     await insertProject("proj-a", "AAA");
     await insertProject("proj-b", "BBB");
-    await insertWorkItem("wi-a1", "proj-a", "SHARED-001", "2026-01-01T00:00:00.000Z");
-    await insertWorkItem("wi-b1", "proj-b", "SHARED-001", "2026-01-02T00:00:00.000Z");
+    await insertWorkItem(
+      "wi-a1",
+      "proj-a",
+      "SHARED-001",
+      "2026-01-01T00:00:00.000Z",
+    );
+    await insertWorkItem(
+      "wi-b1",
+      "proj-b",
+      "SHARED-001",
+      "2026-01-02T00:00:00.000Z",
+    );
 
     const { dedupeLegacyItemKeys } = await import("../item-key-dedup.js");
     const result = await dedupeLegacyItemKeys();
@@ -238,12 +273,29 @@ describe("dedupeLegacyItemKeys", () => {
   it("pre-existing comment + link rows referencing a reassigned item's id are untouched (only item_key changes)", async () => {
     const exec = await setup();
     await insertProject("proj-1", "PAY");
-    await insertWorkItem("wi-old", "proj-1", "PAY-009", "2026-01-01T00:00:00.000Z");
-    await insertWorkItem("wi-new", "proj-1", "PAY-009", "2026-02-01T00:00:00.000Z");
+    await insertWorkItem(
+      "wi-old",
+      "proj-1",
+      "PAY-009",
+      "2026-01-01T00:00:00.000Z",
+    );
+    await insertWorkItem(
+      "wi-new",
+      "proj-1",
+      "PAY-009",
+      "2026-02-01T00:00:00.000Z",
+    );
     // A human comment and a link edge that point at the to-be-reassigned row.
     await exec.execute({
       sql: `INSERT INTO tracker_comments (id, work_item_id, author_kind, author_name, body, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      args: ["cmt-1", "wi-new", "human", "dev@x.com", "原始评论", "2026-02-02T00:00:00.000Z"],
+      args: [
+        "cmt-1",
+        "wi-new",
+        "human",
+        "dev@x.com",
+        "原始评论",
+        "2026-02-02T00:00:00.000Z",
+      ],
     });
     await exec.execute({
       sql: `INSERT INTO tracker_links (id, from_item_id, to_item_id, link_type, created_at) VALUES (?, ?, ?, ?, ?)`,
@@ -271,8 +323,18 @@ describe("dedupeLegacyItemKeys", () => {
   it("is idempotent: a second back-to-back call makes no further changes and inserts no further audit rows", async () => {
     await setup();
     await insertProject("proj-1", "PAY");
-    await insertWorkItem("wi-old", "proj-1", "PAY-002", "2026-01-01T00:00:00.000Z");
-    await insertWorkItem("wi-new", "proj-1", "PAY-002", "2026-02-01T00:00:00.000Z");
+    await insertWorkItem(
+      "wi-old",
+      "proj-1",
+      "PAY-002",
+      "2026-01-01T00:00:00.000Z",
+    );
+    await insertWorkItem(
+      "wi-new",
+      "proj-1",
+      "PAY-002",
+      "2026-02-01T00:00:00.000Z",
+    );
 
     const { dedupeLegacyItemKeys } = await import("../item-key-dedup.js");
     await dedupeLegacyItemKeys();
@@ -293,9 +355,24 @@ describe("dedupeLegacyItemKeys", () => {
     // practice; the dedup query guards both '' and NULL defensively.)
     await setup();
     await insertProject("proj-1", "PAY");
-    await insertWorkItem("wi-blank-1", "proj-1", "", "2026-01-01T00:00:00.000Z");
-    await insertWorkItem("wi-blank-2", "proj-1", "", "2026-01-02T00:00:00.000Z");
-    await insertWorkItem("wi-blank-3", "proj-1", "", "2026-01-03T00:00:00.000Z");
+    await insertWorkItem(
+      "wi-blank-1",
+      "proj-1",
+      "",
+      "2026-01-01T00:00:00.000Z",
+    );
+    await insertWorkItem(
+      "wi-blank-2",
+      "proj-1",
+      "",
+      "2026-01-02T00:00:00.000Z",
+    );
+    await insertWorkItem(
+      "wi-blank-3",
+      "proj-1",
+      "",
+      "2026-01-03T00:00:00.000Z",
+    );
 
     const { dedupeLegacyItemKeys } = await import("../item-key-dedup.js");
     const result = await dedupeLegacyItemKeys();

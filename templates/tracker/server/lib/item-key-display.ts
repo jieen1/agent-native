@@ -20,6 +20,7 @@
 // status=open must still flag a duplicate whose sibling is status=closed and
 // therefore absent from that filtered batch.
 import { and, inArray } from "drizzle-orm";
+
 import { getDb, schema } from "../db/index.js";
 import { ownerScope } from "./access.js";
 
@@ -58,7 +59,12 @@ export async function computeItemKeyDisplays(
       itemKey: schema.workItems.itemKey,
     })
     .from(schema.workItems)
-    .where(and(ownerScope(schema.workItems), inArray(schema.workItems.projectId, projectIds)));
+    .where(
+      and(
+        ownerScope(schema.workItems),
+        inArray(schema.workItems.projectId, projectIds),
+      ),
+    );
 
   const counts = new Map<string, number>();
   for (const s of siblings) {
