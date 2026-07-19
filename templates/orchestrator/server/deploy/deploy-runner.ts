@@ -177,6 +177,100 @@ function buildOutputDir(cfg: DeployConfig, app: DeployApp): string {
   return `${cfg.remoteBasePath}/templates/${app}/.output`;
 }
 
+/**
+ * Established container-naming convention (`DEFAULT_RESTART_COMMAND`, this
+ * file's own tests, `deploy-secrets.ts`'s description text) — not derived
+ * from `cfg.restartCommand`, which is an opaque shell string a deployment
+ * could customize arbitrarily. Only orchestrator's container ever needs this
+ * (see `ensureGhCli`'s doc comment); tracker has no `gh` dependency.
+ */
+function containerName(app: DeployApp): string {
+  return `an-${app}`;
+}
+
+/**
+ * Idempotent check-then-install of the `gh` CLI INSIDE a running app
+ * container. `gh` is a real RUNTIME dependency of the orchestrator's V3
+ * workspace surface (`server/v3-workspace-local.ts`: `commitAndPush`'s PR
+ * open, CI-status polling, and `workspaceMergePr`'s real `gh pr merge`) — not
+ * a build-time toolchain dependency, so `withNodeToolchain`'s host-side
+ * nvm/corepack setup never covers it: the process that actually calls `gh`
+ * runs INSIDE the container, not on the host shell `sshExec` normally
+ * targets. Nothing before this fix ever provisioned it there: there is no
+ * Dockerfile/compose/provisioning script for `an-orchestrator`/`an-tracker`
+ * anywhere in this repo (confirmed by repo-wide search) — these are
+ * long-lived containers whose code gets rsynced in and restarted, never
+ * rebuilt from a base image — so a fresh container (first boot, or any
+ * future recreate-from-image scenario) would silently lack `gh` until
+ * `workspaceMergePr` failed at runtime and someone patched the live
+ * container by hand, exactly as happened before this fix existed. Runs once
+ * per deploy, right after the restart command brings the container back up.
+ * Never throws: a transient install hiccup (apt lock contention, momentary
+ * egress blip) must not fail an otherwise-successful deploy — but a `gh`
+ * that is STILL missing after the install attempt is a real, actionable gap
+ * and must not be silently swallowed, so it's logged as an explicit
+ * `console.warn` (same `[deploy]`-tagged convention as `sanitizeSshFailure`
+ * above) rather than just discarded.
+ */
+async function ensureGhCli(
+  cfg: DeployConfig,
+  container: string,
+): Promise<{ ok: boolean; detail: string }> {
+  const probe = "command -v gh >/dev/null 2>&1 && echo PRESENT || echo MISSING";
+
+  let alreadyPresent: boolean;
+  try {
+    const { stdout } = await sshExec(
+      cfg,
+      `docker exec ${container} sh -c '${probe}'`,
+      30_000,
+    );
+    alreadyPresent = stdout.trim() === "PRESENT";
+  } catch (err) {
+    const detail =
+      `${container}: gh presence check failed (container not running / ` +
+      `docker exec unavailable) — ` +
+      `${err instanceof Error ? err.message : String(err)}`;
+    // eslint-disable-next-line no-console
+    console.warn(`[deploy] gh CLI provisioning: ${detail}`);
+    return { ok: false, detail };
+  }
+  if (alreadyPresent) {
+    return { ok: true, detail: `${container}: gh already present (no-op)` };
+  }
+
+  try {
+    await sshExec(
+      cfg,
+      `docker exec ${container} sh -c 'apt-get update -y && apt-get install -y gh'`,
+      120_000,
+    );
+  } catch (err) {
+    const detail = `${container}: gh install failed (${
+      err instanceof Error ? err.message : String(err)
+    })`;
+    // eslint-disable-next-line no-console
+    console.warn(`[deploy] gh CLI provisioning: ${detail}`);
+    return { ok: false, detail };
+  }
+
+  const { stdout: verifyOut } = await sshExec(
+    cfg,
+    `docker exec ${container} sh -c '${probe}'`,
+    30_000,
+  ).catch(() => ({ stdout: "MISSING\n", stderr: "" }));
+  if (verifyOut.trim() === "PRESENT") {
+    const detail = `${container}: gh installed successfully`;
+    // eslint-disable-next-line no-console
+    console.log(`[deploy] gh CLI provisioning: ${detail}`);
+    return { ok: true, detail };
+  }
+  const detail = `${container}: gh still missing after install attempt — needs manual investigation`;
+  // eslint-disable-next-line no-console
+  console.warn(`[deploy] gh CLI provisioning: ${detail}`);
+  return { ok: false, detail };
+}
+
 /** Where the app actually gets SERVED from — see `DeployConfig.liveBasePath`. */
 function liveBase(cfg: DeployConfig): string {
   return cfg.liveBasePath?.trim() ? cfg.liveBasePath : cfg.remoteBasePath;
@@ -376,7 +470,15 @@ async function withStage<T>(
 
   try {
     const result = await fn();
-    await completeStage(runId, stage, true);
+    // Record the stage's own result text on success too (not just on
+    // failure) — a string result (every stage above returns one, e.g. the
+    // "restarting" stage's gh-provisioning outcome) is genuinely useful
+    // operator-facing evidence of what actually happened, not just whether
+    // it happened; previously this was silently discarded on the success
+    // path. Redacted with the same helper as the failure path for parity.
+    const detail =
+      typeof result === "string" ? redactCfgSecrets(cfg, result) : undefined;
+    await completeStage(runId, stage, true, detail);
     return result;
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
@@ -655,6 +757,15 @@ export async function runDeployJob(
 
     await withStage(runId, "restarting", cfg, async () => {
       const { stdout } = await sshExec(cfg, cfg.restartCommand, 60_000);
+      // Runs every deploy, not just once — idempotent (check-then-install),
+      // so a container that already has `gh` is a fast no-op, and a
+      // container that ever loses it (redeploy from a fresh image, manual
+      // rollback to a bare container, etc.) gets it re-provisioned
+      // automatically instead of silently failing `workspaceMergePr` again.
+      if (apps.includes("orchestrator")) {
+        const gh = await ensureGhCli(cfg, containerName("orchestrator"));
+        return `${stdout.slice(-1000)}\n---\ngh CLI: ${gh.detail}`;
+      }
       return stdout.slice(-1000);
     });
 

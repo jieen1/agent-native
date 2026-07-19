@@ -145,6 +145,16 @@ function isDeployVersionUrl(url: string): boolean {
   return url.includes("/api/deploy-version");
 }
 
+/** Matches `ensureGhCli`'s presence probe (`command -v gh ... PRESENT/MISSING`) inside a container. */
+function isGhProbe(cmd: string): boolean {
+  return cmd.startsWith("docker exec") && cmd.includes("command -v gh");
+}
+
+/** Matches `ensureGhCli`'s install command. */
+function isGhInstall(cmd: string): boolean {
+  return cmd.startsWith("docker exec") && cmd.includes("apt-get install -y gh");
+}
+
 /** A `global.fetch` mock where the base health-check URL and the deploy-version marker both report `commitSha`. */
 function healthyFetchWithMarker(commitSha: string): typeof fetch {
   return vi.fn(async (url: string) => {
@@ -577,4 +587,166 @@ describe("runDeployJob", () => {
     expect(row.error).toContain("health check failed");
     expect(row.error).toContain("stale cached response");
   }, 20_000);
+
+  // ── gh CLI provisioning (production incident: `an-orchestrator` had no
+  // `gh` at all until it was patched live into the running container by
+  // hand). The "restarting" stage must idempotently check-then-install `gh`
+  // INSIDE the orchestrator container on every real deploy so this can never
+  // regress after a container loses it (fresh container, manual rollback to
+  // a bare image, etc.) without needing another manual patch.
+
+  it("skips installing gh when it is already present in the container (idempotent no-op)", async () => {
+    seedRun("deploy_gh_present");
+    let sawGhInstall = false;
+    hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "abc123\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      if (isGhInstall(cmd)) sawGhInstall = true;
+      if (isGhProbe(cmd)) return { stdout: "PRESENT\n", stderr: "" };
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = healthyFetchWithMarker("abc123");
+
+    await runDeployJob("deploy_gh_present", CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_gh_present")!;
+    expect(row.status).toBe("succeeded");
+    expect(sawGhInstall).toBe(false);
+    const log = JSON.parse(row.stageLog as string);
+    const restarting = log.find(
+      (e: { stage: string }) => e.stage === "restarting",
+    );
+    expect(restarting.detail).toContain("gh already present");
+  });
+
+  it("installs gh via apt-get when missing from the container, and verifies it afterward", async () => {
+    seedRun("deploy_gh_missing_installs");
+    let ghProbeCalls = 0;
+    let sawGhInstall = false;
+    hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "abc123\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      if (isGhInstall(cmd)) {
+        sawGhInstall = true;
+        return { stdout: "ok", stderr: "" };
+      }
+      if (isGhProbe(cmd)) {
+        ghProbeCalls += 1;
+        // First probe (pre-install): missing. Second probe (post-install
+        // verify): present — models a real successful `apt-get install`.
+        return {
+          stdout: ghProbeCalls === 1 ? "MISSING\n" : "PRESENT\n",
+          stderr: "",
+        };
+      }
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = healthyFetchWithMarker("abc123");
+
+    await runDeployJob("deploy_gh_missing_installs", CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_gh_missing_installs")!;
+    expect(row.status).toBe("succeeded");
+    expect(sawGhInstall).toBe(true);
+    expect(ghProbeCalls).toBe(2);
+    const log = JSON.parse(row.stageLog as string);
+    const restarting = log.find(
+      (e: { stage: string }) => e.stage === "restarting",
+    );
+    expect(restarting.detail).toContain("gh installed successfully");
+  });
+
+  it("does not fail the deploy when the gh install attempt itself errors (transient problem, not a deploy blocker)", async () => {
+    seedRun("deploy_gh_install_fails");
+    hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "abc123\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      if (isGhInstall(cmd))
+        throw new Error("dpkg: lock is held by another process");
+      if (isGhProbe(cmd)) return { stdout: "MISSING\n", stderr: "" };
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = healthyFetchWithMarker("abc123");
+
+    await runDeployJob("deploy_gh_install_fails", CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_gh_install_fails")!;
+    // The deploy itself must still succeed — a transient gh-install problem
+    // is not a reason to roll back an otherwise-healthy deploy.
+    expect(row.status).toBe("succeeded");
+    const log = JSON.parse(row.stageLog as string);
+    const restarting = log.find(
+      (e: { stage: string }) => e.stage === "restarting",
+    );
+    expect(restarting.ok).toBe(true);
+    // But the gap must be visible, not silently swallowed.
+    expect(restarting.detail).toContain("gh install failed");
+  });
+
+  it("surfaces a clear warning (not silence) when gh is still missing after a install attempt that itself reported success", async () => {
+    seedRun("deploy_gh_still_missing");
+    hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "abc123\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      // Every probe (before AND after install) reports missing — models an
+      // `apt-get install` that exits 0 but the binary still isn't resolvable
+      // (e.g. wrong repo configured).
+      if (isGhProbe(cmd)) return { stdout: "MISSING\n", stderr: "" };
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = healthyFetchWithMarker("abc123");
+
+    await runDeployJob("deploy_gh_still_missing", CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_gh_still_missing")!;
+    expect(row.status).toBe("succeeded");
+    const log = JSON.parse(row.stageLog as string);
+    const restarting = log.find(
+      (e: { stage: string }) => e.stage === "restarting",
+    );
+    expect(restarting.detail).toContain("still missing after install attempt");
+  });
+
+  it("never touches the orchestrator container's gh CLI on a tracker-only deploy", async () => {
+    seedRun("deploy_tracker_only");
+    let sawAnyGhCommand = false;
+    hoisted.execImpl = async (cmd: string) => {
+      const clean = cleanCheckoutBranch(cmd);
+      if (clean) return clean;
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "abc123\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      if (isGhProbe(cmd) || isGhInstall(cmd)) sawAnyGhCommand = true;
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = healthyFetchWithMarker("abc123");
+
+    await runDeployJob("deploy_tracker_only", CFG, ["tracker"]);
+
+    const row = hoisted.rows.get("deploy_tracker_only")!;
+    expect(row.status).toBe("succeeded");
+    expect(sawAnyGhCommand).toBe(false);
+  });
 });
