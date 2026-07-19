@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 
 import { getDbExec, runMigrations } from "@agent-native/core/db";
+import { getDb } from "../db/index.js";
+import { dedupeItemKeys } from "../lib/dedupe-item-keys.js";
 
 /** Derive the array-element type straight from `runMigrations`'s own params
  *  so this file never re-declares (and risks drifting from) core's
@@ -686,4 +688,15 @@ export default async function trackerDbPlugin(
 ): Promise<void> {
   await coreRunMigrations(nitroApp as never);
   await verifyMigrationHashes();
+  // SDLC-038 retroactive dedup: reassign historically-duplicated itemKeys via
+  // the one-time idempotent boot pass (server/lib/dedupe-item-keys.ts). Runs
+  // AFTER verifyMigrationHashes so the schema (tracker_project_seq etc.) is
+  // guaranteed present. Fail-open — dedupeItemKeys swallows its own errors, and
+  // this outer try/catch is a belt-and-suspenders guard mirroring the fail-open
+  // style of verifyMigrationHashes above so a dedupe failure never blocks boot.
+  try {
+    await dedupeItemKeys(getDb());
+  } catch (err) {
+    console.error("[trackerDbPlugin] dedupeItemKeys failed (swallowed):", err);
+  }
 }

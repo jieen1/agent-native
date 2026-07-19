@@ -1,18 +1,26 @@
-// F8: itemKey 消歧(读路径). Historical duplicate itemKeys (SDLC-032~036 —
-// pre-sequencer count(*) races minted the same itemKey twice within a
-// project) are NEVER rewritten (only-add, no-change red line — 迁移只加不改
-// applies to data too, not just schema). Instead every read path that shows
-// an itemKey to a human appends a short id suffix when — and only when — a
-// (projectId, itemKey) pair is not unique, so a human can tell two same-
-// labeled items apart. Single-item contexts where no comparison is possible
-// (e.g. run-acceptance.ts's report title for the one item being accepted)
-// don't need this.
+// F8: itemKey 消歧(读路径). Historical duplicate itemKeys (the pre-sequencer
+// count(*) races that minted the same itemKey twice within a project) are NO
+// LONGER left in place: the one-time, idempotent boot-time pass in
+// server/lib/dedupe-item-keys.ts (the SDLC-038 retroactive backfill) reassigns
+// a fresh itemKey to every "losing" duplicate row via the SAME atomic
+// project-level sequencer create-work-item uses (allocateItemKey), so the
+// historical collisions are actually resolved at the data level — not merely
+// papered over at read time.
+//
+// With that pass in place, computeItemKeyDisplays is now DEFENSE-IN-DEPTH, not
+// the primary fix: a read-time safety net that still appends a short id suffix
+// when — and only when — a (projectId, itemKey) pair is not unique, so that any
+// NEW duplicate that might slip through in the future (a yet-unknown bug or
+// race) is still human-disambiguable rather than silently mislabeled. Single-
+// item contexts where no comparison is possible (e.g. run-acceptance.ts's
+// report title for the one item being accepted) don't need this.
 //
 // Detection is against the FULL project population, not just the batch of
 // rows a given read happens to fetch — e.g. list-work-items filtered to
 // status=open must still flag a duplicate whose sibling is status=closed and
 // therefore absent from that filtered batch.
 import { and, inArray } from "drizzle-orm";
+
 import { getDb, schema } from "../db/index.js";
 import { ownerScope } from "./access.js";
 
@@ -51,7 +59,12 @@ export async function computeItemKeyDisplays(
       itemKey: schema.workItems.itemKey,
     })
     .from(schema.workItems)
-    .where(and(ownerScope(schema.workItems), inArray(schema.workItems.projectId, projectIds)));
+    .where(
+      and(
+        ownerScope(schema.workItems),
+        inArray(schema.workItems.projectId, projectIds),
+      ),
+    );
 
   const counts = new Map<string, number>();
   for (const s of siblings) {
