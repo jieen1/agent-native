@@ -195,6 +195,7 @@ export class AcpHarnessSession implements AgentHarnessSession {
   private readonly pendingPermissions = new Map<string, PendingPermission>();
   private readonly toolTitles = new Map<string, string>();
   private readonly toolInputs = new Map<string, Record<string, unknown>>();
+  private readonly toolNames = new Map<string, string>();
   private approvalCounter = 0;
   private stderrTail = "";
   private childExited = false;
@@ -282,7 +283,9 @@ export class AcpHarnessSession implements AgentHarnessSession {
       ...(opts.metadata ? { _meta: opts.metadata } : {}),
     });
     this.acpSessionId =
-      typeof created?.sessionId === "string" ? created.sessionId : this.placeholderId;
+      typeof created?.sessionId === "string"
+        ? created.sessionId
+        : this.placeholderId;
   }
 
   async *streamTurn(
@@ -391,12 +394,17 @@ export class AcpHarnessSession implements AgentHarnessSession {
     ) {
       this.toolInputs.set(update.toolCallId, update.rawInput);
     }
+    if (update?.sessionUpdate === "tool_call") {
+      const rawName = acpRawToolName(update);
+      if (rawName) this.toolNames.set(update.toolCallId, rawName);
+    }
     // Updates that arrive without an active turn are history replay from
     // loadSession; the transcript already contains them, so drop them.
     if (!this.queue) return;
     for (const event of acpUpdateToHarnessEvents(update, {
       titleFor: (id) => this.toolTitles.get(id),
       inputFor: (id) => this.toolInputs.get(id),
+      nameFor: (id) => this.toolNames.get(id),
     })) {
       this.queue.push(event);
     }
@@ -516,9 +524,38 @@ function messageToText(content: string | unknown[]): string {
 }
 
 /**
+ * The real, canonical tool name (e.g. "Read", "Glob", "Bash",
+ * "mcp__orchestrator__runState") a `tool_call`/`tool_call_update` is FOR.
+ *
+ * ACP's own wire schema only carries a human-readable `title` (e.g. "Read
+ * File", "Find `*.ts`") and a coarse `kind` category (e.g. "search" for BOTH
+ * Glob and Grep) — neither identifies the actual tool, so a consumer that
+ * needs the real name (an allow-list gate, a cross-adapter-consistent
+ * transcript — see `ai-sdk-adapter.ts`, which puts the real `toolName` in the
+ * exact same {@link AgentHarnessEvent} `name` field) can never recover it from
+ * those alone. `@agentclientprotocol/claude-agent-acp` (the vendored
+ * `acp:claude-code` preset's own agent binary) DOES stamp the real name onto
+ * every `tool_call`/`tool_call_update` as a Claude-specific `_meta.claudeCode.
+ * toolName` extension (confirmed against its own `dist/acp-agent.js`
+ * `toolCallNotification()` — every call site sets `_meta: { claudeCode: {
+ * toolName: toolUse.name }, ... }`); other ACP agents (e.g. Gemini CLI) don't,
+ * so callers must still fall back to `title`/`kind` for those.
+ */
+function acpRawToolName(update: {
+  _meta?: Record<string, unknown>;
+}): string | undefined {
+  const claudeCode = (
+    update._meta as { claudeCode?: { toolName?: unknown } } | undefined
+  )?.claudeCode;
+  const name = claudeCode?.toolName;
+  return typeof name === "string" && name ? name : undefined;
+}
+
+/**
  * Translate a single ACP `session/update` payload into harness events. Pure and
- * stateless; the caller supplies a resolver for tool titles seen on earlier
- * `tool_call` updates so completion events can be labelled.
+ * stateless; the caller supplies resolvers for the tool name/title seen on
+ * earlier `tool_call` updates so completion events (which may omit `_meta`/
+ * `title` on a refining `tool_call_update`) can still be identified/labelled.
  */
 export function acpUpdateToHarnessEvents(
   update: AcpSessionUpdate,
@@ -527,12 +564,15 @@ export function acpUpdateToHarnessEvents(
     | {
         titleFor?: (toolCallId: string) => string | undefined;
         inputFor?: (toolCallId: string) => Record<string, unknown> | undefined;
+        nameFor?: (toolCallId: string) => string | undefined;
       },
 ): AgentHarnessEvent[] {
   const titleFor =
     typeof resolvers === "function" ? resolvers : resolvers?.titleFor;
   const inputFor =
     typeof resolvers === "function" ? undefined : resolvers?.inputFor;
+  const nameFor =
+    typeof resolvers === "function" ? undefined : resolvers?.nameFor;
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
       const text = acpContentBlockToText(update.content);
@@ -550,7 +590,7 @@ export function acpUpdateToHarnessEvents(
         {
           type: "tool-start",
           id: update.toolCallId,
-          name: update.title || update.kind || "tool",
+          name: acpRawToolName(update) || update.title || update.kind || "tool",
           input: update.rawInput ?? {},
         },
       ];
@@ -559,7 +599,12 @@ export function acpUpdateToHarnessEvents(
         events.push({
           type: "tool-done",
           id: update.toolCallId,
-          name: update.title || titleFor?.(update.toolCallId) || "tool",
+          name:
+            acpRawToolName(update) ||
+            update.title ||
+            nameFor?.(update.toolCallId) ||
+            titleFor?.(update.toolCallId) ||
+            "tool",
           ...((update.rawInput ?? inputFor?.(update.toolCallId))
             ? { input: update.rawInput ?? inputFor?.(update.toolCallId) }
             : {}),
@@ -576,7 +621,12 @@ export function acpUpdateToHarnessEvents(
         events.push({
           type: "tool-done",
           id: update.toolCallId,
-          name: update.title || titleFor?.(update.toolCallId) || "tool",
+          name:
+            acpRawToolName(update) ||
+            update.title ||
+            nameFor?.(update.toolCallId) ||
+            titleFor?.(update.toolCallId) ||
+            "tool",
           ...((update.rawInput ?? inputFor?.(update.toolCallId))
             ? { input: update.rawInput ?? inputFor?.(update.toolCallId) }
             : {}),
@@ -602,7 +652,9 @@ export function acpUpdateToHarnessEvents(
           type: "usage",
           contextUsedTokens: update.used,
           contextWindowTokens: update.size,
-          ...(update.cost ? { costCents: Math.round(update.cost.amount * 100) } : {}),
+          ...(update.cost
+            ? { costCents: Math.round(update.cost.amount * 100) }
+            : {}),
         },
       ];
     default:
@@ -826,6 +878,7 @@ export type AcpSessionUpdate =
       rawInput?: Record<string, unknown>;
       rawOutput?: Record<string, unknown>;
       locations?: unknown[];
+      _meta?: Record<string, unknown>;
     }
   | {
       sessionUpdate: "tool_call_update";
@@ -836,6 +889,7 @@ export type AcpSessionUpdate =
       content?: AcpToolCallContent[] | null;
       rawInput?: Record<string, unknown>;
       rawOutput?: Record<string, unknown>;
+      _meta?: Record<string, unknown>;
     }
   | { sessionUpdate: "plan"; entries: AcpPlanEntry[] }
   | { sessionUpdate: "available_commands_update"; availableCommands: unknown[] }

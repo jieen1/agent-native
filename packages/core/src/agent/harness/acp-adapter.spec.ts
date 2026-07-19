@@ -62,6 +62,137 @@ describe("acpUpdateToHarnessEvents", () => {
     ]);
   });
 
+  it("prefers the real Claude tool name (_meta.claudeCode.toolName) over the display title/kind — task #119/SDLC-066 regression", () => {
+    // `@agentclientprotocol/claude-agent-acp` renders its OWN human-readable
+    // title/kind for built-in tools (Glob -> title "Find", kind "search";
+    // Read with no file_path yet -> title "Read File") — NEITHER identifies
+    // the real tool, so a phase's allow-list (brain-capability.ts's
+    // ["Read","Grep","Glob"]) can never match against them and wrongly denies
+    // every real, allowed Read/Grep/Glob call. The real name lives in
+    // `_meta.claudeCode.toolName` and must win.
+    expect(
+      acpUpdateToHarnessEvents({
+        sessionUpdate: "tool_call",
+        toolCallId: "call-glob",
+        title: "Find",
+        kind: "search",
+        rawInput: { pattern: "*.ts" },
+        _meta: { claudeCode: { toolName: "Glob" } },
+      }),
+    ).toEqual([
+      {
+        type: "tool-start",
+        id: "call-glob",
+        name: "Glob",
+        input: { pattern: "*.ts" },
+      },
+    ]);
+
+    expect(
+      acpUpdateToHarnessEvents({
+        sessionUpdate: "tool_call",
+        toolCallId: "call-read",
+        title: "Read File",
+        kind: "read",
+        rawInput: {},
+        _meta: { claudeCode: { toolName: "Read" } },
+      }),
+    ).toEqual([
+      {
+        type: "tool-start",
+        id: "call-read",
+        name: "Read",
+        input: {},
+      },
+    ]);
+  });
+
+  it("uses the real tool name on a terminal tool_call_update that carries its own _meta", () => {
+    const events = acpUpdateToHarnessEvents({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "call-grep",
+      status: "completed",
+      title: 'grep -n "foo"',
+      rawOutput: { matches: 0 },
+      _meta: { claudeCode: { toolName: "Grep" } },
+    });
+    expect(events).toEqual([
+      {
+        type: "tool-done",
+        id: "call-grep",
+        name: "Grep",
+        result: { matches: 0 },
+      },
+    ]);
+  });
+
+  it("falls back to a cached real name (nameFor) when a refining tool_call_update omits _meta", () => {
+    const events = acpUpdateToHarnessEvents(
+      {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call-read-2",
+        status: "completed",
+        rawOutput: { ok: true },
+      },
+      {
+        nameFor: (id) => (id === "call-read-2" ? "Read" : undefined),
+        titleFor: (id) => (id === "call-read-2" ? "Read File" : undefined),
+      },
+    );
+    expect(events).toEqual([
+      {
+        type: "tool-done",
+        id: "call-read-2",
+        name: "Read",
+        result: { ok: true },
+      },
+    ]);
+  });
+
+  it("falls back to title/kind when no agent-specific _meta is present (e.g. a non-Claude ACP agent)", () => {
+    // Non-Claude ACP agents (e.g. Gemini CLI) never set `_meta.claudeCode`, so
+    // this must keep behaving exactly as before this fix.
+    expect(
+      acpUpdateToHarnessEvents({
+        sessionUpdate: "tool_call",
+        toolCallId: "call-other",
+        title: "Search files",
+        kind: "search",
+        rawInput: { query: "foo" },
+      }),
+    ).toEqual([
+      {
+        type: "tool-start",
+        id: "call-other",
+        name: "Search files",
+        input: { query: "foo" },
+      },
+    ]);
+  });
+
+  it("passes an MCP tool call's real name through unaffected (default title === name already)", () => {
+    // `claude-agent-acp` has no custom title-formatter for MCP tool names, so
+    // its own `title` already equals the real name — confirms this fix leaves
+    // the already-correct mcp__orchestrator__* case untouched.
+    expect(
+      acpUpdateToHarnessEvents({
+        sessionUpdate: "tool_call",
+        toolCallId: "call-mcp",
+        title: "mcp__orchestrator__view-screen",
+        kind: "other",
+        rawInput: {},
+        _meta: { claudeCode: { toolName: "mcp__orchestrator__view-screen" } },
+      }),
+    ).toEqual([
+      {
+        type: "tool-start",
+        id: "call-mcp",
+        name: "mcp__orchestrator__view-screen",
+        input: {},
+      },
+    ]);
+  });
+
   it("emits tool-done plus file-change when a tool_call_update completes with a diff", () => {
     const events = acpUpdateToHarnessEvents(
       {
@@ -143,7 +274,11 @@ describe("acpUpdateToHarnessEvents", () => {
         size: 200_000,
       }),
     ).toEqual([
-      { type: "usage", contextUsedTokens: 12_345, contextWindowTokens: 200_000 },
+      {
+        type: "usage",
+        contextUsedTokens: 12_345,
+        contextWindowTokens: 200_000,
+      },
     ]);
   });
 
@@ -351,18 +486,12 @@ describe("AcpHarnessSession — mcpServers + metadata forwarding", () => {
   // through `createAcpHarnessAdapter`'s dynamic import. A real (trivial)
   // child process is still spawned because `initialize()` wires its stdio
   // through `Writable.toWeb` / `Readable.toWeb`, which require real streams.
-  function fakeAcp(calls: {
-    newSession: unknown[];
-    loadSession: unknown[];
-  }) {
+  function fakeAcp(calls: { newSession: unknown[]; loadSession: unknown[] }) {
     return {
       PROTOCOL_VERSION: 1,
       ndJsonStream: () => ({}) as never,
       ClientSideConnection: class {
-        constructor(
-          _toClient: unknown,
-          _stream: unknown,
-        ) {}
+        constructor(_toClient: unknown, _stream: unknown) {}
         async initialize() {
           return { agentCapabilities: { loadSession: true } };
         }
@@ -398,7 +527,10 @@ describe("AcpHarnessSession — mcpServers + metadata forwarding", () => {
 
   it("forwards mcpServers and metadata as ACP _meta on a fresh session (newSession), not hardcoded []", async () => {
     await withTrivialChild(async (child) => {
-      const calls = { newSession: [] as unknown[], loadSession: [] as unknown[] };
+      const calls = {
+        newSession: [] as unknown[],
+        loadSession: [] as unknown[],
+      };
       const session = new AcpHarnessSession({
         acp: fakeAcp(calls),
         child,
@@ -422,7 +554,10 @@ describe("AcpHarnessSession — mcpServers + metadata forwarding", () => {
 
   it("forwards mcpServers and metadata as ACP _meta on a resumed session (loadSession), not hardcoded []", async () => {
     await withTrivialChild(async (child) => {
-      const calls = { newSession: [] as unknown[], loadSession: [] as unknown[] };
+      const calls = {
+        newSession: [] as unknown[],
+        loadSession: [] as unknown[],
+      };
       const session = new AcpHarnessSession({
         acp: fakeAcp(calls),
         child,
@@ -433,7 +568,9 @@ describe("AcpHarnessSession — mcpServers + metadata forwarding", () => {
       const mcpServers = [
         { type: "http", name: "orchestrator", url: "http://x", headers: [] },
       ];
-      const metadata = { claudeCode: { options: { model: "claude-sonnet-5" } } };
+      const metadata = {
+        claudeCode: { options: { model: "claude-sonnet-5" } },
+      };
       await session.initialize({
         mcpServers,
         metadata,
