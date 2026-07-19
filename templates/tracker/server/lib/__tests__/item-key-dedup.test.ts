@@ -2,7 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 // ============================================================================
 // SDLC-027: boot-time backtrack dedup of historical colliding itemKeys
@@ -119,6 +127,7 @@ async function setup() {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   const { getDbExec } = await import("@agent-native/core/db");
   const exec = getDbExec();
   for (const t of [
@@ -384,5 +393,63 @@ describe("dedupeLegacyItemKeys", () => {
     expect(items.find((r) => r.id === "wi-blank-1")?.item_key).toBe("");
     expect(items.find((r) => r.id === "wi-blank-2")?.item_key).toBe("");
     expect(items.find((r) => r.id === "wi-blank-3")?.item_key).toBe("");
+  });
+
+  it("concurrent-boot race: when the row's item_key was already re-keyed by another process between read and write, the guarded UPDATE matches nothing and NO activity/comment audit rows are inserted (no throw)", async () => {
+    await setup();
+    await insertProject("proj-1", "PAY");
+    await insertWorkItem(
+      "wi-old",
+      "proj-1",
+      "PAY-001",
+      "2026-01-01T00:00:00.000Z",
+    );
+    await insertWorkItem(
+      "wi-new",
+      "proj-1",
+      "PAY-001",
+      "2026-02-01T00:00:00.000Z",
+    );
+
+    // Simulate a concurrent winner: a second boot/replica that already
+    // detected the SAME duplicate group and re-keyed wi-new to PAY-999 BEFORE
+    // this call's per-row write fires. We mutate the row inside
+    // allocateItemKey() — which dedupeLegacyItemKeys() calls AFTER it reads the
+    // row (observing item_key "PAY-001") but BEFORE its guarded UPDATE — so the
+    // guarded UPDATE's `item_key = <observed>` clause no longer matches.
+    const sequencer = await import("../item-key-sequencer.js");
+    const allocateSpy = vi
+      .spyOn(sequencer, "allocateItemKey")
+      .mockImplementation(async (projectId: string, projectKey: string) => {
+        const { getDbExec } = await import("@agent-native/core/db");
+        const exec = getDbExec();
+        await exec.execute({
+          sql: `UPDATE tracker_work_items SET item_key = ? WHERE id = ?`,
+          args: ["PAY-999", "wi-new"],
+        });
+        // Return a plausible freshly-allocated key (the value this "loser"
+        // instance would have written had it won the race).
+        return `${projectKey}-888`;
+      });
+
+    const { dedupeLegacyItemKeys } = await import("../item-key-dedup.js");
+    // Must NOT throw even though it lost the race.
+    const result = await dedupeLegacyItemKeys();
+
+    expect(allocateSpy).toHaveBeenCalledTimes(1);
+    // This instance lost the race → it reassigned nothing.
+    expect(result.rowsReassigned).toBe(0);
+
+    // The concurrent winner's key stands; this instance's minted key was NOT
+    // written (the guarded UPDATE matched nothing).
+    const items = await allRows("tracker_work_items");
+    expect(items.find((r) => r.id === "wi-new")?.item_key).toBe("PAY-999");
+    expect(items.find((r) => r.id === "wi-old")?.item_key).toBe("PAY-001");
+
+    // The crux of the fix: NO audit rows from the losing instance — exactly
+    // one reassignment ever happened, so there must be zero activity/comment
+    // rows (the winner, being simulated by a raw UPDATE above, wrote none).
+    expect((await allRows("tracker_activities")).length).toBe(0);
+    expect((await allRows("tracker_comments")).length).toBe(0);
   });
 });

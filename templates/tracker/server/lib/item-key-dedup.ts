@@ -22,6 +22,14 @@
 // foreign-keys on the work item's internal nanoid `id`, never on item_key —
 // so reassigning an item_key orphans nothing. We only touch
 // tracker_work_items.item_key plus the audit rows we add.
+//
+// Concurrency + crash safety (SDLC-027 review FIX-MODE): each row's
+// reassignment is a guarded, conditional UPDATE (only fires if the row still
+// holds the item_key we observed) wrapped with its activity+comment audit
+// inserts in a single transaction — so two replicas booting concurrently
+// against one shared Postgres can't double-write the audit trail, and a crash
+// mid-row can't leave an item_key changed with no audit explaining why. See
+// the per-row block in dedupeLegacyItemKeys() below.
 import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 
@@ -109,41 +117,89 @@ export async function dedupeLegacyItemKeys(): Promise<DedupeResult> {
           const newItemKey = await allocateItemKey(row.projectId, project.key);
           const now = new Date().toISOString();
 
-          await db
-            .update(schema.workItems)
-            .set({ itemKey: newItemKey, updatedAt: now })
-            .where(eq(schema.workItems.id, row.id));
+          // Guarded, atomic per-row reassignment (SDLC-027 review FIX-MODE):
+          //
+          // 1) Concurrent-boot race guard — this pass runs on EVERY boot for
+          //    the app's lifetime, so two replicas booting concurrently
+          //    against one shared Postgres can both detect the SAME duplicate
+          //    group before either commits, each minting a DIFFERENT
+          //    replacement key for the same row via allocateItemKey(). The
+          //    UPDATE is therefore conditional on the row STILL holding the
+          //    item_key we observed when we read it (the trailing
+          //    `item_key = oldItemKey` in the WHERE). `.returning({ id })`
+          //    yields one row only if THIS call actually changed the row —
+          //    i.e. this instance won the race. If a concurrent winner already
+          //    re-keyed it, the WHERE matches nothing, `changed` is empty, and
+          //    we skip the audit inserts entirely for this row (no duplicate
+          //    activity/comment describing a key the row no longer has, and no
+          //    throw). `.returning()` is supported by both the Postgres and the
+          //    SQLite/libsql Drizzle drivers this template runs on.
+          //
+          // 2) Crash safety — the guarded UPDATE + activity INSERT + comment
+          //    INSERT run in ONE transaction so a crash mid-sequence can't
+          //    leave an item_key silently changed with no audit trail
+          //    explaining why. `tx` (the transaction-scoped client) is used for
+          //    all three writes. allocateItemKey() stays OUTSIDE the tx on
+          //    purpose: it uses the separate getDbExec() connection (a raw
+          //    UPDATE...RETURNING sequencer), and the minted key is only
+          //    "spent" if this tx commits — a rolled-back tx merely skips one
+          //    sequence number, which is harmless.
+          const updated = await db.transaction(async (tx) => {
+            const changed = await tx
+              .update(schema.workItems)
+              .set({ itemKey: newItemKey, updatedAt: now })
+              .where(
+                and(
+                  eq(schema.workItems.id, row.id),
+                  eq(schema.workItems.itemKey, oldItemKey),
+                ),
+              )
+              .returning({ id: schema.workItems.id });
 
-          await db.insert(schema.activities).values({
-            id: nanoid(),
-            workItemId: row.id,
-            actorKind: "agent",
-            actorName: "itemKey去重迁移",
-            eventType: "item_key.reassigned",
-            payload: JSON.stringify({
-              oldItemKey,
-              newItemKey,
-              authoritativeWorkItemId: authoritative!.id,
-              authoritativeItemKey: authoritative!.itemKey,
-              reason: "SDLC-027 跨sprint撞号去重迁移",
-            }),
-            createdAt: now,
-            ownerEmail: row.ownerEmail,
-            orgId: row.orgId,
-            visibility: row.visibility,
+            // Lost the race (another process already re-keyed this row):
+            // skip the audit inserts for this row. Not an error — just skip.
+            if (changed.length === 0) return false;
+
+            await tx.insert(schema.activities).values({
+              id: nanoid(),
+              workItemId: row.id,
+              actorKind: "agent",
+              actorName: "itemKey去重迁移",
+              eventType: "item_key.reassigned",
+              payload: JSON.stringify({
+                oldItemKey,
+                newItemKey,
+                authoritativeWorkItemId: authoritative!.id,
+                authoritativeItemKey: authoritative!.itemKey,
+                reason: "SDLC-027 跨sprint撞号去重迁移",
+              }),
+              createdAt: now,
+              ownerEmail: row.ownerEmail,
+              orgId: row.orgId,
+              visibility: row.visibility,
+            });
+
+            await tx.insert(schema.comments).values({
+              id: nanoid(),
+              workItemId: row.id,
+              authorKind: "agent",
+              authorName: "系统迁移(SDLC-027)",
+              body: `本工单的 itemKey 因跨 sprint 撞号从 ${oldItemKey} 重新分配为 ${newItemKey};权威工单为 ${authoritative!.itemKey}(id=${authoritative!.id});评论/链接/阶段历史均未变更。`,
+              createdAt: now,
+              ownerEmail: row.ownerEmail,
+              orgId: row.orgId,
+              visibility: row.visibility,
+            });
+
+            return true;
           });
 
-          await db.insert(schema.comments).values({
-            id: nanoid(),
-            workItemId: row.id,
-            authorKind: "agent",
-            authorName: "系统迁移(SDLC-027)",
-            body: `本工单的 itemKey 因跨 sprint 撞号从 ${oldItemKey} 重新分配为 ${newItemKey};权威工单为 ${authoritative!.itemKey}(id=${authoritative!.id});评论/链接/阶段历史均未变更。`,
-            createdAt: now,
-            ownerEmail: row.ownerEmail,
-            orgId: row.orgId,
-            visibility: row.visibility,
-          });
+          if (!updated) {
+            console.warn(
+              `[item-key-dedup] row ${row.id} no longer holds itemKey ${oldItemKey} (a concurrent boot already reassigned it); skipping audit inserts`,
+            );
+            continue;
+          }
 
           result.rowsReassigned += 1;
         }
@@ -167,4 +223,3 @@ export async function dedupeLegacyItemKeys(): Promise<DedupeResult> {
   }
   return result;
 }
-// STABILITY_MARKER_1784480305
