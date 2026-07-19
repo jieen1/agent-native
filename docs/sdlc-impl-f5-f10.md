@@ -251,6 +251,8 @@ F0 先行;用量采集改动落在 **F2 同文件集**(`engine-loop.ts` + `v3-di
 | `actions/get-work-item.ts` | 返回体加 `runs: [{runId, threadId, branch, dispatchedAt, superseded}]`(按 dispatched_at 倒序);S4 执行组消费。 |
 | itemKey 消歧(读路径) | `list-work-items`/`get-work-item` 对同 project 重号 itemKey 追加显示后缀:返回体 `itemKeyDisplay = item_key + (重号 ? '·' + id.slice(0,4) : '')`——纯读侧计算,零写。**完备性缺口(R3 实核)**:除这两个 action,`itemKey`/`item_key` 至少在 `advance-stage.ts`/`bulk-dispatch-to-orchestrator.ts`/`decompose-epic.ts`/`list-epic-children.ts`/`validate-dependency-graph.ts`/`run-acceptance.ts`/`enqueue-work-item.ts` 等后端文件与看板/队列/Sprint 详情/工作项详情等前端页出现——多数只是透传已取的工作项对象(消歧因此自动生效),但看板/队列页若有独立 list 取数路径,需逐一核实是否绕开本消歧,不能只当"两个 action 就够"。 |
 
+> **SDLC-027 后续补记(取代上文「历史重号不改」结论,原句保留作决策史)**:上文 F8 当时定案「历史重号不改、只靠 UI 消歧」,但 SDLC-038 的原始验收标准本就含「回溯去重迁移」,F8 只是刻意推迟了它。SDLC-027 现已真正完成该回填:实际撞号集合比最初记的 5 个(SDLC-032~036)更大——共 **8 个 itemKey / 16 行**(SDLC-027、032、033、034、035、036、056、057),全部是无 sprint 的历史工单。实现见 `server/lib/item-key-dedup.ts`:启动时幂等扫描所有 (project_id, item_key) 重号组,最早创建的行为权威保留原号,其余行经 `allocateItemKey()` 重新分配,并各写一条 activity + 一条 comment 审计;评论/链接/阶段历史均按内部 `id` 外键、不受影响。因 core 的 `splitSqlStatements()` 不解析 `$$` 块,此迁移用 TypeScript(仿 `verifyMigrationHashes()` 的启动钩子)而非裸 SQL。至此 SDLC-038 的「回溯去重迁移」验收标准真正满足;4B 的读侧消歧降为兜底(防新启动竞态窗口与未来回归)。
+
 ### 4B. 前端实施(S4 执行组接真,原型已备)
 
 执行组「关联运行」从单值改列表:每行 run 深链(orchestrator run 页)+ superseded 行灰显 strike;「分支」行显示最新非空 branch(mono,可复制);重号项 itemKey 显示 `itemKeyDisplay`(tooltip「历史重号,已消歧显示」)。无新弹窗。

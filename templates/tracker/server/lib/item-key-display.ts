@@ -1,12 +1,19 @@
-// F8: itemKey 消歧(读路径). Historical duplicate itemKeys (SDLC-032~036 —
-// pre-sequencer count(*) races minted the same itemKey twice within a
-// project) are NEVER rewritten (only-add, no-change red line — 迁移只加不改
-// applies to data too, not just schema). Instead every read path that shows
-// an itemKey to a human appends a short id suffix when — and only when — a
-// (projectId, itemKey) pair is not unique, so a human can tell two same-
-// labeled items apart. Single-item contexts where no comparison is possible
-// (e.g. run-acceptance.ts's report title for the one item being accepted)
-// don't need this.
+// F8: itemKey 消歧(读路径). Historical duplicate itemKeys (SDLC-027/032~036/
+// 056/057 — pre-sequencer count(*) races minted the same itemKey twice within
+// a project) used to be left in place on a "迁移只加不改" red line, but SDLC-027
+// now actually BACKFILLS them: server/lib/item-key-dedup.ts runs at boot and
+// reassigns every non-authoritative duplicate row a fresh item_key (the
+// earliest-created row of each (projectId, itemKey) group keeps its key). So
+// the duplicates this read path disambiguates are no longer the steady state.
+//
+// computeItemKeyDisplay(s) remain as DEFENSE-IN-DEPTH, not the primary fix:
+// they cover the brief race window on a fresh boot before item-key-dedup.ts
+// has run, and guard against any future bug that reintroduces a duplicate.
+// Every read path that shows an itemKey to a human still appends a short id
+// suffix when — and only when — a (projectId, itemKey) pair is not unique, so
+// a human can tell two same-labeled items apart. Single-item contexts where no
+// comparison is possible (e.g. run-acceptance.ts's report title for the one
+// item being accepted) don't need this.
 //
 // Detection is against the FULL project population, not just the batch of
 // rows a given read happens to fetch — e.g. list-work-items filtered to
