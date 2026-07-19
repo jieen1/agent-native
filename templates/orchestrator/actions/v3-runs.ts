@@ -188,11 +188,20 @@ export const runCancel = defineAction({
     // as a column identifier and the query fails with "Failed query" every
     // time (a run could never actually be cancelled, and it was an injection
     // shape). The tagged template parameterizes ${args.runId}.
+    //
+    // v3_spawns has NO run_id column — it only has node_id (see
+    // server/db/v3-schema.ts). Scoping the UPDATE directly by run_id fails in
+    // production with 'column "run_id" does not exist', which the try/catch
+    // below turns into a spurious `warning` on every successful cancel and
+    // leaves running spawns un-cancelled until the spawn-reconcile sweep. Scope
+    // to this run's spawns via a node_id subquery — the exact pattern already
+    // used in actions/v3-archive.ts.
     let warning: string | undefined;
     try {
       await db.execute(sql`
         UPDATE v3_spawns SET status = 'cancelled', completed_at = NOW()
-        WHERE run_id = ${args.runId} AND status = 'running'
+        WHERE status = 'running'
+          AND node_id IN (SELECT id FROM v3_nodes WHERE run_id = ${args.runId})
       `);
     } catch (err) {
       warning = `Run cancelled, but clearing its running spawns failed: ${

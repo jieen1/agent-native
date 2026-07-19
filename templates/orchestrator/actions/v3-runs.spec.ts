@@ -88,6 +88,28 @@ function resetState(): void {
   });
 }
 
+/**
+ * Reconstruct the SQL text of a drizzle `sql` tagged-template object.
+ *
+ * The object handed to db.execute exposes its static SQL fragments in
+ * `queryChunks[].value` (arrays of strings); parameter values appear as bare
+ * string/number chunks. String(q) is just "[object Object]", so we walk the
+ * chunks and concatenate the literal SQL. Param values are irrelevant to the
+ * column-shape assertions and are intentionally skipped.
+ */
+function extractSqlText(q: unknown): string {
+  const chunks = (q as { queryChunks?: unknown[] })?.queryChunks;
+  if (!Array.isArray(chunks)) return String(q);
+  let out = "";
+  for (const chunk of chunks) {
+    const value = (chunk as { value?: unknown })?.value;
+    if (Array.isArray(value)) {
+      out += value.map((v) => String(v)).join("");
+    }
+  }
+  return out;
+}
+
 describe("runCancel — F10 R9 defensive success reporting (T-F10-07)", () => {
   beforeEach(() => {
     resetState();
@@ -120,6 +142,47 @@ describe("runCancel — F10 R9 defensive success reporting (T-F10-07)", () => {
 
     // The cancellation write itself DID take effect.
     expect(hoisted.state.runs[0]?.status).toBe("cancelled");
+  });
+
+  it("regression: spawn-cleanup SQL scopes by node_id via a v3_nodes subquery, NOT a bare run_id column on v3_spawns", async () => {
+    // v3_spawns has NO run_id column (only node_id — see
+    // server/db/v3-schema.ts). The old query filtered v3_spawns directly by
+    // `WHERE run_id = ...`, which fails in production with
+    // 'column "run_id" does not exist', attaches a spurious `warning` to every
+    // successful cancel, and leaves running spawns un-cancelled. Capture the
+    // actual SQL text handed to db.execute and lock in the correct shape.
+    let captured: unknown;
+    hoisted.state.executeImpl = async (q: unknown) => {
+      captured = q;
+      return { rows: [] };
+    };
+
+    const result = await runCancel.run({ runId: "run-1" });
+
+    // The spawn-cleanup query ran and did not produce a warning.
+    expect(hoisted.state.executeCalls).toBe(1);
+    expect((result as any).warning).toBeUndefined();
+    expect(captured).toBeDefined();
+
+    // The drizzle `sql` tagged template yields an object whose static SQL text
+    // lives in queryChunks[].value (param values are bare string chunks).
+    // String(q) is just "[object Object]", so reconstruct the text here.
+    const sqlText = extractSqlText(captured);
+
+    // Positive: spawns are scoped to this run via node_id IN (v3_nodes subquery
+    // keyed by run_id) — the exact pattern used in actions/v3-archive.ts.
+    expect(sqlText).toContain("v3_nodes");
+    expect(sqlText).toMatch(
+      /node_id\s+IN\s*\(\s*SELECT id FROM v3_nodes WHERE run_id\s*=/,
+    );
+
+    // Negative: the v3_spawns UPDATE's OWN WHERE clause (everything before the
+    // node_id subquery) must not reference run_id as a column of v3_spawns. In
+    // the buggy version there was no `node_id IN`, so this slice is the whole
+    // statement and DOES contain `run_id` — failing the assertion.
+    const updateWhere = sqlText.split("node_id IN")[0];
+    expect(updateWhere).toMatch(/UPDATE v3_spawns/);
+    expect(updateWhere).not.toMatch(/\brun_id\b/);
   });
 
   it("rejects cancelling an already-cancelled run (unchanged behavior)", async () => {
