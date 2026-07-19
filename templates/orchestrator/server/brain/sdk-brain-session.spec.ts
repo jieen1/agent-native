@@ -78,11 +78,19 @@ vi.mock("./brain-mcp-config.js", () => ({
 
 const openaiCalls: Array<{ apiKey: string; baseURL: string }> = [];
 const openaiModelCalls: string[] = [];
-const mockGenerateText = vi.fn(async (..._args: unknown[]) => ({
-  text: "ok",
-  toolCalls: [],
-  finishReason: "stop",
-}));
+interface MockGenerateTextResult {
+  text: string;
+  toolCalls: unknown[];
+  finishReason: string;
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+}
+const mockGenerateText = vi.fn(
+  async (..._args: unknown[]): Promise<MockGenerateTextResult> => ({
+    text: "ok",
+    toolCalls: [],
+    finishReason: "stop",
+  }),
+);
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => mockGenerateText(...args),
