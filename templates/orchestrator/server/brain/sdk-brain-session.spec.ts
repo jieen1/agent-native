@@ -14,6 +14,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const hoisted = vi.hoisted(() => {
+  // A distinguishable fake "real secret" so a runtimeOverride test can prove
+  // this value is NEVER used for an override's endpoint, rather than merely
+  // coinciding with the placeholder because no env var happened to be set.
+  // Set via vi.hoisted (runs before the static `import` below resolves) since
+  // VLLM_API_KEY is a module-level const computed from process.env at import
+  // time — a plain top-of-file assignment would run too late to affect it.
+  process.env.OPENAI_API_KEY = "sk-should-never-leak-to-a-runtime-override";
+
   const state = { events: [] as Array<Record<string, unknown>> };
 
   function priorEventsChain(rows: unknown[]) {
@@ -122,10 +130,14 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
 
     expect(result).toEqual({ ok: true });
     // These mirror sdk-brain-session.ts's own module-level fallback constants
-    // (VLLM_BASE_URL/VLLM_MODEL/VLLM_API_KEY) — no OPENAI_* env vars are set
-    // in this test process, so the hardcoded defaults apply unchanged.
+    // (VLLM_BASE_URL/VLLM_MODEL/VLLM_API_KEY) — the real (fake-for-this-test)
+    // OPENAI_API_KEY env secret IS expected here: this is the unmodified,
+    // pre-existing automatic-fallback path, which has always used it.
     expect(openaiCalls).toEqual([
-      { apiKey: "sk-vllm-local", baseURL: "http://192.168.1.250:9000/v1" },
+      {
+        apiKey: "sk-should-never-leak-to-a-runtime-override",
+        baseURL: "http://192.168.1.250:9000/v1",
+      },
     ]);
     expect(openaiModelCalls).toEqual(["claude-sonnet-4-6"]);
 
@@ -169,7 +181,7 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
     );
   });
 
-  it("a runtimeOverride missing an apiKey falls back to the local placeholder key (VllmExecutorConfig's own tolerance)", async () => {
+  it("a runtimeOverride missing an apiKey falls back to a fake placeholder, NEVER to the host's real OPENAI_API_KEY env secret", async () => {
     await runSdkBrainTurn({
       threadId: "thread-3",
       ownerEmail: "owner@example.com",
@@ -181,6 +193,12 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
       },
     });
 
+    // The real assertion: whatever key was used, it must NOT be the (fake,
+    // for this test) "real" OPENAI_API_KEY secret — an override's endpoint is
+    // user-supplied and must never receive the host's real credential.
+    expect(openaiCalls[0]?.apiKey).not.toBe(
+      "sk-should-never-leak-to-a-runtime-override",
+    );
     expect(openaiCalls).toEqual([
       { apiKey: "sk-vllm-local", baseURL: "http://localhost:8000/v1" },
     ]);

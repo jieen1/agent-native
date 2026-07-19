@@ -25,6 +25,15 @@ const VLLM_BASE_URL =
   process.env.OPENAI_BASE_URL?.trim() || "http://192.168.1.250:9000/v1";
 const VLLM_MODEL = process.env.OPENAI_MODEL?.trim() || "claude-sonnet-4-6";
 const VLLM_API_KEY = process.env.OPENAI_API_KEY?.trim() || "sk-vllm-local";
+/**
+ * A deliberate runtime override with no saved key of its own (a local-network
+ * endpoint with no auth, e.g.) must NEVER fall back to the host's real
+ * OPENAI_API_KEY env secret — that secret is scoped to the trusted default
+ * VLLM_BASE_URL, not to a user-supplied baseUrl. Mirrors
+ * `vllm-executor.ts`'s `VLLM_PLACEHOLDER_KEY`: a deliberately fake value, the
+ * OpenAI SDK just requires a non-empty string.
+ */
+const RUNTIME_OVERRIDE_PLACEHOLDER_KEY = "sk-vllm-local";
 
 interface AppendEventInput {
   type: string;
@@ -249,9 +258,18 @@ export async function runSdkBrainTurn(
   // A deliberate runtime override (a saved openai-compatible/vllm
   // runtime_configs row) takes precedence over the env-var-derived defaults;
   // omitting it preserves the EXACT existing automatic-fallback behavior.
+  //
+  // The API key resolution is NOT symmetric with baseUrl/model: when an
+  // override is active but has no saved key of its own, it falls back to a
+  // fake placeholder, never to VLLM_API_KEY (the host's real
+  // OPENAI_API_KEY env secret). That secret is scoped to the trusted default
+  // VLLM_BASE_URL — sending it to an arbitrary user-supplied baseUrl would
+  // leak a real credential to whatever endpoint the row names.
   const resolvedBaseUrl = runtimeOverride?.baseUrl.trim() || VLLM_BASE_URL;
   const resolvedModel = runtimeOverride?.model.trim() || VLLM_MODEL;
-  const resolvedApiKey = runtimeOverride?.apiKey?.trim() || VLLM_API_KEY;
+  const resolvedApiKey = runtimeOverride
+    ? runtimeOverride.apiKey?.trim() || RUNTIME_OVERRIDE_PLACEHOLDER_KEY
+    : VLLM_API_KEY;
 
   // Mint A2A bearer for this owner.
   const bearer = mintBrainToken(ownerEmail);
