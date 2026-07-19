@@ -77,6 +77,14 @@ const mockGenerateText = vi.fn(async (..._args: unknown[]) => ({
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => mockGenerateText(...args),
+  // Mirrors the real `ai` package's marker-wrapped Schema<T> shape closely
+  // enough to prove `sdk-brain-session.ts` actually calls `jsonSchema()`
+  // (rather than silently passing the raw object through, which throws
+  // "... is not a function" against the real `asSchema()`).
+  jsonSchema: (schema: Record<string, unknown>) => ({
+    __wrappedJsonSchema: true,
+    jsonSchema: schema,
+  }),
 }));
 vi.mock("@ai-sdk/openai", () => ({
   createOpenAI: (opts: { apiKey: string; baseURL: string }) => {
@@ -204,7 +212,7 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
     ]);
   });
 
-  it("passes each MCP tool's schema to generateText as `inputSchema`, not the stale v4/v5 `parameters` key", async () => {
+  it("passes each MCP tool's schema to generateText as a jsonSchema()-wrapped `inputSchema`, not the stale v4/v5 `parameters` key", async () => {
     // Regression test for a real production failure: AI SDK v6's `Tool` type
     // reads `inputSchema`. Building the tools record with `parameters:
     // t.inputSchema` (the old v4/v5 field name) left every tool's real
@@ -212,6 +220,12 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
     // bare default for every tool regardless of what the MCP endpoint served,
     // which is what actually broke tool-calling against a strict
     // OpenAI-compatible endpoint (Aliyun/DashScope) — not just `list_apps`.
+    //
+    // A raw JSON-Schema object isn't valid on its own either — `asSchema()`
+    // calls anything that isn't a recognized Schema/Zod/Standard-Schema AS A
+    // FUNCTION, throwing "... is not a function". This asserts
+    // `jsonSchema()` (mocked above) actually wraps it, matching
+    // `ai-sdk-engine.ts`'s `engineToolsToAISDK(tools, jsonSchema)` pattern.
     await runSdkBrainTurn({
       threadId: "thread-4",
       ownerEmail: "owner@example.com",
@@ -224,7 +238,10 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
       mockGenerateText.mock.calls[0]?.[0] as { tools?: Record<string, any> }
     )?.tools;
     expect(passedTools).toEqual({
-      noop: { description: "no-op", inputSchema: {} },
+      noop: {
+        description: "no-op",
+        inputSchema: { __wrappedJsonSchema: true, jsonSchema: {} },
+      },
     });
     expect(passedTools?.noop.parameters).toBeUndefined();
   });

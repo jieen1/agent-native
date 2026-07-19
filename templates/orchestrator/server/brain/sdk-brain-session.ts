@@ -404,12 +404,32 @@ export async function runSdkBrainTurn(
   // (`{type:"object",properties:{},additionalProperties:false}`, no real
   // properties and no `required`) for EVERY tool, discarding the actual MCP
   // schema entirely regardless of what build-server.ts serves.
+  //
+  // A raw JSON-Schema-shaped object isn't a valid `inputSchema` on its own
+  // either: v6's `asSchema()` only recognizes a Zod schema, a Standard
+  // Schema, or the SDK's own `Schema<T>` wrapper — anything else it calls AS
+  // A FUNCTION (`schema()`), throwing "... is not a function". Wrap with the
+  // `ai` package's own `jsonSchema()` helper, exactly like
+  // `ai-sdk-engine.ts`'s `engineToolsToAISDK(tools, jsonSchema)` call.
+  let jsonSchemaFn: ((schema: Record<string, unknown>) => unknown) | undefined;
+  try {
+    const aiModule = await import("ai");
+    jsonSchemaFn = aiModule.jsonSchema as typeof jsonSchemaFn;
+  } catch {
+    // Fall through — the per-step dynamic import below reports a clean
+    // "Cannot import ai SDK" event/error if the module truly isn't available.
+  }
+
   const tools: Record<string, { description?: string; inputSchema: unknown }> =
     {};
   for (const t of mcpTools) {
+    const rawSchema = (t.inputSchema ?? {
+      type: "object",
+      properties: {},
+    }) as Record<string, unknown>;
     tools[t.name] = {
       description: t.description,
-      inputSchema: t.inputSchema,
+      inputSchema: jsonSchemaFn ? jsonSchemaFn(rawSchema) : rawSchema,
     };
   }
 
