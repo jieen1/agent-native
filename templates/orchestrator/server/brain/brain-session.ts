@@ -68,38 +68,13 @@
 // destructive here), and the two stay in lockstep from that point on.
 
 import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
-import { getV3Db, v3Schema } from "../db/index.js";
-import {
-  claudeWorkerEnv,
-  getManagedClaudeStatus,
-} from "../claude-managed-auth.js";
-import { refreshManagedTokenIfNeeded } from "../claude-login.js";
-import {
-  writeBrainMcpConfig,
-  buildBrainMcpServers,
-} from "./brain-mcp-config.js";
-import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
-import { getBrainModel } from "./brain-model.js";
-import { deriveContextWindow } from "../../actions/brain-usage.js";
-import { runSdkBrainTurn } from "./sdk-brain-session.js";
-import { registerOrchestratorRuntime } from "../register-runtime.js";
-import {
-  type BrainPhase,
-  buildBrainArgv,
-  harnessBuiltinTools,
-  loadBrainCapabilityProfile,
-  resolveBrainAllowedTools,
-  NO_DIRECT_WRITE_PROMPT_CLAUSE,
-  REVIEW_PHASE_PROMPT_ADDENDUM,
-} from "./brain-capability.js";
-import { maybeLogToolDenied } from "./tool-denied.js";
+import { createInterface } from "node:readline";
+
 import {
   ensureAgentHarnessSessionTables,
   getAgentHarnessEntry,
@@ -111,6 +86,37 @@ import {
   markAgentHarnessSessionStopped,
   type AgentHarnessSession,
 } from "@agent-native/core/agent/harness";
+import { eq, sql } from "drizzle-orm";
+
+import { deriveContextWindow } from "../../actions/brain-usage.js";
+import { refreshManagedTokenIfNeeded } from "../claude-login.js";
+import {
+  claudeWorkerEnv,
+  getManagedClaudeStatus,
+} from "../claude-managed-auth.js";
+import { getV3Db, v3Schema } from "../db/index.js";
+import { registerOrchestratorRuntime } from "../register-runtime.js";
+import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
+import {
+  type BrainPhase,
+  buildBrainArgv,
+  harnessBuiltinTools,
+  loadBrainCapabilityProfile,
+  resolveBrainAllowedTools,
+  NO_DIRECT_WRITE_PROMPT_CLAUSE,
+  REVIEW_PHASE_PROMPT_ADDENDUM,
+} from "./brain-capability.js";
+import {
+  writeBrainMcpConfig,
+  buildBrainMcpServers,
+} from "./brain-mcp-config.js";
+import { getBrainModel } from "./brain-model.js";
+import {
+  getBrainRuntimeSelection,
+  type BrainRuntimeSelection,
+} from "./brain-runtime.js";
+import { runSdkBrainTurn } from "./sdk-brain-session.js";
+import { maybeLogToolDenied } from "./tool-denied.js";
 
 /** Harness-name tag for the brain's row in the shared `agent_harness_sessions` store. */
 const BRAIN_HARNESS_NAME = "orchestrator:claude-cli-brain";
@@ -275,6 +281,51 @@ export async function recordHarnessDegradation(
   }
 }
 
+/**
+ * A saved `runtime:<id>` brain-model override no longer resolves (row
+ * deleted, wrong kind, or missing baseUrl/model) — must never fall back
+ * SILENTLY, mirroring {@link recordHarnessDegradation}'s SDLC-049 invariant
+ * for the OTHER degradation seam. Logs at error level and writes a
+ * `capability.degraded` v3_event EVERY time this branch is hit — no dedup, so
+ * the degradation stays visible for the whole time the saved selection stays
+ * broken. Best-effort: a failure to WRITE the event must never fail the turn.
+ */
+export async function recordRuntimeOverrideDegradation(
+  db: ReturnType<typeof getV3Db>,
+  threadId: string,
+  ownerEmail: string,
+  orgId: string | null,
+  runtimeConfigId: string,
+): Promise<void> {
+  const message =
+    `[brain] capability degraded: brain-model override "runtime:${runtimeConfigId}" ` +
+    `no longer resolves to a usable runtime config (deleted, wrong kind, or ` +
+    `missing baseUrl/model) — falling back to the default CC/vLLM-fallback ` +
+    `path for thread ${threadId}.`;
+  // eslint-disable-next-line no-console
+  console.error(message);
+  try {
+    await db.insert(v3Schema.v3Events).values({
+      id: `ev_${randomUUID()}`,
+      runId: null,
+      spawnId: null,
+      kind: "capability.degraded",
+      payload: {
+        capability: "brain-runtime-override",
+        reason: `runtime config ${runtimeConfigId} unresolved`,
+        runtimeConfigId,
+        threadId,
+      },
+      seqNum: null,
+      ts: new Date(),
+      ownerEmail,
+      orgId,
+    });
+  } catch {
+    // Best-effort — the console.error above already made this visible.
+  }
+}
+
 /** Shape of the opaque `resumeState` this module stores/reads. */
 interface BrainResumeState {
   sessionId?: string | null;
@@ -357,6 +408,38 @@ interface StartBrainTurnResult {
   threadId: string;
 }
 
+/** A resolved, valid `runtime:<id>` override — the narrowed "runtime" arm of {@link BrainRuntimeSelection}. */
+type ResolvedRuntimeOverride = Extract<
+  BrainRuntimeSelection,
+  { kind: "runtime" }
+>;
+
+/**
+ * The pure engine-choice decision a brain turn resolves to, given this turn's
+ * runtime-override selection and the CC login state. PURE — no IO,
+ * unit-testable in isolation (mirrors `evaluateBrainHarness`/
+ * `selectRuntimeRoute`'s "pure decision, tested separately from its IO
+ * plumbing" shape).
+ *
+ * A resolved `"runtime"` selection is a DELIBERATE operator choice: it forces
+ * `useSdkBrain = true` regardless of `loggedIn` — a runtime override must
+ * route through `runSdkBrainTurn` even when Claude Code IS logged in. Every
+ * other case (`"claude"`, or a `"runtime-unresolved"` degradation) resolves
+ * `useSdkBrain` from `!loggedIn` alone — the EXACT pre-existing behavior, so a
+ * broken saved selection degrades to the safety net instead of blocking the
+ * turn (the caller is responsible for logging that degradation LOUDLY; see
+ * {@link recordRuntimeOverrideDegradation}).
+ */
+export function resolveBrainEngineChoice(
+  runtimeSelection: BrainRuntimeSelection,
+  loggedIn: boolean,
+): { useSdkBrain: boolean; runtimeOverride: ResolvedRuntimeOverride | null } {
+  const runtimeOverride =
+    runtimeSelection.kind === "runtime" ? runtimeSelection : null;
+  const useSdkBrain = runtimeOverride ? true : !loggedIn;
+  return { useSdkBrain, runtimeOverride };
+}
+
 /**
  * Start (or resume) a brain turn for a thread. NON-BLOCKING: resolves the
  * thread, appends the user message to the transcript, kicks off the CC child
@@ -371,7 +454,23 @@ export async function startBrainTurn(
   // Check Claude Code login status. If CC is unavailable, fall through to the
   // SDK brain (vLLM). Only throw if BOTH CC and the SDK path fail.
   const login = getManagedClaudeStatus();
-  const useSdkBrain = !login.loggedIn;
+
+  // A saved `runtime:<id>` brain-model override (additive — see
+  // brain-runtime.ts / brain-model.ts's RUNTIME_MODEL_PREFIX) routes this turn
+  // through a saved openai-compatible/vllm runtime_configs row INSTEAD of
+  // Claude, regardless of CC login state — a deliberate operator choice, not a
+  // fallback. A once-valid-but-now-broken selection (row deleted, wrong kind,
+  // missing baseUrl/model) degrades LOUDLY (recordRuntimeOverrideDegradation,
+  // below) and falls through to the EXACT pre-existing `!login.loggedIn`
+  // behavior for this turn — a broken saved selection must never block the
+  // brain from running at all. When no override is saved, this resolves to
+  // `{kind:"claude", model}` and every line below behaves exactly as before
+  // this feature shipped.
+  const runtimeSelection = await getBrainRuntimeSelection(args.ownerEmail);
+  const { useSdkBrain, runtimeOverride } = resolveBrainEngineChoice(
+    runtimeSelection,
+    login.loggedIn,
+  );
   // Within the CC path, gated opt-in to the harness-adapter execution engine
   // instead of the raw `claude` spawn (see file banner + evaluateBrainHarness).
   const harnessEval = useSdkBrain
@@ -552,15 +651,35 @@ export async function startBrainTurn(
   }
 
   // Observability: record which execution engine this turn resolved to. The
-  // three paths are mutually exclusive and chosen above from the managed-CC
-  // login state (SDK/vLLM when logged out) and the harness opt-in gate.
+  // paths are mutually exclusive and chosen above from a deliberate runtime
+  // override (highest precedence), the managed-CC login state (SDK/vLLM when
+  // logged out), and the harness opt-in gate.
   console.log(
     // F7 (SDLC-049) fixed this to log the resolved `useHarnessBrain` decision
     // (post-degradation) instead of the raw `isBrainHarnessEnabled()` env
     // flag, which could read true even when this turn actually degraded to
-    // raw-spawn — keep that fix; F4 adds `phase` alongside it.
-    `[brain] engine=${useSdkBrain ? "vllm-sdk" : useHarnessBrain ? "harness-acp" : "raw-spawn-cc"} thread=${threadId} phase=${effectivePhase} ccLoggedIn=${!useSdkBrain} harnessEnabled=${useHarnessBrain}`,
+    // raw-spawn — keep that fix; F4 adds `phase` alongside it. A deliberate
+    // `runtime:<id>` override logs its own row name (`runtime:<name>`) so it
+    // stays distinguishable from the automatic CC-logged-out vllm-sdk
+    // fallback even though both dispatch through the same runSdkBrainTurn.
+    `[brain] engine=${useSdkBrain ? (runtimeOverride ? `runtime:${runtimeOverride.name}` : "vllm-sdk") : useHarnessBrain ? "harness-acp" : "raw-spawn-cc"} thread=${threadId} phase=${effectivePhase} ccLoggedIn=${login.loggedIn} harnessEnabled=${useHarnessBrain}`,
   );
+
+  // A saved runtime-override no longer resolves — must be LOUD, not a silent
+  // fallback (same 04 §7 "降级显式化不变量" invariant as the harness
+  // degradation below). Every wake that hits this branch logs + writes a
+  // fresh event (no dedup) so the degradation stays visible for the whole
+  // time the saved selection stays broken, while the turn itself still runs
+  // via the pre-existing `!login.loggedIn` fallback computed above.
+  if (runtimeSelection.kind === "runtime-unresolved") {
+    await recordRuntimeOverrideDegradation(
+      db,
+      threadId!,
+      args.ownerEmail,
+      args.orgId ?? null,
+      runtimeSelection.runtimeConfigId,
+    );
+  }
 
   // SDLC-049: the operator opted into the harness (ORCH_BRAIN_HARNESS=1) but
   // it turned out unusable this turn — this must be LOUD, not a silent
@@ -578,13 +697,22 @@ export async function startBrainTurn(
   }
 
   // 4) Run the brain in the background (do not await).
-  // Use the SDK brain (vLLM) when CC is not logged in; otherwise CC path.
+  // Use the SDK brain (vLLM, or a deliberate runtime override) when CC is not
+  // logged in OR a runtime override was selected; otherwise CC path.
   const bgTask = useSdkBrain
     ? runSdkBrainTurn({
         threadId: threadId!,
         ownerEmail: args.ownerEmail,
         orgId: args.orgId ?? null,
         message: args.message,
+        runtimeOverride: runtimeOverride
+          ? {
+              baseUrl: runtimeOverride.baseUrl,
+              model: runtimeOverride.model,
+              apiKey: runtimeOverride.apiKey,
+              name: runtimeOverride.name,
+            }
+          : undefined,
       }).then(async (outcome) => {
         const db2 = getV3Db();
         if (!outcome.ok) {
@@ -1071,8 +1199,7 @@ export async function finalizeThreadStatus(
       .update(v3Schema.brainThreads)
       .set({
         status: "done",
-        closingAnomaly:
-          outcome.lastResultText ?? `(${outcome.resultSubtype})`,
+        closingAnomaly: outcome.lastResultText ?? `(${outcome.resultSubtype})`,
         updatedAt: new Date(),
       })
       .where(eq(v3Schema.brainThreads.id, threadId));

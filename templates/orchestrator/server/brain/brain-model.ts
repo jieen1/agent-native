@@ -15,6 +15,31 @@ import { getSetting, putSetting } from "@agent-native/core/settings";
 export const BRAIN_MODEL_KEY = "brain-model";
 
 /**
+ * Prefix marking a brain-model override value as a saved `runtime_configs` row
+ * id (an openai-compatible/vllm endpoint) instead of a Claude model id. Stored
+ * in the SAME `BRAIN_MODEL_KEY` global setting as the Claude ids — safe by
+ * construction because `getBrainModel()` already degrades any value outside
+ * `ACCEPTED_BRAIN_MODELS` to `DEFAULT_BRAIN_MODEL`, so an unaware caller just
+ * sees "unrecognized" and falls back to Sonnet instead of erroring. See
+ * `server/brain/brain-runtime.ts`'s `getBrainRuntimeSelection` for the
+ * resolution logic that actually routes a `runtime:<id>` override to a real
+ * endpoint.
+ */
+export const RUNTIME_MODEL_PREFIX = "runtime:";
+
+/**
+ * Parse a brain-model setting value as a runtime_configs id reference. Returns
+ * the id when `raw` starts with `RUNTIME_MODEL_PREFIX` and has a non-empty
+ * suffix, else null (including for plain Claude model ids and empty/unset
+ * values). Pure — no IO.
+ */
+export function parseRuntimeModelSelector(raw: string): string | null {
+  if (!raw.startsWith(RUNTIME_MODEL_PREFIX)) return null;
+  const id = raw.slice(RUNTIME_MODEL_PREFIX.length).trim();
+  return id ? id : null;
+}
+
+/**
  * Settings key controlling which model tier is permitted for the CC subscription
  * brain. Defaults to "sonnet" (Opus/Fable blocked); can be relaxed to "all".
  */
@@ -31,9 +56,7 @@ const RESTRICTED_MODELS = new Set([
 ]);
 
 /** Return the subset of ACCEPTED_BRAIN_MODELS allowed for the given tier. */
-export function getAllowedBrainModels(
-  tier: BrainModelTier,
-): readonly string[] {
+export function getAllowedBrainModels(tier: BrainModelTier): readonly string[] {
   if (tier === "all") return ACCEPTED_BRAIN_MODELS;
   return ACCEPTED_BRAIN_MODELS.filter((m) => !RESTRICTED_MODELS.has(m));
 }
@@ -110,22 +133,34 @@ export function isAcceptedBrainModel(id: string): id is BrainModelId {
 }
 
 /**
+ * Read the raw, trimmed `BRAIN_MODEL_KEY` setting value with no accept-list
+ * validation — "" when unset or unreadable. Shared by `getBrainModel()` (which
+ * additionally degrades an unaccepted Claude id to the default) and
+ * `brain-runtime.ts`'s `getBrainRuntimeSelection` (which needs the raw value
+ * to detect a `RUNTIME_MODEL_PREFIX`-prefixed override BEFORE that
+ * Claude-only degradation would otherwise erase it).
+ */
+export async function getRawBrainModelSetting(): Promise<string> {
+  let raw: unknown = null;
+  try {
+    raw = await getSetting(BRAIN_MODEL_KEY);
+  } catch {
+    return "";
+  }
+  const value =
+    raw && typeof raw === "object" ? (raw as { model?: unknown }).model : raw;
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
+/**
  * Read the saved brain model override. When nothing (or a no-longer-accepted
  * id) is saved, fall back to DEFAULT_BRAIN_MODEL — the brain always runs a
  * known model rather than whatever the CLI defaults to. A throwing getSetting
  * degrades to the default rather than failing the turn.
  */
 export async function getBrainModel(): Promise<string> {
-  let raw: unknown = null;
-  try {
-    raw = await getSetting(BRAIN_MODEL_KEY);
-  } catch {
-    return DEFAULT_BRAIN_MODEL;
-  }
-  const value =
-    raw && typeof raw === "object" ? (raw as { model?: unknown }).model : raw;
-  if (typeof value !== "string") return DEFAULT_BRAIN_MODEL;
-  const trimmed = value.trim();
+  const trimmed = await getRawBrainModelSetting();
   if (!trimmed || !isAcceptedBrainModel(trimmed)) return DEFAULT_BRAIN_MODEL;
   return trimmed;
 }

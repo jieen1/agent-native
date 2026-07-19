@@ -21,6 +21,7 @@ import type {
 
 const aliyunRow: OwnerRuntimeRow = {
   id: "rt_aliyun123",
+  name: "Aliyun Bailian",
   kind: "openai-compatible",
   baseUrl: "https://llm-odw71g832ubo775e.cn-beijing.maas.aliyuncs.com/v1",
   model: "qwen-plus",
@@ -29,6 +30,7 @@ const aliyunRow: OwnerRuntimeRow = {
 
 const inactiveVllmRow: OwnerRuntimeRow = {
   id: "rt_localvllm",
+  name: "Local vLLM",
   kind: "vllm",
   baseUrl: "http://localhost:8000/v1",
   model: "qwen3.6",
@@ -37,6 +39,7 @@ const inactiveVllmRow: OwnerRuntimeRow = {
 
 const activeClaudeCodeRow: OwnerRuntimeRow = {
   id: "rt_cc",
+  name: "Claude Code",
   kind: "claude-code",
   baseUrl: null,
   model: null,

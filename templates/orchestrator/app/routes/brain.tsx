@@ -139,6 +139,12 @@ const MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: "claude-fable-5", label: "Fable 5" },
 ];
 
+// A saved openai-compatible/vllm runtime_configs row can ALSO drive the brain
+// (kept in sync with server/brain/brain-model.ts's RUNTIME_MODEL_PREFIX). The
+// model Select merges the caller's own non-claude-code `list-runtime-configs`
+// rows into MODEL_OPTIONS as `runtime:<id>` values — see runtimeModelOptions.
+const RUNTIME_MODEL_PREFIX = "runtime:";
+
 // Composer template quick-reply chips (04 §6: "新增模板快捷 chips"). Clicking
 // one appends the canonical instruction text to the draft message.
 const TEMPLATE_CHIPS: { label: string; text: string }[] = [
@@ -186,12 +192,25 @@ interface BrainUsage {
   model: string | null;
   actualModel?: string | null;
   configuredModel: string | null;
+  /** Non-null only when the saved override is a `runtime:<id>` selector. */
+  runtimeOverrideId?: string | null;
   context: {
     used: number | null;
     window: number | null;
     pct: number | null;
     windowDerived?: boolean;
   };
+}
+
+/** A saved model runtime (list-runtime-configs row) that can drive the brain. */
+interface RuntimeConfigRow {
+  id: string;
+  name: string;
+  kind: "vllm" | "openai-compatible" | "claude-code";
+  baseUrl: string | null;
+  model: string | null;
+  models: string[];
+  active: boolean;
 }
 
 /** Bar fill color by severity. */
@@ -512,6 +531,29 @@ export default function BrainRoute() {
     return new Set<string>(tierData.allowedModels.map((m) => m.id));
   }, [tierData]);
 
+  // The caller's own saved model runtimes (vLLM/OpenAI-compatible endpoints)
+  // that can ALSO drive the brain — merged into the model Select below as
+  // `runtime:<id>` options, alongside the Claude MODEL_OPTIONS.
+  const { data: runtimeConfigs = [] } = useActionQuery(
+    "list-runtime-configs" as any,
+    {},
+    { refetchInterval: 60_000 },
+  ) as { data?: RuntimeConfigRow[] };
+  const runtimeModelOptions = useMemo(
+    () =>
+      runtimeConfigs
+        .filter((r) => r.kind !== "claude-code")
+        .map((r) => ({
+          value: `${RUNTIME_MODEL_PREFIX}${r.id}`,
+          label: `${r.name} · ${r.model ?? r.baseUrl ?? r.id}`,
+        })),
+    [runtimeConfigs],
+  );
+  const allModelOptions = useMemo(
+    () => [...MODEL_OPTIONS, ...runtimeModelOptions],
+    [runtimeModelOptions],
+  );
+
   // ── Managed Claude Code login (whether the primary "claude-code" engine is
   // actually the one driving turns, vs the sdk-vllm fallback) ──
   const { data: claudeStatus } = useClaudeStatus();
@@ -630,7 +672,15 @@ export default function BrainRoute() {
     // Map the "CLI default" sentinel back to the empty string the action expects.
     const model = value === DEFAULT_MODEL_VALUE ? "" : value;
     try {
-      await setModel.mutateAsync({ model });
+      const result = (await setModel.mutateAsync({ model })) as {
+        name?: string;
+      };
+      // A runtime-config switch echoes the resolved row's real name — show a
+      // confirmation toast naming it (Claude switches keep their existing,
+      // silent behavior; `name` is only present on the runtime: branch).
+      if (result?.name) {
+        toast.success(`大脑模型已切换为「${result.name}」。`);
+      }
       // Reflect the pending switch immediately; the resolved init model lands on
       // the next brain turn.
       refetchUsage();
@@ -727,14 +777,25 @@ export default function BrainRoute() {
 
   // The Select shows the configured override when set, else the live model.
   // An empty / unknown override maps to the "CLI default" sentinel (Radix Select
-  // forbids an empty-string item value).
-  const selectModelValue = usage?.configuredModel
-    ? MODEL_OPTIONS.some((o) => o.value === usage.configuredModel)
-      ? (usage.configuredModel as string)
+  // forbids an empty-string item value). A saved `runtime:<id>` override is
+  // checked FIRST, against the live merged runtime option list, so it resolves
+  // to that row's real name instead of falling into the "unknown" bucket — if
+  // the saved id no longer resolves to a live row (deleted), it falls through
+  // to the SAME "unknown override" sentinel every other unrecognized value
+  // already gets (server-side loudly logs the degradation separately).
+  const selectModelValue = usage?.runtimeOverrideId
+    ? allModelOptions.some(
+        (o) => o.value === `${RUNTIME_MODEL_PREFIX}${usage.runtimeOverrideId}`,
+      )
+      ? `${RUNTIME_MODEL_PREFIX}${usage.runtimeOverrideId}`
       : DEFAULT_MODEL_VALUE
-    : usage?.model && MODEL_OPTIONS.some((o) => o.value === usage.model)
-      ? (usage.model as string)
-      : DEFAULT_MODEL_VALUE;
+    : usage?.configuredModel
+      ? MODEL_OPTIONS.some((o) => o.value === usage.configuredModel)
+        ? (usage.configuredModel as string)
+        : DEFAULT_MODEL_VALUE
+      : usage?.model && MODEL_OPTIONS.some((o) => o.value === usage.model)
+        ? (usage.model as string)
+        : DEFAULT_MODEL_VALUE;
 
   const composerPlaceholder = activeThreadId
     ? hasSession
@@ -1160,6 +1221,7 @@ export default function BrainRoute() {
           onModelChange={handleModelChange}
           switching={setModel.isPending}
           allowedModelValues={allowedModelValues}
+          modelOptions={allModelOptions}
           tier={tierData?.tier ?? null}
           claudeLoggedIn={!!claudeStatus?.loggedIn}
           harnessEnabled={!!harnessStatus?.enabled}
@@ -1602,6 +1664,7 @@ function EngineModelCard({
   onModelChange,
   switching,
   allowedModelValues,
+  modelOptions,
   tier,
   claudeLoggedIn,
   harnessEnabled,
@@ -1612,6 +1675,7 @@ function EngineModelCard({
   onModelChange: (value: string) => void;
   switching: boolean;
   allowedModelValues: Set<string>;
+  modelOptions: { value: string; label: string }[];
   tier: string | null;
   claudeLoggedIn: boolean;
   harnessEnabled: boolean;
@@ -1649,16 +1713,19 @@ function EngineModelCard({
             <SelectValue placeholder={modelLabel(usage?.model ?? null)} />
           </SelectTrigger>
           <SelectContent>
-            {MODEL_OPTIONS.filter(
-              (o) =>
-                o.value === DEFAULT_MODEL_VALUE ||
-                allowedModelValues.size === 0 ||
-                allowedModelValues.has(o.value),
-            ).map((o) => (
-              <SelectItem key={o.value} value={o.value} className="text-xs">
-                {o.label}
-              </SelectItem>
-            ))}
+            {modelOptions
+              .filter(
+                (o) =>
+                  o.value === DEFAULT_MODEL_VALUE ||
+                  o.value.startsWith(RUNTIME_MODEL_PREFIX) ||
+                  allowedModelValues.size === 0 ||
+                  allowedModelValues.has(o.value),
+              )
+              .map((o) => (
+                <SelectItem key={o.value} value={o.value} className="text-xs">
+                  {o.label}
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
         {tier ? (

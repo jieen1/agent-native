@@ -15,8 +15,13 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq, desc } from "drizzle-orm";
 import { z } from "zod";
+
+import {
+  getBrainModel,
+  getRawBrainModelSetting,
+  parseRuntimeModelSelector,
+} from "../server/brain/brain-model.js";
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
-import { getBrainModel } from "../server/brain/brain-model.js";
 
 /**
  * Derive the context window (tokens) from a model id by FAMILY when the thread
@@ -98,8 +103,16 @@ export default defineAction({
     }
 
     // The configured override (so the Select reflects a pending switch even
-    // before the next turn re-captures the resolved init model).
+    // before the next turn re-captures the resolved init model). Unchanged —
+    // still degrades a `runtime:<id>` override to DEFAULT_BRAIN_MODEL, same
+    // as any other unrecognized value, so this field's meaning never changes.
     const configuredModel = await getBrainModel();
+    // Additive: the RAW setting value, only when it is a `runtime:<id>`
+    // selector — lets the UI show a saved runtime-override's real row name
+    // instead of falling into the "unknown override" bucket (getBrainModel()
+    // itself must stay untouched for every other caller).
+    const rawModelSetting = await getRawBrainModelSetting();
+    const runtimeOverrideId = parseRuntimeModelSelector(rawModelSetting);
     // The ACTUAL model the thread ran as (captured from the init `system` event),
     // independent of any override.
     const actualModel = threadRow?.model ?? null;
@@ -119,6 +132,7 @@ export default defineAction({
       model,
       actualModel,
       configuredModel,
+      runtimeOverrideId,
       context: { used, window, pct: contextPct, windowDerived },
     };
   },

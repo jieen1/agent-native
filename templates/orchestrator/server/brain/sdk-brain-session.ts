@@ -12,7 +12,9 @@
 // returns with no tool calls or MAX_STEPS is reached.
 
 import { randomUUID } from "node:crypto";
+
 import { eq, sql } from "drizzle-orm";
+
 import { getV3Db, v3Schema } from "../db/index.js";
 import { mintBrainToken } from "./brain-mcp-config.js";
 import { BRAIN_PROMPT } from "./brain-prompt.js";
@@ -21,10 +23,8 @@ const MCP_URL = "http://localhost:3002/_agent-native/mcp";
 const MAX_STEPS = 50;
 const VLLM_BASE_URL =
   process.env.OPENAI_BASE_URL?.trim() || "http://192.168.1.250:9000/v1";
-const VLLM_MODEL =
-  process.env.OPENAI_MODEL?.trim() || "claude-sonnet-4-6";
-const VLLM_API_KEY =
-  process.env.OPENAI_API_KEY?.trim() || "sk-vllm-local";
+const VLLM_MODEL = process.env.OPENAI_MODEL?.trim() || "claude-sonnet-4-6";
+const VLLM_API_KEY = process.env.OPENAI_API_KEY?.trim() || "sk-vllm-local";
 
 interface AppendEventInput {
   type: string;
@@ -91,7 +91,9 @@ async function appendEvent(
 /** Call the orchestrator MCP endpoint via JSON-RPC to list available tools. */
 async function mcpListTools(
   bearer: string,
-): Promise<Array<{ name: string; description?: string; inputSchema: unknown }>> {
+): Promise<
+  Array<{ name: string; description?: string; inputSchema: unknown }>
+> {
   const resp = await fetch(MCP_URL, {
     method: "POST",
     headers: {
@@ -129,7 +131,13 @@ async function mcpListTools(
   }
 
   const data = (await resp.json()) as {
-    result?: { tools?: Array<{ name: string; description?: string; inputSchema: unknown }> };
+    result?: {
+      tools?: Array<{
+        name: string;
+        description?: string;
+        inputSchema: unknown;
+      }>;
+    };
     error?: { message: string };
   };
   if (data.error) throw new Error(`MCP error: ${data.error.message}`);
@@ -158,7 +166,9 @@ async function mcpCallTool(
   });
 
   if (!resp.ok) {
-    throw new Error(`MCP tools/call ${name} failed: ${resp.status} ${resp.statusText}`);
+    throw new Error(
+      `MCP tools/call ${name} failed: ${resp.status} ${resp.statusText}`,
+    );
   }
 
   const ct = resp.headers.get("content-type") ?? "";
@@ -181,7 +191,8 @@ async function mcpCallTool(
     result?: { content?: Array<{ type: string; text?: string }> };
     error?: { message: string };
   };
-  if (data.error) throw new Error(`MCP tool ${name} error: ${data.error.message}`);
+  if (data.error)
+    throw new Error(`MCP tool ${name} error: ${data.error.message}`);
   // MCP result: array of content items, extract text
   const content = data.result?.content ?? [];
   if (content.length === 1 && content[0].type === "text") {
@@ -194,11 +205,28 @@ async function mcpCallTool(
   return content;
 }
 
+/**
+ * A deliberate brain-model override resolved to a saved `runtime_configs` row
+ * (`server/brain/brain-runtime.ts`'s `getBrainRuntimeSelection`). When
+ * present, it takes precedence over the module-level env-var-derived
+ * VLLM_BASE_URL/VLLM_MODEL/VLLM_API_KEY constants below — omitting it
+ * preserves the EXACT existing automatic-fallback behavior (CC-logged-out
+ * safety net), byte for byte.
+ */
+export interface SdkBrainRuntimeOverride {
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  /** The runtime_configs row's saved name, for transcript/log honesty. */
+  name?: string;
+}
+
 interface SdkBrainOpts {
   threadId: string;
   ownerEmail: string;
   orgId: string | null;
   message: string;
+  runtimeOverride?: SdkBrainRuntimeOverride;
 }
 
 export interface SdkBrainOutcome {
@@ -216,24 +244,42 @@ export interface SdkBrainOutcome {
 export async function runSdkBrainTurn(
   opts: SdkBrainOpts,
 ): Promise<SdkBrainOutcome> {
-  const { threadId, ownerEmail, orgId, message } = opts;
+  const { threadId, ownerEmail, orgId, message, runtimeOverride } = opts;
+
+  // A deliberate runtime override (a saved openai-compatible/vllm
+  // runtime_configs row) takes precedence over the env-var-derived defaults;
+  // omitting it preserves the EXACT existing automatic-fallback behavior.
+  const resolvedBaseUrl = runtimeOverride?.baseUrl.trim() || VLLM_BASE_URL;
+  const resolvedModel = runtimeOverride?.model.trim() || VLLM_MODEL;
+  const resolvedApiKey = runtimeOverride?.apiKey?.trim() || VLLM_API_KEY;
 
   // Mint A2A bearer for this owner.
   const bearer = mintBrainToken(ownerEmail);
 
   // Discover tools from the live MCP endpoint.
-  let mcpTools: Array<{ name: string; description?: string; inputSchema: unknown }>;
+  let mcpTools: Array<{
+    name: string;
+    description?: string;
+    inputSchema: unknown;
+  }>;
   try {
     mcpTools = await mcpListTools(bearer);
   } catch (err) {
     const msg = `Failed to list MCP tools: ${err instanceof Error ? err.message : String(err)}`;
-    await appendEvent(threadId, ownerEmail, orgId, { type: "error", text: msg });
+    await appendEvent(threadId, ownerEmail, orgId, {
+      type: "error",
+      text: msg,
+    });
     return { ok: false, error: msg };
   }
 
   if (mcpTools.length === 0) {
-    const msg = "MCP server returned no tools — orchestrator may not be running.";
-    await appendEvent(threadId, ownerEmail, orgId, { type: "error", text: msg });
+    const msg =
+      "MCP server returned no tools — orchestrator may not be running.";
+    await appendEvent(threadId, ownerEmail, orgId, {
+      type: "error",
+      text: msg,
+    });
     return { ok: false, error: msg };
   }
 
@@ -249,12 +295,44 @@ export async function runSdkBrainTurn(
   type Message =
     | { role: "system"; content: string }
     | { role: "user"; content: string }
-    | { role: "assistant"; content: Array<{ type: "text"; text: string } | { type: "tool-call"; toolCallId: string; toolName: string; args: Record<string, unknown> }> }
-    | { role: "tool"; content: Array<{ type: "tool-result"; toolCallId: string; toolName: string; result: unknown }> };
+    | {
+        role: "assistant";
+        content: Array<
+          | { type: "text"; text: string }
+          | {
+              type: "tool-call";
+              toolCallId: string;
+              toolName: string;
+              args: Record<string, unknown>;
+            }
+        >;
+      }
+    | {
+        role: "tool";
+        content: Array<{
+          type: "tool-result";
+          toolCallId: string;
+          toolName: string;
+          result: unknown;
+        }>;
+      };
 
   const messages: Message[] = [];
-  const assistantParts: Array<{ type: "text"; text: string } | { type: "tool-call"; toolCallId: string; toolName: string; args: Record<string, unknown> }> = [];
-  const toolResults: Array<{ type: "tool-result"; toolCallId: string; toolName: string; result: unknown }> = [];
+  const assistantParts: Array<
+    | { type: "text"; text: string }
+    | {
+        type: "tool-call";
+        toolCallId: string;
+        toolName: string;
+        args: Record<string, unknown>;
+      }
+  > = [];
+  const toolResults: Array<{
+    type: "tool-result";
+    toolCallId: string;
+    toolName: string;
+    result: unknown;
+  }> = [];
 
   function flushAssistant() {
     if (assistantParts.length > 0) {
@@ -302,7 +380,8 @@ export async function runSdkBrainTurn(
   messages.push({ role: "user", content: message });
 
   // Build AI SDK tool definitions from MCP tool schemas.
-  const tools: Record<string, { description?: string; parameters: unknown }> = {};
+  const tools: Record<string, { description?: string; parameters: unknown }> =
+    {};
   for (const t of mcpTools) {
     tools[t.name] = {
       description: t.description,
@@ -310,10 +389,15 @@ export async function runSdkBrainTurn(
     };
   }
 
-  // Emit a system event so the transcript shows which mode is active.
+  // Emit a system event so the transcript shows which mode is active — names
+  // the actual resolved endpoint/model, and the row name when this turn is a
+  // deliberate runtime-override selection rather than the automatic fallback.
+  const engineLabel = runtimeOverride
+    ? `SDK brain (runtime override${runtimeOverride.name ? `: ${runtimeOverride.name}` : ""})`
+    : "SDK brain (vLLM)";
   await appendEvent(threadId, ownerEmail, orgId, {
     type: "system",
-    text: `SDK brain (vLLM) turn started — model: ${VLLM_MODEL}, endpoint: ${VLLM_BASE_URL}, tools: ${mcpTools.length}`,
+    text: `${engineLabel} turn started — model: ${resolvedModel}, endpoint: ${resolvedBaseUrl}, tools: ${mcpTools.length}`,
   });
 
   // Run the agentic loop.
@@ -324,8 +408,19 @@ export async function runSdkBrainTurn(
     step++;
 
     // Dynamic import of ai package (same pattern as ai-sdk-engine.ts).
-    let generateText: (opts: unknown) => Promise<{ text: string; toolCalls?: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>; finishReason: string }>;
-    let createOpenAI: (opts: { apiKey: string; baseURL: string }) => (model: string) => unknown;
+    let generateText: (opts: unknown) => Promise<{
+      text: string;
+      toolCalls?: Array<{
+        toolCallId: string;
+        toolName: string;
+        args: Record<string, unknown>;
+      }>;
+      finishReason: string;
+    }>;
+    let createOpenAI: (opts: {
+      apiKey: string;
+      baseURL: string;
+    }) => (model: string) => unknown;
     try {
       const ai = await import("ai");
       generateText = ai.generateText as typeof generateText;
@@ -333,12 +428,18 @@ export async function runSdkBrainTurn(
       createOpenAI = openaiMod.createOpenAI as typeof createOpenAI;
     } catch (err) {
       const msg = `Cannot import ai SDK: ${err instanceof Error ? err.message : String(err)}`;
-      await appendEvent(threadId, ownerEmail, orgId, { type: "error", text: msg });
+      await appendEvent(threadId, ownerEmail, orgId, {
+        type: "error",
+        text: msg,
+      });
       return { ok: false, error: msg };
     }
 
-    const openai = createOpenAI({ apiKey: VLLM_API_KEY, baseURL: VLLM_BASE_URL });
-    const model = openai(VLLM_MODEL);
+    const openai = createOpenAI({
+      apiKey: resolvedApiKey,
+      baseURL: resolvedBaseUrl,
+    });
+    const model = openai(resolvedModel);
 
     let result: Awaited<ReturnType<typeof generateText>>;
     try {
@@ -351,7 +452,10 @@ export async function runSdkBrainTurn(
       });
     } catch (err) {
       const msg = `generateText error (step ${step}): ${err instanceof Error ? err.message : String(err)}`;
-      await appendEvent(threadId, ownerEmail, orgId, { type: "error", text: msg });
+      await appendEvent(threadId, ownerEmail, orgId, {
+        type: "error",
+        text: msg,
+      });
       return { ok: false, error: msg };
     }
 
@@ -369,8 +473,18 @@ export async function runSdkBrainTurn(
     }
 
     // Execute each tool call against the MCP endpoint and collect results.
-    const toolResultParts: Array<{ type: "tool-result"; toolCallId: string; toolName: string; result: unknown }> = [];
-    const assistantCallParts: Array<{ type: "tool-call"; toolCallId: string; toolName: string; args: Record<string, unknown> }> = [];
+    const toolResultParts: Array<{
+      type: "tool-result";
+      toolCallId: string;
+      toolName: string;
+      result: unknown;
+    }> = [];
+    const assistantCallParts: Array<{
+      type: "tool-call";
+      toolCallId: string;
+      toolName: string;
+      args: Record<string, unknown>;
+    }> = [];
 
     for (const tc of result.toolCalls) {
       const useId = tc.toolCallId;
@@ -384,13 +498,20 @@ export async function runSdkBrainTurn(
         toolInput: args,
       });
 
-      assistantCallParts.push({ type: "tool-call", toolCallId: useId, toolName: name, args });
+      assistantCallParts.push({
+        type: "tool-call",
+        toolCallId: useId,
+        toolName: name,
+        args,
+      });
 
       let toolResult: unknown;
       try {
         toolResult = await mcpCallTool(bearer, name, args);
       } catch (err) {
-        toolResult = { error: err instanceof Error ? err.message : String(err) };
+        toolResult = {
+          error: err instanceof Error ? err.message : String(err),
+        };
       }
 
       await appendEvent(threadId, ownerEmail, orgId, {
@@ -400,7 +521,12 @@ export async function runSdkBrainTurn(
         toolResult,
       });
 
-      toolResultParts.push({ type: "tool-result", toolCallId: useId, toolName: name, result: toolResult });
+      toolResultParts.push({
+        type: "tool-result",
+        toolCallId: useId,
+        toolName: name,
+        result: toolResult,
+      });
     }
 
     // Extend message history: assistant turn with tool calls, then tool results.

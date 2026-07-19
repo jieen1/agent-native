@@ -59,7 +59,7 @@
 // placeholder as "no explicit choice" instead of an unknown one.
 
 import { readAppSecret } from "@agent-native/core/secrets";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { runtimeApiKeySecretKey } from "../../../actions/_util.js";
 import { BUILTIN_ENGINES } from "../executor-choice.js";
@@ -74,6 +74,7 @@ import { VllmExecutor, type VllmExecutorConfig } from "./vllm-executor.js";
 /** A saved runtime_configs row, scoped to one owner, with the `active` flag. */
 export interface OwnerRuntimeRow {
   id: string;
+  name: string;
   kind: "vllm" | "openai-compatible" | "claude-code";
   baseUrl: string | null;
   model: string | null;
@@ -112,6 +113,7 @@ async function loadOwnerRuntimeRows(
   const rows = await getDb()
     .select({
       id: schema.runtimeConfigs.id,
+      name: schema.runtimeConfigs.name,
       kind: schema.runtimeConfigs.kind,
       baseUrl: schema.runtimeConfigs.baseUrl,
       model: schema.runtimeConfigs.model,
@@ -123,13 +125,51 @@ async function loadOwnerRuntimeRows(
 }
 
 /**
+ * Load ONE saved runtime_configs row for one owner by id — mirrors
+ * `loadOwnerRuntimeRows`, filtered to a single id (production default).
+ * Returns undefined when no row with that id exists for THIS owner (wrong id
+ * or a different owner's row — the two are indistinguishable on purpose, a
+ * scoped lookup must never leak whether an id exists under someone else's
+ * account). Returned regardless of `kind` — callers that must never treat a
+ * claude-code-kind row as a real endpoint (the brain runtime-override paths,
+ * `server/brain/brain-model.ts` / `brain-runtime.ts`) check `row.kind`
+ * themselves so each can report its own specific rejection reason.
+ */
+export async function resolveOwnerRuntimeRow(
+  ownerEmail: string,
+  id: string,
+): Promise<OwnerRuntimeRow | undefined> {
+  const { getDb, schema } = await import("../../db/index.js");
+  const [row] = await getDb()
+    .select({
+      id: schema.runtimeConfigs.id,
+      name: schema.runtimeConfigs.name,
+      kind: schema.runtimeConfigs.kind,
+      baseUrl: schema.runtimeConfigs.baseUrl,
+      model: schema.runtimeConfigs.model,
+      active: schema.runtimeConfigs.active,
+    })
+    .from(schema.runtimeConfigs)
+    .where(
+      and(
+        eq(schema.runtimeConfigs.id, id),
+        eq(schema.runtimeConfigs.ownerEmail, ownerEmail),
+      ),
+    )
+    .limit(1);
+  return row as OwnerRuntimeRow | undefined;
+}
+
+/**
  * Resolve a matched row's real API key (production default) — the SAME
  * secret `save-runtime-config` writes and `activate-runtime` /
  * `test-runtime-config` read, via `runtimeApiKeySecretKey`. Local vLLM/LM
  * Studio rows never configure one; `VllmExecutor` falls through to its own
- * placeholder when this resolves to undefined.
+ * placeholder when this resolves to undefined. Exported so
+ * `server/brain/brain-runtime.ts` can resolve the SAME secret for a brain
+ * runtime-override selection instead of duplicating this lookup.
  */
-async function resolveRowApiKey(
+export async function resolveRuntimeConfigApiKey(
   row: OwnerRuntimeRow,
   ownerEmail: string,
 ): Promise<string | undefined> {
@@ -173,7 +213,7 @@ export class RoutingRuntimeExecutor implements RuntimeExecutor {
 
   constructor(deps: RoutingRuntimeExecutorDeps = {}) {
     this.loadRows = deps.loadRows ?? loadOwnerRuntimeRows;
-    this.resolveApiKeyFor = deps.resolveApiKey ?? resolveRowApiKey;
+    this.resolveApiKeyFor = deps.resolveApiKey ?? resolveRuntimeConfigApiKey;
     this.vllmFor = deps.vllmFor ?? ((cfg) => new VllmExecutor(cfg));
     this.remoteApi = deps.remoteApi ?? new RemoteApiExecutor();
   }
