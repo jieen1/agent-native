@@ -22,7 +22,10 @@ const hoisted = vi.hoisted(() => {
   // time — a plain top-of-file assignment would run too late to affect it.
   process.env.OPENAI_API_KEY = "sk-should-never-leak-to-a-runtime-override";
 
-  const state = { events: [] as Array<Record<string, unknown>> };
+  const state = {
+    events: [] as Array<Record<string, unknown>>,
+    updates: [] as Array<Record<string, unknown>>,
+  };
 
   function priorEventsChain(rows: unknown[]) {
     const chain = {
@@ -52,6 +55,12 @@ const hoisted = vi.hoisted(() => {
         values: (row: Record<string, unknown>) => {
           state.events.push(row);
           return Promise.resolve();
+        },
+      }),
+      update: () => ({
+        set: (values: Record<string, unknown>) => {
+          state.updates.push(values as Record<string, unknown>);
+          return { where: () => Promise.resolve() };
         },
       }),
     }),
@@ -117,6 +126,7 @@ import { runSdkBrainTurn } from "./sdk-brain-session.js";
 describe("runSdkBrainTurn — runtimeOverride", () => {
   beforeEach(() => {
     hoisted.state.events.length = 0;
+    hoisted.state.updates.length = 0;
     openaiCalls.length = 0;
     openaiModelCalls.length = 0;
     mockGenerateText.mockClear();
@@ -244,5 +254,65 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
       },
     });
     expect(passedTools?.noop.parameters).toBeUndefined();
+  });
+
+  it("persists the resolved model + a derived context window to brain_threads for a runtimeOverride turn", async () => {
+    // Regression test for the root cause: runSdkBrainTurn never wrote
+    // `model`/`contextWindow` back to brain_threads, so the brain-usage
+    // action's actualModel stayed NULL and fell back to the Claude-tier
+    // DEFAULT_BRAIN_MODEL (1M window) for whatever model actually ran.
+    const result = await runSdkBrainTurn({
+      threadId: "thread-5",
+      ownerEmail: "owner@example.com",
+      orgId: null,
+      message: "hello",
+      runtimeOverride: {
+        baseUrl:
+          "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        model: "qwen3.8-max-preview",
+        apiKey: "sk-real-aliyun-key",
+        name: "Aliyun Bailian",
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+
+    const modelUpdate = hoisted.state.updates.find(
+      (u) => u.model === "qwen3.8-max-preview",
+    );
+    expect(modelUpdate).toBeDefined();
+    // "qwen3.8-max-preview" matches neither the opus/[1m] 1M regexes nor the
+    // sonnet/haiku family regexes, so it lands on deriveContextWindow's
+    // default of 200000 — a number, present, and NOT the Claude-tier 1M.
+    expect(typeof modelUpdate?.contextWindow).toBe("number");
+    expect(modelUpdate?.contextWindow).toBe(200000);
+    expect(modelUpdate?.contextWindow).not.toBe(1000000);
+  });
+
+  it("persists the live context fill (contextUsed) from generateText's usage.inputTokens", async () => {
+    // AI SDK v6's OpenAI-compatible usage.inputTokens is the TOTAL prompt/
+    // context size for the call (already includes cached-read tokens), so it
+    // is persisted directly as contextUsed without any cache subfield sum.
+    mockGenerateText.mockResolvedValueOnce({
+      text: "done",
+      toolCalls: [],
+      finishReason: "stop",
+      usage: { inputTokens: 12345, outputTokens: 10, totalTokens: 12355 },
+    });
+
+    const result = await runSdkBrainTurn({
+      threadId: "thread-6",
+      ownerEmail: "owner@example.com",
+      orgId: null,
+      message: "hello",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+
+    const usageUpdate = hoisted.state.updates.find(
+      (u) => u.contextUsed === 12345,
+    );
+    expect(usageUpdate).toBeDefined();
   });
 });
