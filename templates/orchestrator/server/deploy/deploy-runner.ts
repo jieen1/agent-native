@@ -368,6 +368,27 @@ async function backupApp(
  * resetting over them. `headSha` is passed in (not returned) so the caller
  * already has the one recoverable reference recorded even if this throws.
  */
+/**
+ * `git status --porcelain` line suffixes this guard must NEVER treat as real,
+ * unrecorded work — every one of these is a tracked file the "building"
+ * stage itself deliberately leaves dirty on every successful run (see
+ * `deploy-version.generated.ts`'s own doc comment: checked in as "dev",
+ * overwritten in place with the real commit SHA right before that app's
+ * build, on purpose never reset back afterward). Without this exclusion,
+ * this guard added by Bug #93 would refuse EVERY deploy after the very first
+ * one — the prior run's own expected side effect would look identical to
+ * real uncommitted work and permanently block `git reset --hard`, confirmed
+ * against the real host (its checkout was already sitting in exactly this
+ * state from a prior deploy).
+ */
+const EXPECTED_DIRTY_FILE_SUFFIXES = ["/server/deploy-version.generated.ts"];
+
+/** True when a `git status --porcelain` line names one of {@link EXPECTED_DIRTY_FILE_SUFFIXES}. */
+function isExpectedDirtyStatusLine(line: string): boolean {
+  const path = line.slice(3).trim();
+  return EXPECTED_DIRTY_FILE_SUFFIXES.some((suffix) => path.endsWith(suffix));
+}
+
 async function assertCheckoutSafeToReset(
   cfg: DeployConfig,
   headSha: string,
@@ -377,11 +398,16 @@ async function assertCheckoutSafeToReset(
     `cd '${cfg.remoteBasePath}' && git status --porcelain`,
     15_000,
   );
-  if (statusOut.trim().length > 0) {
+  const realDirtyLines = statusOut
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0 && !isExpectedDirtyStatusLine(line));
+  if (realDirtyLines.length > 0) {
     throw new Error(
       `remote checkout at '${cfg.remoteBasePath}' has uncommitted local changes ` +
-        `(HEAD ${headSha}) — refusing to run 'git reset --hard' over real, ` +
-        `unrecorded work. Reconcile the checkout by hand first.`,
+        `(HEAD ${headSha}): ${realDirtyLines.join(", ")} — refusing to run ` +
+        `'git reset --hard' over real, unrecorded work. Reconcile the checkout ` +
+        `by hand first.`,
     );
   }
 
