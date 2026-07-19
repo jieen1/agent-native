@@ -545,6 +545,79 @@ describe("runDeployJob", () => {
     ).toBe(false);
   });
 
+  // ── Real-host discovery (found while verifying the gh-provisioning fix
+  // above): the "building" stage's own deploy-version.generated.ts marker
+  // (see that file's doc comment) is a TRACKED file the pipeline deliberately
+  // leaves dirty after every successful build — never reset back afterward.
+  // Bug #93's guard, added above, would treat that expected leftover as real
+  // uncommitted work and refuse EVERY deploy after the very first one.
+  // Confirmed live: the real host's checkout was already sitting in exactly
+  // this state from its last real deploy.
+
+  it("does not refuse `git reset --hard` when the only dirty file is the expected deploy-version.generated.ts marker left by the PRIOR deploy's own build stage", async () => {
+    seedRun("deploy_expected_dirty_marker");
+    hoisted.execImpl = async (cmd: string) => {
+      if (isGitStatusProbe(cmd))
+        return {
+          stdout:
+            " M templates/orchestrator/server/deploy-version.generated.ts\n",
+          stderr: "",
+        };
+      if (isAheadCountProbe(cmd)) return { stdout: "0\n", stderr: "" };
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "abc123\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = healthyFetchWithMarker("abc123");
+
+    await runDeployJob("deploy_expected_dirty_marker", CFG, ["orchestrator"]);
+
+    const row = hoisted.rows.get("deploy_expected_dirty_marker")!;
+    expect(row.status).toBe("succeeded");
+    expect(
+      hoisted.execCalls.some((c) => c.includes("git reset --hard origin/main")),
+    ).toBe(true);
+  });
+
+  it("still refuses `git reset --hard` when a REAL file is dirty alongside the expected marker (the exclusion must not swallow genuine unrecorded work)", async () => {
+    seedRun("deploy_real_plus_expected_dirty");
+    hoisted.execImpl = async (cmd: string) => {
+      if (isGitStatusProbe(cmd))
+        return {
+          stdout:
+            " M templates/orchestrator/server/deploy-version.generated.ts\n" +
+            " M some/real-uncommitted-file.ts\n",
+          stderr: "",
+        };
+      if (isAheadCountProbe(cmd)) return { stdout: "0\n", stderr: "" };
+      if (cmd.includes("git rev-parse HEAD"))
+        return { stdout: "deadbeef\n", stderr: "" };
+      if (isExistsProbe(cmd)) return { stdout: "EXISTS\n", stderr: "" };
+      if (isBackupVerifyProbe(cmd))
+        return { stdout: "BACKUP_OK\n", stderr: "" };
+      return { stdout: "ok", stderr: "" };
+    };
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch;
+
+    await runDeployJob("deploy_real_plus_expected_dirty", CFG, [
+      "orchestrator",
+    ]);
+
+    const row = hoisted.rows.get("deploy_real_plus_expected_dirty")!;
+    expect(row.status).toBe("rolled_back");
+    expect(row.error).toContain("uncommitted");
+    expect(row.error).toContain("real-uncommitted-file.ts");
+    expect(row.error).not.toContain("deploy-version.generated.ts");
+    expect(
+      hoisted.execCalls.some((c) => c.includes("git reset --hard origin/main")),
+    ).toBe(false);
+  });
+
   // ── Bug #94: `checkHealth` must not treat a bare `res.ok` 200 as proof the
   // NEW build is live — this app's own AGENTS.md documents SSR responses as
   // "hard-cached at the CDN for every visitor", so a stale cached 200 has to
