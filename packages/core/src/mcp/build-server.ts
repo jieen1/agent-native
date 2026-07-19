@@ -276,6 +276,24 @@ function isActionVisibleForOAuthScope(
   return hasMcpOAuthScope(scopes, required);
 }
 
+/**
+ * Wire `inputSchema` for a tool whose `ActionTool` declares no `parameters`
+ * (e.g. `list_apps`, `list_templates`). A bare `{ type: "object", properties:
+ * {} }` is tolerated by OpenAI's and Anthropic's own function-calling schema
+ * validators but rejected outright by stricter OpenAI-compatible validators
+ * (observed: Aliyun/DashScope `InvalidParameter: ... must confirm to a valid
+ * openai-compatible JSON schema`). `additionalProperties: false` and
+ * `required: []` make the schema unambiguous under those stricter validators
+ * while staying semantically identical for every other client — nothing here
+ * has any properties to restrict either way.
+ */
+const NO_PARAMS_INPUT_SCHEMA = {
+  type: "object" as const,
+  properties: {},
+  required: [] as string[],
+  additionalProperties: false,
+};
+
 const COMPACT_MCP_APP_CATALOG_BUILTINS = new Set([
   "list_apps",
   "open_app",
@@ -1627,10 +1645,7 @@ export async function createMCPServerForRequest(
             description: hasLink
               ? `${baseDescription} After calling, surface the returned "Open in … →" link to the user.`
               : baseDescription,
-            inputSchema: entry.tool.parameters ?? {
-              type: "object" as const,
-              properties: {},
-            },
+            inputSchema: entry.tool.parameters ?? NO_PARAMS_INPUT_SCHEMA,
             ...(Object.keys(toolMeta).length > 0 ? { _meta: toolMeta } : {}),
             annotations,
           };

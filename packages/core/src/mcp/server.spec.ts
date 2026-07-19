@@ -648,6 +648,67 @@ describe("handleMcpRequest — web-standard runtime fallback (no Node req/res)",
     expect(echo._meta?.ui?.permissions).toBeUndefined();
   });
 
+  it("gives zero-parameter builtin tools a JSON schema strict OpenAI-compatible validators accept", async () => {
+    // Regression test: `list_apps` (and `list_templates` / `create_workspace_app`
+    // in this file's builtin-tools mock, which mirror the real production
+    // shape of declaring NO `tool.parameters`) used to fall back to a bare
+    // `{ type: "object", properties: {} }` inputSchema. Some stricter
+    // OpenAI-compatible function-calling validators (observed: Aliyun/
+    // DashScope) reject that shape outright with a 400
+    // `InvalidParameter: ... must confirm to a valid openai-compatible JSON
+    // schema` error, even though OpenAI's and Anthropic's own validators
+    // tolerate it. The fix must add `additionalProperties: false` and
+    // `required: []` WITHOUT touching tools that already declare real
+    // parameters.
+    const out = await callWeb(
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/list",
+        params: {},
+      },
+      {
+        headers: { "x-agent-native-mcp-full-catalog": "1" },
+        config: compactSurfaceDefaultConfig,
+      },
+    );
+    expect(out.error).toBeUndefined();
+    const byName = (name: string) =>
+      out.result.tools.find((t: any) => t.name === name);
+
+    const noParamsSchema = {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    };
+    expect(byName("list_apps").inputSchema).toEqual(noParamsSchema);
+    expect(byName("list_templates").inputSchema).toEqual(noParamsSchema);
+    expect(byName("create_workspace_app").inputSchema).toEqual(noParamsSchema);
+
+    // Tools that already declare real parameters must be untouched — no
+    // `additionalProperties` / `required: []` injected onto their existing
+    // schemas.
+    expect(byName("open_app").inputSchema).toEqual({
+      type: "object",
+      properties: {
+        app: { type: "string" },
+        path: { type: "string" },
+        embed: { type: "boolean" },
+      },
+    });
+    expect(byName("open_app").inputSchema.additionalProperties).toBeUndefined();
+    expect(byName("ask_app").inputSchema).toEqual({
+      type: "object",
+      properties: {
+        app: { type: "string" },
+        message: { type: "string" },
+      },
+      required: ["app", "message"],
+    });
+    expect(byName("ask_app").inputSchema.additionalProperties).toBeUndefined();
+  });
+
   it("uses a compact tool catalog when the OAuth token has mcp:apps", async () => {
     const out = await callWeb(
       {
