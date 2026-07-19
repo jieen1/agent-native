@@ -203,4 +203,29 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
       { apiKey: "sk-vllm-local", baseURL: "http://localhost:8000/v1" },
     ]);
   });
+
+  it("passes each MCP tool's schema to generateText as `inputSchema`, not the stale v4/v5 `parameters` key", async () => {
+    // Regression test for a real production failure: AI SDK v6's `Tool` type
+    // reads `inputSchema`. Building the tools record with `parameters:
+    // t.inputSchema` (the old v4/v5 field name) left every tool's real
+    // `inputSchema` undefined; `asSchema()` then silently substituted its own
+    // bare default for every tool regardless of what the MCP endpoint served,
+    // which is what actually broke tool-calling against a strict
+    // OpenAI-compatible endpoint (Aliyun/DashScope) — not just `list_apps`.
+    await runSdkBrainTurn({
+      threadId: "thread-4",
+      ownerEmail: "owner@example.com",
+      orgId: null,
+      message: "hello",
+    });
+
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+    const passedTools = (
+      mockGenerateText.mock.calls[0]?.[0] as { tools?: Record<string, any> }
+    )?.tools;
+    expect(passedTools).toEqual({
+      noop: { description: "no-op", inputSchema: {} },
+    });
+    expect(passedTools?.noop.parameters).toBeUndefined();
+  });
 });

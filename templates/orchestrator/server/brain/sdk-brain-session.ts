@@ -397,13 +397,19 @@ export async function runSdkBrainTurn(
   // Append the current user message to history.
   messages.push({ role: "user", content: message });
 
-  // Build AI SDK tool definitions from MCP tool schemas.
-  const tools: Record<string, { description?: string; parameters: unknown }> =
+  // Build AI SDK tool definitions from MCP tool schemas. AI SDK v6's `Tool`
+  // type reads `inputSchema`, not `parameters` (that was the v4/v5 field
+  // name) — passing `parameters` left every tool's schema as `undefined`,
+  // which `asSchema()` silently replaces with its own bare default
+  // (`{type:"object",properties:{},additionalProperties:false}`, no real
+  // properties and no `required`) for EVERY tool, discarding the actual MCP
+  // schema entirely regardless of what build-server.ts serves.
+  const tools: Record<string, { description?: string; inputSchema: unknown }> =
     {};
   for (const t of mcpTools) {
     tools[t.name] = {
       description: t.description,
-      parameters: t.inputSchema,
+      inputSchema: t.inputSchema,
     };
   }
 
@@ -425,13 +431,15 @@ export async function runSdkBrainTurn(
   while (step < MAX_STEPS) {
     step++;
 
-    // Dynamic import of ai package (same pattern as ai-sdk-engine.ts).
+    // Dynamic import of ai package (same pattern as ai-sdk-engine.ts). AI SDK
+    // v6's tool-call result carries the arguments under `input`, not the
+    // v4/v5 `args` name (see TypedToolCall in the `ai` package).
     let generateText: (opts: unknown) => Promise<{
       text: string;
       toolCalls?: Array<{
         toolCallId: string;
         toolName: string;
-        args: Record<string, unknown>;
+        input: Record<string, unknown>;
       }>;
       finishReason: string;
     }>;
@@ -507,7 +515,7 @@ export async function runSdkBrainTurn(
     for (const tc of result.toolCalls) {
       const useId = tc.toolCallId;
       const name = tc.toolName;
-      const args = tc.args ?? {};
+      const args = tc.input ?? {};
 
       await appendEvent(threadId, ownerEmail, orgId, {
         type: "tool_use",
