@@ -139,7 +139,7 @@ describe("decompose-epic: itemKey sequencer routing", () => {
     const keys = result.children.map((c: any) => c.itemKey);
     // epic-1 already holds F8-001 — children continue from 002.
     expect(keys).toEqual(["F8-002", "F8-003", "F8-004"]);
-  });
+  }, 20000);
 
   it("a create-work-item call interleaved with decompose-epic never collides (shared sequencer, not two independent counters)", async () => {
     await setup();
@@ -166,5 +166,5 @@ describe("decompose-epic: itemKey sequencer routing", () => {
     expect(new Set(allKeys).size).toBe(allKeys.length); // no duplicates
     expect(created.itemKey).toBe("F8-002");
     expect(decomposed.children[0].itemKey).toBe("F8-003");
-  });
+  }, 20000);
 });

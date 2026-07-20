@@ -1,12 +1,14 @@
-// F8: itemKey 消歧(读路径). Historical duplicate itemKeys (SDLC-032~036 —
-// pre-sequencer count(*) races minted the same itemKey twice within a
-// project) are NEVER rewritten (only-add, no-change red line — 迁移只加不改
-// applies to data too, not just schema). Instead every read path that shows
-// an itemKey to a human appends a short id suffix when — and only when — a
-// (projectId, itemKey) pair is not unique, so a human can tell two same-
-// labeled items apart. Single-item contexts where no comparison is possible
-// (e.g. run-acceptance.ts's report title for the one item being accepted)
-// don't need this.
+// F8: itemKey 消歧(读路径) — 现为防御性兜底. 历史撞号(pre-sequencer count(*)
+// races 在同一项目内把同一 itemKey 发了两次)现在已由 scripts/f038-backfill-
+// dedupe-item-keys.mts --execute 真正回溯改写去重(SDLC-038, 工单 cy9upfianv):
+// 对每个未挂 sprint 的重复 itemKey,保留最早创建的一行为权威,其余各行被分配全新
+// 且唯一的 itemKey。这推翻了本文件旧版注释里"历史撞号永不改写,只加不改"的决定。
+//
+// 因此本读路径消歧函数(computeItemKeyDisplays / computeItemKeyDisplay)不再是
+// 撞号问题的唯一/主要应对方式,而是防御性兜底:万一未来又通过其它写法引入撞号,
+// 或某个项目还没跑过 f038 backfill,展示层仍能在 (projectId, itemKey) 不唯一时
+// 追加 `·<id前4位>` 后缀,让人能区分两个同标签的工单。不需要比较的单工单上下文
+// (如 run-acceptance.ts 对单个被验收工单的报表标题)无需消歧。
 //
 // Detection is against the FULL project population, not just the batch of
 // rows a given read happens to fetch — e.g. list-work-items filtered to
