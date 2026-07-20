@@ -2049,13 +2049,20 @@ export function WorkItemDetailPage() {
   }
 
   if (isLoading && !item) {
+    // 三栏骨架:左 rail(属性,--panel L1 面板)+ 中栏(主内容)+ 右栏
+    // (执行/时间/关联/活动,--panel L1 面板),形状与加载完成后的布局一致。
     return (
-      <div className="mx-auto max-w-5xl space-y-5 p-6">
+      <div className="mx-auto max-w-[1400px] space-y-5 p-5 sm:p-6">
         <Skeleton className="h-7 w-24" />
         <Skeleton className="h-9 w-2/3" />
-        <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
-          <Skeleton className="h-64 w-full rounded-xl" />
-          <Skeleton className="h-48 w-full rounded-xl" />
+        <div className="grid items-start gap-5 lg:grid-cols-[240px_minmax(0,1fr)_340px]">
+          <Skeleton className="h-96 w-full rounded-xl bg-panel" />
+          <div className="min-w-0 space-y-5">
+            <Skeleton className="h-32 w-full rounded-xl" />
+            <Skeleton className="h-40 w-full rounded-xl" />
+            <Skeleton className="h-28 w-full rounded-xl" />
+          </div>
+          <Skeleton className="h-[28rem] w-full rounded-xl bg-panel" />
         </div>
       </div>
     );
@@ -2423,148 +2430,11 @@ export function WorkItemDetailPage() {
         ) : null}
       </header>
 
-      {/* ── Body ── */}
-      <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
-        {/* Left column */}
-        <div className="order-2 min-w-0 space-y-6 lg:order-1">
-          {/* Stage progress card */}
-          <StageProgressCard
-            workItemId={id}
-            currentStageName={currentStageName}
-            plannedStages={plannedStagesList}
-          />
-
-          {/* Requirement */}
-          <section>
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              需求
-            </h2>
-            <div className="rounded-xl border border-border bg-card/40 p-4">
-              {item.description ? (
-                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-                  {item.description}
-                </p>
-              ) : (
-                <p className="text-sm italic text-muted-foreground">
-                  暂无需求描述。
-                </p>
-              )}
-            </div>
-          </section>
-
-          {/* 执行记录 — the run's node chain + failure evidence + history
-              (原型 s4-work-item.html ~420-462). Full detail lives here in the
-              main column; the Inspector's "关联运行" row (执行 group) only
-              shows a compact reference badge, matching the prototype's split
-              between the two surfaces. */}
-          {runs.length > 0 ? (
-            <section>
-              <h2 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <IconTimeline className="size-3.5" />
-                执行记录
-              </h2>
-              <div className="rounded-xl border border-border bg-card/40 p-4">
-                <RunEvidenceList
-                  runs={runs}
-                  activity={activity.data}
-                  activityLoading={activity.isLoading}
-                />
-              </div>
-            </section>
-          ) : null}
-
-          {/* 产物 — versioned outputs a stage produced (原型 ~464-485). */}
-          <ArtifactsPanel workItemId={id} />
-
-          {/* Epic children (only for epic/集合 work items) */}
-          {(item.type === "epic" || item.type === "集合") && (
-            <EpicChildrenPanel workItemId={id} />
-          )}
-
-          {/* Links */}
-          <LinksPanel workItemId={id} />
-
-          {/* Documents — real feature beyond the prototype's scope (design/
-              prototype/acceptance/spec doc links); kept, grouped next to
-              产物 since both are "attached reference material" panels. */}
-          <DocumentsPanel workItemId={id} />
-
-          {/* Unified activity + comments tab panel */}
-          <section className="rounded-xl border border-border bg-card/40">
-            {/* Tab header */}
-            <div className="flex items-center gap-1 border-b border-border px-4 pt-3 pb-0">
-              <button
-                type="button"
-                onClick={() => setActivityTab("activity")}
-                className={cn(
-                  "pb-2 px-2 text-xs font-medium border-b-2 -mb-px transition-colors",
-                  activityTab === "activity"
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
-                )}
-              >
-                活动
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivityTab("comments")}
-                className={cn(
-                  "pb-2 px-2 text-xs font-medium border-b-2 -mb-px transition-colors",
-                  activityTab === "comments"
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
-                )}
-              >
-                评论
-              </button>
-            </div>
-            <div className="p-4">
-              {activityTab === "activity" ? (
-                <ActivitiesPanel workItemId={id} />
-              ) : (
-                <CommentsPanel workItemId={id} />
-              )}
-            </div>
-          </section>
-
-          {/* Orchestrator Activity Feed */}
-          {dispatched ? (
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  编排器动态
-                </h2>
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      activity.isLoading
-                        ? "bg-amber-500 animate-pulse"
-                        : "bg-emerald-500",
-                    )}
-                  />
-                  {activity.data?.thread?.status
-                    ? `大脑 ${activity.data.thread.status}`
-                    : "实时"}
-                </span>
-              </div>
-              <ActivityFeed
-                dispatched={dispatched}
-                activity={activity.data}
-                isLoading={activity.isLoading}
-              />
-            </section>
-          ) : null}
-        </div>
-
-        {/* Right column: context — Inspector, grouped into 属性/执行/时间
-            (原型 s4-work-item.html ~533-564), replacing the old flat
-            MetaRow list. The 触发下一阶段/回退阶段 buttons that used to live
-            here in a separate "Actions card" now live in the page header —
-            the prototype's Inspector holds only grouped info, no action
-            buttons. */}
-        <aside className="order-1 lg:order-2">
-          <div className="space-y-3 lg:sticky lg:top-4 rounded-xl border border-border bg-card px-1">
+      {/* ── Body —— 三栏：左栏(属性 rail) · 中栏(主内容) · 右栏(执行/时间/关联/活动面板) ── */}
+      <div className="grid items-start gap-5 lg:grid-cols-[240px_minmax(0,1fr)_340px]">
+        {/* 左栏：导航/元信息 rail —— --panel 表面，sticky（原 Inspector「属性」分组整体迁入） */}
+        <aside className="order-1">
+          <div className="space-y-3 lg:sticky lg:top-4 rounded-xl border border-border bg-panel px-1">
             <InspectorSection label="属性" first>
               <GuardedStatusRow
                 item={{
@@ -2610,9 +2480,6 @@ export function WorkItemDetailPage() {
                 <EditableOwner id={id} owner={owner} />
               </MetaRow>
 
-              {/* Real fields beyond the prototype's 属性 group — appended
-                  after the prototype-matching rows above rather than
-                  dropped. */}
               {itemKey ? (
                 <MetaRow icon={IconHash} label="编号">
                   <span
@@ -2641,8 +2508,61 @@ export function WorkItemDetailPage() {
                 <EditableTags id={id} tags={tags} />
               </MetaRow>
             </InspectorSection>
+          </div>
+        </aside>
 
-            <InspectorSection label="执行">
+        {/* 中栏：主内容 —— 页面视觉核心 */}
+        <div className="order-2 min-w-0 space-y-6">
+          <StageProgressCard
+            workItemId={id}
+            currentStageName={currentStageName}
+            plannedStages={plannedStagesList}
+          />
+
+          <section>
+            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              需求
+            </h2>
+            <div className="rounded-xl border border-border bg-card/40 p-4">
+              {item.description ? (
+                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
+                  {item.description}
+                </p>
+              ) : (
+                <p className="text-sm italic text-muted-foreground">
+                  暂无需求描述。
+                </p>
+              )}
+            </div>
+          </section>
+
+          {runs.length > 0 ? (
+            <section>
+              <h2 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <IconTimeline className="size-3.5" />
+                执行记录
+              </h2>
+              <div className="rounded-xl border border-border bg-card/40 p-4">
+                <RunEvidenceList
+                  runs={runs}
+                  activity={activity.data}
+                  activityLoading={activity.isLoading}
+                />
+              </div>
+            </section>
+          ) : null}
+
+          <ArtifactsPanel workItemId={id} />
+
+          {(item.type === "epic" || item.type === "集合") && (
+            <EpicChildrenPanel workItemId={id} />
+          )}
+        </div>
+
+        {/* 右栏：活动/评论/关联信息面板 —— --panel 表面，sticky（原 Inspector「执行」「时间」分组 + 关联/文档/活动/评论/编排器动态迁入） */}
+        <aside className="order-3">
+          <div className="space-y-3 lg:sticky lg:top-4 rounded-xl border border-border bg-panel px-1">
+            <InspectorSection label="执行" first>
               <MetaRow icon={IconBrandGithub} label="仓库">
                 {ghHref ? (
                   <a
@@ -2668,10 +2588,6 @@ export function WorkItemDetailPage() {
                 </span>
               </MetaRow>
 
-              {/* Compact reference only (status + run id + deep link) —
-                  the full node chain / evidence / history lives in the main
-                  column's "执行记录" section above, matching the prototype's
-                  split between the two surfaces (原型 ~558 vs ~420-462). */}
               {runs.length > 0 ? (
                 <MetaRow icon={IconTimeline} label="关联运行">
                   <RunBadgeCompact
@@ -2720,6 +2636,76 @@ export function WorkItemDetailPage() {
                 </span>
               </MetaRow>
             </InspectorSection>
+          </div>
+
+          <div className="mt-6 space-y-6">
+            <LinksPanel workItemId={id} />
+
+            <DocumentsPanel workItemId={id} />
+
+            <section className="rounded-xl border border-border bg-card/40">
+              <div className="flex items-center gap-1 border-b border-border px-4 pt-3 pb-0">
+                <button
+                  type="button"
+                  onClick={() => setActivityTab("activity")}
+                  className={cn(
+                    "pb-2 px-2 text-xs font-medium border-b-2 -mb-px transition-colors",
+                    activityTab === "activity"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  活动
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivityTab("comments")}
+                  className={cn(
+                    "pb-2 px-2 text-xs font-medium border-b-2 -mb-px transition-colors",
+                    activityTab === "comments"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  评论
+                </button>
+              </div>
+              <div className="p-4">
+                {activityTab === "activity" ? (
+                  <ActivitiesPanel workItemId={id} />
+                ) : (
+                  <CommentsPanel workItemId={id} />
+                )}
+              </div>
+            </section>
+
+            {dispatched ? (
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    编排器动态
+                  </h2>
+                  <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        activity.isLoading
+                          ? "bg-amber-500 animate-pulse"
+                          : "bg-emerald-500",
+                      )}
+                    />
+                    {activity.data?.thread?.status
+                      ? `大脑 ${activity.data.thread.status}`
+                      : "实时"}
+                  </span>
+                </div>
+                <ActivityFeed
+                  dispatched={dispatched}
+                  activity={activity.data}
+                  isLoading={activity.isLoading}
+                />
+              </section>
+            ) : null}
           </div>
         </aside>
       </div>
