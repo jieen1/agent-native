@@ -1,0 +1,191 @@
+{
+  "generatedAt": "2026-07-20T04:41:25.809Z",
+  "viewport": {
+    "width": 1440,
+    "height": 904
+  },
+  "tool": "playwright@1.61.1 (chromium headless)",
+  "themeMethod": "document.documentElement.classList.add('dark') — 与原型自带主题按钮及 next-themes class 策略等效",
+  "entries": [
+    {
+      "ok": true,
+      "kind": "prototype",
+      "name": "prototype-s2-sprint-studio.light.png",
+      "file": "prototype-s2-sprint-studio.light.png",
+      "theme": "light",
+      "url": "file:///workspaces/040c87f5-d785-4e1f-8a87-e5c3bbc04b5d/docs/sdlc-product-design/prototypes/s2-sprint-studio.html",
+      "httpStatus": 200,
+      "capturedAt": "2026-07-20T04:41:01.345Z"
+    },
+    {
+      "ok": true,
+      "kind": "prototype",
+      "name": "prototype-s2-sprint-studio.dark.png",
+      "file": "prototype-s2-sprint-studio.dark.png",
+      "theme": "dark",
+      "url": "file:///workspaces/040c87f5-d785-4e1f-8a87-e5c3bbc04b5d/docs/sdlc-product-design/prototypes/s2-sprint-studio.html",
+      "httpStatus": 200,
+      "capturedAt": "2026-07-20T04:41:03.125Z"
+    },
+    {
+      "ok": true,
+      "kind": "prototype",
+      "name": "prototype-s6-sprint-cockpit.light.png",
+      "file": "prototype-s6-sprint-cockpit.light.png",
+      "theme": "light",
+      "url": "file:///workspaces/040c87f5-d785-4e1f-8a87-e5c3bbc04b5d/docs/sdlc-product-design/prototypes/s6-sprint-cockpit.html",
+      "httpStatus": 200,
+      "capturedAt": "2026-07-20T04:41:04.937Z"
+    },
+    {
+      "ok": true,
+      "kind": "prototype",
+      "name": "prototype-s6-sprint-cockpit.dark.png",
+      "file": "prototype-s6-sprint-cockpit.dark.png",
+      "theme": "dark",
+      "url": "file:///workspaces/040c87f5-d785-4e1f-8a87-e5c3bbc04b5d/docs/sdlc-product-design/prototypes/s6-sprint-cockpit.html",
+      "httpStatus": 200,
+      "capturedAt": "2026-07-20T04:41:06.702Z"
+    },
+    {
+      "ok": true,
+      "kind": "prototype",
+      "name": "prototype-s9-brain-console.light.png",
+      "file": "prototype-s9-brain-console.light.png",
+      "theme": "light",
+      "url": "file:///workspaces/040c87f5-d785-4e1f-8a87-e5c3bbc04b5d/docs/sdlc-product-design/prototypes/s9-brain-console.html",
+      "httpStatus": 200,
+      "capturedAt": "2026-07-20T04:41:08.487Z"
+    },
+    {
+      "ok": true,
+      "kind": "prototype",
+      "name": "prototype-s9-brain-console.dark.png",
+      "file": "prototype-s9-brain-console.dark.png",
+      "theme": "dark",
+      "url": "file:///workspaces/040c87f5-d785-4e1f-8a87-e5c3bbc04b5d/docs/sdlc-product-design/prototypes/s9-brain-console.html",
+      "httpStatus": 200,
+      "capturedAt": "2026-07-20T04:41:10.236Z"
+    },
+    {
+      "ok": true,
+      "kind": "prototype",
+      "name": "prototype-s10-health-insights.light.png",
+      "file": "prototype-s10-health-insights.light.png",
+      "theme": "light",
+      "url": "file:///workspaces/040c87f5-d785-4e1f-8a87-e5c3bbc04b5d/docs/sdlc-product-design/prototypes/s10-health-insights.html",
+      "httpStatus": 200,
+      "capturedAt": "2026-07-20T04:41:12.013Z"
+    },
+    {
+      "ok": true,
+      "kind": "prototype",
+      "name": "prototype-s10-health-insights.dark.png",
+      "file": "prototype-s10-health-insights.dark.png",
+      "theme": "dark",
+      "url": "file:///workspaces/040c87f5-d785-4e1f-8a87-e5c3bbc04b5d/docs/sdlc-product-design/prototypes/s10-health-insights.html",
+      "httpStatus": 200,
+      "capturedAt": "2026-07-20T04:41:13.763Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "orchestrator-index.light.png",
+      "file": "orchestrator-index.light.png",
+      "theme": "light",
+      "url": "http://localhost:3101/",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:14.976Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "orchestrator-index.dark.png",
+      "file": "orchestrator-index.dark.png",
+      "theme": "dark",
+      "url": "http://localhost:3101/",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:16.191Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "orchestrator-brain.light.png",
+      "file": "orchestrator-brain.light.png",
+      "theme": "light",
+      "url": "http://localhost:3101/brain",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:17.391Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "orchestrator-brain.dark.png",
+      "file": "orchestrator-brain.dark.png",
+      "theme": "dark",
+      "url": "http://localhost:3101/brain",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:18.591Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "orchestrator-health.light.png",
+      "file": "orchestrator-health.light.png",
+      "theme": "light",
+      "url": "http://localhost:3101/health",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:19.790Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "orchestrator-health.dark.png",
+      "file": "orchestrator-health.dark.png",
+      "theme": "dark",
+      "url": "http://localhost:3101/health",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:20.991Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "orchestrator-insights.light.png",
+      "file": "orchestrator-insights.light.png",
+      "theme": "light",
+      "url": "http://localhost:3101/insights",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:22.190Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "orchestrator-insights.dark.png",
+      "file": "orchestrator-insights.dark.png",
+      "theme": "dark",
+      "url": "http://localhost:3101/insights",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:23.390Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "tracker-sprints.light.png",
+      "file": "tracker-sprints.light.png",
+      "theme": "light",
+      "url": "http://localhost:3102/sprints",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:24.591Z"
+    },
+    {
+      "ok": true,
+      "kind": "app",
+      "name": "tracker-sprints.dark.png",
+      "file": "tracker-sprints.dark.png",
+      "theme": "dark",
+      "url": "http://localhost:3102/sprints",
+      "httpStatus": 500,
+      "capturedAt": "2026-07-20T04:41:25.790Z"
+    }
+  ]
+}
