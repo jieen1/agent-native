@@ -65,12 +65,14 @@ const workspaceSkillIncludes = [
   "context-awareness",
   "context-xray",
   "create-skill",
+  "customizing-agent-native",
   "data-programs",
   "delegate-to-agent",
   "extension-points",
   "extensions",
   "external-agents",
   "frontend-design",
+  "feature-flags",
   "generative-ui",
   "harness-agents",
   "internationalization",
@@ -112,15 +114,20 @@ const templateSharedSkillIncludes = [
   "capture-learnings",
   "client-methods",
   "create-skill",
+  "customizing-agent-native",
   "delegate-to-agent",
   "frontend-design",
+  "feature-flags",
+  "integration-webhooks",
   "internationalization",
+  "onboarding",
   "performance",
   "real-time-collab",
   "real-time-sync",
   "security",
   "self-modifying-code",
   "shadcn-ui",
+  "secrets",
   "storing-data",
   "upgrade-agent-native",
 ];
@@ -130,15 +137,29 @@ const requiredTemplateSharedSkills: Record<string, string[]> = {
 };
 
 /** Copied into every first-party template that uses shared skills. */
-const requiredAllTemplateSharedSkills = ["upgrade-agent-native"];
+const requiredAllTemplateSharedSkills = [
+  "customizing-agent-native",
+  "feature-flags",
+  "upgrade-agent-native",
+];
 
 const requiredDefaultTemplateSharedSkills = [
+  "customizing-agent-native",
+  "feature-flags",
+  "integration-webhooks",
   "internationalization",
+  "onboarding",
+  "secrets",
   "upgrade-agent-native",
 ];
 
 const requiredHeadlessTemplateSharedSkills = [
+  "actions",
   "agent-native-docs",
+  "customizing-agent-native",
+  "feature-flags",
+  "integration-webhooks",
+  "secrets",
   "upgrade-agent-native",
 ];
 
@@ -201,6 +222,7 @@ const requiredActionGuidance = [
 // workspaces should not inherit branch/PR shipping behavior from our monorepo.
 const workspaceSkillExcludes = [
   "babysit-pr",
+  "multi-frontier-desktop",
   "new-branch",
   "ship",
   "ship-desktop",

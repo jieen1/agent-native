@@ -16,6 +16,10 @@ Detailed media, meeting, dictation, editing, and sharing rules live in
 - Never hardcode API keys, tokens, webhook URLs, signing secrets, private Builder/internal data, customer data, or credential-looking literals. Use secrets/OAuth/runtime configuration and obvious placeholders in examples.
 - Use actions for recording metadata, transcripts, cleanup, summaries, chapters,
   comments, spaces/folders, meetings, and sharing. Do not bypass access helpers.
+- Organization admins can use `set-organization-branding` with
+  `defaultVisibility=public|org|private` to choose the visibility applied when
+  new recordings omit an explicit visibility. The default remains `public`, and
+  explicit visibility wins (for example, bug-report recordings use `org`).
 - Use `move-recording` for both single and bulk folder moves. Pass `id` for one
   clip or `ids` for selected clips, and `folderId: null` to move them to the
   library or space root.
@@ -43,10 +47,31 @@ Detailed media, meeting, dictation, editing, and sharing rules live in
   transcript. Pass `--regenerate=true` to replace an existing ready transcript
   from the stored recording media; if regeneration fails, keep the prior ready
   transcript available.
+- Use `export-to-brain --recordingId=<id>` for one ready transcript. For a
+  bounded historical import, omit `recordingId` and pass `lookbackDays`,
+  `limit`, and `concurrency`; when `nextCursor` is non-null, pass it as
+  `cursor` on the next call until `nextCursor` is null. The cursor keeps the
+  original lookback snapshot and advances by recording creation time plus id,
+  so pages cannot reselect the same recordings or expand forever as new clips
+  arrive. The action only selects
+  current-user recordings with ready transcripts in the active organization
+  and reports exported, quarantined, skipped, and failed counts. Both
+  `BRAIN_INGEST_URL` and `BRAIN_INGEST_TOKEN` must be available as scoped Clips
+  secrets.
 - The transcript embedded by `view-screen` is a bounded preview. If
   `previewTruncated` is true, it may end mid-sentence and does not show where
   transcription ended. Call `get-recording-player-data` before judging
   completeness or quoting the full transcript.
+- Mobile captures originate in the Agent Native iOS/Android app. The phone
+  persists each audio/video file before network work, creates the recording
+  with `sourceAppName: "Agent Native Mobile"`, and resumes bounded chunk
+  uploads from its durable queue. Do not ask users to keep a capture screen
+  open or re-record after a transient upload failure; reconnect Clips and retry
+  the saved job from mobile Home.
+- Mobile meeting capture is microphone-only. It can record an in-person room or
+  audio playing from another device, but iOS and Android do not expose another
+  phone app's Zoom/Meet/Teams call audio to this flow. Do not claim mobile
+  attendee attribution has the desktop mic-plus-system-audio fidelity.
 - Dictation cleanup, Clip title/cleanup, and meeting summaries should pass
   bounded `voiceContext` to the shared cleanup/transcription path when active
   app context, learned vocabulary, user notes, or AGENTS.md preferences are
