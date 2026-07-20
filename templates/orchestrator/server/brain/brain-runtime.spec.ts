@@ -6,32 +6,33 @@
 
 import { describe, it, expect, vi } from "vitest";
 
-import type { OwnerRuntimeRow } from "../runtime/executors/routing-runtime-executor.js";
+import type { RuntimeRowWithOwner } from "../runtime/executors/routing-runtime-executor.js";
 import { getBrainRuntimeSelection } from "./brain-runtime.js";
 
-const aliyunRow: OwnerRuntimeRow = {
+const aliyunRow: RuntimeRowWithOwner = {
   id: "rt_4ry56fwd1yj763f3",
   name: "Aliyun Bailian",
   kind: "openai-compatible",
   baseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
   model: "qwen3.8-max-preview",
   active: 1,
+  ownerEmail: "sdlc-manager-1783064523@dogfood.local",
 };
 
 describe("getBrainRuntimeSelection", () => {
   it("returns the claude variant, calling getBrainModel(), when nothing is saved", async () => {
     const getBrainModel = vi.fn(async () => "claude-sonnet-5[1m]");
-    const resolveOwnerRuntimeRow = vi.fn();
+    const resolveRuntimeRowById = vi.fn();
 
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => "",
       getBrainModel,
-      resolveOwnerRuntimeRow,
+      resolveRuntimeRowById,
     });
 
     expect(result).toEqual({ kind: "claude", model: "claude-sonnet-5[1m]" });
     expect(getBrainModel).toHaveBeenCalledTimes(1);
-    expect(resolveOwnerRuntimeRow).not.toHaveBeenCalled();
+    expect(resolveRuntimeRowById).not.toHaveBeenCalled();
   });
 
   it("returns the claude variant for a plain Claude model id (no runtime: prefix)", async () => {
@@ -39,14 +40,13 @@ describe("getBrainRuntimeSelection", () => {
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => "claude-opus-4-8",
       getBrainModel,
-      resolveOwnerRuntimeRow: vi.fn(),
+      resolveRuntimeRowById: vi.fn(),
     });
     expect(result).toEqual({ kind: "claude", model: "claude-opus-4-8" });
   });
 
   it("resolves a valid runtime: selector to the 'runtime' variant with the row's baseUrl/model/name + resolved apiKey", async () => {
-    const resolveOwnerRuntimeRow = vi.fn(async (owner: string, id: string) => {
-      expect(owner).toBe("owner@example.com");
+    const resolveRuntimeRowById = vi.fn(async (id: string) => {
       expect(id).toBe(aliyunRow.id);
       return aliyunRow;
     });
@@ -54,7 +54,7 @@ describe("getBrainRuntimeSelection", () => {
 
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => `runtime:${aliyunRow.id}`,
-      resolveOwnerRuntimeRow,
+      resolveRuntimeRowById,
       resolveApiKey,
     });
 
@@ -68,20 +68,61 @@ describe("getBrainRuntimeSelection", () => {
     });
   });
 
+  // Board #84's real production incident: the global BRAIN_MODEL_KEY setting
+  // pointed at a runtime_configs row owned by ONE identity
+  // (sdlc-manager-1783064523@dogfood.local), but the CALLER dispatching this
+  // specific turn was a DIFFERENT real identity (413343998@qq.com). The old
+  // owner-scoped lookup (`resolveOwnerRuntimeRow(callerEmail, id)`) could
+  // never find a row belonging to someone else, silently degraded to
+  // "runtime-unresolved", and the turn fell through to Claude — even though
+  // the global setting clearly named a real, valid Aliyun row. This is the
+  // decisive proof the fix holds: a caller whose OWN email differs from the
+  // row's owner must still resolve to "runtime", and the API key must be
+  // read using the ROW's owner (whoever configured it), never the caller's.
+  it("resolves the SAME saved row for a caller whose own identity differs from the row's owner (the real bug this fixes)", async () => {
+    const resolveRuntimeRowById = vi.fn(async (id: string) => {
+      expect(id).toBe(aliyunRow.id);
+      return aliyunRow; // owned by sdlc-manager-...@dogfood.local
+    });
+    const resolveApiKey = vi.fn(
+      async (row: RuntimeRowWithOwner, owner: string) => {
+        expect(row.id).toBe(aliyunRow.id);
+        expect(owner).toBe(aliyunRow.ownerEmail); // the ROW's owner, not the caller's
+        return "sk-real-aliyun-key";
+      },
+    );
+
+    const result = await getBrainRuntimeSelection("413343998@qq.com", {
+      getRawBrainModelSetting: async () => `runtime:${aliyunRow.id}`,
+      resolveRuntimeRowById,
+      resolveApiKey,
+    });
+
+    expect(result).toEqual({
+      kind: "runtime",
+      runtimeConfigId: aliyunRow.id,
+      name: aliyunRow.name,
+      baseUrl: aliyunRow.baseUrl,
+      model: aliyunRow.model,
+      apiKey: "sk-real-aliyun-key",
+    });
+    expect(resolveApiKey).toHaveBeenCalledWith(aliyunRow, aliyunRow.ownerEmail);
+  });
+
   it("resolves with apiKey undefined when the row never configured one", async () => {
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => `runtime:${aliyunRow.id}`,
-      resolveOwnerRuntimeRow: async () => aliyunRow,
+      resolveRuntimeRowById: async () => aliyunRow,
       resolveApiKey: async () => undefined,
     });
     expect(result.kind).toBe("runtime");
     if (result.kind === "runtime") expect(result.apiKey).toBeUndefined();
   });
 
-  it("returns 'runtime-unresolved' when the row no longer exists (deleted / wrong owner)", async () => {
+  it("returns 'runtime-unresolved' when the row no longer exists (deleted)", async () => {
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => "runtime:rt_deleted",
-      resolveOwnerRuntimeRow: async () => undefined,
+      resolveRuntimeRowById: async () => undefined,
       resolveApiKey: vi.fn(),
     });
     expect(result).toEqual({
@@ -91,17 +132,18 @@ describe("getBrainRuntimeSelection", () => {
   });
 
   it("returns 'runtime-unresolved' for a claude-code-kind row (never a real endpoint)", async () => {
-    const ccRow: OwnerRuntimeRow = {
+    const ccRow: RuntimeRowWithOwner = {
       id: "rt_cc",
       name: "Claude Code",
       kind: "claude-code",
       baseUrl: null,
       model: null,
       active: 1,
+      ownerEmail: "sdlc-manager-1783064523@dogfood.local",
     };
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => "runtime:rt_cc",
-      resolveOwnerRuntimeRow: async () => ccRow,
+      resolveRuntimeRowById: async () => ccRow,
     });
     expect(result).toEqual({
       kind: "runtime-unresolved",
@@ -110,10 +152,10 @@ describe("getBrainRuntimeSelection", () => {
   });
 
   it("returns 'runtime-unresolved' when the row is missing baseUrl", async () => {
-    const row: OwnerRuntimeRow = { ...aliyunRow, baseUrl: null };
+    const row: RuntimeRowWithOwner = { ...aliyunRow, baseUrl: null };
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => `runtime:${row.id}`,
-      resolveOwnerRuntimeRow: async () => row,
+      resolveRuntimeRowById: async () => row,
     });
     expect(result).toEqual({
       kind: "runtime-unresolved",
@@ -122,10 +164,10 @@ describe("getBrainRuntimeSelection", () => {
   });
 
   it("returns 'runtime-unresolved' when the row is missing model", async () => {
-    const row: OwnerRuntimeRow = { ...aliyunRow, model: null };
+    const row: RuntimeRowWithOwner = { ...aliyunRow, model: null };
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => `runtime:${row.id}`,
-      resolveOwnerRuntimeRow: async () => row,
+      resolveRuntimeRowById: async () => row,
     });
     expect(result).toEqual({
       kind: "runtime-unresolved",
@@ -136,7 +178,7 @@ describe("getBrainRuntimeSelection", () => {
   it("degrades to 'runtime-unresolved' when the row lookup throws (never blocks the turn)", async () => {
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => "runtime:rt_boom",
-      resolveOwnerRuntimeRow: async () => {
+      resolveRuntimeRowById: async () => {
         throw new Error("db unavailable");
       },
     });
@@ -160,7 +202,7 @@ describe("getBrainRuntimeSelection", () => {
   it("resolves with apiKey undefined when resolveApiKey itself throws (never blocks the turn)", async () => {
     const result = await getBrainRuntimeSelection("owner@example.com", {
       getRawBrainModelSetting: async () => `runtime:${aliyunRow.id}`,
-      resolveOwnerRuntimeRow: async () => aliyunRow,
+      resolveRuntimeRowById: async () => aliyunRow,
       resolveApiKey: async () => {
         throw new Error("secret read failed");
       },

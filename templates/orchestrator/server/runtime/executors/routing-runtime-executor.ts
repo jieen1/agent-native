@@ -160,6 +160,44 @@ export async function resolveOwnerRuntimeRow(
   return row as OwnerRuntimeRow | undefined;
 }
 
+/** {@link resolveRuntimeRowById}'s result — the row plus its real owner. */
+export interface RuntimeRowWithOwner extends OwnerRuntimeRow {
+  ownerEmail: string;
+}
+
+/**
+ * Resolve a runtime_configs row by id ALONE — no owner filter — for the
+ * brain's own GLOBAL engine choice (`server/brain/brain-runtime.ts`'s
+ * `getBrainRuntimeSelection`). That setting is a single admin-level value
+ * every brain turn shares regardless of which identity dispatched it; unlike
+ * {@link resolveOwnerRuntimeRow}'s per-DAG-node routing (where the ownership
+ * check protects a real per-user cost/API-key boundary), scoping this lookup
+ * to the CALLING identity would make the global setting only ever resolve
+ * for whichever single owner happens to own that row — every other identity
+ * silently falls back to Claude regardless of what the setting says (the
+ * exact bug this fixes: a dispatch under a second real identity silently ran
+ * on claude-sonnet-5 instead of the configured Aliyun runtime).
+ */
+export async function resolveRuntimeRowById(
+  id: string,
+): Promise<RuntimeRowWithOwner | undefined> {
+  const { getDb, schema } = await import("../../db/index.js");
+  const [row] = await getDb()
+    .select({
+      id: schema.runtimeConfigs.id,
+      name: schema.runtimeConfigs.name,
+      kind: schema.runtimeConfigs.kind,
+      baseUrl: schema.runtimeConfigs.baseUrl,
+      model: schema.runtimeConfigs.model,
+      active: schema.runtimeConfigs.active,
+      ownerEmail: schema.runtimeConfigs.ownerEmail,
+    })
+    .from(schema.runtimeConfigs)
+    .where(eq(schema.runtimeConfigs.id, id))
+    .limit(1);
+  return row as RuntimeRowWithOwner | undefined;
+}
+
 /**
  * Resolve a matched row's real API key (production default) — the SAME
  * secret `save-runtime-config` writes and `activate-runtime` /

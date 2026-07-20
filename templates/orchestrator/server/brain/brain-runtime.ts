@@ -13,9 +13,9 @@
 // baseUrl + model to drive a real endpoint).
 
 import {
-  resolveOwnerRuntimeRow,
+  resolveRuntimeRowById,
   resolveRuntimeConfigApiKey,
-  type OwnerRuntimeRow,
+  type RuntimeRowWithOwner,
 } from "../runtime/executors/routing-runtime-executor.js";
 import {
   getBrainModel,
@@ -53,14 +53,17 @@ export interface BrainRuntimeSelectionDeps {
   getRawBrainModelSetting?: () => Promise<string>;
   /** Injectable for tests; production resolves the Claude-path model id. */
   getBrainModel?: () => Promise<string>;
-  /** Injectable for tests; production loads the real, owner-scoped row. */
-  resolveOwnerRuntimeRow?: (
-    ownerEmail: string,
+  /**
+   * Injectable for tests; production loads the row by id ALONE (no owner
+   * filter — this is a global setting, not per-caller; see
+   * {@link resolveRuntimeRowById}'s doc comment for why).
+   */
+  resolveRuntimeRowById?: (
     id: string,
-  ) => Promise<OwnerRuntimeRow | undefined>;
+  ) => Promise<RuntimeRowWithOwner | undefined>;
   /** Injectable for tests; production reads the row's real saved secret. */
   resolveApiKey?: (
-    row: OwnerRuntimeRow,
+    row: RuntimeRowWithOwner,
     ownerEmail: string,
   ) => Promise<string | undefined>;
 }
@@ -68,9 +71,13 @@ export interface BrainRuntimeSelectionDeps {
 /**
  * Resolve which engine a brain turn for `ownerEmail` should run on. Reads the
  * SAME global `BRAIN_MODEL_KEY` setting `getBrainModel()` reads; a
- * `runtime:<id>` value routes to that owner's saved row (excluding
- * claude-code kind, requiring a real baseUrl + model), everything else keeps
- * the exact existing Claude resolution.
+ * `runtime:<id>` value routes to that saved row regardless of which identity
+ * is dispatching THIS turn (the setting is a single global choice, not a
+ * per-owner one — see {@link resolveRuntimeRowById}), excluding claude-code
+ * kind and requiring a real baseUrl + model. The row's OWN owner_email
+ * resolves its saved API key (whoever configured the row owns the secret),
+ * never the calling `ownerEmail`. Everything else keeps the exact existing
+ * Claude resolution.
  */
 export async function getBrainRuntimeSelection(
   ownerEmail: string,
@@ -78,7 +85,7 @@ export async function getBrainRuntimeSelection(
 ): Promise<BrainRuntimeSelection> {
   const readRaw = deps.getRawBrainModelSetting ?? getRawBrainModelSetting;
   const readModel = deps.getBrainModel ?? getBrainModel;
-  const readRow = deps.resolveOwnerRuntimeRow ?? resolveOwnerRuntimeRow;
+  const readRow = deps.resolveRuntimeRowById ?? resolveRuntimeRowById;
   const readApiKey = deps.resolveApiKey ?? resolveRuntimeConfigApiKey;
 
   let raw = "";
@@ -93,9 +100,9 @@ export async function getBrainRuntimeSelection(
     return { kind: "claude", model: await readModel() };
   }
 
-  let row: OwnerRuntimeRow | undefined;
+  let row: RuntimeRowWithOwner | undefined;
   try {
-    row = await readRow(ownerEmail, runtimeConfigId);
+    row = await readRow(runtimeConfigId);
   } catch {
     row = undefined;
   }
@@ -106,7 +113,7 @@ export async function getBrainRuntimeSelection(
 
   let apiKey: string | undefined;
   try {
-    apiKey = await readApiKey(row, ownerEmail);
+    apiKey = await readApiKey(row, row.ownerEmail);
   } catch {
     apiKey = undefined;
   }
