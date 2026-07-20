@@ -20,6 +20,11 @@
   --secondary-foreground: 220 10% 15%;
   --muted: 220 10% 95%;
   --muted-foreground: 220 5% 45%;
+  /* L1 次级面板表面(列表栏/检查器/线程轨/会话轨)— 01-design-system.md
+     §2.2 四级表面模型:必须与 L0 页面背景(--background,纯白)有可感知色差,
+     不允许同色仅靠 1px 分隔线。取值介于 --card(纯白)与 --muted(95%)之间,
+     对应规范 §2.1 的 oklch(0.972 0.002 286.35)。 */
+  --panel: 220 10% 97%;
   --accent: 220 10% 95%;
   --accent-foreground: 220 10% 15%;
   --destructive: 0 84% 60%;
@@ -80,6 +85,7 @@
 }
 
 @theme {
+  --color-panel: hsl(var(--panel));
   --color-success: hsl(var(--success));
   --color-warning: hsl(var(--warning));
   --color-info: hsl(var(--info));
@@ -102,6 +108,10 @@
   --secondary-foreground: 0 0% 90%;
   --muted: 220 4% 10%;
   --muted-foreground: 220 4% 60%;
+  /* L1 面板表面(dark):--muted(10%)太暗不能直接当面板,向 --card/--background
+     (6%)量级上调几个百分点(11.5%),让 rail/侧栏在暗色下仍有可辨识层次,
+     对应规范 §2.1 dark 的 oklch(0.215 0.006 285.9)。 */
+  --panel: 220 4% 11.5%;
   --accent: 220 4% 13%;
   --accent-foreground: 0 0% 90%;
   --destructive: 0 63% 51%;
