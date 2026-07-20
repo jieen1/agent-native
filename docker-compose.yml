@@ -1,0 +1,86 @@
+# docker-compose.yml — Agent-Native production stack (host 101)
+#
+# Added after the 2026-07-19 OOM incident: all ~19 containers on host 101 had
+# HostConfig.Memory=0 (unlimited). A single runaway container (especially
+# an-orchestrator, which dispatches pnpm install / typecheck / full test suites)
+# could exhaust host memory and OOM-kill every co-tenant on the shared machine.
+#
+# These limits give each container a hard cgroup memory ceiling so the kernel
+# OOM-kills only the offending container, not the whole host.
+#
+# Verify after applying:
+#   docker inspect an-orchestrator --format '{{.HostConfig.Memory}}'
+#   # Should print a non-zero byte count, e.g. 8589934592 for 8g
+#
+# To apply (on host 101, in the directory holding this file):
+#   docker compose up -d
+
+version: "2.4"
+
+services:
+  # ── an-orchestrator ─────────────────────────────────────────────────────────
+  # Heaviest workload: dispatches pnpm install, tsc typecheck, and full vitest
+  # suites in child processes. 8 GB hard limit prevents a stuck install or
+  # runaway test worker from consuming all host memory.
+  an-orchestrator:
+    image: node:22-alpine
+    container_name: an-orchestrator
+    restart: unless-stopped
+    mem_limit: 8g
+    mem_reservation: 2g
+    working_dir: /app
+    command: ["node", ".output/server/index.mjs"]
+    volumes:
+      - ./templates/orchestrator/.output:/app/.output:ro
+    environment:
+      - NODE_ENV=production
+
+  # ── an-tracker ──────────────────────────────────────────────────────────────
+  # Lighter workload: task board UI + SSE. 2 GB is generous for the Nitro server.
+  an-tracker:
+    image: node:22-alpine
+    container_name: an-tracker
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 512m
+    working_dir: /app
+    command: ["node", ".output/server/index.mjs"]
+    volumes:
+      - ./templates/tracker/.output:/app/.output:ro
+    environment:
+      - NODE_ENV=production
+
+  # ── an-postgres ─────────────────────────────────────────────────────────────
+  # Shared PostgreSQL for orchestrator + tracker state. 2 GB keeps the DB
+  # bounded; shared_buffers should be tuned to ~25% of this (512 MB).
+  an-postgres:
+    image: postgres:16-alpine
+    container_name: an-postgres
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 512m
+    environment:
+      - POSTGRES_DB=agentnative
+      - POSTGRES_USER=agentnative
+      # Set POSTGRES_PASSWORD via .env or secrets — never hardcode here.
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # ── an-content ──────────────────────────────────────────────────────────────
+  # Static/SSR content app. 1 GB is ample for a Nitro content server.
+  an-content:
+    image: node:22-alpine
+    container_name: an-content
+    restart: unless-stopped
+    mem_limit: 1g
+    mem_reservation: 256m
+    working_dir: /app
+    command: ["node", ".output/server/index.mjs"]
+    volumes:
+      - ./templates/content/.output:/app/.output:ro
+    environment:
+      - NODE_ENV=production
+
+volumes:
+  pgdata:
