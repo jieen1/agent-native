@@ -1,9 +1,10 @@
 import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import { ownerScope } from "../server/lib/access.js";
 import { backfillWorkItemRun } from "../server/lib/work-item-runs.js";
 import { assertWritebackCaller } from "../server/lib/writeback-actor.js";
 
@@ -59,6 +60,11 @@ export default defineAction({
     });
 
     const db = getDb();
+    // SDLC-072 安全热修(与 SDLC-032/033 同类): 工作项查询必须带 ownerScope() 守卫。
+    // assertWritebackCaller 只验"调用身份=回写哨兵", 不验目标行的 org —— 故由
+    // ownerScope 的 orgId 分支按 JWT 的 org_id 声明放行合法回写(reconciler 铸造
+    // 的 A2A JWT org_id = 该行真实 orgId); 一旦 org_id 被篡改指向别org, 该行选
+    // 不中 → 走下方 not-found, 零写入(不回填 run、不写活动), 堵死跨org写。
     const item = (
       await db
         .select({
@@ -67,7 +73,7 @@ export default defineAction({
           orgId: schema.workItems.orgId,
         })
         .from(schema.workItems)
-        .where(eq(schema.workItems.id, args.workItemId))
+        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found");

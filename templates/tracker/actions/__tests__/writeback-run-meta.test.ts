@@ -45,6 +45,11 @@ function asWriteback(fn: () => Promise<any> | any) {
     fn,
   );
 }
+// 回写哨兵身份 + 自选 org_id —— 用于 SDLC-072 跨org攻击面测试:
+// 身份门(caller==='mcp' && userEmail===哨兵)通过, 但 org_id 由攻击者指定。
+function asWritebackOrg(orgId: string, fn: () => Promise<any> | any) {
+  return runWithRequestContext({ userEmail: WRITEBACK_EMAIL, orgId }, fn);
+}
 function mcpCtx() {
   return { caller: "mcp" as const };
 }
@@ -326,5 +331,55 @@ describe("T-F9-05: 非回写身份调 writeback-run-meta", () => {
         ),
       ),
     ).rejects.toMatchObject({ code: "actor-denied" });
+  });
+});
+
+// ============================================================================
+// SDLC-072(与 SDLC-032/033 同类): 跨org回写拦截。
+// assertWritebackCaller 只验调用身份=回写哨兵, 不验目标行的 org; ownerScope()
+// 守卫负责按 JWT 的 org_id 声明放行。一旦 org_id 被篡改成不拥有该行的 org,
+// 工作项选不中 → not-found, 零写入(不回填 run、不写活动)。
+// ============================================================================
+describe("SDLC-072: 跨org回写被 ownerScope 拦截 (writeback-run-meta)", () => {
+  it("回写哨兵身份但 JWT org_id 指向别org → 目标行选不中, 零写入", async () => {
+    // 在另一个 org 里种一个工作项 + 其当前活跃派发行。
+    await db.insert(trackerSchema.workItems).values({
+      id: "wi-other",
+      projectId: "proj-other",
+      title: "other-org item",
+      description: "",
+      status: "dispatched",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+      ownerEmail: "other@example.com",
+      orgId: "org-other",
+      itemKey: "OTH-001",
+      execState: "dispatched",
+    } as any);
+    await recordDispatchRun(db as any, {
+      workItemId: "wi-other",
+      threadId: "bt_other",
+      ownerEmail: "other@example.com",
+      orgId: "org-other",
+      dispatchedAt: "2026-01-01T00:00:00Z",
+    });
+
+    // 调用身份是回写哨兵(身份门通过), 但请求上下文 org_id = 攻击者自选的
+    // 'org-attacker' —— 既不等于该行真实 orgId 'org-other', ownerEmail 也不匹配
+    // 哨兵 → ownerScope 的 OR 两分支都不命中, 该行选不中。
+    await expect(
+      asWritebackOrg("org-attacker", () =>
+        writebackRunMeta.run(
+          { workItemId: "wi-other", runId: "run_evil", branch: "evil/branch" },
+          mcpCtx(),
+        ),
+      ),
+    ).rejects.toThrow("Work item not found");
+
+    // 零写入: 派发行的 runId 仍为空(未被回填), 且没有任何活动残留。
+    const runs = await fetchRuns("wi-other");
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.runId).toBeNull();
+    expect(await fetchActivities("wi-other")).toHaveLength(0);
   });
 });

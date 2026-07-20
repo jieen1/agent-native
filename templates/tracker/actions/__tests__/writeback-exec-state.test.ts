@@ -33,6 +33,11 @@ function asUser(fn: () => Promise<any> | any) {
 function asWriteback(fn: () => Promise<any> | any) {
   return runWithRequestContext({ userEmail: WRITEBACK_EMAIL, orgId: ORG_ID }, fn);
 }
+// 回写哨兵身份 + 自选 org_id —— 用于 SDLC-072 跨org攻击面测试:
+// 身份门(caller==='mcp' && userEmail===哨兵)通过, 但 org_id 由攻击者指定。
+function asWritebackOrg(orgId: string, fn: () => Promise<any> | any) {
+  return runWithRequestContext({ userEmail: WRITEBACK_EMAIL, orgId }, fn);
+}
 function mcpCtx() {
   return { caller: "mcp" as const };
 }
@@ -237,6 +242,44 @@ describe("T-F9-05: 非回写身份调 writeback-exec-state", () => {
     await expect(
       asUser(() => writebackExecState.run({ workItemId: id, target: "queued" }, mcpCtx())),
     ).rejects.toMatchObject({ code: "actor-denied" });
+    expect(await fetchActivities(id)).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// SDLC-072(与 SDLC-032/033 同类): 跨org回写拦截。
+// assertWritebackCaller 只验调用身份=回写哨兵, 不验目标行的 org; ownerScope()
+// 守卫负责按 JWT 的 org_id 声明放行。一旦 org_id 被篡改成不拥有该行的 org,
+// 工作项选不中 → not-found, 零写入(exec_state 不动、无活动)。
+// ============================================================================
+describe("SDLC-072: 跨org回写被 ownerScope 拦截 (writeback-exec-state)", () => {
+  it("回写哨兵身份但 JWT org_id 指向别org → 目标行选不中, exec_state 不动且零活动", async () => {
+    // 在另一个 org 里种一个已派发的工作项。
+    const id = await insertItem({
+      id: "wi-other",
+      ownerEmail: "other@example.com",
+      orgId: "org-other",
+      itemKey: "OTH-1",
+      currentStageName: "实施",
+      execState: "dispatched",
+    });
+
+    // 调用身份是回写哨兵(身份门通过), 但请求上下文 org_id = 攻击者自选的
+    // 'org-attacker' —— 既不等于该行真实 orgId 'org-other', ownerEmail 也不匹配
+    // 哨兵 → ownerScope 的 OR 两分支都不命中, 该行选不中。
+    await expect(
+      asWritebackOrg("org-attacker", () =>
+        writebackExecState.run(
+          { workItemId: id, target: "queued", reason: "evil-cross-org" },
+          mcpCtx(),
+        ),
+      ),
+    ).rejects.toThrow("Work item not found");
+
+    // 零写入: exec_state 仍为 'dispatched'(未被打回 queued), 且没有任何活动残留。
+    const row = await fetchItem(id);
+    expect((row as any).execState).toBe("dispatched");
+    expect(row.currentStageName).toBe("实施");
     expect(await fetchActivities(id)).toHaveLength(0);
   });
 });
