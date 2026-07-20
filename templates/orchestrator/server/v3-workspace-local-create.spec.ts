@@ -96,6 +96,7 @@ vi.mock("@agent-native/core/server", () => ({
 import {
   createLocalWorkspace,
   commitAndPush,
+  destroyLocalWorkspace,
   bareMirrorDir,
   WorkspaceNotReadyError,
 } from "./v3-workspace-local.js";
@@ -544,5 +545,64 @@ describe("board #87 — branch must not equal the base branch it's cut from", ()
     expect(ws.branch).not.toBe("main");
     expect(ws.branch).toMatch(/^orchestrator\/run-/);
     expect(hoisted.rows[0].state).toBe("ready");
+  });
+});
+
+// ── destroyLocalWorkspace: a correct implementation already existed in this
+// module (worktree detach + prune + rm + DB update to "destroyed"), but the
+// `workspaceDestroy` action never called it — it only ever flipped the DB
+// state to "destroying" and stopped. This is the root cause of the
+// 2026-07-20 production disk-full incident: every workspace ever created
+// (174 real checkouts, 48.5GB) stayed on disk forever, "destroying" or not.
+// These tests prove the underlying function itself behaves correctly now
+// that actions/v3-workspace.ts's workspaceDestroy actually calls it.
+describe("destroyLocalWorkspace — real reclaim, not just a DB flag", () => {
+  it("removes the checkout from disk AND detaches it from the bare mirror's worktree admin state (not just rm -rf)", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    const ws = await createLocalWorkspace({
+      repoUrl: f.upstream,
+      ownerKind: "run",
+      ownerId: "run-destroy",
+      baseRef: "main",
+    });
+    expect(existsSync(ws.dir)).toBe(true);
+
+    const bare = bareMirrorDir(f.upstream);
+    const before = requireOk(bare, ["worktree", "list", "--porcelain"]);
+    expect(before).toContain(ws.dir);
+
+    await destroyLocalWorkspace(ws.id);
+
+    expect(existsSync(ws.dir)).toBe(false);
+    expect(hoisted.rows[0].state).toBe("destroyed");
+    expect(hoisted.rows[0].destroyedAt).toBeInstanceOf(Date);
+
+    // Decisive proof this went through `git worktree remove`, not a bare `rm
+    // -rf`: the mirror's own admin list no longer references the path either.
+    // A raw rm -rf would delete the directory but leave a dangling
+    // `.git/worktrees/<id>` entry behind (surfacing later as "already used by
+    // worktree" on any future create against the same repo).
+    const after = requireOk(bare, ["worktree", "list", "--porcelain"]);
+    expect(after).not.toContain(ws.dir);
+  });
+
+  it("is idempotent: destroying an already-gone checkout still reaches state 'destroyed' instead of throwing", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    const ws = await createLocalWorkspace({
+      repoUrl: f.upstream,
+      ownerKind: "run",
+      ownerId: "run-destroy-twice",
+      baseRef: "main",
+    });
+
+    await destroyLocalWorkspace(ws.id);
+    expect(existsSync(ws.dir)).toBe(false);
+
+    await expect(destroyLocalWorkspace(ws.id)).resolves.toBeUndefined();
+    expect(hoisted.rows[0].state).toBe("destroyed");
   });
 });

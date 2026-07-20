@@ -14,6 +14,7 @@ import { MicrosandboxRuntime } from "../server/runtime/microsandbox-runtime.js";
 import { VM_HOME, scrubSecretsFromLog } from "../server/runtime/vm-creds.js";
 import {
   createLocalWorkspace,
+  destroyLocalWorkspace,
   localWorkspaceDiff,
   localWorkspaceFiles,
   localWorkspaceRead,
@@ -276,10 +277,12 @@ export const workspaceDestroy = defineAction({
       })
       .where(wsFilter);
 
+    await destroyLocalWorkspace(args.workspaceId);
+
     return {
       workspaceId: args.workspaceId,
       previousState: current.state,
-      state: "destroying",
+      state: "destroyed",
       ok: true,
     };
   },
