@@ -45,6 +45,21 @@ describe("deriveStudioSteps — 已定稿 (final)", () => {
     );
     expect(steps.find((s) => s.step === 6)!.state).toBe("final");
   });
+
+  it("passes producedByKind through to the derived step (rail's `docKey vN · agent|human` subtext)", () => {
+    const steps = deriveStudioSteps(
+      baseInput({
+        artifacts: {
+          "sprint-doc": { latestVersion: 2, producedByKind: "human" },
+          "test-plan": { latestVersion: 1, producedByKind: "agent" },
+        },
+      }),
+    );
+    expect(steps.find((s) => s.step === 2)!.producedByKind).toBe("human");
+    expect(steps.find((s) => s.step === 3)!.producedByKind).toBe("agent");
+    // Facts without producedByKind pass through as null (rail hides the suffix).
+    expect(steps.find((s) => s.step === 5)!.producedByKind).toBeNull();
+  });
 });
 
 describe("deriveStudioSteps — 进行中 (in-progress)", () => {

@@ -30,7 +30,9 @@ function StepStatus({ state }: { state: DerivedStudioStep["state"] }) {
 
 function stepSubtext(step: DerivedStudioStep): string | null {
   if (step.state === "final" && step.latestVersion != null) {
-    return `${step.docKey} v${step.latestVersion}`;
+    return `${step.docKey} v${step.latestVersion}${
+      step.producedByKind ? ` · ${step.producedByKind}` : ""
+    }`;
   }
   if (step.state === "in-progress") return "会话进行中";
   if (step.state === "skipped") return "已跳过";

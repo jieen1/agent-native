@@ -107,6 +107,9 @@ export function hasUiShapedInScope(outcomes: InScopeLike[]): boolean | null {
 export interface StepArtifactFacts {
   /** Latest version number for this docKey, or null when no version exists yet. */
   latestVersion: number | null;
+  /** Producer of the latest version (`SprintArtifact.producedByKind`), or null
+   *  when no version exists / the source didn't carry the field. */
+  producedByKind?: "agent" | "human" | null;
 }
 
 export interface DeriveStudioStepsInput {
@@ -123,6 +126,10 @@ export interface DeriveStudioStepsInput {
 export interface DerivedStudioStep extends StudioStepDef {
   state: StudioStepState;
   latestVersion: number | null;
+  /** Producer of the latest version, passed through from the artifact facts
+   *  (null when absent) — surfaced in the rail's `docKey vN · agent|human`
+   *  subtext. */
+  producedByKind?: "agent" | "human" | null;
   /** Short machine-readable reason, surfaced in tests and the rail's tooltip. */
   reason: string;
 }
@@ -132,6 +139,13 @@ function versionOf(
   docKey: string,
 ): number | null {
   return artifacts[docKey]?.latestVersion ?? null;
+}
+
+function producedByKindOf(
+  artifacts: DeriveStudioStepsInput["artifacts"],
+  docKey: string,
+): "agent" | "human" | null {
+  return artifacts[docKey]?.producedByKind ?? null;
 }
 
 export function deriveStudioSteps(
@@ -152,6 +166,7 @@ export function deriveStudioSteps(
         ...def,
         state: override,
         latestVersion: versionOf(input.artifacts, def.docKey),
+        producedByKind: producedByKindOf(input.artifacts, def.docKey),
         reason: `手动覆盖为「${override}」`,
       };
     }
@@ -162,6 +177,7 @@ export function deriveStudioSteps(
           ...def,
           state: "final",
           latestVersion: brainstormVersion,
+          producedByKind: producedByKindOf(input.artifacts, "brainstorm-notes"),
           reason: "brainstorm-notes 已有产物版本",
         };
       }
@@ -209,6 +225,7 @@ export function deriveStudioSteps(
           ...def,
           state: "final",
           latestVersion: techDesignVersion,
+          producedByKind: producedByKindOf(input.artifacts, "tech-design"),
           reason: "tech-design 已有产物版本",
         };
       }
@@ -218,6 +235,7 @@ export function deriveStudioSteps(
           ...def,
           state: "final",
           latestVersion: techDesignVersion,
+          producedByKind: producedByKindOf(input.artifacts, "tech-design"),
           reason:
             "tech-design 版本 ≥2，判定为至少完成一轮对抗评审（启发式，非精确轮次统计）",
         };
@@ -229,6 +247,7 @@ export function deriveStudioSteps(
           ...def,
           state: "final",
           latestVersion: version,
+          producedByKind: producedByKindOf(input.artifacts, def.docKey),
           reason: `${def.docKey} 已有产物版本`,
         };
       }
@@ -247,6 +266,7 @@ export function deriveStudioSteps(
       ...def,
       state: "pending",
       latestVersion: versionOf(input.artifacts, def.docKey),
+      producedByKind: producedByKindOf(input.artifacts, def.docKey),
       reason: "尚未开始",
     };
   });
