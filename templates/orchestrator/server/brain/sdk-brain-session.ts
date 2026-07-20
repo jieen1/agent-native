@@ -310,7 +310,12 @@ export async function runSdkBrainTurn(
     .where(eq(v3Schema.brainEvents.threadId, threadId))
     .orderBy(v3Schema.brainEvents.seq);
 
-  // Build message history from prior events.
+  // Build message history from prior events. AI SDK v6's ModelMessage schema
+  // names these parts `input`/`output` (v4/v5 called them `args`/`result`) —
+  // see ToolCallPart/ToolResultPart in @ai-sdk/provider-utils. `output` is
+  // additionally a discriminated union, not a bare value — MCP tool results
+  // are JSON-serializable objects, so `{type:"json", value}` is correct here.
+  type ToolResultOutput = { type: "json"; value: unknown };
   type Message =
     | { role: "system"; content: string }
     | { role: "user"; content: string }
@@ -322,7 +327,7 @@ export async function runSdkBrainTurn(
               type: "tool-call";
               toolCallId: string;
               toolName: string;
-              args: Record<string, unknown>;
+              input: Record<string, unknown>;
             }
         >;
       }
@@ -332,7 +337,7 @@ export async function runSdkBrainTurn(
           type: "tool-result";
           toolCallId: string;
           toolName: string;
-          result: unknown;
+          output: ToolResultOutput;
         }>;
       };
 
@@ -343,14 +348,14 @@ export async function runSdkBrainTurn(
         type: "tool-call";
         toolCallId: string;
         toolName: string;
-        args: Record<string, unknown>;
+        input: Record<string, unknown>;
       }
   > = [];
   const toolResults: Array<{
     type: "tool-result";
     toolCallId: string;
     toolName: string;
-    result: unknown;
+    output: ToolResultOutput;
   }> = [];
 
   function flushAssistant() {
@@ -380,7 +385,7 @@ export async function runSdkBrainTurn(
         type: "tool-call",
         toolCallId: ev.toolUseId ?? `tc_${randomUUID()}`,
         toolName: ev.toolName ?? "",
-        args: (ev.toolInput ?? {}) as Record<string, unknown>,
+        input: (ev.toolInput ?? {}) as Record<string, unknown>,
       });
     } else if (ev.type === "tool_result") {
       flushAssistant();
@@ -388,7 +393,7 @@ export async function runSdkBrainTurn(
         type: "tool-result",
         toolCallId: ev.toolUseId ?? `tc_${randomUUID()}`,
         toolName: ev.toolName ?? "",
-        result: ev.toolResult,
+        output: { type: "json", value: ev.toolResult ?? null },
       });
     }
   }
@@ -560,13 +565,13 @@ export async function runSdkBrainTurn(
       type: "tool-result";
       toolCallId: string;
       toolName: string;
-      result: unknown;
+      output: { type: "json"; value: unknown };
     }> = [];
     const assistantCallParts: Array<{
       type: "tool-call";
       toolCallId: string;
       toolName: string;
-      args: Record<string, unknown>;
+      input: Record<string, unknown>;
     }> = [];
 
     for (const tc of result.toolCalls) {
@@ -585,7 +590,7 @@ export async function runSdkBrainTurn(
         type: "tool-call",
         toolCallId: useId,
         toolName: name,
-        args,
+        input: args,
       });
 
       let toolResult: unknown;
@@ -608,7 +613,7 @@ export async function runSdkBrainTurn(
         type: "tool-result",
         toolCallId: useId,
         toolName: name,
-        result: toolResult,
+        output: { type: "json", value: toolResult ?? null },
       });
     }
 
