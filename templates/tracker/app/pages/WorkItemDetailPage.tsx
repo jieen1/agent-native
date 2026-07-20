@@ -1476,10 +1476,11 @@ function GuardedTransitionDialog({
           : {}),
       },
       {
-        onSuccess: (res: { noop?: boolean }) => {
+        onSuccess: (res: unknown) => {
+          const r = res as { noop?: boolean } | undefined;
           onOpenChange(false);
           toast.success(
-            res?.noop
+            r?.noop
               ? "无变化(状态未改变)"
               : isChangesRequested
                 ? "已驳回并要求返工"
