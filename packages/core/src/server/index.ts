@@ -124,6 +124,16 @@ export {
   type AgentToolCallExecutionResult,
   type ExecuteAgentToolCallOptions,
 } from "../agent/production-agent.js";
+// Additive re-export (work item nv73eo2nbm): the soft-timeout + resumable-error
+// continuation wrapper around `runAgentLoop`. Previously only reachable from
+// core-internal modules; template executors (e.g. the orchestrator's V3
+// dev/spawn engine-loop) need it to get stream-resume + anti-replay without
+// reimplementing the loop locally. Pure re-export of an existing function — no
+// behavior change.
+export {
+  runAgentLoopDirectWithSoftTimeout,
+  MAX_RUN_LOOP_CONTINUATIONS,
+} from "../agent/run-loop-with-resume.js";
 export {
   mountRealtimeVoiceRoutes,
   realtimeVoiceSafetyIdentifier,

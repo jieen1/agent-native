@@ -859,6 +859,7 @@ export class V3Dispatcher {
           {
             node: runnerNode,
             deps: context.deps,
+            spawnId,
             ownerEmail: nodeRow.ownerEmail,
             orgId: nodeRow.orgId,
             onStep,

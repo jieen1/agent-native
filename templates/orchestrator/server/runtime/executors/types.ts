@@ -66,6 +66,16 @@ export interface RuntimeExecCtx {
   item?: unknown;
   /** Reasoning-effort hint (§1.6), mapped onto the engine call when supported. */
   effort?: "low" | "medium" | "high";
+  /**
+   * The `v3_spawns.id` for THIS node execution (work item nv73eo2nbm). The
+   * dispatcher threads it through so the engine-loop can use it as the
+   * Observational Memory `threadId` — the stable, unique-per-spawn identity
+   * that activates OM consumption + the tool journal exactly like the in-app
+   * vLLM chat. Optional: a caller that does not have a spawn row (e.g. the
+   * schema-correction path, or a direct `NodeRunnerExecutor.invoke`) leaves it
+   * unset and the engine-loop falls back to a `spawn:<nodeId>` threadId.
+   */
+  spawnId?: string;
   /** The run owner's email — needed to scope key resolution + request context. */
   ownerEmail: string;
   /** The run org id (null for single-tenant). */

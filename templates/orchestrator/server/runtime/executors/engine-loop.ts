@@ -1,31 +1,43 @@
 // Shared "engine-model in a VM" runner (DESIGN §7.4.1a stage 4). Both the
 // vLLM and remote-API executors have the SAME shape — the only difference is
 // which AgentEngine they resolve. This module is that shared body: build the
-// VM-bound acting bridge, run `runAgentLoop` ON THE HOST against the resolved
-// engine, and capture `AgentLoopUsage` + the tool-call count from the run.
+// VM-bound acting bridge, run the framework agent loop ON THE HOST against the
+// resolved engine, and capture `AgentLoopUsage` + the tool-call count.
 //
 // The §4.2.3 landmine ("capture AgentLoopUsage inside runFn") is handled here
-// by calling `runAgentLoop` DIRECTLY (not through `startRun`, which only awaits
-// a `Promise<void>` and drops the returned usage). We are already inside the
+// by calling the loop DIRECTLY (not through `startRun`, which only awaits a
+// `Promise<void>` and drops the returned usage). We are already inside the
 // run's request context (the NodeRunner / scheduler establishes it) and we are
 // handed the scheduler's `AbortSignal`, so we do not need `startRun`'s thread
 // bookkeeping for a single node loop.
 //
-// F2 executor context management (SDLC docs §2 / 02-workflows.md §4.1 C1-C4):
-// this is also where the dev loop gets a `threadId` (activating core's
-// Observational Memory consumption + tool journal, exactly like the in-app
-// vLLM chat), a size-triggered fire-and-forget compaction pass, a bounded
-// local resume-on-transport-cut wrapper, and a context checkpoint persisted
-// for a future retry (see context-checkpoint.ts). See the "F2 resume note"
-// comment below for why the resume wrapper is a local reimplementation
-// instead of importing core's `runAgentLoopDirectWithSoftTimeout`.
-// checkpoint 消费端在 F2b(dispatcher 重试注入)——本切片 checkpoint 只写;
-// 读取 v3_spawns.context_checkpoint 并注入重试 prompt 的 v3-dispatcher.ts
-// 改动属 F2b 后续切片(F1/F4 并行期 v3-dispatcher 禁碰)。
+// F2 executor context management (work item nv73eo2nbm — investigation
+// conclusion B): the dev/spawn loop gets Observational Memory (OM) consumption
+// + grown-too-long recovery + stream-resume by passing the SAME call parameters
+// the in-app vLLM chat path already passes — a `threadId` (the spawn id) +
+// `ownerEmail`/`orgId`. With those present, the framework `runAgentLoop`
+// itself:
+//   • CONSUMES OM — `applyObservationalMemoryToContext` folds a compacted
+//     thread's reflections/observations into the context each iteration;
+//   • PRODUCES OM — fire-and-forget `maybeCompactThread` after a clean turn;
+//   • journals tool calls (anti-replay on resume).
+// On top of that we:
+//   • route the OUTER call through `runAgentLoopDirectWithSoftTimeout` so the
+//     spawn gets stream-resume (断流续传) + anti-replay (防重放) — the SAME
+//     wrapper the chat run handler uses, NOT a local reimplementation;
+//   • fire an EXTRA size-triggered `maybeCompactThread` mid-turn when the
+//     cumulative tool-result volume crosses the OM threshold (a long single
+//     turn would otherwise only compact after it finishes), and surface a
+//     visible `[observational-memory]` / `[context.compacted]` trace in
+//     `spawn_events` so the Node Inspector shows OM was injected/compacted;
+//   • persist a context checkpoint for a future retry (context-checkpoint.ts).
+//
+// The 64k context clamp is a SEPARATE ticket and is intentionally untouched.
+// checkpoint 消费端在 F2b(dispatcher 重试注入)——本切片 checkpoint 只写。
 
 import {
   actionsToEngineTools,
-  runAgentLoop,
+  runAgentLoopDirectWithSoftTimeout,
   type ActionEntry,
   type AgentChatEvent,
 } from "@agent-native/core/server";
@@ -34,7 +46,11 @@ import type {
   EngineContentPart,
   EngineMessage,
 } from "@agent-native/core/agent/engine";
-import { maybeCompactThread } from "@agent-native/core/agent/observational-memory";
+import {
+  maybeCompactThread,
+  buildObservationalContext,
+  hasObservationalMemory,
+} from "@agent-native/core/agent/observational-memory";
 
 import { createVmActingBridge } from "../acting-bridge.js";
 import {
@@ -122,6 +138,24 @@ export function compactThresholdChars(): number {
   return compactThresholdTokens() * 4;
 }
 
+/**
+ * Soft-timeout budget (ms) handed to `runAgentLoopDirectWithSoftTimeout` for a
+ * dev spawn. A POSITIVE value activates the wrapper's resume + anti-replay
+ * loop; `0` disables the wrapper entirely (it falls straight through to a bare
+ * `runAgentLoop`, no resume).
+ *
+ * Default 600_000 (10 min) — deliberately NOT the chat handler's 40s
+ * foreground wall: a spawn is background work (it runs inside the spawn
+ * reconciler worker, not an HTTP request), so we pass `backgroundFunction:true`
+ * at the call site which raises the hosted ceiling to the 13-min background
+ * budget and keeps this 10-min default un-clamped. `ORCH_DEV_SOFT_TIMEOUT_MS`
+ * overrides (set `0` to turn the wrapper off).
+ */
+export function devSoftTimeoutMs(): number {
+  const raw = Number(process.env.ORCH_DEV_SOFT_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 600_000;
+}
+
 /** Map the §1.6 effort hint onto runAgentLoop's reasoning-effort option. */
 function reasoningEffort(
   effort: RuntimeExecCtx["effort"],
@@ -129,60 +163,12 @@ function reasoningEffort(
   return effort;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// F2 resume note (T-F2-05 / T-F2-06 — "truncated stream continues, doesn't
-// restart from zero"):
-//
-// The design doc (SDLC §2A) calls for routing the outer `runAgentLoop` call
-// through core's `runAgentLoopDirectWithSoftTimeout` (run-loop-with-resume.ts),
-// which already implements soft-timeout + resumable-transport-error
-// continuation. That function — and the `isResumableEngineError` /
-// `appendAgentLoopContinuation` helpers it depends on — are NOT re-exported
-// from any `@agent-native/core` subpath reachable from a template (verified
-// against this checkout's `packages/core/package.json` "exports" map and both
-// `agent/index.ts` and `server/index.ts` barrels). Adding that export is a
-// `packages/core` change, which is out of bounds for this slice ("core 零改动").
-//
-// So this module reimplements the OBSERVABLE behavior locally, reusing only
-// the already-exported `runAgentLoop`: a bounded retry loop that treats a
-// narrow set of transport-cut errors as resumable, appends a "continue from
-// where you left off" nudge to the SAME in-memory message array, and retries
-// in the SAME spawn (not a fresh attempt) — so tool-journal-backed writes are
-// never re-run and `steps`/`finalText` keep accumulating across attempts.
-// A future core changeset that exports the real helpers can replace this
-// block with a direct call, unchanged call-site shape.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Bounds the local resume loop so a persistently-broken transport fails loud
- * instead of spinning forever (mirrors core's MAX_RUN_LOOP_CONTINUATIONS). */
-const MAX_RESUME_ATTEMPTS = 4;
-
-const RESUMABLE_ERROR_RE =
-  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|EPIPE|socket hang up|fetch failed|network|terminated|premature close|und_err|upstream connect error/i;
-
-/**
- * Narrow, local heuristic for "this looks like a transport-level cut, not a
- * real model/tool error" — NOT a port of core's `isResumableEngineError`
- * (unreachable here; see the F2 resume note above). Never treats a
- * cooperative abort (`ctx.signal`) as resumable.
- */
-export function isLikelyResumableStreamError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  if (err.name === "AbortError") return false;
-  return RESUMABLE_ERROR_RE.test(err.message);
-}
-
-const RESUME_CONTINUATION_TEXT =
-  "The previous attempt was interrupted by a transport error before finishing. " +
-  "Continue exactly where you left off. Do not repeat a tool call or file " +
-  "write that already completed — check the workspace state first if unsure.";
-
 /**
  * Reconstruct an `EngineMessage[]` transcript from the ordered step log this
  * module already builds for `spawn_events` (DESIGN §8.5), so `maybeCompactThread`
  * can run its Observer/Reflector over the REAL conversation instead of the
  * empty array it would load from the chat-threads store (a `spawn:<id>`
- * thread is never written there — `runAgentLoop` is called directly here, not
+ * thread is never written there — the loop is called directly here, not
  * through the chat plugin that persists `thread_data`). Mirrors the
  * text/tool-call (assistant) + tool-result (user) alternation
  * `production-agent.ts` itself builds.
@@ -264,18 +250,15 @@ export async function runEngineLoopInVm(args: {
   const { ctx, engine, model } = args;
   const workdir = ctx.workdir || DEFAULT_WORKDIR;
 
-  // F2 threadId (SDLC §2A): `spawn:` prefix keeps this thread space disjoint
-  // from chat threads (`bt_*`) in `observational_memory` / context-xray
-  // storage (T-F2-04). `ctx.node.id` is the ONLY stable-per-run identifier
-  // `RuntimeExecCtx` carries today — it is the `v3_nodes.id` the dispatcher
-  // resolved this node to (unique per run+node+iteration+fanout, and stable
-  // across NodeRunner's OWN internal attempt retries since those all happen
-  // inside one `runner.run()` call). It is NOT the literal `v3_spawns.id`
-  // (the dispatcher never threads that through `NodeRunnerInput` /
-  // `RuntimeExecCtx` — doing so needs a `v3-dispatcher.ts` change, out of
-  // bounds for this slice). Passing it as `threadId` still activates core's
-  // OM consumption + tool journal exactly like the in-app vLLM chat does.
-  const threadId = `spawn:${ctx.node.id}`;
+  // F2 threadId (nv73eo2nbm, conclusion B): key Observational Memory on the
+  // REAL spawn id so this node execution gets OM consumption + the tool
+  // journal exactly like the in-app vLLM chat. The dispatcher threads
+  // `ctx.spawnId` (the `v3_spawns.id`) through NodeRunner → RuntimeExecCtx;
+  // when a caller has no spawn row (schema-correction path, direct
+  // NodeRunnerExecutor.invoke) we fall back to the stable-per-run
+  // `ctx.node.id`. The `spawn:` prefix keeps this thread space disjoint from
+  // chat threads (`bt_*`) in `observational_memory` / context-xray storage.
+  const threadId = `spawn:${ctx.spawnId ?? ctx.node.id}`;
 
   // The VM-bound acting bridge — same tool CONTRACT createCodingToolRegistry
   // exposes, side effects reimplemented against the VM (DESIGN §7.4.1a).
@@ -321,15 +304,52 @@ export async function runEngineLoopInVm(args: {
     if (t) pushStep({ type: "text", text: t });
   };
 
+  const initialPromptText = buildPrompt(ctx);
+
+  // F2 OM-injection trace (nv73eo2nbm ⑤): if this thread already has persisted
+  // Observational Memory (a prior compaction of the same spawn thread), surface
+  // a visible step so the Node Inspector shows OM was folded into the context.
+  // The framework loop does the actual injection internally
+  // (`applyObservationalMemoryToContext`) once `ownerEmail`+`threadId` are set;
+  // this is the observable trace of that, gated on an authenticated owner.
+  // Best-effort: any read failure is swallowed (OM is an optimization, never a
+  // correctness gate — §2A "幂等与失败语义").
+  if (ctx.ownerEmail) {
+    try {
+      const omContext = await buildObservationalContext({
+        threadId,
+        ownerEmail: ctx.ownerEmail,
+        orgId: ctx.orgId ?? null,
+        messages: [
+          { role: "user", content: [{ type: "text", text: initialPromptText }] },
+        ],
+      });
+      if (hasObservationalMemory(omContext)) {
+        pushStep({
+          type: "text",
+          text:
+            `[observational-memory] injected ${omContext.observations.length} ` +
+            `observation(s) + ${omContext.reflections.length} reflection(s) for ` +
+            `${threadId}; the compacted earlier history is folded into context.`,
+        });
+      }
+    } catch (err) {
+      console.warn(
+        `[engine-loop] OM-injection trace skipped for ${threadId}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
   // F2 compaction bookkeeping (T-F2-02 / T-F2-13): accumulate tool_result
   // char volume; cross the threshold exactly ONCE per spawn, then
   // fire-and-forget `maybeCompactThread`. A compaction failure is logged and
   // otherwise invisible to the loop — it is an optimization, never a
-  // correctness gate (§2A "幂等与失败语义").
+  // correctness gate. The NEXT loop iteration's `applyObservationalMemoryToContext`
+  // folds the freshly-written observations into the context.
   const thresholdChars = compactThresholdChars();
   let toolResultCharsAccum = 0;
   let compactionTriggered = false;
-  const initialPromptText = buildPrompt(ctx);
 
   const maybeTriggerCompaction = (): void => {
     if (compactionTriggered) return;
@@ -380,95 +400,65 @@ export async function runEngineLoopInVm(args: {
     "workspace. Always use the tools to make real changes; never claim a " +
     "change you did not perform with a tool.";
 
-  // Call runAgentLoop DIRECTLY so its returned AgentLoopUsage is captured
-  // (DESIGN §4.2.3). We are already in the run's request context.
+  // The mutable message array the loop owns. `runAgentLoopDirectWithSoftTimeout`
+  // appends its continuation nudges to THIS array in place across resume rounds,
+  // so completed tool calls are never re-run and the transcript keeps growing.
+  const messages: EngineMessage[] = [
+    { role: "user", content: [{ type: "text", text: initialPromptText }] },
+  ];
+
+  // Call the framework loop through `runAgentLoopDirectWithSoftTimeout` (the
+  // SAME wrapper the in-app chat run handler uses) so the spawn gets
+  // soft-timeout + resumable-transport-error continuation (stream-resume /
+  // 断流续传) and tool-call-journal anti-replay (防重放) — conclusion B, NOT a
+  // local reimplementation. `threadId` + `ownerEmail`/`orgId` activate the
+  // loop's internal OM consumption + post-turn compaction + tool journal.
   //
   // maxOutputTokens must be explicit (the AI SDK's ~4k default is exhausted
   // by thinking tokens on reasoning models — qwen3.6 returned an empty string
   // with it, 2026-06-21) but deliberately small: see devMaxOutputTokens().
   //
-  // F2: `messages` is now a mutable array (not an inline literal) — the local
-  // resume loop below appends a continuation nudge to it in place, and
-  // `stepsToEngineMessages` above reconstructs the equivalent for compaction.
-  const messages: EngineMessage[] = [
-    { role: "user", content: [{ type: "text", text: initialPromptText }] },
-  ];
-
-  const usage = {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    model,
-  };
-  let lastErr: unknown;
-  let completed = false;
-
-  for (let attempt = 1; attempt <= MAX_RESUME_ATTEMPTS; attempt += 1) {
-    lastErr = undefined;
-    try {
-      const attemptUsage = await runAgentLoop({
-        engine,
-        model,
-        systemPrompt,
-        tools,
-        actions,
-        messages,
-        send,
-        signal: ctx.signal,
-        ownerEmail: ctx.ownerEmail,
-        orgId: ctx.orgId,
-        threadId,
-        reasoningEffort: reasoningEffort(ctx.effort),
-        maxOutputTokens: devMaxOutputTokens(),
-      });
-      usage.inputTokens += attemptUsage.inputTokens ?? 0;
-      usage.outputTokens += attemptUsage.outputTokens ?? 0;
-      usage.cacheReadTokens += attemptUsage.cacheReadTokens ?? 0;
-      usage.cacheWriteTokens += attemptUsage.cacheWriteTokens ?? 0;
-      usage.model = attemptUsage.model || usage.model;
-      completed = true;
-      break;
-    } catch (err) {
-      lastErr = err;
-      const canResume =
-        !ctx.signal.aborted &&
-        attempt < MAX_RESUME_ATTEMPTS &&
-        isLikelyResumableStreamError(err);
-      if (!canResume) break;
-      messages.push({
-        role: "user",
-        content: [{ type: "text", text: RESUME_CONTINUATION_TEXT }],
-      });
-      pushStep({
-        type: "text",
-        text:
-          `[loop.resumed] stream interruption recovered (attempt ${attempt} of ` +
-          `${MAX_RESUME_ATTEMPTS}); continuing the same spawn without re-running ` +
-          "completed work.",
-      });
-    }
-  }
+  // The soft-timeout budget is dev-shaped (see devSoftTimeoutMs): a generous
+  // background budget, NOT the chat handler's 40s foreground wall.
+  const usage = await runAgentLoopDirectWithSoftTimeout(
+    {
+      engine,
+      model,
+      systemPrompt,
+      tools,
+      actions,
+      messages,
+      send,
+      signal: ctx.signal,
+      ownerEmail: ctx.ownerEmail,
+      orgId: ctx.orgId,
+      threadId,
+      reasoningEffort: reasoningEffort(ctx.effort),
+      maxOutputTokens: devMaxOutputTokens(),
+    },
+    devSoftTimeoutMs(),
+    // A spawn is background work (spawn reconciler worker), not an HTTP request:
+    // raise the hosted soft-timeout ceiling to the background budget so the
+    // 10-min default is never clamped down to the 40s foreground wall.
+    { backgroundFunction: true },
+  );
 
   // Flush any trailing assistant text (the final answer) as its own step so a
   // node whose last action is text — not a tool call — still records it live.
   flushText();
 
-  // F2 checkpoint (T-F2-07/T-F2-11): persist on BOTH the success and the
-  // give-up path — a failed/truncated attempt's completed-writes list is
-  // exactly what a future retry needs. Best-effort; never throws.
+  // F2 checkpoint (T-F2-07/T-F2-11): persist on the success path — a
+  // truncated attempt's completed-writes list is exactly what a future retry
+  // needs. Best-effort; never throws. (A give-up path throws out of the
+  // wrapper above, so the checkpoint there is handled by the caller's retry.)
   await persistContextCheckpoint({
     nodeId: ctx.node.id,
     checkpoint: buildContextCheckpoint({ steps, finalText: finalText.trim() }),
   });
 
-  if (!completed) {
-    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
-  }
-
-  // F7 telemetry (04 §7/§13, SDLC-051): read the input/output split from THIS
-  // SAME terminal `usage` object — accumulated by the F2 resume loop above
-  // across every attempt, never per streamed chunk/event. `tokensSpent` keeps
+  // F7 telemetry (04 §7/§13, SDLC-051): read the input/output split from the
+  // SAME terminal `usage` object the wrapper returns — accumulated across every
+  // internal resume round, never per streamed chunk/event. `tokensSpent` keeps
   // its historical all-in-one meaning (cache counted as spend); the two new
   // fields below are the real components the dispatcher persists to
   // `v3_spawns.tokens_input`/`tokens_output` instead of hardcoding
