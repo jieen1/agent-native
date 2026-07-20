@@ -102,15 +102,24 @@ let the downstream worker (or you) read the prose.
 
 ## Workers: which agent for which job
 
-Two worker agents ship with this app (`.claude/agents/*.md`):
+**Standing policy: DAG worker nodes must never use `claude-code`.** Every
+worker node — analyze/design, develop, review, and any ad-hoc fix/investigate
+node you author on the fly (e.g. a one-off `fix_agent`-style node) — uses
+`agent: "vllm"`, which routes through the owner's active `runtime_configs` row
+(currently Aliyun `qwen3.8-max-preview`) via `RoutingNodeExecutor`. This is a
+real decision, not a fallback: `claude-code` is reserved for **you, the
+brain**, which is a separate MCP-tool-calling session outside the DAG, never a
+DAG node. Do not fall back to `claude-code` for a node just because a `vllm`
+attempt failed or looked slow — retry/replan on `vllm` instead (see the brain
+patrol guidance for how to judge a stall vs. genuine progress).
 
 | Job | Node `agent` | Runtime / engine |
 |---|---|---|
-| Analyze / design / review (capable coding agent) | `claude-code` | `acp:claude-code` (subscription) |
-| Develop / implement (cheap local model) | `vllm` | `ai-sdk:openai` (local vLLM, `qwen3.6`) |
+| Analyze / design / review / any ad-hoc fix node (all DAG worker nodes) | `vllm` | routes to the active `runtime_configs` row |
 
-The user's flow is: **CC analyzes → vLLM develops → CC reviews → commit + MR.**
-Map analyze + review to `claude-code`, development to `vllm`.
+The flow is: **vLLM analyzes → vLLM develops → vLLM reviews → you (the brain)
+commit + open the MR.** Map every worker node — analyze, develop, review, and
+any fix/cleanup node — to `vllm`.
 
 ## Canonical DAG: design → develop → review → commit
 
@@ -124,7 +133,7 @@ explicitly interpolates ONLY what the next worker needs.
     {
       "id": "design",
       "type": "agent",
-      "agent": "claude-code",
+      "agent": "vllm",
       "workspace": "{{inputs.workspaceId}}",
       "prompt": "Repo is checked out at /work on branch {{inputs.baseBranch}}.\nRequirement:\n{{inputs.requirement}}\n\nAnalyze the codebase and produce a concrete implementation plan: which files to touch and the exact change for each. Reply with a clear natural-language plan."
     },
@@ -139,7 +148,7 @@ explicitly interpolates ONLY what the next worker needs.
     {
       "id": "review",
       "type": "agent",
-      "agent": "claude-code",
+      "agent": "vllm",
       "deps": ["develop"],
       "workspace": "{{inputs.workspaceId}}",
       "prompt": "Repo at /work. Review the working-tree diff (`git --no-pager diff`) against this requirement:\n{{inputs.requirement}}\n\nDeveloper summary:\n{{deps.develop.output}}\n\nDecide pass or fail and give actionable feedback. Start your reply with a single line 'VERDICT: pass' or 'VERDICT: fail', then the details."
