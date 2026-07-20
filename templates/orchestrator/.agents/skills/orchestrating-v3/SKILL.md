@@ -22,6 +22,17 @@ shape — but a quick task may be a single `spawnOnce`, a scratch `workspaceCrea
 + inspection, or direct work with no workflow at all. Choose the lightest path
 that does the job, then monitor and finish it.
 
+> **A node/spawn with no `workspace` gets an EMPTY, non-git scratch directory —
+> not the live monorepo checkout, not any repo at all.** This has caused real
+> silent-failure runs: a fact-gathering `spawnOnce` was dispatched with no
+> `workspace`, its agent found an empty `/tmp/v3-claude-*` dir with zero files,
+> and (with no success guard) still reported "done." Any task that reads,
+> greps, or diffs real repo files — including read-only investigation/audit
+> spawns, not just code-editing ones — MUST call `workspaceCreate` first and
+> pass the resulting `workspaceId` as `workspace` on every node/spawn that
+> touches it. Only skip `workspace` for pure-reasoning tasks with no file
+> access at all.
+
 > This supersedes the v2 `orchestrating` skill (work-item + `run-start` +
 > `transition-work-item`). v2 is retained as legacy. For new task execution use
 > the V3 surface below.
