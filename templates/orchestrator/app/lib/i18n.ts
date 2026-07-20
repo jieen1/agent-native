@@ -130,6 +130,17 @@ const en = {
     spawnTimeoutSeconds: "seconds",
     spawnTimeoutSaved: "Default spawn timeout updated.",
     spawnTimeoutInvalid: "Enter a positive whole number of seconds.",
+    // Brain periodic drift-check interval (patrol cadence).
+    brainMonitorIntervalTitle: "Brain patrol interval",
+    brainMonitorIntervalDesc:
+      "Default cadence (seconds) for the brain's periodic on-track check " +
+      "when a thread doesn't set its own interval. Raising this cuts brain " +
+      "(Claude) token spend on long-running tasks that mostly just need an " +
+      "occasional check-in, not a tight poll loop. 0 disables the periodic " +
+      "timer (event-only wakes).",
+    brainMonitorIntervalSeconds: "seconds",
+    brainMonitorIntervalSaved: "Default brain patrol interval updated.",
+    brainMonitorIntervalInvalid: "Enter a non-negative whole number of seconds.",
     // vLLM Test button (DESIGN §8.3 item2 — parity with the Claude Code test).
     vllmTest: "Test",
     vllmTesting: "Testing…",
@@ -900,6 +911,16 @@ const zh: typeof en = {
     spawnTimeoutSeconds: "秒",
     spawnTimeoutSaved: "默认派发超时已更新。",
     spawnTimeoutInvalid: "请输入一个正整数(秒)。",
+    // brain 定时巡检间隔(节奏)。
+    brainMonitorIntervalTitle: "Brain 巡检间隔",
+    brainMonitorIntervalDesc:
+      "线程未单独设置巡检间隔时使用的默认周期(秒)——brain 会按这个间隔做一次" +
+      "\"是否正常推进\"的巡检。调大这个值可以显著降低长耗时任务上 brain(Claude)" +
+      "的token消耗，因为大多数时候只需要偶尔确认一下没卡死，不需要紧密轮询。" +
+      "设为0则关闭定时巡检，只靠事件唤醒。",
+    brainMonitorIntervalSeconds: "秒",
+    brainMonitorIntervalSaved: "默认巡检间隔已更新。",
+    brainMonitorIntervalInvalid: "请输入一个非负整数(秒)。",
     // 部署页（ship-it 控制）—— 真实 备份→重建→重启→验证。
     tabDeploy: "部署",
     deployTitle: "部署到生产环境",

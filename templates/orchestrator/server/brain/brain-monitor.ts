@@ -23,12 +23,16 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { getManagedClaudeStatus } from "../claude-managed-auth.js";
 import { getV3Db, v3Schema } from "../db/index.js";
+import { getBrainMonitorDefaultIntervalSeconds } from "../orchestration-defaults.js";
 
-/** Default periodic drift-check cadence (seconds) when a thread leaves it unset. */
-export function defaultMonitorIntervalSec(): number {
-  const raw = process.env.BRAIN_MONITOR_INTERVAL_SEC;
-  const n = raw != null ? Number(raw) : NaN;
-  return Number.isFinite(n) && n >= 0 ? n : 120;
+/**
+ * Default periodic drift-check cadence (seconds) when a thread leaves it
+ * unset. Resolution order: the Settings-page override
+ * (brain-monitor-default-interval-seconds) → BRAIN_MONITOR_INTERVAL_SEC env
+ * var → 120. See orchestration-defaults.ts.
+ */
+export async function defaultMonitorIntervalSec(): Promise<number> {
+  return getBrainMonitorDefaultIntervalSeconds();
 }
 
 /** How often the scheduler sweeps active brain-monitored runs. */
@@ -120,7 +124,7 @@ export async function monitorSweepOnce(): Promise<string[]> {
   );
 
   const woken: string[] = [];
-  const defaultSec = defaultMonitorIntervalSec();
+  const defaultSec = await defaultMonitorIntervalSec();
   const now = Date.now();
   // De-dup: a thread may own several active runs — wake it at most once/sweep.
   const seen = new Set<string>();
@@ -189,10 +193,18 @@ export function startBrainMonitorTick(tickMs: number = MONITOR_TICK_MS): void {
     });
   }, tickMs);
   if (typeof timer.unref === "function") timer.unref();
-  console.log(
-    `[brain-monitor] periodic drift-check scheduler started ` +
-      `(tick=${tickMs}ms, default interval=${defaultMonitorIntervalSec()}s)`,
-  );
+  void defaultMonitorIntervalSec()
+    .then((intervalSec) => {
+      console.log(
+        `[brain-monitor] periodic drift-check scheduler started ` +
+          `(tick=${tickMs}ms, default interval=${intervalSec}s)`,
+      );
+    })
+    .catch(() => {
+      console.log(
+        `[brain-monitor] periodic drift-check scheduler started (tick=${tickMs}ms)`,
+      );
+    });
 }
 
 /** Stop the brain monitor tick (test cleanup / shutdown). */

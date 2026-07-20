@@ -84,6 +84,7 @@ export default function SettingsRoute() {
             <ClaudeCodeCard />
             <BrainModelTierCard />
             <SpawnTimeoutCard />
+            <BrainMonitorIntervalCard />
           </div>
         </TabsContent>
         <TabsContent value="models">
@@ -237,6 +238,82 @@ function SpawnTimeoutCard() {
             variant="outline"
             onClick={handleSave}
             disabled={setTimeout_.isPending || draft === ""}
+          >
+            {t("common.save")}
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Brain periodic drift-check interval (patrol cadence) ────────────────────
+
+function BrainMonitorIntervalCard() {
+  const { t } = useTranslation();
+  const { data, refetch } = useActionQuery(
+    "get-brain-monitor-default-interval" as any,
+    {},
+  );
+  const setInterval_ = useActionMutation(
+    "set-brain-monitor-default-interval" as any,
+    {},
+  );
+
+  const currentSeconds =
+    typeof (data as any)?.seconds === "number" ? (data as any).seconds : 120;
+  const [draft, setDraft] = useState<string>("");
+  const displaySeconds = draft !== "" ? draft : String(currentSeconds);
+
+  function handleSave() {
+    const parsed = Number(draft);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      toast.error(t("settings.brainMonitorIntervalInvalid"));
+      return;
+    }
+    setInterval_.mutate(
+      { seconds: parsed },
+      {
+        onSuccess: () => {
+          toast.success(t("settings.brainMonitorIntervalSaved"));
+          setDraft("");
+          refetch();
+        },
+        onError: (e: unknown) =>
+          toast.error(
+            e instanceof Error ? e.message : t("common.actionFailed"),
+          ),
+      },
+    );
+  }
+
+  return (
+    <section>
+      <SectionHeading
+        icon={<IconSparkles className="size-5" />}
+        title={t("settings.brainMonitorIntervalTitle")}
+      />
+      <div className="rounded-lg border bg-card p-4 space-y-3">
+        <p className="text-xs text-muted-foreground">
+          {t("settings.brainMonitorIntervalDesc")}
+        </p>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={0}
+            className="w-32"
+            value={displaySeconds}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={setInterval_.isPending}
+          />
+          <span className="text-xs text-muted-foreground">
+            {t("settings.brainMonitorIntervalSeconds")}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSave}
+            disabled={setInterval_.isPending || draft === ""}
           >
             {t("common.save")}
           </Button>
