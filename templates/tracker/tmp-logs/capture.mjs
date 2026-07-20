@@ -32,6 +32,23 @@ if (!BASE) throw new Error("dev server never became ready on any candidate port"
 const SIGNIN = BASE + SIGNIN_PATH;
 log("server is up at", BASE);
 
+// ── 0b. Wait until action routes are mounted (db-status stops 404ing) ──
+for (let i = 0; i < 60; i++) {
+  try {
+    const r = await fetch(`${BASE}${PREFIX}/db-status`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (r.status !== 404) { log("actions mounted (db-status ->", r.status + ")"); break; }
+    if (i % 5 === 0) log(`actions not mounted yet (probe ${i})`);
+  } catch (e) {
+    if (i % 5 === 0) log(`db-status probe ${i}: ${e.cause?.code ?? e.message}`);
+  }
+  await new Promise((r) => setTimeout(r, 4000));
+}
+
 const browser = await pw.chromium.launch({ headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();
