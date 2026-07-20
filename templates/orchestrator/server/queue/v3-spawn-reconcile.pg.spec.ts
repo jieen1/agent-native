@@ -567,5 +567,200 @@ describe.skipIf(!dockerAvailable)(
       expect((spawnRow.rows[0] as any).status).toBe("failed");
       expect((spawnRow.rows[0] as any).error).toContain("host-native stall");
     }, 20_000);
+
+    it("HARD-STALE heartbeat-awareness fix guard (production incident 2026-07-20, task board 3i322q5tnm): a host-native spawn past the 30-min hard backstop, with a FRESH heartbeat, is NOT reset — the dev-server+Playwright false-kill", async () => {
+      // Reproduces the EXACT production shape that broke task board item
+      // 3i322q5tnm: a `develop` node starts a dev server and then runs a
+      // Playwright screenshot verification step, which legitimately takes far
+      // longer than a plain code-editing `develop` node — sometimes crossing 30
+      // minutes total. Pre-fix, the ~30-min hard backstop (`hardStale`) was
+      // computed purely from `started_at` (total AGE) and ignored the live,
+      // RECENT heartbeat entirely, so this genuinely-alive spawn (parent not
+      // terminal, eventStalled false, noVmAndAged false) was reset as "stale
+      // running spawn (~30m)... no live worker" the instant its age crossed
+      // ~30 min — even though it had been emitting real heartbeats/output right
+      // up to the kill (one confirmed case produced real light.png/dark.png).
+      // This fixture is that exact shape: started 35 minutes ago (past the
+      // 30-min V3_SPAWN_STALE_GRACE_MS), a FRESH heartbeat (30s ago, well within
+      // ORCH_SPAWN_HOST_NATIVE_STALL_MS). It MUST be left running.
+      const { getDbExec } = await import("../db/index.js");
+      const { reconcileV3SpawnsOnce, V3_SPAWN_STALE_GRACE_MS } =
+        await import("./v3-spawn-reconcile.js");
+
+      expect(V3_SPAWN_STALE_GRACE_MS).toBeGreaterThan(0);
+
+      const runId = "f10-run-hardstale-healthy";
+      const nodeId = "f10-node-hardstale-healthy";
+      const spawnId = "f10-spawn-hardstale-healthy";
+
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_runs (id, inputs, dag, status, owner_email)
+            VALUES ($1, '{}'::jsonb, $2::jsonb, 'running', 'local@localhost')`,
+        args: [
+          runId,
+          JSON.stringify({ nodes: [{ id: "a", type: "agent", deps: [] }] }),
+        ],
+      });
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_nodes (id, run_id, node_id_in_dag, type, status, current_spawn_id, owner_email)
+            VALUES ($1, $2, 'a', 'agent', 'running', $3, 'local@localhost')`,
+        args: [nodeId, runId, spawnId],
+      });
+      // Host-native develop node (runtime='acp:claude-code', no VM) started 35
+      // minutes ago — comfortably past the 30-min hard backstop.
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_spawns (id, node_id, rendered_prompt, status, runtime, started_at, owner_email)
+            VALUES ($1, $2, 'test prompt', 'running', 'acp:claude-code', now() - interval '35 minutes', 'local@localhost')`,
+        args: [spawnId, nodeId],
+      });
+      // A FRESH heartbeat (30s ago) — the spawn is demonstrably still alive and
+      // working (the Playwright verification step is mid-run). recentHeartbeat
+      // is true, so the now heartbeat-aware hardStale must NOT fire.
+      await getDbExec().execute({
+        sql: `INSERT INTO spawn_events (id, spawn_id, seq, type, created_at, owner_email)
+            VALUES ($1, $2, 0, 'text', now() - interval '30 seconds', 'local@localhost')`,
+        args: [`${spawnId}-step0`, spawnId],
+      });
+
+      const reconciled = await reconcileV3SpawnsOnce();
+
+      // The healthy long-running spawn must NOT appear in the reconciled set.
+      expect(reconciled.some((r) => r.id === spawnId)).toBe(false);
+
+      const spawnRow = await getDbExec().execute({
+        sql: `SELECT status FROM v3_spawns WHERE id = $1`,
+        args: [spawnId],
+      });
+      expect((spawnRow.rows[0] as any).status).toBe("running");
+
+      const nodeRow = await getDbExec().execute({
+        sql: `SELECT status, current_spawn_id FROM v3_nodes WHERE id = $1`,
+        args: [nodeId],
+      });
+      expect((nodeRow.rows[0] as any).status).toBe("running");
+      expect((nodeRow.rows[0] as any).current_spawn_id).toBe(spawnId);
+    }, 20_000);
+
+    it("a host-native spawn past the 30-min hard backstop with NO recent heartbeat is STILL reset (no regression — the crashed-isolate backstop still catches a genuinely dead old spawn)", async () => {
+      // The heartbeat-awareness fix must not regress the ORIGINAL crashed-
+      // isolate case: a spawn that is genuinely dead (no heartbeat at all, or a
+      // heartbeat older than the stall threshold) and older than the 30-min hard
+      // backstop must STILL be reconciled. Here the spawn started 35 minutes ago
+      // and never emitted a single spawn_events row — recentHeartbeat is false,
+      // so hardStale fires exactly as it did pre-fix.
+      const { getDbExec } = await import("../db/index.js");
+      const { reconcileV3SpawnsOnce } = await import("./v3-spawn-reconcile.js");
+
+      const runId = "f10-run-hardstale-dead";
+      const nodeId = "f10-node-hardstale-dead";
+      const spawnId = "f10-spawn-hardstale-dead";
+
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_runs (id, inputs, dag, status, owner_email)
+            VALUES ($1, '{}'::jsonb, $2::jsonb, 'running', 'local@localhost')`,
+        args: [
+          runId,
+          JSON.stringify({ nodes: [{ id: "a", type: "agent", deps: [] }] }),
+        ],
+      });
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_nodes (id, run_id, node_id_in_dag, type, status, current_spawn_id, owner_email)
+            VALUES ($1, $2, 'a', 'agent', 'running', $3, 'local@localhost')`,
+        args: [nodeId, runId, spawnId],
+      });
+      // Started 35 minutes ago, NO spawn_events heartbeat at all — genuinely
+      // dead (e.g. orchestrator killed before the child ever streamed). With no
+      // live signal, noVmAndAged would also fire here, but the point is the row
+      // is reconciled (the backstop still catches a dead old spawn).
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_spawns (id, node_id, rendered_prompt, status, runtime, started_at, owner_email)
+            VALUES ($1, $2, 'test prompt', 'running', 'acp:claude-code', now() - interval '35 minutes', 'local@localhost')`,
+        args: [spawnId, nodeId],
+      });
+
+      const reconciled = await reconcileV3SpawnsOnce();
+      expect(
+        reconciled.some((r) => r.id === spawnId && r.to === "failed"),
+      ).toBe(true);
+
+      const spawnRow = await getDbExec().execute({
+        sql: `SELECT status FROM v3_spawns WHERE id = $1`,
+        args: [spawnId],
+      });
+      expect((spawnRow.rows[0] as any).status).toBe("failed");
+    }, 20_000);
+
+    it("ABSOLUTE ceiling backstop: a spawn past the new V3_SPAWN_ABSOLUTE_STALE_GRACE_MS ceiling, with an artificially FRESH heartbeat, is STILL reset (final runaway/cost-control safety net)", async () => {
+      // The new absolute ceiling is the true UNCONDITIONAL final backstop — it
+      // fires regardless of heartbeat, exactly like the old hardStale did, so a
+      // spawn that heartbeats forever but never actually finishes (a wedged
+      // loop / a dev server that never lets its verification conclude) is still
+      // reaped for cost control. We pass a SMALL absoluteGraceMs override
+      // directly into reconcileV3SpawnsOnce's new 5th param (rather than waiting
+      // 2 real hours): the spawn is 35 minutes old with a fresh heartbeat, so
+      // the now heartbeat-aware hardStale is SUPPRESSED (recentHeartbeat true) —
+      // the ONLY thing that can reset it is the absolute backstop.
+      const { getDbExec } = await import("../db/index.js");
+      const {
+        reconcileV3SpawnsOnce,
+        V3_SPAWN_NOVM_GRACE_MS,
+        V3_SPAWN_STALE_GRACE_MS,
+        ORCH_SPAWN_STALL_MS,
+        ORCH_SPAWN_HOST_NATIVE_STALL_MS,
+      } = await import("./v3-spawn-reconcile.js");
+
+      const runId = "f10-run-absolute";
+      const nodeId = "f10-node-absolute";
+      const spawnId = "f10-spawn-absolute";
+
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_runs (id, inputs, dag, status, owner_email)
+            VALUES ($1, '{}'::jsonb, $2::jsonb, 'running', 'local@localhost')`,
+        args: [
+          runId,
+          JSON.stringify({ nodes: [{ id: "a", type: "agent", deps: [] }] }),
+        ],
+      });
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_nodes (id, run_id, node_id_in_dag, type, status, current_spawn_id, owner_email)
+            VALUES ($1, $2, 'a', 'agent', 'running', $3, 'local@localhost')`,
+        args: [nodeId, runId, spawnId],
+      });
+      // 35 minutes old — past the small absolute override (20 min) below, AND
+      // past the default 30-min hard backstop, but with a fresh heartbeat the
+      // heartbeat-aware hardStale is suppressed.
+      await getDbExec().execute({
+        sql: `INSERT INTO v3_spawns (id, node_id, rendered_prompt, status, runtime, started_at, owner_email)
+            VALUES ($1, $2, 'test prompt', 'running', 'acp:claude-code', now() - interval '35 minutes', 'local@localhost')`,
+        args: [spawnId, nodeId],
+      });
+      // An artificially FRESH heartbeat (10s ago) — proves the reset is the
+      // absolute backstop firing, NOT the (now heartbeat-aware) hard backstop.
+      await getDbExec().execute({
+        sql: `INSERT INTO spawn_events (id, spawn_id, seq, type, created_at, owner_email)
+            VALUES ($1, $2, 0, 'text', now() - interval '10 seconds', 'local@localhost')`,
+        args: [`${spawnId}-step0`, spawnId],
+      });
+
+      // Pass the real defaults for the first four params and a SMALL absolute
+      // override (20 min) for the new 5th param — the spawn (35 min) is past it.
+      const reconciled = await reconcileV3SpawnsOnce(
+        V3_SPAWN_NOVM_GRACE_MS,
+        V3_SPAWN_STALE_GRACE_MS,
+        ORCH_SPAWN_STALL_MS,
+        ORCH_SPAWN_HOST_NATIVE_STALL_MS,
+        20 * 60_000,
+      );
+      expect(
+        reconciled.some((r) => r.id === spawnId && r.to === "failed"),
+      ).toBe(true);
+
+      const spawnRow = await getDbExec().execute({
+        sql: `SELECT status, error FROM v3_spawns WHERE id = $1`,
+        args: [spawnId],
+      });
+      expect((spawnRow.rows[0] as any).status).toBe("failed");
+      expect((spawnRow.rows[0] as any).error).toContain("absolute");
+    }, 20_000);
   },
 );
