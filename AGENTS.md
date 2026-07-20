@@ -300,8 +300,6 @@ Read the relevant skill before making changes in that area:
 - `self-modifying-code` for source edits by the agent.
 - `upgrade-agent-native` for bringing an older app/workspace to current
   `@agent-native/*` packages without patching core/dispatch.
-- `upgrade-agent-native` for bringing an older app/workspace to current
-  `@agent-native/*` packages without patching core/dispatch.
 - `server-plugins` for `/_agent-native/*` routes and plugins.
 - `authentication`, `onboarding`, `secrets` for setup/auth/credentials.
 - `automations`, `recurring-jobs`, `integration-webhooks` for background work.
