@@ -120,6 +120,16 @@ const en = {
     ccTierSonnet: "Sonnet / Haiku only (block Opus)",
     ccTierAll: "All models (allow Opus)",
     ccTierSaved: "Model tier updated.",
+    // spawn.once default timeout (ad-hoc investigation/patrol spawns).
+    spawnTimeoutTitle: "Ad-hoc spawn timeout",
+    spawnTimeoutDesc:
+      "Default timeout for one-off agent spawns (fact-gathering, patrol " +
+      "checks) that don't specify their own timeout. Real-browser " +
+      "screenshot/investigation work can take much longer than a plain " +
+      "code-edit turn.",
+    spawnTimeoutSeconds: "seconds",
+    spawnTimeoutSaved: "Default spawn timeout updated.",
+    spawnTimeoutInvalid: "Enter a positive whole number of seconds.",
     // vLLM Test button (DESIGN §8.3 item2 — parity with the Claude Code test).
     vllmTest: "Test",
     vllmTesting: "Testing…",
@@ -883,6 +893,13 @@ const zh: typeof en = {
     ccTierSonnet: "仅 Sonnet / Haiku（屏蔽 Opus）",
     ccTierAll: "全部模型（允许 Opus）",
     ccTierSaved: "模型档次已更新。",
+    // spawn.once 默认超时(临时调查/巡检类派发)。
+    spawnTimeoutTitle: "临时派发超时时长",
+    spawnTimeoutDesc:
+      "未显式指定超时时长的一次性agent派发(事实核查、定时巡检等)使用的默认超时。真实浏览器截图/调查类工作耗时可能远超普通代码编辑一轮。",
+    spawnTimeoutSeconds: "秒",
+    spawnTimeoutSaved: "默认派发超时已更新。",
+    spawnTimeoutInvalid: "请输入一个正整数(秒)。",
     // 部署页（ship-it 控制）—— 真实 备份→重建→重启→验证。
     tabDeploy: "部署",
     deployTitle: "部署到生产环境",

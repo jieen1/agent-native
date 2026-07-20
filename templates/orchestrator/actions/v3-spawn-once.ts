@@ -16,9 +16,11 @@ import {
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
 import { z } from "zod";
+
 import { getV3Db, v3Schema } from "../server/db/index.js";
-import { newId } from "./_util.js";
+import { getSpawnDefaultTimeoutSeconds } from "../server/orchestration-defaults.js";
 import { triggerTickSafe } from "../server/plugins/v3-reconciler.js";
+import { newId } from "./_util.js";
 
 export const spawnOnce = defineAction({
   description:
@@ -43,8 +45,9 @@ export const spawnOnce = defineAction({
     outputSchema: z.record(z.string(), z.unknown()).optional(),
     /** Max tokens for the summary / output (default: 2000). */
     maxSummaryTokens: z.number().int().positive().default(2000),
-    /** Timeout in seconds for the spawn (default: 3600). */
-    timeoutSeconds: z.number().int().positive().default(3600),
+    /** Timeout in seconds for the spawn. Omit to use the configured default
+     * (Settings → Runtime; falls back to 3600 if never set). */
+    timeoutSeconds: z.number().int().positive().optional(),
     /** Retry policy. */
     retry: z
       .object({
@@ -63,6 +66,9 @@ export const spawnOnce = defineAction({
     const ownerEmail = getRequestUserEmail() ?? "local@localhost";
     const orgId = getRequestOrgId() ?? null;
 
+    const timeoutSeconds =
+      args.timeoutSeconds ?? (await getSpawnDefaultTimeoutSeconds());
+
     const nodeId = "spawn_agent";
     const dag = {
       nodes: [
@@ -71,12 +77,16 @@ export const spawnOnce = defineAction({
           type: "agent" as const,
           agent: args.agent,
           prompt: args.prompt,
-          ...(args.engineOverride ? { engine_override: args.engineOverride } : {}),
+          ...(args.engineOverride
+            ? { engine_override: args.engineOverride }
+            : {}),
           ...(args.modelOverride ? { model_override: args.modelOverride } : {}),
           ...(args.workspace ? { workspace: args.workspace } : {}),
           ...(args.outputSchema ? { output_schema: args.outputSchema } : {}),
-          ...(args.maxSummaryTokens !== 2000 ? { max_summary_tokens: args.maxSummaryTokens } : {}),
-          ...(args.timeoutSeconds !== 3600 ? { timeout_seconds: args.timeoutSeconds } : {}),
+          ...(args.maxSummaryTokens !== 2000
+            ? { max_summary_tokens: args.maxSummaryTokens }
+            : {}),
+          timeout_seconds: timeoutSeconds,
           ...(args.retry ? { retry: args.retry } : {}),
           deps: [],
         },

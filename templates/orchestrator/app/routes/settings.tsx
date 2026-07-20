@@ -83,6 +83,7 @@ export default function SettingsRoute() {
           <div className="space-y-6">
             <ClaudeCodeCard />
             <BrainModelTierCard />
+            <SpawnTimeoutCard />
           </div>
         </TabsContent>
         <TabsContent value="models">
@@ -167,6 +168,79 @@ function BrainModelTierCard() {
             <SelectItem value="all">{t("settings.ccTierAll")}</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+    </section>
+  );
+}
+
+// ── Spawn default timeout (ad-hoc investigation/patrol spawns) ──────────────
+
+function SpawnTimeoutCard() {
+  const { t } = useTranslation();
+  const { data, refetch } = useActionQuery(
+    "get-spawn-default-timeout" as any,
+    {},
+  );
+  const setTimeout_ = useActionMutation("set-spawn-default-timeout" as any, {});
+
+  const currentSeconds =
+    typeof (data as any)?.seconds === "number" ? (data as any).seconds : 3600;
+  const [draft, setDraft] = useState<string>("");
+  const displaySeconds = draft !== "" ? draft : String(currentSeconds);
+
+  function handleSave() {
+    const parsed = Number(draft);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      toast.error(t("settings.spawnTimeoutInvalid"));
+      return;
+    }
+    setTimeout_.mutate(
+      { seconds: parsed },
+      {
+        onSuccess: () => {
+          toast.success(t("settings.spawnTimeoutSaved"));
+          setDraft("");
+          refetch();
+        },
+        onError: (e: unknown) =>
+          toast.error(
+            e instanceof Error ? e.message : t("common.actionFailed"),
+          ),
+      },
+    );
+  }
+
+  return (
+    <section>
+      <SectionHeading
+        icon={<IconRocket className="size-5" />}
+        title={t("settings.spawnTimeoutTitle")}
+      />
+      <div className="rounded-lg border bg-card p-4 space-y-3">
+        <p className="text-xs text-muted-foreground">
+          {t("settings.spawnTimeoutDesc")}
+        </p>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={1}
+            className="w-32"
+            value={displaySeconds}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={setTimeout_.isPending}
+          />
+          <span className="text-xs text-muted-foreground">
+            {t("settings.spawnTimeoutSeconds")}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSave}
+            disabled={setTimeout_.isPending || draft === ""}
+          >
+            {t("common.save")}
+          </Button>
+        </div>
       </div>
     </section>
   );
