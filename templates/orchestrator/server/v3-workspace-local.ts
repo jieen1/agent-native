@@ -159,6 +159,12 @@ export interface CommitAndPushOptions {
   id: string;
   /** Commit message. */
   message: string;
+  /**
+   * Explicit push target branch, overriding the workspace's recorded
+   * `v3_workspaces.branch`. Omit to push to the workspace's own branch (the
+   * common case — a workspace normally already owns its run branch).
+   */
+  branch?: string;
   /** When true, open a PR/MR after pushing (via `gh` or the GitHub API). */
   createMr?: boolean;
   /** Base branch for the PR. Defaults to the repo default (gh resolves it). */
@@ -1619,9 +1625,11 @@ export async function commitAndPush(
 
   const dir = row.hostPath;
   let branch =
-    row.branch && row.branch.trim() !== ""
-      ? row.branch.trim()
-      : defaultRunBranch(opts.id);
+    opts.branch && opts.branch.trim() !== ""
+      ? opts.branch.trim()
+      : row.branch && row.branch.trim() !== ""
+        ? row.branch.trim()
+        : defaultRunBranch(opts.id);
 
   // Detection/self-heal safety net (b) for the unborn-HEAD incident: even
   // with the ensureBareMirror/refreshMirror fix (prevention (a) — never

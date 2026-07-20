@@ -2,14 +2,15 @@ import { defineAction } from "@agent-native/core";
 import { resolveSecret } from "@agent-native/core/server";
 import { eq, and, desc, or, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
-import { MicrosandboxRuntime } from "../server/runtime/microsandbox-runtime.js";
 import {
   addAll,
   commit,
   pushBranch,
   type GitContext,
 } from "../server/runtime/git-wrapper.js";
+import { MicrosandboxRuntime } from "../server/runtime/microsandbox-runtime.js";
 import { VM_HOME, scrubSecretsFromLog } from "../server/runtime/vm-creds.js";
 import {
   createLocalWorkspace,
@@ -586,6 +587,7 @@ export const workspaceCommitPush = defineAction({
       const result = await commitAndPushLocal({
         id: args.workspaceId,
         message: args.message,
+        branch: args.pushBranch,
         createMr: true,
         baseBranch,
         prTitle: args.message.split("\n")[0] || args.message,
@@ -688,7 +690,9 @@ export const workspaceMergePr = defineAction({
   run: async (args) => {
     const ws = await assertWorkspaceExists(args.workspaceId);
     if (ws.state !== "ready" && ws.state !== "busy") {
-      throw new Error(`Workspace ${args.workspaceId} is ${ws.state}, cannot merge`);
+      throw new Error(
+        `Workspace ${args.workspaceId} is ${ws.state}, cannot merge`,
+      );
     }
     const result = await mergePrLocal({
       id: args.workspaceId,

@@ -10,7 +10,7 @@
 // smoke failure → row state `failed` + the ORIGINAL WorkspaceNotReadyError
 // (stage/errorClass=infra) propagates + the checkout dir is cleaned up).
 
-import { describe, it, expect, vi, afterEach, afterAll } from "vitest";
+import { spawnSync } from "node:child_process";
 import {
   mkdtempSync,
   rmSync,
@@ -20,7 +20,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+
+import { describe, it, expect, vi, afterEach, afterAll } from "vitest";
 
 // ── Hoisted env: pin WORKSPACE_ROOT/BARE_ROOT (captured at module import) to
 // a temp dir so the real mirror/worktree machinery never touches /workspaces.
@@ -355,15 +356,87 @@ describe("unborn-HEAD incident regression", () => {
 
     // The diff against that real base is ONLY the intended new file, never a
     // wholesale re-add of the whole repo.
-    const changed = requireOk(ws.dir, [
-      "diff",
-      "--name-only",
-      f.c0,
-      "HEAD",
-    ])
+    const changed = requireOk(ws.dir, ["diff", "--name-only", f.c0, "HEAD"])
       .split("\n")
       .filter(Boolean);
     expect(changed).toEqual(["fix.txt"]);
+  });
+});
+
+// ── Board #106: an explicit push-target branch must win over the workspace's
+// own recorded v3_workspaces.branch. workspaceCommitPush's host-native path
+// threads its `pushBranch` arg through to commitAndPush's `branch` option —
+// before this fix, commitAndPush only ever read `row.branch`, so an explicit
+// override was silently dropped and the push always landed on the
+// workspace's own (possibly stale) branch.
+describe("board #106 — commitAndPush explicit branch override", () => {
+  it("opts.branch overrides the workspace's recorded branch as the actual push target", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    const ws = await createLocalWorkspace({
+      repoUrl: f.upstream,
+      ownerKind: "run",
+      ownerId: "run-branch-override",
+      baseRef: "main",
+    });
+
+    writeFileSync(join(ws.dir, "override.txt"), "explicit branch target\n");
+
+    const result = await commitAndPush({
+      id: ws.id,
+      message: "fix: push to an explicit branch, not the workspace's own",
+      branch: "explicit-target-branch",
+    });
+
+    expect(result.committed).toBe(true);
+    expect(result.pushed).toBe(true);
+    expect(result.branch).toBe("explicit-target-branch");
+
+    // Decisive proof: the real "remote" (f.upstream) actually received the
+    // commit on the EXPLICIT branch name, not the workspace's own branch.
+    const pushedSha = requireOk(f.upstream, [
+      "rev-parse",
+      "--verify",
+      "refs/heads/explicit-target-branch",
+    ]);
+    expect(pushedSha).not.toBe("");
+    expect(requireOk(ws.dir, ["rev-parse", "HEAD"])).toBe(pushedSha);
+
+    // The workspace's own branch name must NOT have received this commit —
+    // decisive proof the override actually redirected the push instead of
+    // pushing to both. createLocalWorkspace never pushes on its own, so the
+    // workspace's own branch should have no ref at all on the remote yet.
+    expect(() =>
+      requireOk(f.upstream, [
+        "rev-parse",
+        "--verify",
+        `refs/heads/${ws.branch}`,
+      ]),
+    ).toThrow();
+  });
+
+  it("omitting opts.branch falls back to the workspace's own recorded branch (unchanged default behavior)", async () => {
+    const f = makeUpstream();
+    tempRoots.push(f.root);
+
+    const ws = await createLocalWorkspace({
+      repoUrl: f.upstream,
+      ownerKind: "run",
+      ownerId: "run-branch-default",
+      baseRef: "main",
+    });
+
+    writeFileSync(join(ws.dir, "default.txt"), "default branch target\n");
+
+    const result = await commitAndPush({
+      id: ws.id,
+      message: "fix: no explicit branch, keep pushing to the workspace's own",
+    });
+
+    expect(result.committed).toBe(true);
+    expect(result.pushed).toBe(true);
+    expect(result.branch).toBe(ws.branch);
   });
 });
 
