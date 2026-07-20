@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
+import { SprintPhaseStepper } from "@/components/SprintPhaseStepper";
 import { ArtifactToolRow } from "@/components/studio/ArtifactToolRow";
 import { BriefsStepView } from "@/components/studio/BriefsStepView";
 import { GenericArtifactContent } from "@/components/studio/GenericArtifactContent";
@@ -90,11 +91,15 @@ export function SprintStudioPage() {
   const [signoffGate, setSignoffGate] = useState<GateKey | null>(null);
 
   const artifactFacts = useMemo(() => {
-    const facts: Record<string, { latestVersion: number | null }> = {};
+    const facts: Record<
+      string,
+      { latestVersion: number | null; producedByKind: "agent" | "human" | null }
+    > = {};
     for (const def of STUDIO_STEPS) {
       const versions = byDocKey[def.docKey] ?? [];
       facts[def.docKey] = {
         latestVersion: latestOf(versions)?.version ?? null,
+        producedByKind: latestOf(versions)?.producedByKind ?? null,
       };
     }
     return facts;
@@ -263,27 +268,7 @@ export function SprintStudioPage() {
           {SPRINT_PHASE_LABELS[phase as keyof typeof SPRINT_PHASE_LABELS] ??
             phase}
         </Badge>
-        <div className="ml-2 flex items-center gap-1 overflow-x-auto text-xs text-muted-foreground">
-          {Object.values(SPRINT_PHASE_LABELS).map((label, i, arr) => (
-            <span key={label} className="flex items-center gap-1">
-              <span
-                className={
-                  label ===
-                  (SPRINT_PHASE_LABELS[
-                    phase as keyof typeof SPRINT_PHASE_LABELS
-                  ] ?? phase)
-                    ? "font-semibold text-info"
-                    : ""
-                }
-              >
-                {label}
-              </span>
-              {i < arr.length - 1 ? (
-                <span className="mx-0.5 h-px w-2.5 bg-border" />
-              ) : null}
-            </span>
-          ))}
-        </div>
+        <SprintPhaseStepper phase={phase} />
         <div className="ml-auto flex items-center gap-2">
           <Button asChild size="sm" variant="outline" className="gap-1.5">
             <Link to={`/sprints/${id}`}>
