@@ -91,6 +91,13 @@ export interface NodeRunnerInput {
   ownerEmail: string;
   orgId: string | null;
   /**
+   * The `v3_spawns.id` for THIS node execution (work item nv73eo2nbm). The
+   * dispatcher supplies it so the engine-loop can key Observational Memory on
+   * the real spawn id (activating OM consumption + the tool journal). Optional
+   * for callers without a spawn row; forwarded verbatim to `RuntimeExecCtx`.
+   */
+  spawnId?: string;
+  /**
    * Live step sink (DESIGN §8.5) — forwarded to the executor's EXECUTE ctx so
    * the dispatcher can append `spawn_events` for a RUNNING node in real time.
    */
@@ -281,6 +288,7 @@ export class NodeRunner {
         deps: input.deps,
         item: input.item,
         effort: input.effort,
+        spawnId: input.spawnId,
         ownerEmail: input.ownerEmail,
         orgId: input.orgId,
         signal,
