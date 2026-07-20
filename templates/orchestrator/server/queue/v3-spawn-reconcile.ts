@@ -27,11 +27,16 @@
 //           vm_name concept for these at all, see §"host-native liveness" fix
 //           note below) that has not yet emitted a single step — AND it is
 //           older than a short grace, OR
-//       (3) it is older than a GENEROUS hard grace (default 30 min — longer than
-//           any real spawn) regardless of the above, as a crashed-isolate
-//           backstop.
+//       (3) it is older than a GENEROUS hard grace (default 30 min) AND has NO
+//           recent heartbeat — a crashed-isolate backstop. This is now
+//           HEARTBEAT-AWARE: a spawn that is demonstrably still emitting fresh
+//           spawn_events heartbeats is EXEMPT from it, however long it has been
+//           running (see the 2026-07-20 incident note below), OR
+//       (4) it is older than the ABSOLUTE ceiling (default 2 h) regardless of
+//           heartbeat — the true unconditional final backstop / cost-control
+//           safety net for a spawn that heartbeats forever but never finishes.
 //     A spawn whose parent is still active AND that has EITHER a live VM OR a
-//     real spawn_events heartbeat AND is within grace is left alone.
+//     real, RECENT spawn_events heartbeat AND is within grace is left alone.
 //
 //   Host-native liveness fix (production incident 2026-07-18, task board
 //   review of #95's `sdlc-merge-review`): this file used to gate the
@@ -70,6 +75,32 @@
 //   (default 8 min) applied only when `liveVm` is false — see
 //   `effectiveStallMs` below. `ORCH_SPAWN_STALL_MS` itself is unchanged for
 //   microVM spawns.
+//
+//   Hard-stale heartbeat-awareness fix (production incident 2026-07-20, task
+//   board item 3i322q5tnm): the ~30-minute hard backstop (rule 3,
+//   `V3_SPAWN_STALE_GRACE_MS`) used to be computed purely from `started_at`
+//   (the spawn's total AGE) and completely ignored whether the spawn still had
+//   a live, RECENT `spawn_events` heartbeat. So a genuinely-alive spawn that
+//   had been emitting fresh heartbeats the entire time — parent not terminal,
+//   `eventStalled` false (its last heartbeat is recent), `noVmAndAged` false
+//   (it has a live signal) — was STILL forcibly failed the instant its total
+//   age crossed ~30 minutes, purely for having run long. Confirmed in
+//   production: a `develop` node that starts a dev server and then runs a
+//   Playwright screenshot verification step (which legitimately takes far
+//   longer than a plain code-editing `develop` node — sometimes crossing 30
+//   minutes total) was reset as "stale running spawn (~30m)... no live worker"
+//   even though it had been actively producing real heartbeats/output right up
+//   to the kill (one confirmed case even produced real light.png/dark.png
+//   screenshots). Plain code-editing develop nodes finish in minutes and never
+//   hit this backstop, so the false-kill only showed up on the
+//   dev-server+Playwright verification path. Fixed by making the ~30-minute
+//   backstop HEARTBEAT-AWARE — it no longer fires for a spawn that is
+//   demonstrably still emitting fresh heartbeats (`recentHeartbeat` below) —
+//   and adding a NEW, longer, genuinely-UNCONDITIONAL absolute ceiling
+//   (`V3_SPAWN_ABSOLUTE_STALE_GRACE_MS`, default 2 h) as the true final
+//   backstop for a spawn that heartbeats forever but never actually finishes
+//   (the runaway/cost-control safety net the old hard-stale rule was doing
+//   double duty as).
 //
 //   • PENDING orphans (never bound to a node: `node_id IS NULL`) older than the
 //     hard grace are cancelled — a created-but-never-dispatched spawn from a
@@ -113,14 +144,37 @@ export const V3_SPAWN_NOVM_GRACE_MS = (() => {
 })();
 
 /**
- * Hard age backstop: any 'running' spawn older than this — or any unbound
- * 'pending' orphan older than this — is reconciled regardless of VM/parent state
- * (the crashed-isolate / killed-test backstop). Generous so a real long spawn
- * never trips it. Env-overridable via V3_SPAWN_STALE_GRACE_MS (default 30 min).
+ * Hard age backstop (now HEARTBEAT-AWARE — see the 2026-07-20 incident note in
+ * the file header): a 'running' spawn older than this is reconciled ONLY when it
+ * has NO recent heartbeat (the crashed-isolate backstop). A spawn that is
+ * demonstrably still emitting fresh `spawn_events` heartbeats is EXEMPT from
+ * this backstop, however long it has been running — a genuinely-alive
+ * dev-server+Playwright `develop` node legitimately crosses 30 minutes and must
+ * not be killed for merely running long. This is NO LONGER the unconditional
+ * final backstop: that role now belongs to `V3_SPAWN_ABSOLUTE_STALE_GRACE_MS`
+ * below. (Unbound 'pending' orphans older than this are still cancelled — a
+ * pending spawn has no heartbeat concept, so this grace stays age-only there.)
+ * Env-overridable via V3_SPAWN_STALE_GRACE_MS (default 30 min).
  */
 export const V3_SPAWN_STALE_GRACE_MS = (() => {
   const raw = Number(process.env.V3_SPAWN_STALE_GRACE_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : 30 * 60_000; // 30 min default
+})();
+
+/**
+ * Absolute age ceiling — the NEW, genuinely-UNCONDITIONAL final backstop (fires
+ * regardless of heartbeat). Separate from the now heartbeat-aware
+ * `V3_SPAWN_STALE_GRACE_MS` above: this is the true runaway / cost-control
+ * safety net for a spawn that keeps emitting fresh heartbeats forever but never
+ * actually finishes (a wedged loop, a dev server that never lets its
+ * verification step conclude). A spawn older than this is reconciled even with
+ * a perfectly fresh heartbeat — exactly the role the old hard-stale rule used to
+ * play before it was made heartbeat-aware. Generous (2 h) so no real long spawn
+ * trips it. Env-overridable via V3_SPAWN_ABSOLUTE_STALE_GRACE_MS (default 2 h).
+ */
+export const V3_SPAWN_ABSOLUTE_STALE_GRACE_MS = (() => {
+  const raw = Number(process.env.V3_SPAWN_ABSOLUTE_STALE_GRACE_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 120 * 60_000; // 2 h default
 })();
 
 /**
@@ -200,6 +254,7 @@ export async function reconcileV3SpawnsOnce(
   staleGraceMs: number = V3_SPAWN_STALE_GRACE_MS,
   stallMs: number = ORCH_SPAWN_STALL_MS,
   hostNativeStallMs: number = ORCH_SPAWN_HOST_NATIVE_STALL_MS,
+  absoluteGraceMs: number = V3_SPAWN_ABSOLUTE_STALE_GRACE_MS,
 ): Promise<ReconciledV3Spawn[]> {
   if (!isPostgres()) return [];
 
@@ -296,7 +351,14 @@ export async function reconcileV3SpawnsOnce(
     //       for several real minutes with nothing wrong; a microVM's own
     //       heartbeat is expected to be far more granular, so a much shorter
     //       threshold is still the right failure signal there, OR
-    //   (4) older than the hard stale backstop regardless.
+    //   (4) older than the hard stale backstop AND has NO recent heartbeat —
+    //       the crashed-isolate backstop, now HEARTBEAT-AWARE (see the
+    //       2026-07-20 incident note in the file header): a spawn that is
+    //       demonstrably still emitting fresh heartbeats is EXEMPT, however
+    //       long it has been running, OR
+    //   (5) older than the ABSOLUTE ceiling regardless of heartbeat — the true
+    //       unconditional final backstop / cost-control safety net for a spawn
+    //       that heartbeats forever but never finishes.
     const parentTerminal = nodeTerminal || runTerminal;
     const noVmAndAged = !anyLiveSignal && startedAt < Date.now() - noVmGraceMs;
     const effectiveStallMs = liveVm ? stallMs : hostNativeStallMs;
@@ -305,8 +367,27 @@ export async function reconcileV3SpawnsOnce(
       anyLiveSignal &&
       hasHeartbeat &&
       Date.now() - lastEventAt > effectiveStallMs;
-    const hardStale = startedAt < Date.now() - staleGraceMs;
-    if (!parentTerminal && !noVmAndAged && !eventStalled && !hardStale)
+    // A live, RECENT heartbeat: the spawn currently has a live signal AND its
+    // most recent spawn_events heartbeat is within the SAME stall threshold
+    // already used for `eventStalled` above. Such a spawn is demonstrably still
+    // alive, so the ~30-min hard backstop must NOT fire for it.
+    const recentHeartbeat =
+      anyLiveSignal &&
+      hasHeartbeat &&
+      Date.now() - lastEventAt <= effectiveStallMs;
+    const hardStale =
+      !recentHeartbeat && startedAt < Date.now() - staleGraceMs;
+    // The unconditional final backstop — ignores heartbeat entirely (exactly
+    // like the old hardStale did), so a spawn that heartbeats forever but never
+    // finishes is still reaped for cost control.
+    const absoluteStale = startedAt < Date.now() - absoluteGraceMs;
+    if (
+      !parentTerminal &&
+      !noVmAndAged &&
+      !eventStalled &&
+      !hardStale &&
+      !absoluteStale
+    )
       continue;
 
     const ageMin = Math.round((Date.now() - startedAt) / 60_000);
@@ -319,7 +400,9 @@ export async function reconcileV3SpawnsOnce(
         ? `no live microVM (runtime=${runtime ?? "?"}) for ~${ageMin}m`
         : eventStalled
           ? `no spawn_events heartbeat for ~${silentMin}m (${liveVm ? "live-VM" : "host-native"} stall)`
-          : `stale running spawn (~${ageMin}m)`;
+          : hardStale
+            ? `stale running spawn (~${ageMin}m)`
+            : `still running past the absolute ${Math.round(absoluteGraceMs / 60_000)}m ceiling (~${ageMin}m)`;
     const reason = `reconciled: stranded running spawn — ${why}`;
 
     // Guard the write on status='running' so we never race a spawn that just
