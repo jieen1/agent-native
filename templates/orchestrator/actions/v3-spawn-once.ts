@@ -43,8 +43,8 @@ export const spawnOnce = defineAction({
     outputSchema: z.record(z.string(), z.unknown()).optional(),
     /** Max tokens for the summary / output (default: 2000). */
     maxSummaryTokens: z.number().int().positive().default(2000),
-    /** Timeout in seconds for the spawn (default: 120). */
-    timeoutSeconds: z.number().int().positive().default(120),
+    /** Timeout in seconds for the spawn (default: 3600). */
+    timeoutSeconds: z.number().int().positive().default(3600),
     /** Retry policy. */
     retry: z
       .object({
@@ -76,7 +76,7 @@ export const spawnOnce = defineAction({
           ...(args.workspace ? { workspace: args.workspace } : {}),
           ...(args.outputSchema ? { output_schema: args.outputSchema } : {}),
           ...(args.maxSummaryTokens !== 2000 ? { max_summary_tokens: args.maxSummaryTokens } : {}),
-          ...(args.timeoutSeconds !== 120 ? { timeout_seconds: args.timeoutSeconds } : {}),
+          ...(args.timeoutSeconds !== 3600 ? { timeout_seconds: args.timeoutSeconds } : {}),
           ...(args.retry ? { retry: args.retry } : {}),
           deps: [],
         },
