@@ -61,6 +61,7 @@ import { motionPreviewBridgeScript } from "../../../.generated/bridge/motion-pre
 import { navBridgeScript } from "../../../.generated/bridge/nav.generated";
 import { shaderFillPreviewBridgeScript } from "../../../.generated/bridge/shader-fill-preview.generated";
 import { shaderRuntimeBridgeScript } from "../../../.generated/bridge/shader-runtime.generated";
+import { tailwindSelfhealBridgeScript } from "../../../.generated/bridge/tailwind-selfheal.generated";
 import { tweakBridgeScript } from "../../../.generated/bridge/tweak.generated";
 import { zoomBridgeScript } from "../../../.generated/bridge/zoom.generated";
 import { isTrustedCanvasBridgeMessage } from "./bridge-security";
@@ -250,6 +251,23 @@ ${embeddedWheelBridgeScript}
 const NAV_BRIDGE_SCRIPT = `
 <script data-agent-native-nav-bridge>
 ${navBridgeScript}
+</script>
+`;
+
+/**
+ * Tailwind CDN self-heal bridge. ALWAYS injected. The Tailwind CDN script
+ * (`@tailwindcss/browser`) each generated prototype loads can silently fail
+ * to produce any output under real editor load (see the bridge source for
+ * the full reproduction) — this verifies it actually took effect and forces
+ * a fresh script load to recover if not, instead of leaving every utility
+ * class inert.
+ *
+ * Source: app/components/design/bridge/tailwind-selfheal.bridge.ts
+ * Compiled: .generated/bridge/tailwind-selfheal.generated.ts (run bridge/codegen.ts to update)
+ */
+const TAILWIND_SELFHEAL_BRIDGE_SCRIPT = `
+<script data-agent-native-tailwind-selfheal-bridge>
+${tailwindSelfhealBridgeScript}
 </script>
 `;
 
@@ -2120,6 +2138,7 @@ export function DesignCanvas({
       TWEAK_BRIDGE_SCRIPT +
       ZOOM_BRIDGE_SCRIPT +
       NAV_BRIDGE_SCRIPT +
+      TAILWIND_SELFHEAL_BRIDGE_SCRIPT +
       LIGHTWEIGHT_HIT_TEST_BRIDGE_SCRIPT +
       embeddedGestureBridgeForCurrentState +
       editorChromeBridge;
