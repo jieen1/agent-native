@@ -2,10 +2,11 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
-import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
 import { reevaluateBlockedQueue } from "../server/lib/dispatch-gate.js";
+import { callOrchestratorTool } from "../server/lib/orchestrator-client.js";
 
 // Read activity for a dispatched work item back from the orchestrator: the
 // brain transcript (via the stored threadId) plus any tagged runs/spawns
@@ -246,28 +247,46 @@ export default defineAction({
 
     const tagMatch = { source: "tracker", item_id: item.id };
 
+    // The orchestrator's brain-thread/runsList/spawnList reads are strictly
+    // owner-scoped on ITS side (V3 has no shares — see brain-thread.ts). The
+    // identity that must authenticate this cross-app call is whoever actually
+    // OWNS the dispatched work (item.ownerEmail — who dispatch-to-orchestrator
+    // ran as), NOT the viewer currently browsing this page. ownerScope() above
+    // already gated whether this viewer may see the item at all (org-level
+    // access is fine there); using the viewer's own email here instead of the
+    // item's real owner produced a real bug — any org-mate other than the
+    // item's exact dispatching owner got "Brain thread ... not found" even
+    // though the item itself rendered fine.
+    const dispatchOwnerEmail = item.ownerEmail;
+
     // Fan out: brain transcript + tagged runs + tagged spawns + the global
     // brain queue snapshot (the live concurrency gate). Plus the per-item
     // brain_task slot read straight from the shared DB. Tolerate partial
     // failures so a transient orchestrator hiccup still shows what it can.
     const [threadRes, runsRes, spawnsRes, queueRes, slot] = await Promise.all([
       Promise.allSettled([
-        callOrchestratorTool(ownerEmail, "brain-thread", {
+        callOrchestratorTool(dispatchOwnerEmail, "brain-thread", {
           threadId: item.orchestratorThreadId,
         }),
       ]).then((r) => r[0]!),
       Promise.allSettled([
-        callOrchestratorTool(ownerEmail, "runsList", { tagMatch, limit: 50 }),
+        callOrchestratorTool(dispatchOwnerEmail, "runsList", {
+          tagMatch,
+          limit: 50,
+        }),
       ]).then((r) => r[0]!),
       Promise.allSettled([
-        callOrchestratorTool(ownerEmail, "spawnList", { tagMatch, limit: 100 }),
+        callOrchestratorTool(dispatchOwnerEmail, "spawnList", {
+          tagMatch,
+          limit: 100,
+        }),
       ]).then((r) => r[0]!),
       Promise.allSettled([
-        callOrchestratorTool(ownerEmail, "brain-queue-status", {}),
+        callOrchestratorTool(dispatchOwnerEmail, "brain-queue-status", {}),
       ]).then((r) => r[0]!),
       // Per-item slot state, read via the orchestrator's own action surface
       // (F9 — no more raw cross-app SQL, see readBrainTaskSlot above).
-      readBrainTaskSlot(ownerEmail, item.orchestratorThreadId),
+      readBrainTaskSlot(dispatchOwnerEmail, item.orchestratorThreadId),
     ]);
 
     const errors: Record<string, string> = {};
@@ -318,7 +337,7 @@ export default defineAction({
         if (runId) {
           try {
             const nodeRes = await callOrchestratorTool(
-              ownerEmail,
+              dispatchOwnerEmail,
               "v3RunNodes",
               {
                 runId,
@@ -420,7 +439,8 @@ export default defineAction({
     // items that were blocked-by this one — re-evaluate them. (isGateCleared
     // keys on the 实施 stage being completed / the stage moving past 实施,
     // not on status="done", so the returned+验收 writeback still unblocks.)
-    const justCompleted = nextStatus === "returned" && item.status !== "returned";
+    const justCompleted =
+      nextStatus === "returned" && item.status !== "returned";
     if (Object.keys(patch).length) {
       patch.updatedAt = new Date().toISOString();
       await db
