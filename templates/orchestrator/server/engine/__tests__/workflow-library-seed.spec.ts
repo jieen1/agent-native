@@ -61,4 +61,28 @@ describe("WORKFLOW_LIBRARY_SEED", () => {
       expect(typeof entry.inputSchema.properties).toBe("object");
     },
   );
+
+  // SDLC-039 / B1: sdlc-dev 的 develop 节点必须把 TDD 红先行两段提交纪律 +
+  // done 报告测试证据纪律写进 prompt（可机检标记），否则 develop 节点会退回
+  // 单 squash commit、done 报告无测试输出的旧行为。
+  it("sdlc-dev: develop 节点 prompt 含 TDD 两段提交 + 测试证据纪律标记", () => {
+    const entry = WORKFLOW_LIBRARY_SEED.find((e) => e.name === "sdlc-dev");
+    expect(entry).toBeDefined();
+    const devNode = entry!.dag.nodes.find(
+      (n) => (n as { id?: string }).id === "develop",
+    ) as { prompt?: string } | undefined;
+    expect(devNode).toBeDefined();
+    const prompt = devNode!.prompt ?? "";
+
+    // (A) TDD 红先行两段提交纪律
+    expect(prompt).toContain("test:");
+    expect(prompt).toContain("红");
+    expect(prompt).toContain("分两段提交");
+    expect(prompt).toContain("git log");
+
+    // (B) done 报告必须附测试执行证据
+    expect(prompt).toContain("测试命令");
+    expect(prompt).toContain("输出摘录");
+    expect(prompt).toContain("commit hash");
+  });
 });

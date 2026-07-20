@@ -126,7 +126,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           id: "develop",
           agent: "vllm",
           prompt:
-            "你是开发者。请在当前 workspace 用 Read/Edit/Write/Bash 完成下面的开发规格,实现全部代码改动:\n\n{{inputs.spec}}\n\n严格遵守工程约束(只改指定文件/范围、DB 变更加性、复用现有写法、新表要有建表迁移)。**不要运行 pnpm install 或构建**。完成后简述改/新建了哪些文件及关键改动。",
+            "你是开发者。请在当前 workspace 用 Read/Edit/Write/Bash 完成下面的开发规格,实现全部代码改动:\n\n{{inputs.spec}}\n\n严格遵守工程约束(只改指定文件/范围、DB 变更加性、复用现有写法、新表要有建表迁移)。**不要运行 pnpm install 或构建**。完成后简述改/新建了哪些文件及关键改动。\n\n## 纪律 1：TDD 红先行两段提交（MUST）\n必须分两段提交,禁止把红测试与实现 squash 成单个 commit:\n1. 第一段:先写失败测试(红),运行确认其确实失败后,单独 git commit,commit message 以 test: 开头并标注 (红/red),例如 `test: <描述> (红)`。此提交必须只含测试,不含使其通过的实现。\n2. 第二段:再写最小实现让测试转绿,运行确认通过后,单独 git commit,commit message 以 feat:/fix: 开头。\n结果:分支 git log 中红测试提交必须在实现提交之前(git log 顺序可证)。\n\n## 纪律 2：done 报告必须附测试执行证据（P4 证据优先，MUST）\ndone/完成报告必须包含:① 实际执行的测试命令(完整命令行);② 该命令的真实输出摘录(红阶段失败摘录 + 绿阶段通过摘录,含通过/失败计数),不得只写\"测试通过\"这类无证据结论;③ 两段提交的 commit hash。评审者据此可核对,无需自己重跑。",
           workspace: "{{inputs.workspaceId}}",
         },
       ],
