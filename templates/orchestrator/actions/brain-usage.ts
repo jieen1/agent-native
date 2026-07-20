@@ -39,7 +39,8 @@ export function deriveContextWindow(model: string | null): number | null {
   const m = model.toLowerCase();
   if (/\[1m\]/.test(m)) return 1_000_000;
   if (/opus-4-8|opus-4-7|opus-4-6/.test(m)) return 1_000_000;
-  if (/opus-4-5|sonnet-4-6|haiku-4-5/.test(m)) return 200_000;
+  // sonnet-5: 200k default window (Anthropic model spec); sonnet-5[1m] → 1M via the [1m] check above.
+  if (/opus-4-5|sonnet-4-6|haiku-4-5|sonnet-5/.test(m)) return 200_000;
   return 200_000;
 }
 
