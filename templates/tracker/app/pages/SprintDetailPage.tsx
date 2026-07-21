@@ -26,13 +26,16 @@ import {
   IconPlayerPlay,
   IconPlayerTrackNext,
   IconPlus,
+  IconRocket,
   IconRubberStamp,
+  IconStopwatch,
   IconX,
 } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router";
 import { Link } from "react-router";
 
+import { formatDurationSec } from "@shared/sprint-timing";
 import { ActorAvatar } from "@/components/ActorAvatar";
 import { ArtifactBadge, ArtifactViewDialog } from "@/components/ArtifactBadge";
 import { InspectorSection } from "@/components/InspectorSection";
@@ -91,9 +94,11 @@ import {
   useGoalMetrics,
   useQueueHealth,
   useRejectGate,
+  useReleaseSprint,
   useRequestApproval,
   useSprint,
   useSprintArtifacts,
+  useSprintStageTiming,
   useUpdateSprint,
 } from "@/hooks/use-tracker";
 import { classifyDocKey, ARTIFACT_GROUP_ORDER } from "@/lib/sprint-artifacts";
@@ -1314,6 +1319,201 @@ function MetricsSummary({ sprint }: { sprint: SprintDetail }) {
   );
 }
 
+// ── M5 Sprint-status: per-work-item stage timing from real v3_spawns ─────────
+// Every number here is derived from real orchestrator v3_spawns.started_at /
+// completed_at timestamps via get-sprint-stage-timing. A stage with no spawn
+// data shows "无数据" — never 0, never fabricated.
+
+function StageTimingCell({ sec }: { sec: number | null }) {
+  return (
+    <span
+      className={
+        sec == null
+          ? "text-muted-foreground"
+          : "font-mono text-foreground tabular-nums"
+      }
+    >
+      {formatDurationSec(sec)}
+    </span>
+  );
+}
+
+function SprintStageTiming({ sprintId }: { sprintId: string }) {
+  const { data, isLoading } = useSprintStageTiming(sprintId);
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+        <IconStopwatch className="size-4 text-muted-foreground" />
+        阶段耗时
+        <span className="text-[11px] font-normal text-muted-foreground">
+          （来源：orchestrator v3_spawns 真实时间戳）
+        </span>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border bg-card">
+        {isLoading ? (
+          <div className="p-5">
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ) : !data || data.items.length === 0 ? (
+          <p className="p-5 text-sm text-muted-foreground">
+            暂无工作项或 orchestrator 数据（尚未派发任何工作项，v3_spawns 无记录）。
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-9 px-3 text-[10.5px]">Key</TableHead>
+                <TableHead className="h-9 px-3 text-[10.5px]">标题</TableHead>
+                <TableHead className="h-9 px-3 text-[10.5px] text-right">
+                  dev
+                </TableHead>
+                <TableHead className="h-9 px-3 text-[10.5px] text-right">
+                  qa
+                </TableHead>
+                <TableHead className="h-9 px-3 text-[10.5px] text-right">
+                  review
+                </TableHead>
+                <TableHead className="h-9 px-3 text-[10.5px] text-right">
+                  gate
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((item) => {
+                const stageMap = Object.fromEntries(
+                  item.stages.map((s) => [s.stage, s]),
+                );
+                return (
+                  <TableRow key={item.workItemId}>
+                    <TableCell className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground">
+                      {item.itemKey}
+                    </TableCell>
+                    <TableCell className="px-3 py-2">
+                      <Link
+                        to={`/items/${item.workItemId}`}
+                        className="truncate font-medium text-foreground hover:underline"
+                      >
+                        {item.title}
+                      </Link>
+                    </TableCell>
+                    {(["dev", "qa", "review", "gate"] as const).map((stage) => (
+                      <TableCell
+                        key={stage}
+                        className="px-3 py-2 text-right text-xs"
+                      >
+                        <TooltipProvider delayDuration={100}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-default">
+                                <StageTimingCell
+                                  sec={stageMap[stage]?.totalSec ?? null}
+                                />
+                              </span>
+                            </TooltipTrigger>
+                            {stageMap[stage]?.spawns?.length ? (
+                              <TooltipContent
+                                side="left"
+                                className="max-w-xs text-[11px]"
+                              >
+                                <p className="mb-1 font-semibold">
+                                  {stageMap[stage]!.spawnCount} spawn(s)
+                                </p>
+                                {stageMap[stage]!.spawns.map((sp) => (
+                                  <div key={sp.spawnId} className="font-mono">
+                                    {sp.spawnId.slice(0, 8)}…{" "}
+                                    {sp.startedAt?.slice(11, 19) ?? "?"}→
+                                    {sp.completedAt?.slice(11, 19) ?? "运行中"}
+                                    {sp.durationSec != null
+                                      ? ` (${sp.durationSec}s)`
+                                      : ""}
+                                  </div>
+                                ))}
+                              </TooltipContent>
+                            ) : null}
+                          </Tooltip>
+                        </TooltipProvider>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+        {data?.errors && Object.keys(data.errors).length > 0 ? (
+          <p className="border-t px-4 py-2 text-[11.5px] text-warning">
+            部分 orchestrator 数据读取失败（不影响已有数据展示）：
+            {Object.values(data.errors).join("; ")}
+          </p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+// ── Release button (M5 §5 — Sprint '发布') ────────────────────────────────────
+// Enabled only when sprint is in "已完成" status. Clicking transitions to
+// "已发布". The action itself is idempotent: re-releasing an already-released
+// sprint is a no-op (guarded server-side in release-sprint.ts).
+
+function ReleaseButton({
+  sprintId,
+  status,
+}: {
+  sprintId: string;
+  status: string;
+}) {
+  const releaseSprint = useReleaseSprint();
+  const [open, setOpen] = useState(false);
+
+  const isReleased = status === "已发布";
+  const canRelease = status === "已完成" || isReleased;
+
+  if (!canRelease) return null;
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant={isReleased ? "outline" : "default"}
+        className="gap-1.5"
+        disabled={isReleased || releaseSprint.isPending}
+        onClick={() => setOpen(true)}
+      >
+        <IconRocket className="size-4" />
+        {isReleased ? "已发布" : "发布"}
+      </Button>
+
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>发布 Sprint？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将 Sprint 状态标记为「已发布」，并写入 changelog 发布记录。
+              此操作在已发布时为空操作（幂等），可安全重试。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                void releaseSprint
+                  .mutateAsync({ sprintId })
+                  .then(() => setOpen(false));
+              }}
+              disabled={releaseSprint.isPending}
+            >
+              {releaseSprint.isPending ? "发布中…" : "确认发布"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
 // ── 推进相位 (manual, unguarded — the criteria engine described by the
 // prototype's "判据 N/M" fraction does not exist for the 8 cross-phase
 // transitions; this is an honest manual override, not a fake gate check) ───
@@ -1436,7 +1636,10 @@ export function SprintDetailPage() {
               {SPRINT_PHASE_LABELS[phase as SprintPhase] ?? phase}
             </Badge>
           </div>
-          <AdvancePhaseButton sprintId={id} phase={phase} />
+          <div className="flex items-center gap-2">
+            <ReleaseButton sprintId={id} status={sprint.status} />
+            <AdvancePhaseButton sprintId={id} phase={phase} />
+          </div>
         </div>
       </header>
 
@@ -1450,6 +1653,7 @@ export function SprintDetailPage() {
           {phase === "executing" ? <ExecutingPhasePanel items={items} /> : null}
           <DeliveryProgressCard items={items} />
           <SprintItemsTable items={items} />
+          <SprintStageTiming sprintId={id} />
           <SprintArtifactsSection sprintId={id} />
           <SprintApprovalsSection sprintId={id} />
         </div>

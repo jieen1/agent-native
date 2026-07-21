@@ -330,6 +330,38 @@ export interface SprintDetail extends Sprint {
   stages: Stage[];
 }
 
+// M5 度量复盘 — per-work-item stage timing (actions/get-sprint-stage-timing.ts).
+// Every duration is derived from real orchestrator v3_spawns started_at/
+// completed_at timestamps; `totalSec === null` means NO DATA for that stage
+// (never 0). See shared/sprint-timing.ts for the derivation.
+export type TimingStage = "dev" | "qa" | "review" | "gate";
+export interface SpawnTimingEvidence {
+  spawnId: string;
+  runId: string | null;
+  nodeIdInDag: string | null;
+  status: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationSec: number | null;
+}
+export interface StageTiming {
+  stage: TimingStage;
+  totalSec: number | null;
+  spawnCount: number;
+  spawns: SpawnTimingEvidence[];
+}
+export interface WorkItemStageTiming {
+  workItemId: string;
+  itemKey: string;
+  title: string;
+  stages: StageTiming[];
+}
+export interface SprintStageTimingResult {
+  sprintId: string;
+  items: WorkItemStageTiming[];
+  errors?: Record<string, string>;
+}
+
 // Goal metrics (S6 驾驶舱 Goal 卡) — mirrors
 // actions/extract-goal-metrics.ts's GoalMetric/ParsedSuccessMetrics exactly
 // (that action deterministically parses the M-numbered "## Success Metrics"
