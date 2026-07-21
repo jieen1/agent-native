@@ -112,11 +112,14 @@ describe("parseClaudeStreamJson", () => {
     expect(parseClaudeStreamJson("").steps).toEqual([]);
   });
 
-  it("falls back to summed per-assistant usage when no result event arrives", () => {
+  it("falls back to the FINAL per-assistant usage when no result event arrives (never a sum)", () => {
     const cut = SAMPLE.split("\n").slice(0, 4).join("\n"); // drop result line
     const r = parseClaudeStreamJson(cut);
-    // 1200+50 + 1300+30 = 2580.
-    expect(r.tokensSpent).toBe(2580);
+    // Streaming usage is cumulative, so the fallback is the LAST assistant
+    // usage (1300+30 = 1330), NOT a sum of both (1200+50 + 1300+30 = 2580).
+    expect(r.tokensSpent).toBe(1330);
+    expect(r.tokensInput).toBe(1300);
+    expect(r.tokensOutput).toBe(30);
     expect(r.toolCallCount).toBe(1);
     expect(r.sawResult).toBe(false);
   });

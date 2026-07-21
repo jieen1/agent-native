@@ -585,6 +585,76 @@ export interface SprintArtifactsByDocKey {
   byDocKey: Record<string, SprintArtifact[]>;
 }
 
+// ── M5 度量复盘 — stage timing derived from real orchestrator v3_spawns ──────
+// Every duration is derived NATIVELY from real `v3_spawns` started_at /
+// completed_at timestamps (surfaced by the orchestrator's `spawnList` MCP tool
+// as `startedAt` / `completedAt`) — see shared/sprint-timing.ts. NEVER mined
+// from Claude Code JSONL transcripts (that format does not exist in this
+// system) and NEVER fabricated: a stage with no spawn data reports
+// `totalSec === null` ("无数据"), not 0.
+
+/** The four review-facing stages the timing panel reports, in pipeline order. */
+export type TimingStage = "dev" | "qa" | "review" | "gate";
+
+/** One real spawn's contribution to a stage's timing (the evidence trail). */
+export interface SpawnTimingEvidence {
+  spawnId: string;
+  runId: string | null;
+  /** The DAG node id (e.g. "develop", "review1") this spawn ran, if known. */
+  nodeIdInDag: string | null;
+  status: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  /** completedAt − startedAt in seconds, or null if still running / unknown. */
+  durationSec: number | null;
+}
+
+export interface StageTiming {
+  stage: TimingStage;
+  /** Sum of settled spawn durations (seconds), or null = no data (honest). */
+  totalSec: number | null;
+  /** Count of SETTLED spawns that contributed to totalSec. */
+  spawnCount: number;
+  spawns: SpawnTimingEvidence[];
+}
+
+export interface WorkItemStageTiming {
+  workItemId: string;
+  itemKey: string;
+  title: string;
+  stages: StageTiming[];
+}
+
+// ── M5 sprint-status aggregate (sprint-status + 燃尽 + 实走验证 timing) ──────
+
+export interface BurndownPoint {
+  date: string;
+  remaining: number;
+}
+
+/** Honest empty-state reasons for the burndown series (never fabricated). */
+export type BurndownEmptyReason =
+  | "no-items"
+  | "no-start-date"
+  | "too-new"
+  | "too-long";
+
+export interface SprintStatusResult {
+  sprintId: string;
+  status: string;
+  phase: string;
+  totalItems: number;
+  delivered: number;
+  /** Empty array + a reason when there is no honest series to draw. */
+  burndown: BurndownPoint[];
+  burndownEmptyReason: BurndownEmptyReason | null;
+  timings: WorkItemStageTiming[];
+  /** True when the cross-app spawnList fetch failed — timings are then an
+   *  honest empty state (all stages 无数据), NOT fabricated. */
+  timingDegraded: boolean;
+  errors?: Record<string, string>;
+}
+
 // Epic decomposition types (M1-4).
 
 export interface DecomposeEpicChildInput {
