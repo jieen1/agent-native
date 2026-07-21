@@ -1306,8 +1306,18 @@ describe("runAgentLoop", () => {
   it("takes the final cumulative cache token counts (not a sum)", async () => {
     const usage = await runUsageLoop(
       makeUsageEngine([
-        { inputTokens: 100, outputTokens: 5, cacheReadTokens: 10, cacheWriteTokens: 1 },
-        { inputTokens: 100, outputTokens: 9, cacheReadTokens: 30, cacheWriteTokens: 3 },
+        {
+          inputTokens: 100,
+          outputTokens: 5,
+          cacheReadTokens: 10,
+          cacheWriteTokens: 1,
+        },
+        {
+          inputTokens: 100,
+          outputTokens: 9,
+          cacheReadTokens: 30,
+          cacheWriteTokens: 3,
+        },
       ]),
     );
 

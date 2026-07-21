@@ -30,9 +30,7 @@ type UsageEvent = Extract<EngineEvent, { type: "usage" }>;
  * Build a single-turn engine whose stream emits the supplied cumulative usage
  * events (in order) followed by a terminal text answer and `end_turn` stop.
  */
-function engineWithCumulativeUsage(
-  usageEvents: UsageEvent[],
-): AgentEngine {
+function engineWithCumulativeUsage(usageEvents: UsageEvent[]): AgentEngine {
   return {
     name: "test",
     label: "Test",
