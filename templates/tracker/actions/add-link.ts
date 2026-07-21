@@ -14,9 +14,11 @@ const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
 export default defineAction({
   description:
-    "Add a typed link between two work items. Validates that both items exist " +
-    "and that the caller owns the from-item. Prevents duplicate links and " +
-    "appends a 'link' activity record on the from-item.",
+    "Add a typed link between two work items. Validates that both the " +
+    "from-item and the to-item are owned by (or shared into the org of) the " +
+    "caller — a target in another tenant is rejected, not just checked for " +
+    "existence. Prevents duplicate links and appends a 'link' activity " +
+    "record on the from-item.",
   schema: z.object({
     fromItemId: z.string().min(1).describe("Source work item id"),
     toItemId: z.string().min(1).describe("Target work item id"),
@@ -34,13 +36,23 @@ export default defineAction({
     const db = getDb();
     const now = new Date().toISOString();
 
-    // Validate that the target work item exists.
-    const toItem = await db
-      .select()
-      .from(schema.workItems)
-      .where(eq(schema.workItems.id, args.toItemId))
-      .limit(1);
-    if (toItem.length === 0) throw new Error("Target work item not found");
+    // Validate that the target work item exists and is owned by the caller.
+    // Unscoped existence-only checks here would let a caller manufacture a
+    // cross-tenant link by pointing toItemId at another org's work item.
+    const toItem = (
+      await db
+        .select()
+        .from(schema.workItems)
+        .where(
+          and(
+            eq(schema.workItems.id, args.toItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
+        .limit(1)
+    )[0];
+    if (!toItem)
+      throw new Error("Target work item not found or not accessible");
 
     // Validate that the source work item exists and is owned by the caller.
     const fromItem = (
