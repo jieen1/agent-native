@@ -39,12 +39,10 @@ describe("per-node routing decision (D-7: node engine > marker > default)", () =
     expect(choice).toEqual({ kind: "engine", engine: "rt_vllm" });
   });
 
-  it("a claude-code node selects claude-code (→ ClaudeCodeExecutor)", () => {
-    const choice = resolveNodeExecutorChoice(
-      { engine: "claude-code" },
-      ctx(null),
-    );
-    expect(choice).toEqual({ kind: "claude-code" });
+  it("a claude-code node throws ConfigError (CC is brain-only, never a DAG worker)", () => {
+    expect(() =>
+      resolveNodeExecutorChoice({ engine: "claude-code" }, ctx(null)),
+    ).toThrow(ConfigError);
   });
 
   it("per-node engine OVERRIDES the orchestrator-runtime marker (D-7)", () => {
@@ -54,16 +52,17 @@ describe("per-node routing decision (D-7: node engine > marker > default)", () =
       resolveNodeExecutorChoice({ engine: "rt_vllm" }, ctx("claude-code")),
     ).toEqual({ kind: "engine", engine: "rt_vllm" });
 
-    // inverse: marker = a vLLM runtime, node picked claude-code → node wins.
-    expect(
+    // inverse: marker = a vLLM runtime, node explicitly picked claude-code →
+    // still rejected (CC is never a valid DAG-worker choice, node or marker).
+    expect(() =>
       resolveNodeExecutorChoice({ engine: "claude-code" }, ctx("rt_vllm")),
-    ).toEqual({ kind: "claude-code" });
+    ).toThrow(ConfigError);
   });
 
-  it("no per-node engine → the marker default decides (claude-code)", () => {
-    expect(resolveNodeExecutorChoice({}, ctx("claude-code"))).toEqual({
-      kind: "claude-code",
-    });
+  it("no per-node engine → the marker default decides, and a claude-code marker throws ConfigError", () => {
+    expect(() => resolveNodeExecutorChoice({}, ctx("claude-code"))).toThrow(
+      ConfigError,
+    );
   });
 
   it("a built-in framework engine id selects that engine (→ RemoteApiExecutor)", () => {

@@ -73,12 +73,14 @@ function fakeRuntime(): {
 }
 
 describe("createVmActingBridge", () => {
-  it("exposes the {bash,read,edit,write} contract with the same input schemas", () => {
+  it("exposes the {bash,read,edit,write,glob,grep} contract with the same input schemas", () => {
     const { runtime, vm } = fakeRuntime();
     const bridge = createVmActingBridge({ runtime, vm, workdir: "/work" });
     expect(Object.keys(bridge).sort()).toEqual([
       "bash",
       "edit",
+      "glob",
+      "grep",
       "read",
       "write",
     ]);

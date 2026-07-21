@@ -437,12 +437,15 @@ describe("Output classification", () => {
     expect(mockDb.artifacts[0].kind).toBe("string");
   });
 
-  it("schema-violation error classification is permanent", () => {
-    // The dispatcher classifies schema-violation as a permanent error.
+  it("schema-violation error classification is its own class (rollback + re-prompt), not permanent", () => {
+    // schema-violation is a distinct ErrorClass from "permanent" — it maps to
+    // "rollback" (same VM, re-prompt) rather than "keep" (snapshot and give
+    // up), so a raw "schema-violation: ..." error must not be misclassified
+    // as permanent.
     expect(
       classifyNodeError(new Error("schema-violation: missing field")),
-    ).toBe("permanent");
-    expect(errorClassToOnFailurePolicy("permanent")).toBe("keep");
+    ).toBe("schema-violation");
+    expect(errorClassToOnFailurePolicy("schema-violation")).toBe("rollback");
   });
 });
 

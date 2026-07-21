@@ -46,11 +46,11 @@ import { NodeRunner } from "../runtime/node-runner.js";
 import type { NodeRunnerResult } from "../runtime/node-runner.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import { WorkspaceNotReadyError } from "../v3-workspace-provision.js";
-import type { V3Node, V3AgentNode } from "./dag-validator.js";
 import {
   isAuditEvidenceSchema,
   validateAuditReport,
 } from "./audit-evidence-validator.js";
+import type { V3Node, V3AgentNode } from "./dag-validator.js";
 import { renderTemplate, type ExpressionContext } from "./interpolation.js";
 import {
   runAcpClaudeCodeWorker,
@@ -191,6 +191,19 @@ function classifyErrorClass(error: unknown): ErrorClass {
   // Cancelled first — abort signals are terminal, not retryable
   for (const indicator of CANCELLED_INDICATORS) {
     if (lower.includes(indicator)) return "cancelled";
+  }
+
+  // schema-violation is its own error class (rollback + re-prompt the SAME
+  // VM), distinct from "permanent" (snapshot and give up) — see
+  // errorClassToOnFailure below. Checked ahead of the generic PERMANENT_
+  // INDICATORS so a caller that throws a raw "schema-violation: ..." Error
+  // (rather than going through classifyOutput's structured path) still gets
+  // the right retry policy instead of being misclassified as permanent.
+  if (
+    lower.includes("schema-violation") ||
+    lower.includes("schema violation")
+  ) {
+    return "schema-violation";
   }
 
   // Permanent — config errors, render failures fail immediately

@@ -17,12 +17,10 @@ const baseCtx: ExecutorChoiceContext = {
 };
 
 describe("resolveNodeExecutorChoice (pure core, D-7 priority)", () => {
-  it("1. node.engine='claude-code' → { kind:'claude-code' }", () => {
-    const result = resolveNodeExecutorChoice(
-      { engine: "claude-code" },
-      baseCtx,
-    );
-    expect(result).toEqual({ kind: "claude-code" });
+  it("1. node.engine='claude-code' → throws ConfigError (CC is brain-only, never a DAG worker)", () => {
+    const result = () =>
+      resolveNodeExecutorChoice({ engine: "claude-code" }, baseCtx);
+    expect(result).toThrow(ConfigError);
   });
 
   it("2. node.engine = seeded runtime_config key → engine of that key", () => {
@@ -91,12 +89,13 @@ describe("resolveNodeExecutorChoice (pure core, D-7 priority)", () => {
     expect(result).toEqual({ kind: "engine", engine: "ai-sdk:openai" });
   });
 
-  it("6. marker default applies when node.engine empty: node={}, markerRuntime='claude-code' → claude-code", () => {
-    const result = resolveNodeExecutorChoice(
-      {},
-      { ...baseCtx, markerRuntime: "claude-code" },
-    );
-    expect(result).toEqual({ kind: "claude-code" });
+  it("6. marker default applies when node.engine empty: node={}, markerRuntime='claude-code' → throws ConfigError (CC is brain-only)", () => {
+    const result = () =>
+      resolveNodeExecutorChoice(
+        {},
+        { ...baseCtx, markerRuntime: "claude-code" },
+      );
+    expect(result).toThrow(ConfigError);
   });
 
   it("systemDefault applies when node.engine and marker are both empty", () => {
@@ -109,15 +108,12 @@ describe("resolveNodeExecutorChoice (pure core, D-7 priority)", () => {
 });
 
 describe("assertSystemDefaultValid (startup validation)", () => {
-  it("7a. real key passes (no throw): runtime_config key, builtin engine, claude-code, and null", async () => {
+  it("7a. real key passes (no throw): runtime_config key, builtin engine, and null", async () => {
     await expect(
       assertSystemDefaultValid("rt_abc", ["rt_abc"]),
     ).resolves.toBeUndefined();
     await expect(
       assertSystemDefaultValid("ai-sdk:openai", ["rt_abc"]),
-    ).resolves.toBeUndefined();
-    await expect(
-      assertSystemDefaultValid("claude-code", ["rt_abc"]),
     ).resolves.toBeUndefined();
     // null/empty means "no system default configured" — allowed.
     await expect(
@@ -135,5 +131,11 @@ describe("assertSystemDefaultValid (startup validation)", () => {
     await expect(
       assertSystemDefaultValid("vllm-default", ["rt_abc"]),
     ).rejects.toMatchObject({ name: "ConfigError" });
+  });
+
+  it("7c. 'claude-code' throws ConfigError — CC subscription is reserved for the brain only, never a valid DAG-worker system default", async () => {
+    await expect(
+      assertSystemDefaultValid("claude-code", ["rt_abc"]),
+    ).rejects.toBeInstanceOf(ConfigError);
   });
 });

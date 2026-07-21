@@ -147,7 +147,9 @@ describe("buildClaudeCommand", () => {
     };
     const ctx = { node } as RuntimeExecCtx;
     const cmd = buildClaudeCommand(ctx);
-    expect(cmd).toContain("claude --output-format stream-json --verbose -p");
+    expect(cmd).toContain(
+      "claude --output-format stream-json --verbose --permission-mode acceptEdits -p",
+    );
     expect(cmd).toContain("'Create /work/hello.txt with '\\''hi'\\''.'");
     expect(cmd).toContain("--model 'claude-sonnet-4-6'");
   });
