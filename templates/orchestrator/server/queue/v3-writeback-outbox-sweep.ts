@@ -34,7 +34,10 @@
 
 import { isPostgres } from "@agent-native/core/db";
 
-import { triggerWritebackDrainSafe } from "../plugins/v3-reconciler.js";
+import {
+  triggerWritebackDrainSafe,
+  triggerBypassedMergeSweepSafe,
+} from "../plugins/v3-reconciler.js";
 
 /**
  * How often (ms) to drain the writeback outbox.
@@ -51,12 +54,16 @@ export function defaultWritebackOutboxSweepIntervalMs(): number {
 
 /**
  * Run one sweep iteration: ask the reconciler singleton to drain every
- * pending writeback outbox row. Best-effort — never throws (
- * `triggerWritebackDrainSafe` swallows its own errors).
+ * pending writeback outbox row, then run the SDLC-083 bypassed-merge sweep
+ * (runs whose PR was merged directly on GitHub instead of through
+ * `workspaceMergePr` — see `V3Reconciler.sweepBypassedMerges`) on the SAME
+ * tick rather than a second scheduler. Best-effort — never throws (both
+ * trigger functions swallow their own errors).
  */
 export async function runWritebackOutboxSweepOnce(): Promise<void> {
   if (!isPostgres()) return;
   await triggerWritebackDrainSafe();
+  await triggerBypassedMergeSweepSafe();
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;

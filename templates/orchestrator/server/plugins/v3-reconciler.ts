@@ -110,6 +110,22 @@ export async function triggerWritebackDrainSafe(): Promise<void> {
 }
 
 /**
+ * SDLC-083: best-effort sweep for runs whose PR was merged directly on
+ * GitHub, bypassing `workspaceMergePr` — see
+ * `V3Reconciler.sweepBypassedMerges` for the full rationale. Called by
+ * server/queue/v3-writeback-outbox-sweep.ts on the SAME periodic timer as
+ * `triggerWritebackDrainSafe` — no separate scheduler.
+ */
+export async function triggerBypassedMergeSweepSafe(): Promise<void> {
+  try {
+    const r = getOrCreateReconciler();
+    await r.sweepBypassedMerges();
+  } catch {
+    // Advisory — DB may not be available yet; next sweep tick retries.
+  }
+}
+
+/**
  * Public API to access the reconciler for pause/resume/cancel.
  */
 export function getReconcilerRef(): V3Reconciler {
