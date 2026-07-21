@@ -25,7 +25,10 @@ env:
 
 jobs:
   create-branches:
-    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    # Skip gracefully (not a hard failure) when NEON_API_KEY isn't configured —
+    # a fork/dogfood repo without real Neon credentials must not permanently
+    # red every PR's check suite over a feature it can't use.
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository && secrets.NEON_API_KEY != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -113,7 +116,9 @@ jobs:
           set_netlify_branch_env "NETLIFY_DATABASE_URL_UNPOOLED" "$NEON_DB_URL_UNPOOLED"
 
   delete-branches:
-    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    # Same rationale as create-branches above — skip, don't fail, when there's
+    # no real Neon credential configured.
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository && secrets.NEON_API_KEY != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
