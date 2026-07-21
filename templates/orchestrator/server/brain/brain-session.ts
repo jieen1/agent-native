@@ -1496,7 +1496,7 @@ async function streamBrainChild(opts: {
       const modelUsage = asRecord(event.modelUsage);
       if (modelUsage) {
         const keys = Object.keys(modelUsage);
-        const key =
+        const key: string | undefined =
           capturedModel && modelUsage[capturedModel] != null
             ? capturedModel
             : keys[0];

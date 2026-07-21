@@ -2716,6 +2716,7 @@ describe("V3Reconciler", () => {
             error: null,
             ownerEmail: "local@localhost",
             orgId: null,
+            workspaceId: null,
           });
           return id;
         }),
@@ -2882,6 +2883,7 @@ describe("V3Reconciler", () => {
             error: null,
             ownerEmail: "local@localhost",
             orgId: null,
+            workspaceId: null,
           });
           return id;
         }),
