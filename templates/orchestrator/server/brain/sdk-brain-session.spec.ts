@@ -114,7 +114,10 @@ vi.mock("@ai-sdk/openai", () => ({
 }));
 
 const mockFetch = vi.fn(async (_url: string, init: { body: string }) => {
-  const body = JSON.parse(init.body) as { method: string };
+  const body = JSON.parse(init.body) as {
+    method: string;
+    params?: { name?: string };
+  };
   if (body.method === "tools/list") {
     return {
       ok: true,
@@ -126,10 +129,29 @@ const mockFetch = vi.fn(async (_url: string, init: { body: string }) => {
       }),
     } as unknown as Response;
   }
+  // A real tool/call against a KNOWN tool (used by the must-not-regress happy
+  // path test below) — generic success payload naming the tool that was
+  // actually called.
+  if (body.method === "tools/call") {
+    return {
+      ok: true,
+      headers: { get: () => "application/json" },
+      json: async () => ({
+        result: {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ ok: true, tool: body.params?.name }),
+            },
+          ],
+        },
+      }),
+    } as unknown as Response;
+  }
   throw new Error(`unexpected fetch call in test: ${body.method}`);
 });
 
-import { runSdkBrainTurn } from "./sdk-brain-session.js";
+import { runSdkBrainTurn, unknownToolMessage } from "./sdk-brain-session.js";
 
 describe("runSdkBrainTurn — runtimeOverride", () => {
   beforeEach(() => {
@@ -322,5 +344,110 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
       (u) => u.contextUsed === 12345,
     );
     expect(usageUpdate).toBeDefined();
+  });
+
+  describe("SDLC-066 — fabricated tool calls get corrective feedback, not a silent black hole", () => {
+    it("unknownToolMessage names the real available tools and the missing-tool guidance, never the generic MCP wording", () => {
+      const msg = unknownToolMessage("workspaceGet", [
+        "noop",
+        "workspaceCreate",
+      ]);
+      expect(msg).toContain('Tool "workspaceGet" does not exist');
+      expect(msg).toContain("noop, workspaceCreate");
+      expect(msg).toContain("workspaceCreate");
+      expect(msg).not.toContain("Unknown tool");
+    });
+
+    it("a tool name not in the discovered set short-circuits BEFORE any MCP round-trip and reports the real tool set", async () => {
+      // Real production data (2026-07-20/21, model=qwen3.8-max-preview via
+      // the aliyun runtime override): the brain repeatedly tried real-looking
+      // but uncataloged action names (workspaceGet, runCancel, nodeRetry,
+      // spawnCancel, source-search) that reached mcpCallTool and got back
+      // only the MCP server's generic "Unknown tool: X" — nothing telling it
+      // what IS callable, so it sometimes needed several attempts (observed:
+      // 3x identical runCancel retries in one thread) before self-correcting.
+      // workspaceGet is used here as the still-uncataloged example (nodeRetry
+      // /runCancel/spawnCancel are fixed at the catalog level by this same
+      // change — see agent-chat.spec.ts).
+      mockGenerateText
+        .mockResolvedValueOnce({
+          text: "",
+          toolCalls: [
+            { toolCallId: "tc_wsget", toolName: "workspaceGet", input: {} },
+          ],
+          finishReason: "tool-calls",
+        })
+        .mockResolvedValueOnce({
+          text: "done",
+          toolCalls: [],
+          finishReason: "stop",
+        });
+
+      const result = await runSdkBrainTurn({
+        threadId: "thread-9",
+        ownerEmail: "owner@example.com",
+        orgId: null,
+        message: "hello",
+      });
+
+      expect(result).toEqual({ ok: true });
+      expect(mockGenerateText).toHaveBeenCalledTimes(2);
+
+      // Never round-tripped the fabricated name to the MCP endpoint — only
+      // the initial tools/list call happened.
+      const calledMethods = mockFetch.mock.calls.map(
+        (c) =>
+          (JSON.parse((c[1] as { body: string }).body) as { method: string })
+            .method,
+      );
+      expect(calledMethods).toEqual(["tools/list"]);
+
+      const toolResultEvent = hoisted.state.events.find(
+        (e) => e.type === "tool_result" && e.toolName === "workspaceGet",
+      );
+      expect(toolResultEvent).toBeDefined();
+      const toolResult = toolResultEvent?.toolResult as { error: string };
+      expect(toolResult.error).toContain('Tool "workspaceGet" does not exist');
+      expect(toolResult.error).toContain("noop");
+      expect(toolResult.error).not.toContain("Unknown tool");
+    });
+
+    it("a real, known tool call still round-trips through the MCP endpoint unaffected (must-not-regress happy path)", async () => {
+      // The currently-working "dispatch straight to a real tool, no
+      // exploration needed" path must see zero behavior change from the
+      // SDLC-066 fix — only a genuinely fabricated name should short-circuit.
+      mockGenerateText
+        .mockResolvedValueOnce({
+          text: "",
+          toolCalls: [{ toolCallId: "tc_noop", toolName: "noop", input: {} }],
+          finishReason: "tool-calls",
+        })
+        .mockResolvedValueOnce({
+          text: "done",
+          toolCalls: [],
+          finishReason: "stop",
+        });
+
+      const result = await runSdkBrainTurn({
+        threadId: "thread-10",
+        ownerEmail: "owner@example.com",
+        orgId: null,
+        message: "hello",
+      });
+
+      expect(result).toEqual({ ok: true });
+
+      const calledMethods = mockFetch.mock.calls.map(
+        (c) =>
+          (JSON.parse((c[1] as { body: string }).body) as { method: string })
+            .method,
+      );
+      expect(calledMethods).toEqual(["tools/list", "tools/call"]);
+
+      const toolResultEvent = hoisted.state.events.find(
+        (e) => e.type === "tool_result" && e.toolName === "noop",
+      );
+      expect(toolResultEvent?.toolResult).toEqual({ ok: true, tool: "noop" });
+    });
   });
 });
