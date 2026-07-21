@@ -181,18 +181,6 @@ export function useGoalMetrics(sprintId: string) {
   };
 }
 
-export function useSprintBurndown(sprintId: string) {
-  return useActionQuery(
-    "get-sprint-burndown",
-    { sprintId },
-    { enabled: !!sprintId, retry: false },
-  ) as {
-    data?: import("@shared/types").SprintBurndown;
-    isLoading: boolean;
-    error: unknown;
-  };
-}
-
 export function useUpdateSprint() {
   const qc = useQueryClient();
   return useActionMutation("update-sprint", {
