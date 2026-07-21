@@ -14,4 +14,9 @@ export const parityActionAllowlist: ParityActionAllowlistEntry[] = [
     reason:
       "Template bootstrap/support action rather than a Content user workflow.",
   },
+  {
+    action: "change-language",
+    reason:
+      "Shared locale-kit framework action (re-export) for the app-chrome language switcher, not a Content-domain workflow.",
+  },
 ];
