@@ -131,6 +131,10 @@ describe("Rule 2 — evidence format acceptance/rejection matrix", () => {
     "xyzxyzxyz", // 9 chars but not hex
     "",
     "   ",
+    "defaced", // 7 hex chars but all-letter — dictionary word bypass (Finding 1)
+    "effaced", // 7 hex chars but all-letter — dictionary word bypass (Finding 1)
+    "deadbeef", // 8 hex chars but all-letter — another common hex word
+    "facade", // 6 hex chars — too short AND all-letter
   ];
 
   it.each(ACCEPTED)("accepts '%s'", (evidence) => {
@@ -145,6 +149,35 @@ describe("Rule 2 — evidence format acceptance/rejection matrix", () => {
     const report = validReport({
       metrics: [
         { name: "m", priority: "P0", status: "MET", evidence: "looks good" },
+      ],
+    });
+    const result = validateAuditReport(report);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("格式非法"))).toBe(true);
+  });
+
+  // Finding 1 regression: dictionary words that happen to be all-hex must NOT pass
+  it("rejects 'defaced' as evidence (pure hex letters, no digits)", () => {
+    expect(isValidEvidenceFormat("defaced")).toBe(false);
+  });
+
+  it("rejects 'effaced' as evidence (pure hex letters, no digits)", () => {
+    expect(isValidEvidenceFormat("effaced")).toBe(false);
+  });
+
+  it("rejects a bragging sentence that merely CONTAINS a 7-char hex token (Finding 1)", () => {
+    // The whole string is not a valid evidence format even though it contains
+    // the hex token "abc1234" — the anchored check rejects it.
+    expect(isValidEvidenceFormat("we did abc1234 which is great")).toBe(false);
+    // validateAuditReport must also reject it
+    const report = validReport({
+      metrics: [
+        {
+          name: "m",
+          priority: "P0",
+          status: "MET",
+          evidence: "we did abc1234 which is great",
+        },
       ],
     });
     const result = validateAuditReport(report);
@@ -327,6 +360,44 @@ describe("Rule 6 — userFacing metrics require real runtime evidence", () => {
       expect(isWeakUserFacingEvidence(w)).toBe(true);
     }
   });
+
+  // Finding 3 — explicit validateAuditReport rejection for each L15 lesson phrase
+  // as the SOLE evidence for a userFacing metric (not just the helper function).
+  it.each([
+    ["tests pass", "L15: 'tests pass' is not proof a real user can use the feature"],
+    ["ran the demo", "L15: 'ran the demo' is not proof of real user capability"],
+    ["seed data", "L15: 'seed data' is not proof of real user capability"],
+  ])(
+    "validateAuditReport rejects '%s' as sole evidence for userFacing metric (L15 regression)",
+    (weakEvidence) => {
+      const report = {
+        verdict: "GAPS_FOUND",
+        metrics: [
+          {
+            name: "user-facing capability",
+            priority: "P0",
+            status: "MET",
+            evidence: weakEvidence,
+            userFacing: true,
+            // No runtimeEvidence — the combination of weak evidence + missing
+            // runtimeEvidence must be caught by rule 6.
+          },
+        ],
+        audited_metrics_count: 1,
+        predicted_metrics_count: 1,
+        concerns: [],
+        summary: "Seemed fine.",
+      };
+      const result = validateAuditReport(report);
+      expect(result.ok).toBe(false);
+      // Must fire at least the rule-6 weak-evidence error
+      expect(
+        result.errors.some(
+          (e) => e.includes("弱证据") || e.includes("真实运行证据"),
+        ),
+      ).toBe(true);
+    },
+  );
 
   it("accepts a userFacing metric with full runtimeEvidence and strong evidence format", () => {
     const report = validReport({

@@ -178,16 +178,35 @@ export function isEmptyEvidencePhrase(evidence: string): boolean {
 // Accepted forms (whole-string, anchored):
 //   repo:file[:line]   e.g. packages/core/src/x.ts:42  (a path with a slash)
 //   PR#<n>             e.g. PR#123
-//   <git sha>          7-40 hex chars
+//   <git sha>          40-char hex (full SHA) OR 7-39 hex chars that contain at
+//                      least one digit (excludes hex-only dictionary words like
+//                      "defaced"/"effaced" which have zero digit characters)
 //   absence-of:<pat>   e.g. absence-of:TODO
 // Anything else is rejected — "tests pass", "looks good", a bare filename with
 // no path, etc.
+//
+// The short-sha check uses two alternatives: first the full 40-char SHA
+// (case-insensitive, no digit required — statistically unambiguous), then a
+// 7-39 char lowercase hex string that MUST contain at least one [0-9] digit
+// so that pure-letter hex words are excluded.
 
-const EVIDENCE_FORMAT_RE =
-  /^(?:PR#\d+|[0-9a-f]{7,40}|absence-of:\S+|[^\s:]+\/[^\s:]+(?::\d+)?)$/i;
+const EVIDENCE_PATH_RE = /^[^\s:]+\/[^\s:]+(?::\d+)?$/;
+const EVIDENCE_PR_RE = /^PR#\d+$/;
+const EVIDENCE_ABSENCE_RE = /^absence-of:\S+$/;
+// Full 40-char SHA (case-insensitive OK — impossible to be a dictionary word)
+const EVIDENCE_FULL_SHA_RE = /^[0-9a-f]{40}$/i;
+// Short SHA: 7-39 lowercase hex chars that include at least one digit
+const EVIDENCE_SHORT_SHA_RE = /^(?=[0-9a-f]{7,39}$)(?=.*[0-9])[0-9a-f]+$/;
 
 export function isValidEvidenceFormat(evidence: string): boolean {
-  return EVIDENCE_FORMAT_RE.test(evidence.trim());
+  const s = evidence.trim();
+  return (
+    EVIDENCE_PATH_RE.test(s) ||
+    EVIDENCE_PR_RE.test(s) ||
+    EVIDENCE_ABSENCE_RE.test(s) ||
+    EVIDENCE_FULL_SHA_RE.test(s) ||
+    EVIDENCE_SHORT_SHA_RE.test(s)
+  );
 }
 
 // ── Rule 3 — default P0 ──────────────────────────────────────────────────────
