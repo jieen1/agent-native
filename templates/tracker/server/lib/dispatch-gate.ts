@@ -120,7 +120,12 @@ export async function reevaluateBlockedQueue(
 ): Promise<void> {
   try {
     // Find all links where the completed item is the "to" side
-    // (i.e., other items are blocked BY this one).
+    // (i.e., other items are blocked BY this one). Scoped to the caller's
+    // own owner/org — completedItemId alone doesn't prove tenancy (e.g. a
+    // "blocked-by" link's toItemId can point at another org's item; see
+    // add-link.ts's separate toItemId scoping gap, SDLC-096), and an
+    // unscoped select here would let one org's stage completion read (and,
+    // via the exec_queue/work_items writes below, mutate) another org's rows.
     const links = await db
       .select()
       .from(schema.links)
@@ -128,6 +133,7 @@ export async function reevaluateBlockedQueue(
         and(
           eq(schema.links.toItemId, completedItemId),
           eq(schema.links.linkType, "blocked-by"),
+          ownerScope(schema.links),
         ),
       );
 
@@ -141,16 +147,32 @@ export async function reevaluateBlockedQueue(
       // Resolve the gate for this downstream item.
       const gate = await resolveDispatchGate(db, fromItemId, ownerEmail, orgId);
 
-      // Find the exec_queue row for this item.
+      // Find the exec_queue row for this item — scoped, mirroring the links
+      // select above (same cross-tenant read/write risk).
       const queueRows = await db
         .select()
         .from(schema.execQueue)
-        .where(eq(schema.execQueue.workItemId, fromItemId))
+        .where(
+          and(
+            eq(schema.execQueue.workItemId, fromItemId),
+            ownerScope(schema.execQueue),
+          ),
+        )
         .limit(1);
 
       if (queueRows.length === 0) continue;
 
       const queueRow = queueRows[0]!;
+
+      // Defense in depth: don't rely solely on the scoped selects above
+      // silently returning zero rows for a foreign tenant — make the
+      // invariant explicit against the ownerEmail/orgId this function was
+      // actually called with, and fail closed (skip, not throw) to match
+      // this function's existing non-fatal error-handling style.
+      const belongsToCaller =
+        queueRow.ownerEmail === ownerEmail ||
+        (orgId !== null && queueRow.orgId === orgId);
+      if (!belongsToCaller) continue;
 
       if (queueRow.status === "blocked" && gate.ready) {
         // Gate cleared — unblock the item.
@@ -160,13 +182,23 @@ export async function reevaluateBlockedQueue(
             status: "queued",
             blockedBy: "[]",
           })
-          .where(eq(schema.execQueue.id, queueRow.id));
+          .where(
+            and(
+              eq(schema.execQueue.id, queueRow.id),
+              ownerScope(schema.execQueue),
+            ),
+          );
 
         // Also update work_items.status from blocked to queued.
         await db
           .update(schema.workItems)
           .set({ status: "queued", updatedAt: now })
-          .where(eq(schema.workItems.id, fromItemId));
+          .where(
+            and(
+              eq(schema.workItems.id, fromItemId),
+              ownerScope(schema.workItems),
+            ),
+          );
 
         // Write an activity log entry.
         await db.insert(schema.activities).values({
@@ -189,7 +221,12 @@ export async function reevaluateBlockedQueue(
               gate.blockedBy.map((d) => ({ id: d.id, itemKey: d.itemKey })),
             ),
           })
-          .where(eq(schema.execQueue.id, queueRow.id));
+          .where(
+            and(
+              eq(schema.execQueue.id, queueRow.id),
+              ownerScope(schema.execQueue),
+            ),
+          );
       }
     }
   } catch (err) {
