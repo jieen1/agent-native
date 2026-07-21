@@ -60,17 +60,17 @@ export const workItems = table("tracker_work_items", {
   updatedAt: text("updated_at").notNull(),
   ...ownableColumns(),
   // --- Additive columns: sprint binding, item keying, risk, tags, execution.
-  sprintId: text("sprint_id").default(null),
+  sprintId: text("sprint_id"),
   itemKey: text("item_key").notNull().default(""),
   risk: text("risk").notNull().default("medium"),
   tags: text("tags").notNull().default("[]"),
   executionMode: text("execution_mode").notNull().default("manual"),
   plannedStages: text("planned_stages").notNull().default("[]"),
   currentStageName: text("current_stage_name").notNull().default("待办"),
-  branch: text("branch").default(null),
+  branch: text("branch"),
   // --- Additive v2: owner (负责人) and nature tags (性质: 前端/后端/API/数据).
   // owner = email or "agent" (显示: 智能体). null = unassigned.
-  owner: text("owner").default(null),
+  owner: text("owner"),
   // nature = JSON array of tags from set: 前端 | 后端 | API | 数据
   nature: text("nature").notNull().default("[]"),
   // --- Additive v24 (F3 状态迁移守卫): dispatch-tracking + closure fields.
@@ -79,21 +79,21 @@ export const workItems = table("tracker_work_items", {
   // currentStageName (业务阶段不因派发而推进, 02 §8). Distinct from `status`
   // (open|queued|running|dispatched|done|failed|blocked|closed), which keeps
   // its pre-existing meaning for board rendering.
-  execState: text("exec_state").default(null),
+  execState: text("exec_state"),
   // Set by transition-work-item when target=closed (未派发项人工关闭).
-  closedReason: text("closed_reason").default(null),
-  closedAt: text("closed_at").default(null),
+  closedReason: text("closed_reason"),
+  closedAt: text("closed_at"),
   // --- Additive v25 (F5 任务拆分阈值/规划前置契约, 02 §3.10):
   // scaleEstimate: JSON {files,crossLifecycle,verdict,signals,at} written by
   // estimate-brief-scale.ts (and overlaid by scale-runtime-signal.ts's
   // runtime-exceeded path) — consumed by dispatch-to-orchestrator.ts's
   // pre-dispatch gate and the S2/S4 scale badge + warning bar.
-  scaleEstimate: text("scale_estimate").default(null),
+  scaleEstimate: text("scale_estimate"),
   // splitParentId: set on each child row by split-work-item.ts — points back
   // at the over-scale parent it was split from. Not a tracker_links edge
   // (unlike decompose-epic's child-of) because the relationship is 1:1 with
   // the row that created it, not a general graph edge.
-  splitParentId: text("split_parent_id").default(null),
+  splitParentId: text("split_parent_id"),
 });
 
 // ---------------------------------------------------------------------------
@@ -142,10 +142,10 @@ export const stages = table("tracker_stages", {
   stageName: text("stage_name").notNull(),
   stageStatus: text("stage_status").default("待执行"),
   deliveryItems: text("delivery_items").default("[]"),
-  workflowRunRef: text("workflow_run_ref").default(null),
-  verdict: text("verdict").default(null),
-  startedAt: text("started_at").default(null),
-  completedAt: text("completed_at").default(null),
+  workflowRunRef: text("workflow_run_ref"),
+  verdict: text("verdict"),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   ...ownableColumns(),
@@ -168,7 +168,7 @@ export const artifacts = table("tracker_artifacts", {
   version: integer("version").default(1),
   contentRef: text("content_ref").default(""),
   producedByKind: text("produced_by_kind").default("agent"),
-  supersedes: text("supersedes").default(null),
+  supersedes: text("supersedes"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   ...ownableColumns(),
@@ -244,7 +244,7 @@ export const execQueue = table("tracker_exec_queue", {
   status: text("status").default("queued"),
   currentStage: text("current_stage").default(""),
   enqueuedAt: text("enqueued_at").notNull(),
-  startedAt: text("started_at").default(null),
+  startedAt: text("started_at"),
   blockedBy: text("blocked_by").default("[]"),
   // v28 (03-tracker.md §8 队列与调度接真): manual drag/pin order within the
   // "可派发" group. On a genuinely fresh DB this column is nullable (null =
@@ -323,11 +323,10 @@ export const projectWorkflowRules = table("tracker_project_workflow_rules", {
   // "调研", "from-audit"). "" = any.
   nature: text("nature").notNull().default(""),
   // null = any; 1 = item must have a sprintId; 0 = item must NOT have one.
-  // (No explicit .default(null) — a column without .notNull()/.default() is
-  // already nullable with a natural NULL default; several pre-existing
-  // .default(null) calls elsewhere in this file trigger a drizzle-orm type
-  // error under the current TS/drizzle version — a known baseline issue this
-  // new column avoids by omitting the redundant call.)
+  // No explicit null default here: a column without .notNull()/.default() is
+  // already nullable with a natural NULL default, and this drizzle-orm
+  // version's `.default()` signature only accepts the column's raw data type
+  // or SQL, never a literal `null`, regardless of nullability.
   inSprint: integer("in_sprint"),
   templateName: text("template_name").notNull(),
   defaultInputs: text("default_inputs").notNull().default("{}"),
@@ -351,18 +350,18 @@ export const projectWorkflowRules = table("tracker_project_workflow_rules", {
 export const approvals = table("tracker_approvals", {
   id: text("id").primaryKey(),
   sprintId: text("sprint_id").notNull(),
-  workItemId: text("work_item_id").default(null),
+  workItemId: text("work_item_id"),
   gateKey: text("gate_key").notNull(),
-  gateRef: text("gate_ref").default(null),
+  gateRef: text("gate_ref"),
   status: text("status").notNull().default("pending"),
   requestedBy: text("requested_by").notNull(),
-  decidedBy: text("decided_by").default(null),
-  reason: text("reason").default(null),
-  decidedAt: text("decided_at").default(null),
+  decidedBy: text("decided_by"),
+  reason: text("reason"),
+  decidedAt: text("decided_at"),
   createdAt: text("created_at").notNull(),
-  anchorArtifactId: text("anchor_artifact_id").default(null),
-  anchorVersion: integer("anchor_version").default(null),
-  staleAt: text("stale_at").default(null),
+  anchorArtifactId: text("anchor_artifact_id"),
+  anchorVersion: integer("anchor_version"),
+  staleAt: text("stale_at"),
   ...ownableColumns(),
 });
 
@@ -381,10 +380,10 @@ export const sprintArtifacts = table("tracker_sprint_artifacts", {
   kind: text("kind").notNull(),
   name: text("name").notNull(),
   version: integer("version").notNull().default(1),
-  supersedes: text("supersedes").default(null),
+  supersedes: text("supersedes"),
   producedByKind: text("produced_by_kind").notNull().default("agent"),
   content: text("content").notNull().default(""),
-  contentRef: text("content_ref").default(null),
+  contentRef: text("content_ref"),
   createdAt: text("created_at").notNull(),
   ...ownableColumns(),
 });
@@ -449,9 +448,9 @@ export const workItemRuns = table(
   {
     id: text("id").primaryKey(),
     workItemId: text("work_item_id").notNull(),
-    runId: text("run_id").default(null),
-    threadId: text("thread_id").default(null),
-    branch: text("branch").default(null),
+    runId: text("run_id"),
+    threadId: text("thread_id"),
+    branch: text("branch"),
     dispatchedAt: text("dispatched_at").notNull(),
     superseded: integer("superseded").notNull().default(0),
     createdAt: text("created_at").notNull(),

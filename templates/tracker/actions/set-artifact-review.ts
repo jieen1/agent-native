@@ -35,6 +35,8 @@ interface SetArtifactReviewArgs {
   reviewer?: string;
 }
 
+type ArtifactReviewInsertValues = typeof schema.artifactReviews.$inferInsert;
+
 /**
  * Build the field values for an upsert of an artifact review row.
  * Returns either an INSERT payload (with fresh id/timestamps) or
@@ -46,8 +48,12 @@ export function buildArtifactReviewUpsertValues(
   ownerEmail: string,
   now: string,
 ):
-  | { kind: "insert"; values: Record<string, unknown> }
-  | { kind: "update"; id: string; values: Record<string, unknown> } {
+  | { kind: "insert"; values: ArtifactReviewInsertValues }
+  | {
+      kind: "update";
+      id: string;
+      values: Partial<ArtifactReviewInsertValues>;
+    } {
   const checkedInt = args.checked ? 1 : 0;
   const reviewer = args.reviewer ?? ownerEmail;
 

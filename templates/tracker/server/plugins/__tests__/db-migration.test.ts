@@ -73,7 +73,7 @@ describe("T-F3-12 / T-F5-07 / T-F6-08: tracker v24/v25/v26 迁移冒烟 (SQLite 
 
       // Every table schema.ts declares as a Drizzle table object must exist.
       const declaredTables = Object.values(trackerSchema)
-        .filter((v): v is object => typeof v === "object" && v !== null)
+        .filter((v) => typeof v === "object" && v !== null)
         .map((t) => {
           try {
             return getTableName(t as any);
@@ -119,10 +119,18 @@ describe("T-F3-12 / T-F5-07 / T-F6-08: tracker v24/v25/v26 迁移冒烟 (SQLite 
       // And it's not just present — every applied version's hash was actually
       // backfilled by verifyMigrationHashes() (T-F6-05's "首次回填" behavior,
       // exercised here for free since this is a from-scratch empty-db run).
-      const migRows = await inspect.execute("SELECT version, hash FROM tracker_migration_hashes");
+      const migRows = await inspect.execute(
+        "SELECT version, hash FROM tracker_migration_hashes",
+      );
       expect(migRows.rows.length).toBeGreaterThan(0);
-      for (const row of migRows.rows as unknown as Array<{ version: number; hash: string | null }>) {
-        expect(row.hash, `version ${row.version} should have a backfilled hash`).toBeTruthy();
+      for (const row of migRows.rows as unknown as Array<{
+        version: number;
+        hash: string | null;
+      }>) {
+        expect(
+          row.hash,
+          `version ${row.version} should have a backfilled hash`,
+        ).toBeTruthy();
       }
 
       // T-F8-06 (SQLite tier): v27's two new tables exist. The Postgres-only
@@ -203,9 +211,12 @@ describe("T-F3-12 / T-F5-07 / T-F6-08: tracker v24/v25/v26 迁移冒烟 (SQLite 
 
 describe("T-F6-03: 冒烟档有效性(删迁移必红/恢复必绿)", () => {
   it("removing v23's CREATE TABLE for tracker_artifact_reviews makes the table absent + auditMigrations() names it exactly (SDLC-061 replay)", async () => {
-    const { closeDbExec, runMigrations } = await import("@agent-native/core/db");
+    const { closeDbExec, runMigrations } =
+      await import("@agent-native/core/db");
     await closeDbExec?.().catch(() => {});
-    const dbDirRed = fs.mkdtempSync(path.join(os.tmpdir(), "tracker-migration-smoke-red-"));
+    const dbDirRed = fs.mkdtempSync(
+      path.join(os.tmpdir(), "tracker-migration-smoke-red-"),
+    );
     const dbPathRed = path.join(dbDirRed, "red.db");
     process.env.DATABASE_URL = `file:${dbPathRed}`;
 
@@ -222,7 +233,9 @@ describe("T-F6-03: 冒烟档有效性(删迁移必红/恢复必绿)", () => {
 
       // Real bookkeeping table name — required so v26's hardcoded ALTER
       // TABLE tracker_migrations target actually exists (see block comment).
-      const runMutated = runMigrations(mutated, { table: "tracker_migrations" });
+      const runMutated = runMigrations(mutated, {
+        table: "tracker_migrations",
+      });
       await runMutated(undefined as never);
 
       const { createClient } = await import("@libsql/client");
@@ -231,16 +244,17 @@ describe("T-F6-03: 冒烟档有效性(删迁移必红/恢复必绿)", () => {
         const tableRows = await inspect.execute(
           "SELECT name FROM sqlite_master WHERE type='table'",
         );
-        const tableNames = new Set(tableRows.rows.map((r: any) => String(r.name)));
+        const tableNames = new Set(
+          tableRows.rows.map((r: any) => String(r.name)),
+        );
 
         // RED: genuinely absent — exactly what the T-F3-12 smoke assertion catches.
         expect(tableNames.has("tracker_artifact_reviews")).toBe(false);
 
         // And migration-audit's pure function names it precisely, not just
         // "something's wrong" (03 §2's "精确名单").
-        const { auditMigrations, resolveRuntimeSchemaSource } = await import(
-          "../../lib/migration-audit.js"
-        );
+        const { auditMigrations, resolveRuntimeSchemaSource } =
+          await import("../../lib/migration-audit.js");
         const schemaSource = await resolveRuntimeSchemaSource();
         const mutatedMigrationsText = mutated.map((m) => m.sql).join("\n");
         const audit = auditMigrations(schemaSource, mutatedMigrationsText);
@@ -255,9 +269,12 @@ describe("T-F6-03: 冒烟档有效性(删迁移必红/恢复必绿)", () => {
   }, 30_000);
 
   it("running the REAL (undoctored) array fresh creates tracker_artifact_reviews — 'restore → all green' (same real bookkeeping name, independent fresh db)", async () => {
-    const { closeDbExec, runMigrations } = await import("@agent-native/core/db");
+    const { closeDbExec, runMigrations } =
+      await import("@agent-native/core/db");
     await closeDbExec?.().catch(() => {});
-    const dbDirGreen = fs.mkdtempSync(path.join(os.tmpdir(), "tracker-migration-smoke-green-"));
+    const dbDirGreen = fs.mkdtempSync(
+      path.join(os.tmpdir(), "tracker-migration-smoke-green-"),
+    );
     const dbPathGreen = path.join(dbDirGreen, "green.db");
     process.env.DATABASE_URL = `file:${dbPathGreen}`;
 
@@ -267,7 +284,9 @@ describe("T-F6-03: 冒烟档有效性(删迁移必红/恢复必绿)", () => {
       };
       const realMigrations = dbPluginModule.TRACKER_MIGRATIONS;
 
-      const runReal = runMigrations(realMigrations, { table: "tracker_migrations" });
+      const runReal = runMigrations(realMigrations, {
+        table: "tracker_migrations",
+      });
       await runReal(undefined as never);
 
       const { createClient } = await import("@libsql/client");
@@ -276,7 +295,9 @@ describe("T-F6-03: 冒烟档有效性(删迁移必红/恢复必绿)", () => {
         const tableRows = await inspect.execute(
           "SELECT name FROM sqlite_master WHERE type='table'",
         );
-        const tableNames = new Set(tableRows.rows.map((r: any) => String(r.name)));
+        const tableNames = new Set(
+          tableRows.rows.map((r: any) => String(r.name)),
+        );
         expect(tableNames.has("tracker_artifact_reviews")).toBe(true);
       } finally {
         inspect.close();
@@ -327,17 +348,26 @@ describe("T-F6-04/05: hash 防撞 + 首次回填", () => {
 
   it("T-F6-05: 首次运行(全新库,hash 全空)→ 全部回填,零报错零重跑", async () => {
     const dbPluginModule = await import("../db.js");
-    const trackerDbPlugin = dbPluginModule.default as unknown as () => Promise<void>;
+    const trackerDbPlugin =
+      dbPluginModule.default as unknown as () => Promise<void>;
 
     await trackerDbPlugin(); // must not throw
 
     const { createClient } = await import("@libsql/client");
     const inspect = createClient({ url: `file:${dbPath4}` });
     try {
-      const rows = await inspect.execute("SELECT version, hash FROM tracker_migration_hashes");
+      const rows = await inspect.execute(
+        "SELECT version, hash FROM tracker_migration_hashes",
+      );
       expect(rows.rows.length).toBeGreaterThan(0);
-      for (const row of rows.rows as unknown as Array<{ version: number; hash: string | null }>) {
-        expect(row.hash, `version ${row.version} should be backfilled`).toBeTruthy();
+      for (const row of rows.rows as unknown as Array<{
+        version: number;
+        hash: string | null;
+      }>) {
+        expect(
+          row.hash,
+          `version ${row.version} should be backfilled`,
+        ).toBeTruthy();
       }
     } finally {
       inspect.close();
@@ -356,14 +386,19 @@ describe("T-F6-04/05: hash 防撞 + 首次回填", () => {
         sql: "SELECT hash FROM tracker_migration_hashes WHERE version = ?",
         args: [21],
       });
-      expect((check.rows[0] as any)?.hash).toBe("bogus-hash-does-not-match-real-sql");
+      expect((check.rows[0] as any)?.hash).toBe(
+        "bogus-hash-does-not-match-real-sql",
+      );
     } finally {
       inspect.close();
     }
 
     const dbPluginModule = await import("../db.js");
-    const trackerDbPlugin = dbPluginModule.default as unknown as () => Promise<void>;
+    const trackerDbPlugin =
+      dbPluginModule.default as unknown as () => Promise<void>;
 
-    await expect(trackerDbPlugin()).rejects.toThrow(/migration-hash-conflict: v21/);
+    await expect(trackerDbPlugin()).rejects.toThrow(
+      /migration-hash-conflict: v21/,
+    );
   }, 30_000);
 });

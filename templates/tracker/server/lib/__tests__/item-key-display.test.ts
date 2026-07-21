@@ -31,7 +31,11 @@ const OWNER = "owner@example.com";
 const ORG_ID = "org-f8";
 
 function asUser<T>(fn: () => Promise<T> | T): Promise<T> {
-  return runWithRequestContext({ userEmail: OWNER, orgId: ORG_ID }, fn);
+  // runWithRequestContext's return type mirrors fn's own sync/async-ness
+  // (T | Promise<T>) — normalize to a real Promise so callers can always await.
+  return Promise.resolve(
+    runWithRequestContext({ userEmail: OWNER, orgId: ORG_ID }, fn),
+  );
 }
 
 let client: Client;
@@ -149,7 +153,13 @@ describe("computeItemKeyDisplays", () => {
     // Same project+itemKey, but a different tenant entirely.
     await client.execute({
       sql: `INSERT INTO tracker_work_items (id, project_id, item_key, owner_email, org_id) VALUES (?, ?, ?, ?, ?)`,
-      args: ["wi-other-tenant", "proj-1", "SDLC-033", "someone-else@example.com", "org-other"],
+      args: [
+        "wi-other-tenant",
+        "proj-1",
+        "SDLC-033",
+        "someone-else@example.com",
+        "org-other",
+      ],
     });
 
     const displays = await asUser(() =>

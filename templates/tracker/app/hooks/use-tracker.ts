@@ -517,7 +517,10 @@ export function useCreateSprintArtifact() {
 
 // Approval hooks (M1-3).
 export function useApprovals(
-  params: { sprintId?: string; status?: string } = {},
+  params: {
+    sprintId?: string;
+    status?: "pending" | "approved" | "rejected";
+  } = {},
 ) {
   return useActionQuery("list-approvals", params, {
     refetchInterval: 5000,
@@ -668,7 +671,7 @@ export function useValidateDependencyGraph(
 ) {
   return useActionQuery(
     "validate-dependency-graph",
-    { scope, id },
+    { scope: scope ?? "epic", id: id ?? "" },
     { enabled: enabled && !!scope && !!id },
   ) as {
     data?: import("@shared/types").GraphValidationResult;

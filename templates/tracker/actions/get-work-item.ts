@@ -2,14 +2,15 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { computeItemKeyDisplay } from "../server/lib/item-key-display.js";
 import {
   actorFromCaller,
   allowedTransitions,
   type Actor,
 } from "../server/lib/transition-guard.js";
-import { computeItemKeyDisplay } from "../server/lib/item-key-display.js";
 import {
   listWorkItemRuns,
   type WorkItemRunSummary,
@@ -23,7 +24,7 @@ type ProjectRow = {
   gitRemote: string;
   defaultBranch: string;
 } | null;
-type SprintRow = { id: string; name: string; status: string } | null;
+type SprintRow = { id: string; name: string; status: string | null } | null;
 
 /**
  * Read-compat fallback for items dispatched BEFORE `tracker_work_item_runs`
@@ -46,7 +47,11 @@ type SprintRow = { id: string; name: string; status: string } | null;
 export function legacyRunFallback(
   item: Pick<
     WorkItemRow,
-    "orchestratorThreadId" | "orchestratorRunId" | "branch" | "dispatchedAt" | "updatedAt"
+    | "orchestratorThreadId"
+    | "orchestratorRunId"
+    | "branch"
+    | "dispatchedAt"
+    | "updatedAt"
   >,
 ): WorkItemRunSummary[] {
   if (!item.orchestratorThreadId) return [];
@@ -225,7 +230,11 @@ export default defineAction({
     const actor = actorFromCaller(ctx?.caller, getRequestUserEmail());
     const [recordedRuns, itemKeyDisplay] = await Promise.all([
       listWorkItemRuns(db, item.id),
-      computeItemKeyDisplay(db, { id: item.id, projectId: item.projectId, itemKey: item.itemKey }),
+      computeItemKeyDisplay(db, {
+        id: item.id,
+        projectId: item.projectId,
+        itemKey: item.itemKey,
+      }),
     ]);
     // Read-compat: items dispatched before F8's tracker_work_item_runs table
     // existed have no recorded history row — fall back to the legacy columns

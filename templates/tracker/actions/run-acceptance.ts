@@ -1,12 +1,13 @@
 import { defineAction } from "@agent-native/core";
+import { loadActionsFromStaticRegistry } from "@agent-native/core/server";
 import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
-import { loadActionsFromStaticRegistry } from "@agent-native/core/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
+import actionsRegistry from "../.generated/actions-registry.js";
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import {
@@ -15,7 +16,6 @@ import {
   uploadContentImage,
 } from "../server/lib/content-client.js";
 import { captureScreenshot } from "../server/lib/screenshot.js";
-import actionsRegistry from "../.generated/actions-registry.js";
 
 // Lazily materialize the static action registry INSIDE run(), never at module
 // top level: actions-registry.js imports every action (including this one), so
@@ -76,7 +76,12 @@ export default defineAction({
             .record(z.string(), z.unknown())
             .optional()
             .describe("kind=action 时传给该 action 的参数"),
-          url: z.string().optional().describe("kind=http 时的请求 URL；kind=screenshot 时为要截图的页面 URL"),
+          url: z
+            .string()
+            .optional()
+            .describe(
+              "kind=http 时的请求 URL；kind=screenshot 时为要截图的页面 URL",
+            ),
           method: z
             .string()
             .optional()
@@ -185,7 +190,9 @@ export default defineAction({
         } else {
           try {
             const { png, pageText } = await captureScreenshot(sc.url);
-            const safeName = sc.name.replace(/[^a-zA-Z0-9-_]/g, "_").slice(0, 60);
+            const safeName = sc.name
+              .replace(/[^a-zA-Z0-9-_]/g, "_")
+              .slice(0, 60);
             const filename = `acceptance-${itemKey}-${safeName}-${Date.now()}.png`;
             const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
             const uploaded = await uploadContentImage(ownerEmail, {
@@ -227,6 +234,11 @@ export default defineAction({
     const passed = results.filter((r) => r.pass).length;
     const failed = results.length - passed;
     const verdictResult: "pass" | "reject" = failed === 0 ? "pass" : "reject";
+    // complete-stage's verdict.result is a separate, mandatory enum (F3 verdict
+    // 语义收紧) distinct from this action's own "pass"/"reject" vocabulary —
+    // translate rather than reuse the string so the call matches its real schema.
+    const stageVerdictResult: "PASSED" | "CHANGES_REQUESTED" =
+      verdictResult === "pass" ? "PASSED" : "CHANGES_REQUESTED";
 
     // --- Generate markdown evidence document ---
     const markdown = [
@@ -243,7 +255,7 @@ export default defineAction({
         "",
         `- kind: ${r.kind}`,
         ...(r.kind === "screenshot" &&
-          typeof (r.actual as Record<string, unknown>).screenshotUrl === "string"
+        typeof (r.actual as Record<string, unknown>).screenshotUrl === "string"
           ? [
               "",
               `![${r.name}](${(r.actual as Record<string, unknown>).screenshotUrl})`,
@@ -277,7 +289,10 @@ export default defineAction({
       );
     }
 
-    const evidenceDocUrl = contentDocumentUrl(contentDoc.urlPath, contentDoc.id);
+    const evidenceDocUrl = contentDocumentUrl(
+      contentDoc.urlPath,
+      contentDoc.id,
+    );
 
     // --- Trigger + complete the 验收 stage ---
     const triggerStageAction = await import("./trigger-stage.js");
@@ -291,7 +306,7 @@ export default defineAction({
       workItemId: args.workItemId,
       stageName: "验收",
       verdict: {
-        result: verdictResult,
+        result: stageVerdictResult,
         passed,
         failed,
         total: results.length,
