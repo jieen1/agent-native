@@ -362,6 +362,17 @@ export interface SprintStageTimingResult {
   errors?: Record<string, string>;
 }
 
+// M5 度量复盘 — Sprint burndown chart series (actions/get-sprint-burndown.ts).
+export interface BurndownPoint {
+  date: string;
+  remaining: number;
+}
+export interface SprintBurndownResult {
+  sprintId: string;
+  series: BurndownPoint[];
+  totalItems: number;
+}
+
 // Goal metrics (S6 驾驶舱 Goal 卡) — mirrors
 // actions/extract-goal-metrics.ts's GoalMetric/ParsedSuccessMetrics exactly
 // (that action deterministically parses the M-numbered "## Success Metrics"

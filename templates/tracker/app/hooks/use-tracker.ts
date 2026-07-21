@@ -181,6 +181,18 @@ export function useGoalMetrics(sprintId: string) {
   };
 }
 
+export function useSprintBurndown(sprintId: string) {
+  return useActionQuery(
+    "get-sprint-burndown",
+    { sprintId },
+    { enabled: !!sprintId, retry: false },
+  ) as {
+    data?: import("@shared/types").SprintBurndown;
+    isLoading: boolean;
+    error: unknown;
+  };
+}
+
 export function useUpdateSprint() {
   const qc = useQueryClient();
   return useActionMutation("update-sprint", {
@@ -499,6 +511,18 @@ export function useSprintArtifacts(sprintId: string) {
 export function useSprintArtifact(id: string) {
   return useActionQuery("get-sprint-artifact", { id }, { enabled: !!id }) as {
     data?: import("@shared/types").SprintArtifact;
+    isLoading: boolean;
+  };
+}
+
+// M5 度量复盘 — Sprint burndown chart (work items remaining over time).
+export function useSprintBurndown(sprintId: string) {
+  return useActionQuery(
+    "get-sprint-burndown",
+    { sprintId },
+    { enabled: !!sprintId },
+  ) as {
+    data?: import("@shared/types").SprintBurndownResult;
     isLoading: boolean;
   };
 }

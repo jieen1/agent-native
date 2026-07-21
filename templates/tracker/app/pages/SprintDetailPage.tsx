@@ -29,6 +29,7 @@ import {
   IconRocket,
   IconRubberStamp,
   IconStopwatch,
+  IconTrendingDown,
   IconX,
 } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
@@ -98,6 +99,7 @@ import {
   useRequestApproval,
   useSprint,
   useSprintArtifacts,
+  useSprintBurndown,
   useSprintStageTiming,
   useUpdateSprint,
 } from "@/hooks/use-tracker";
@@ -1319,6 +1321,168 @@ function MetricsSummary({ sprint }: { sprint: SprintDetail }) {
   );
 }
 
+// ── M5 度量复盘: Sprint burndown chart ────────────────────────────────────────
+// Work items remaining per day, derived from real stage completedAt + item
+// status. Renders an SVG line chart with an ideal burn-down reference line.
+// Shows "暂无数据" when the sprint has no startDate or is too new to plot.
+
+function SprintBurndownChart({ sprintId }: { sprintId: string }) {
+  const { data, isLoading } = useSprintBurndown(sprintId);
+
+  const svgW = 560;
+  const svgH = 160;
+  const padL = 32;
+  const padR = 8;
+  const padT = 8;
+  const padB = 24;
+  const innerW = svgW - padL - padR;
+  const innerH = svgH - padT - padB;
+
+  const series = data?.series ?? [];
+  const totalItems = data?.totalItems ?? 0;
+  const hasData = series.length >= 2;
+
+  const maxRemaining = hasData ? Math.max(1, totalItems) : 1;
+  const n = series.length;
+
+  function toX(i: number) {
+    return padL + (n > 1 ? (i / (n - 1)) * innerW : 0);
+  }
+  function toY(remaining: number) {
+    return padT + innerH - (remaining / maxRemaining) * innerH;
+  }
+
+  const actualPoints = series
+    .map((p, i) => `${toX(i).toFixed(1)},${toY(p.remaining).toFixed(1)}`)
+    .join(" ");
+
+  // Ideal: straight line from totalItems at day 0 to 0 at last day.
+  const idealPoints = hasData
+    ? `${toX(0).toFixed(1)},${toY(totalItems).toFixed(1)} ${toX(n - 1).toFixed(1)},${toY(0).toFixed(1)}`
+    : "";
+
+  // X-axis: show first and last date labels.
+  const firstDate = series[0]?.date ?? "";
+  const lastDate = series[n - 1]?.date ?? "";
+  const lastRemaining = series[n - 1]?.remaining ?? 0;
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+        <IconTrendingDown className="size-4 text-muted-foreground" />
+        燃尽图
+        <span className="text-[11px] font-normal text-muted-foreground">
+          （来源：tracker 阶段完成时间戳）
+        </span>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border bg-card">
+        {isLoading ? (
+          <div className="p-5">
+            <Skeleton className="h-40 w-full" />
+          </div>
+        ) : !hasData ? (
+          <p className="p-5 text-sm text-muted-foreground">
+            暂无数据（需要 Sprint 起始日期且至少跨越 2 天）。
+          </p>
+        ) : (
+          <div className="p-4">
+            <svg
+              viewBox={`0 0 ${svgW} ${svgH}`}
+              className="w-full"
+              style={{ height: svgH }}
+              role="img"
+              aria-label={`燃尽图：剩 ${lastRemaining}/${totalItems} 工作项`}
+            >
+              {/* Y-axis gridlines at 0%, 50%, 100% */}
+              {[0, 0.5, 1].map((frac) => {
+                const y = padT + innerH * (1 - frac);
+                const val = Math.round(maxRemaining * frac);
+                return (
+                  <g key={frac}>
+                    <line
+                      x1={padL}
+                      y1={y}
+                      x2={padL + innerW}
+                      y2={y}
+                      className="stroke-border"
+                      strokeWidth={1}
+                      strokeDasharray="4 3"
+                    />
+                    <text
+                      x={padL - 4}
+                      y={y + 4}
+                      textAnchor="end"
+                      className="fill-muted-foreground"
+                      fontSize={10}
+                    >
+                      {val}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Ideal burn-down (dashed) */}
+              <polyline
+                points={idealPoints}
+                fill="none"
+                className="stroke-muted-foreground"
+                strokeWidth={1.5}
+                strokeDasharray="5 4"
+                opacity={0.5}
+              />
+
+              {/* Actual burn-down */}
+              <polyline
+                points={actualPoints}
+                fill="none"
+                className="stroke-info"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+
+              {/* X-axis date labels */}
+              <text
+                x={toX(0)}
+                y={svgH - 6}
+                textAnchor="start"
+                className="fill-muted-foreground"
+                fontSize={10}
+              >
+                {firstDate}
+              </text>
+              <text
+                x={toX(n - 1)}
+                y={svgH - 6}
+                textAnchor="end"
+                className="fill-muted-foreground"
+                fontSize={10}
+              >
+                {lastDate}
+              </text>
+            </svg>
+
+            <div className="mt-1 flex items-center gap-4 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-0.5 w-6 bg-info" />
+                实际
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-0.5 w-6 border-t border-dashed border-muted-foreground opacity-50" />
+                理想
+              </span>
+              <span className="ml-auto font-mono">
+                剩 {lastRemaining}/{totalItems}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ── M5 Sprint-status: per-work-item stage timing from real v3_spawns ─────────
 // Every number here is derived from real orchestrator v3_spawns.started_at /
 // completed_at timestamps via get-sprint-stage-timing. A stage with no spawn
@@ -1653,6 +1817,7 @@ export function SprintDetailPage() {
           {phase === "executing" ? <ExecutingPhasePanel items={items} /> : null}
           <DeliveryProgressCard items={items} />
           <SprintItemsTable items={items} />
+          <SprintBurndownChart sprintId={id} />
           <SprintStageTiming sprintId={id} />
           <SprintArtifactsSection sprintId={id} />
           <SprintApprovalsSection sprintId={id} />
