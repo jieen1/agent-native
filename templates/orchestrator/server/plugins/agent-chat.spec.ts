@@ -84,6 +84,11 @@ describe("orchestrator agent-chat plugin — MCP connectorCatalog", () => {
       "v3RunNodes",
       "runSummary",
       "nodeSummary",
+      // Intervene (SDLC-066 — named by brain-monitor.ts's PERIODIC_CHECK_MESSAGE
+      // and v3-reconciler.ts's node-event wake message).
+      "nodeRetry",
+      "runCancel",
+      "spawnCancel",
       // Inspect.
       "runsList",
       "workspaceList",
@@ -128,5 +133,36 @@ describe("orchestrator agent-chat plugin — MCP connectorCatalog", () => {
     expect(catalog).not.toContain("tool-search");
     expect(catalog).not.toContain("list_apps");
     expect(catalog).not.toContain("ask_app");
+  });
+
+  it("SDLC-066: every tool literally named in brain-monitor's PERIODIC_CHECK_MESSAGE wake text is in the catalog", async () => {
+    // Real production data (2026-07-20/21, model=qwen3.8-max-preview via the
+    // aliyun runtime override) showed the brain repeatedly calling nodeRetry /
+    // runCancel — exactly the names this wake message tells it to use on a
+    // stuck/drifted run — and getting back a bare "Unknown tool" because they
+    // were missing from the catalog while genuinely existing as real actions
+    // (actions/v3-run-detail.ts, actions/v3-runs.ts). Extract every
+    // camelCase-looking token from the ACTUAL wake message text (not a
+    // hand-copied list) so this fails again the moment the message names a
+    // tool the catalog doesn't have, instead of only pinning today's names.
+    const { PERIODIC_CHECK_MESSAGE } =
+      await import("../brain/brain-monitor.js");
+    const catalog = hoisted.capturedOptions!.connectorCatalog as string[];
+    const mentioned =
+      PERIODIC_CHECK_MESSAGE.match(/\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*\b/g) ??
+      [];
+    expect(mentioned).toEqual(
+      expect.arrayContaining([
+        "runState",
+        "v3RunNodes",
+        "runSummary",
+        "workflowPatch",
+        "nodeRetry",
+        "runCancel",
+      ]),
+    );
+    for (const name of mentioned) {
+      expect(catalog).toContain(name);
+    }
   });
 });

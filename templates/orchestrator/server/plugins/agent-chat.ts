@@ -57,6 +57,14 @@ const ORCHESTRATOR_BRAIN_CONNECTOR_CATALOG = [
   "v3RunNodes",
   "runSummary",
   "nodeSummary",
+  // Intervene (SDLC-066: brain-monitor.ts's PERIODIC_CHECK_MESSAGE and
+  // v3-reconciler.ts's node-event wake message both literally tell the brain
+  // to "用 workflowPatch/nodeRetry/runCancel 介入" on a stuck/drifted run —
+  // these two were real actions the brain kept calling per that instruction,
+  // but were missing here, so every attempt came back "Unknown tool").
+  "nodeRetry",
+  "runCancel",
+  "spawnCancel",
   // Inspect.
   "runsList",
   "workspaceList",
