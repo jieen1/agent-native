@@ -121,18 +121,38 @@ action trio instead:
   provider host, injects configured credentials, blocks private/internal URLs,
   and redacts secrets.
 
-Use `@agent-native/core/provider-api` as the shared substrate. A template should
-only add a thin credential adapter when it has app-specific credential lookup
-rules. If the app stores a built-in provider's OAuth grant under a narrower
-local provider id, use the runtime's `oauthProviderOverrides` instead of
-duplicating the provider config. If credentials are stored on shareable/resource
-rows rather than in the shared credential or OAuth-token stores, build a resolver
-that enforces those access checks before exposing raw provider requests. Keep
-`provider-api-request` `http: false` unless you have a separate UI permission
-model for arbitrary provider writes. Specific actions such as `search-records`,
-`search-emails`, or `sync-source` are convenience shortcuts, not capability
-limits; agents should fall back to the provider API trio when a question
-requires an endpoint or filter that the shortcut does not model.
+Use `@agent-native/core/provider-api` as the shared substrate, and build these
+actions as thin factory imports rather than copying `defineAction` schemas and
+handlers into each template:
+
+```ts
+import {
+  createProviderApiCatalogAction,
+  createProviderApiDocsAction,
+  createProviderApiRequestAction,
+} from "@agent-native/core/provider-api/actions/provider-api";
+import {
+  createDeleteStagedDatasetAction,
+  createListStagedDatasetsAction,
+  createQueryStagedDatasetAction,
+} from "@agent-native/core/provider-api/actions/staged-datasets";
+```
+
+Pass the app's existing provider runtime to the provider factories, and pass
+its app id to the staged-dataset factories. Keep app-specific descriptions,
+provider allow-lists, HTTP/tool-callability settings, and credential adapters
+as factory options. Only add a thin credential adapter when the app has
+app-specific credential lookup rules. If the app stores a built-in provider's
+OAuth grant under a narrower local provider id, use the runtime's
+`oauthProviderOverrides` instead of duplicating provider config. If credentials
+are stored on shareable/resource rows rather than in the shared credential or
+OAuth-token stores, build a resolver that enforces those access checks before
+exposing raw provider requests. Keep `provider-api-request` `http: false`
+unless a separate UI permission model authorizes arbitrary provider writes.
+Specific actions such as `search-records`, `search-emails`, or `sync-source`
+are convenience shortcuts, not capability limits; agents should fall back to
+the provider API trio when a question requires an endpoint or filter that the
+shortcut does not model.
 
 This is a framework tenet. The safety boundary should be provider host
 allow-listing, credential scoping, auth injection, private-network blocking,
@@ -160,6 +180,18 @@ to find likely URLs, `web-request` or `provider-api-docs` with clean
 `responseMode` output to read a page, and `run-code` with `webRead()` /
 `webFetch()` when you need to grep, aggregate, or compare many pages before
 returning a small result.
+
+For LONG compute, `run-code` supports durable background executions: pass
+`background: true` and the code is enqueued to a `sandbox_executions` row and
+executed out-of-band with a generous budget (default 10 min), surviving the
+hosted agent run's ~40s soft timeout. The call returns
+`{ executionId, status: "queued" }` immediately with polling guidance; check
+progress with `run-code` `{ executionId }` (or the `get-code-execution` tool
+where registered) — results persist after completion. Use background for big
+cross-source joins, multi-page provider sweeps, and heavy analysis scripts;
+keep quick scripts in the default foreground mode. Agents should continue
+other work between polls, and on `failed`/`timed_out` split the computation or
+persist intermediate progress with `workspaceWrite` and re-run.
 
 ### The `http` Option
 
@@ -204,6 +236,49 @@ run: async (args) => {
   return JSON.stringify(events, null, 2);
 }
 ```
+
+### Returning Images the Agent Can See (`_agentImages`)
+
+An action's return object may include the well-known optional field
+`_agentImages` to attach vision images (screenshots, chart previews, rendered
+designs) to the tool result. The agent literally sees them — enabling visual
+self-review loops — while the field itself is stripped from the JSON text the
+model reads.
+
+```ts
+run: async ({ dashboardId }) => {
+  const shot = await renderDashboardPng(dashboardId); // Buffer
+  return {
+    dashboardId,
+    panelCount: 6,
+    _agentImages: [
+      // Either a public https URL (preferred — the provider fetches it)…
+      { url: "https://cdn.example.com/previews/dash-1.png", label: "overview" },
+      // …or base64 without a data: prefix (mediaType required; a full
+      // data:image/png;base64,… URL in `data` is also accepted and parsed).
+      { data: shot.toString("base64"), mediaType: "image/png" },
+    ],
+  };
+},
+```
+
+Rules and limits:
+
+- Shape: `Array<{ url?: string; data?: string; mediaType?: string; label?: string }>`.
+  Each entry needs `url` (https only) **or** `data`. Supported media types:
+  `image/jpeg`, `image/png`, `image/gif`, `image/webp`.
+- Caps: max **4 images** per result; max **~2MB of base64** per image.
+  Over-cap or invalid entries never fail the call — they become text notes in
+  the result telling the model what was dropped and why.
+- Persistence: the run ledger stores only the string result plus compact
+  `[image: …]` notes (URLs verbatim; base64 as a byte-count placeholder) —
+  never the payload. Images are re-attached only for the live turn; replayed
+  history is text-only, so prefer stable `url` images the model can re-request.
+- Engine support: native Anthropic and vision-capable AI-SDK providers
+  (anthropic, openai, google, openrouter) receive real image blocks; other
+  paths (Builder gateway, non-vision providers) degrade to the text notes.
+- External MCP tools need no changes — standard MCP `image` content parts are
+  converted automatically under the same caps.
 
 ### Validating Return Values (`outputSchema`)
 
@@ -254,7 +329,7 @@ The frontend calls actions using React Query hooks from `@agent-native/core/clie
 ### `useActionQuery` — for GET actions
 
 ```ts
-import { useActionQuery } from "@agent-native/core/client";
+import { useActionQuery } from "@agent-native/core/client/hooks";
 
 function MealList() {
   // Types are auto-inferred from the action's schema + return type — no manual generic needed
@@ -268,7 +343,7 @@ function MealList() {
 ### `useActionMutation` — for POST/PUT/DELETE actions
 
 ```ts
-import { useActionMutation } from "@agent-native/core/client";
+import { useActionMutation } from "@agent-native/core/client/hooks";
 
 function AddMealButton() {
   // Types are auto-inferred — no manual generic needed
@@ -288,7 +363,7 @@ Mutations automatically invalidate all `["action"]` query keys on success, so GE
 ### `callAction` — for imperative client code
 
 ```ts
-import { callAction } from "@agent-native/core/client";
+import { callAction } from "@agent-native/core/client/hooks";
 
 const people = await callAction("search-people", { query }, { method: "GET" });
 ```
@@ -321,6 +396,11 @@ Most operations should be actions. You only need custom routes in `server/routes
 - **Streaming responses** — SSE or chunked responses that need direct H3 control
 - **Webhooks** — external services POST to a specific URL
 - **OAuth callbacks** — redirect-based flows that need specific URL patterns
+
+When the agent needs a durable image or file URL, call the core `upload-image`
+action or use `uploadFile()` in server code. Do not write base64 into SQL,
+markdown, deck/design JSON, or action results. `_agentImages` on action results
+is for ephemeral vision previews only, not persistence.
 
 If it's a standard CRUD operation, data query, or a wrapper around an action, use the action instead.
 
