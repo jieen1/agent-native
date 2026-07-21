@@ -88,6 +88,14 @@
 
 export type WorkflowFamily = "core" | "sdlc" | "light" | "custom";
 
+// Phase H goal-audit anti-flattery output schema (02-workflows.md §3.3). The
+// `sdlc-audit` node below carries this as its `output_schema`; the V3
+// dispatcher's `classifyOutput` recognizes the `x-audit-evidence` marker and
+// runs the six mechanical rules in `audit-evidence-validator.ts` on top of the
+// ajv shape check, so empty-word/bragging/weak-evidence reports are rejected
+// at the schema layer (node fails + retries), not merely asked-for in prose.
+import { AUDIT_REPORT_OUTPUT_SCHEMA } from "./audit-evidence-validator.js";
+
 export interface WorkflowSeedEntry {
   name: string;
   family: WorkflowFamily;
@@ -126,7 +134,7 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
           id: "develop",
           agent: "vllm",
           prompt:
-            "你是开发者。请在当前 workspace 用 Read/Edit/Write/Bash 完成下面的开发规格,实现全部代码改动:\n\n{{inputs.spec}}\n\n严格遵守工程约束(只改指定文件/范围、DB 变更加性、复用现有写法、新表要有建表迁移)。**不要运行 pnpm install 或构建**。完成后简述改/新建了哪些文件及关键改动。\n\n## 纪律 1：TDD 红先行两段提交（MUST）\n必须分两段提交,禁止把红测试与实现 squash 成单个 commit:\n1. 第一段:先写失败测试(红),运行确认其确实失败后,单独 git commit,commit message 以 test: 开头并标注 (红/red),例如 `test: <描述> (红)`。此提交必须只含测试,不含使其通过的实现。\n2. 第二段:再写最小实现让测试转绿,运行确认通过后,单独 git commit,commit message 以 feat:/fix: 开头。\n结果:分支 git log 中红测试提交必须在实现提交之前(git log 顺序可证)。\n\n## 纪律 2：done 报告必须附测试执行证据（P4 证据优先，MUST）\ndone/完成报告必须包含:① 实际执行的测试命令(完整命令行);② 该命令的真实输出摘录(红阶段失败摘录 + 绿阶段通过摘录,含通过/失败计数),不得只写\"测试通过\"这类无证据结论;③ 两段提交的 commit hash。评审者据此可核对,无需自己重跑。",
+            '你是开发者。请在当前 workspace 用 Read/Edit/Write/Bash 完成下面的开发规格,实现全部代码改动:\n\n{{inputs.spec}}\n\n严格遵守工程约束(只改指定文件/范围、DB 变更加性、复用现有写法、新表要有建表迁移)。**不要运行 pnpm install 或构建**。完成后简述改/新建了哪些文件及关键改动。\n\n## 纪律 1：TDD 红先行两段提交（MUST）\n必须分两段提交,禁止把红测试与实现 squash 成单个 commit:\n1. 第一段:先写失败测试(红),运行确认其确实失败后,单独 git commit,commit message 以 test: 开头并标注 (红/red),例如 `test: <描述> (红)`。此提交必须只含测试,不含使其通过的实现。\n2. 第二段:再写最小实现让测试转绿,运行确认通过后,单独 git commit,commit message 以 feat:/fix: 开头。\n结果:分支 git log 中红测试提交必须在实现提交之前(git log 顺序可证)。\n\n## 纪律 2：done 报告必须附测试执行证据（P4 证据优先，MUST）\ndone/完成报告必须包含:① 实际执行的测试命令(完整命令行);② 该命令的真实输出摘录(红阶段失败摘录 + 绿阶段通过摘录,含通过/失败计数),不得只写"测试通过"这类无证据结论;③ 两段提交的 commit hash。评审者据此可核对,无需自己重跑。',
           workspace: "{{inputs.workspaceId}}",
         },
       ],
@@ -258,96 +266,64 @@ export const WORKFLOW_LIBRARY_SEED: WorkflowSeedEntry[] = [
   {
     name: "sdlc-audit",
     family: "core",
-    tags: ["brain 微工作流", "Phase H 目标审计"],
+    tags: ["brain 微工作流", "Phase H 目标审计", "反奉承证据 schema"],
     description:
-      "Phase H goal audit loop (up to 3 rounds, guard-unrolled): auditor (Sonnet) checks whether the goal is truly met using evidence, not a task checklist. If gaps, vLLM closes them, then re-audit. Stops at NO_GAPS or 3 rounds. Close nodes read the whole audit output (robust).",
+      "Phase H goal-audit (single audit node, anti-flattery evidence schema). The auditor judges whether the GOAL is truly met against the full workspace diff + validation log — it is deliberately NOT handed any issue/ticket checklist, so it cannot just tick off closed tickets. Its structured report is validated MECHANICALLY (server/engine/audit-evidence-validator.ts, wired into v3-dispatcher.ts classifyOutput): empty-word/bragging evidence is rejected, evidence must be repo:file[:line]/PR#n/sha/absence-of:<pattern>, a metric with no priority is P0, the audited metric set may not shrink below the predicted count, user-facing metrics must carry real (non-seed) runtime evidence, and NO_GAPS is only legal when every P0 is MET with no blocking concern. The brain/orchestrator loops this node up to 3 rounds (cycle input), persisting each report as the sprint-level artifact audit-report:{cycle}; a 4th needed round while still GAPS_FOUND escalates to a human audit-deferral gate instead of looping forever.",
     changeNote:
-      "收编自 101 自举血统 v2（run 实绩：done 1 / failed 2）。auditor 只看 diff/证据判断目标是否真正达成,不看任务清单。",
+      "Phase H goal-audit 工作项：把原 sdlc-audit v2 的三轮 guard 展开 DAG 收敛为单审计节点 + 机械反奉承证据 schema。判定基准是 sprint Goal 与可证伪成功指标,不是'单子是否关完'——故刻意不设 issue/ticket 清单输入(防审计员只勾已关单)。output_schema 即 AUDIT_REPORT_OUTPUT_SCHEMA(x-audit-evidence 标记),六条语义规则(空话拒收/证据格式/默认 P0/禁缩指标集/禁吹嘘/用户可感需真实运行证据)+ NO_GAPS 门在 classifyOutput 内机检,违规=schema-violation 重试。轮次/3 轮上限/升级人工由 brain 回合用 audit-evidence-validator.ts 的 auditReportDocKey/shouldEscalateAudit 纯函数 + tracker 的 create-sprint-artifact(audit-report:{cycle}) 与 request-approval(audit-deferral) 落实,DAG 内不内建回写/建单(沿用 Profile A:交付尾归 brain)。",
     dag: {
       nodes: [
         {
           type: "agent",
-          id: "audit1",
+          id: "audit",
           agent: "auditor",
           prompt:
-            "对下面的目标做 Phase H 目标审计。用 git diff、Read、grep 核实当前 workspace 是否真正达成目标(不看任务清单,只看代码/证据)。\n\n目标:\n{{inputs.goal}}\n\n给出结构化 verdict 与证据。",
+            "你是 Phase H 目标审计员(adversarial auditor)。判定基准是下面的目标与其可证伪成功指标,不是'哪些单子关了'——你手上没有任何 issue/ticket 清单,也不要去凑一份;只看代码与证据。\n\n目标(Goal):\n{{inputs.goal}}\n\n本次改动的完整 workspace diff:\n{{inputs.diff}}\n\n验证/测试日志:\n{{inputs.validationLog}}\n\n计划当初预测的成功指标数量(predicted_metrics_count,用于核对审计不得静默缩减指标集):\n{{inputs.predictedMetricsCount}}\n\n审计纪律(这些规则会被机械校验,违反会直接判失败重试,不要心存侥幸):\n1. 不要相信'测试通过/tests pass'就等于用户可感能力真的可用——绿日志不是用户价值的证明。每个指标都要给出可核对的具体证据。\n2. evidence 永远禁止使用空话:implemented/complete/completed/merged/done/✓/ok/okay/finished/passed/测试通过/已完成/完成。evidence 只能是以下四种格式之一:repo:file[:line](如 packages/core/src/x.ts:42)、PR#<n>、git sha(7-40 位十六进制)、absence-of:<pattern>。\n3. 没写 priority 的指标一律按 P0 对待——省略 priority 不能躲开 P0 门。\n4. audited_metrics_count 必须 >= predicted_metrics_count({{inputs.predictedMetricsCount}}),且必须等于 metrics 数组长度;不得在审计过程中悄悄缩减指标集。\n5. summary 与各指标字段禁止任何自我吹嘘措辞(圆满完成/超预期/完美/出色完成/mission accomplished/exceeded expectations/flawless/perfectly 等)。\n6. 任何 userFacing:true 的用户可感指标,必须附真实运行证据 runtimeEvidence{entrypoint(真实入口), realInput(真实的非种子输入), capturedOutput(捕获的真实输出)};不得仅以'测试通过/读源码没问题/跑了 demo/种子数据'作为依据(教训 L15:desktop-launcher 靠种子数据'通过',实修 16 个 PR)。\n7. NO_GAPS 只有在每个 P0 指标都 MET 且 concerns 里没有任何 blocking 项时才允许;只要有一条 P0 未达成或存在 blocking 项,verdict 必须是 GAPS_FOUND——判 NO_GAPS 却带着未达成的 P0/blocking 会被机械拒收。\n\n给出结构化审计报告:verdict(NO_GAPS|GAPS_FOUND)、metrics[](name/priority?/status:MET|PARTIAL|NOT_MET/evidence/userFacing?/runtimeEvidence?)、audited_metrics_count、predicted_metrics_count、concerns[](type:blocking|non-blocking/description)、summary。你的最终回复必须且只能是一个可被 JSON.parse 直接解析的原始 JSON 对象,不要 markdown 围栏,前后不要任何多余文字。",
           workspace: "{{inputs.workspaceId}}",
-          output_schema: {
-            type: "object",
-            required: ["verdict", "summary"],
-            properties: {
-              gaps: { type: "array" },
-              summary: { type: "string" },
-              verdict: { type: "string", enum: ["NO_GAPS", "GAPS_FOUND"] },
-            },
-          },
-        },
-        {
-          type: "agent",
-          id: "close1",
-          agent: "vllm",
-          deps: ["audit1"],
-          guard: "deps.audit1.output.verdict != 'NO_GAPS'",
-          prompt:
-            "目标审计发现未达成的 gap,请在当前 workspace 补齐,使目标真正达成。\n目标:{{inputs.goal}}\n审计结果:\n{{deps.audit1.output}}\n只补齐这些 gap,不引入无关改动。完成后简述改了什么。",
-          workspace: "{{inputs.workspaceId}}",
-        },
-        {
-          type: "agent",
-          id: "audit2",
-          agent: "auditor",
-          deps: ["audit1", "close1"],
-          guard: "deps.audit1.output.verdict != 'NO_GAPS'",
-          prompt:
-            "开发者已按第1轮审计补齐 gap。再次做目标审计(核实证据)。\n目标:\n{{inputs.goal}}\n给出结构化 verdict 与证据。",
-          workspace: "{{inputs.workspaceId}}",
-          output_schema: {
-            type: "object",
-            required: ["verdict", "summary"],
-            properties: {
-              gaps: { type: "array" },
-              summary: { type: "string" },
-              verdict: { type: "string", enum: ["NO_GAPS", "GAPS_FOUND"] },
-            },
-          },
-        },
-        {
-          type: "agent",
-          id: "close2",
-          agent: "vllm",
-          deps: ["audit2"],
-          guard: "deps.audit2.output.verdict != 'NO_GAPS'",
-          prompt:
-            "第2轮审计仍有 gap,请补齐。\n目标:{{inputs.goal}}\n审计结果:\n{{deps.audit2.output}}\n只补这些。完成后简述。",
-          workspace: "{{inputs.workspaceId}}",
-        },
-        {
-          type: "agent",
-          id: "audit3",
-          agent: "auditor",
-          deps: ["audit2", "close2"],
-          guard: "deps.audit2.output.verdict != 'NO_GAPS'",
-          prompt:
-            "第3轮(最终)目标审计。核实证据后给最终 verdict。若仍 GAPS_FOUND,说明需升级人工。\n目标:\n{{inputs.goal}}",
-          workspace: "{{inputs.workspaceId}}",
-          output_schema: {
-            type: "object",
-            required: ["verdict", "summary"],
-            properties: {
-              gaps: { type: "array" },
-              summary: { type: "string" },
-              verdict: { type: "string", enum: ["NO_GAPS", "GAPS_FOUND"] },
-            },
-          },
+          timeout_seconds: 1800,
+          retry: { max: 1 },
+          output_schema: AUDIT_REPORT_OUTPUT_SCHEMA,
         },
       ],
     },
     inputSchema: {
       type: "object",
-      required: ["goal", "workspaceId"],
+      required: [
+        "goal",
+        "diff",
+        "validationLog",
+        "workspaceId",
+        "predictedMetricsCount",
+      ],
       properties: {
-        goal: { type: "string" },
-        workspaceId: { type: "string" },
+        goal: {
+          type: "string",
+          description: "The goal/objective description to audit against.",
+        },
+        diff: {
+          type: "string",
+          description: "The FULL workspace diff for this cycle.",
+        },
+        validationLog: {
+          type: "string",
+          description:
+            "Verification/test logs (not trusted as proof on their own).",
+        },
+        workspaceId: {
+          type: "string",
+          description: "V3 host-native workspace id to audit in.",
+        },
+        cycle: {
+          type: "integer",
+          default: 1,
+          description:
+            "Audit round number (1-based). The report is persisted as the sprint-level artifact audit-report:{cycle}.",
+        },
+        predictedMetricsCount: {
+          type: "integer",
+          description:
+            "How many metrics the plan predicted — the audited set may not shrink below this (rule 4).",
+        },
       },
     },
   },

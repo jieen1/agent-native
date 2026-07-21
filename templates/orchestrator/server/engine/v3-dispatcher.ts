@@ -47,6 +47,10 @@ import type { NodeRunnerResult } from "../runtime/node-runner.js";
 import { getLocalWorkspaceDir } from "../v3-workspace-local.js";
 import { WorkspaceNotReadyError } from "../v3-workspace-provision.js";
 import type { V3Node, V3AgentNode } from "./dag-validator.js";
+import {
+  isAuditEvidenceSchema,
+  validateAuditReport,
+} from "./audit-evidence-validator.js";
 import { renderTemplate, type ExpressionContext } from "./interpolation.js";
 import {
   runAcpClaudeCodeWorker,
@@ -292,6 +296,26 @@ export function classifyOutput(
       const valid = validate(coerced as Record<string, unknown>);
 
       if (valid) {
+        // Phase H goal-audit anti-flattery gate (02-workflows.md §3.3): an
+        // audit-report schema (marked `x-audit-evidence`) carries six SEMANTIC
+        // rules JSON-schema cannot express (empty-word/format evidence,
+        // default-P0, no metric shrink, no bragging, user-facing runtime
+        // evidence, and the NO_GAPS gate). Enforce them HERE, in the same
+        // validation path, so a violating report is a schema-violation (node
+        // fails + retries) rather than a prompt request a model can ignore.
+        if (isAuditEvidenceSchema(outputSchema)) {
+          const auditResult = validateAuditReport(coerced);
+          if (!auditResult.ok) {
+            return {
+              path: "schema-violation",
+              schema: outputSchema,
+              raw: coerced,
+              error: `Audit report rejected by anti-flattery validator: ${auditResult.errors.join(
+                "; ",
+              )}`,
+            };
+          }
+        }
         return {
           path: "object",
           schema: outputSchema,
