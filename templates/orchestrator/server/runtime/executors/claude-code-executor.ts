@@ -116,6 +116,11 @@ export class ClaudeCodeExecutor implements RuntimeExecutor {
         resultSubtype: parsed.resultSubtype,
       },
       tokensSpent: parsed.tokensSpent,
+      // Report the input/output SPLIT from the same final cumulative usage read
+      // `tokensSpent` came from (SDLC-051: previously omitted, so the dispatcher
+      // defaulted tokens_input to 0 and marked every claude-code spawn suspect).
+      tokensInput: parsed.tokensInput,
+      tokensOutput: parsed.tokensOutput,
       toolCallCount: parsed.toolCallCount,
       model: parsed.model ?? ctx.node.model ?? "claude",
       steps: parsed.steps,

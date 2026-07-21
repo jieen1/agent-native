@@ -13,9 +13,13 @@
 //        "total_cost_usd": N, "num_turns": N }               — terminal summary
 //
 // `usage` objects carry `input_tokens`, `output_tokens`,
-// `cache_read_input_tokens`, `cache_creation_input_tokens`. The terminal
-// `result` event's `usage` is CUMULATIVE, so we prefer it; if no `result`
-// event arrived (stream cut off), we fall back to summing per-assistant usage.
+// `cache_read_input_tokens`, `cache_creation_input_tokens` (OpenAI-style
+// `prompt_tokens`/`completion_tokens` aliases are also accepted). Streaming
+// `usage` is CUMULATIVE — each chunk re-reports the running total, it is NOT a
+// per-chunk delta. We therefore record ONLY the FINAL usage value (the terminal
+// `result` event's `usage` when present, else the last assistant `usage` seen);
+// we NEVER sum per-chunk usage, which would quadratically inflate the totals
+// (SDLC-051: the `tokens_output` over-count + `tokens_input` always-0 bug).
 
 /**
  * One ordered intermediate step extracted from the stream (DESIGN §8.5 — the
@@ -44,6 +48,18 @@ export interface ClaudeStreamStep {
 export interface ClaudeStreamParseResult {
   /** Total tokens (input + output + cache read + cache write). */
   tokensSpent: number;
+  /**
+   * Input tokens from the FINAL cumulative usage read (the terminal `result`
+   * event's `usage.input_tokens`, or the last assistant `usage` when the stream
+   * was cut off). Includes cache read + cache creation tokens, matching how
+   * `tokensSpent` is composed. Never a per-chunk sum (SDLC-051).
+   */
+  tokensInput: number;
+  /**
+   * Output tokens from the FINAL cumulative usage read (`usage.output_tokens`).
+   * Never a per-chunk sum (SDLC-051).
+   */
+  tokensOutput: number;
   /** Number of `tool_use` blocks the model emitted (proof of real acting). */
   toolCallCount: number;
   /** The final assistant/result text. */
@@ -70,13 +86,31 @@ interface UsageLike {
   output_tokens?: number;
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
+  /** OpenAI-style aliases some providers emit instead of the Anthropic names. */
+  prompt_tokens?: number;
+  completion_tokens?: number;
 }
 
+/** Resolve input tokens, accepting the OpenAI `prompt_tokens` alias. */
+function usageInputTokens(u: UsageLike): number {
+  return u.input_tokens ?? u.prompt_tokens ?? 0;
+}
+
+/** Resolve output tokens, accepting the OpenAI `completion_tokens` alias. */
+function usageOutputTokens(u: UsageLike): number {
+  return u.output_tokens ?? u.completion_tokens ?? 0;
+}
+
+/**
+ * The all-in-one total for a single usage read: input (incl. cache) + output.
+ * Used for `tokensSpent`. Applied to ONE usage object — never summed across
+ * chunks (streaming usage is cumulative).
+ */
 function usageTotal(u: UsageLike | undefined | null): number {
   if (!u) return 0;
   return (
-    (u.input_tokens ?? 0) +
-    (u.output_tokens ?? 0) +
+    usageInputTokens(u) +
+    usageOutputTokens(u) +
     (u.cache_read_input_tokens ?? 0) +
     (u.cache_creation_input_tokens ?? 0)
   );
@@ -158,8 +192,13 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
   let sawResult = false;
   let resultSubtype: string | null = null;
   let totalCostUsd: number | null = null;
-  let resultUsage = 0;
-  let summedAssistantUsage = 0;
+  // The FINAL cumulative usage read. Streaming usage is cumulative per chunk,
+  // so we keep ONLY the last non-null usage object — never a running sum. The
+  // terminal `result` event's usage wins when present; otherwise the last
+  // assistant `usage` seen is the final cumulative value (stream cut off).
+  let finalUsage: UsageLike | null = null;
+  let lastAssistantUsage: UsageLike | null = null;
+  let sawAssistantUsage = false;
   const steps: ClaudeStreamStep[] = [];
 
   for (const line of raw.split(/\r?\n/)) {
@@ -190,7 +229,13 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
             }
           }
         }
-        summedAssistantUsage += usageTotal(message.usage as UsageLike);
+        // Record the LAST assistant usage seen (cumulative) — do NOT sum it
+        // across chunks. Used as the final value only if no `result` arrives.
+        const u = message.usage as UsageLike | undefined;
+        if (u) {
+          lastAssistantUsage = u;
+          sawAssistantUsage = true;
+        }
       }
       // Append this event's steps with running seq (shared extractor).
       for (const s of stepsFromEvent(event)) {
@@ -203,19 +248,30 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
       if (typeof event.total_cost_usd === "number") {
         totalCostUsd = event.total_cost_usd;
       }
-      resultUsage = usageTotal(event.usage as UsageLike);
+      // The terminal `result` usage is the authoritative CUMULATIVE total.
+      const ru = event.usage as UsageLike | undefined;
+      if (ru) finalUsage = ru;
     } else if (type === "system") {
       const m = event.model;
       if (typeof m === "string") model = m;
     }
   }
 
-  // The result event's usage is cumulative; prefer it when present.
-  const tokensSpent =
-    sawResult && resultUsage > 0 ? resultUsage : summedAssistantUsage;
+  // Prefer the terminal `result` event's cumulative usage; fall back to the
+  // last assistant usage when the stream was cut off (no result event).
+  const usage = finalUsage ?? (sawAssistantUsage ? lastAssistantUsage : null);
+  const tokensSpent = usageTotal(usage);
+  const tokensInput = usage
+    ? usageInputTokens(usage) +
+      (usage.cache_read_input_tokens ?? 0) +
+      (usage.cache_creation_input_tokens ?? 0)
+    : 0;
+  const tokensOutput = usage ? usageOutputTokens(usage) : 0;
 
   return {
     tokensSpent,
+    tokensInput,
+    tokensOutput,
     toolCallCount,
     finalText,
     model,
