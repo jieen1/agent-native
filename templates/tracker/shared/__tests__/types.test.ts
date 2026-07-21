@@ -486,15 +486,15 @@ describe("executionMode values (type-level test)", () => {
   });
 
   it("rejects case variations", () => {
-    expect(valid.includes("Manual")).toBe(false);
-    expect(valid.includes("AUTO")).toBe(false);
-    expect(valid.includes("Auto")).toBe(false);
+    expect(valid.includes("Manual" as unknown as ExecutionMode)).toBe(false);
+    expect(valid.includes("AUTO" as unknown as ExecutionMode)).toBe(false);
+    expect(valid.includes("Auto" as unknown as ExecutionMode)).toBe(false);
   });
 
   it("rejects similar but wrong strings", () => {
-    expect(valid.includes("automatic")).toBe(false);
-    expect(valid.includes("scheduled")).toBe(false);
-    expect(valid.includes("")).toBe(false);
+    expect(valid.includes("automatic" as unknown as ExecutionMode)).toBe(false);
+    expect(valid.includes("scheduled" as unknown as ExecutionMode)).toBe(false);
+    expect(valid.includes("" as unknown as ExecutionMode)).toBe(false);
   });
 });
 
@@ -509,15 +509,15 @@ describe("Risk values (type-level test)", () => {
   });
 
   it('rejects "critical" and "none"', () => {
-    expect(valid.includes("critical")).toBe(false);
-    expect(valid.includes("none")).toBe(false);
-    expect(valid.includes("undefined")).toBe(false);
+    expect(valid.includes("critical" as unknown as ItemRisk)).toBe(false);
+    expect(valid.includes("none" as unknown as ItemRisk)).toBe(false);
+    expect(valid.includes("undefined" as unknown as ItemRisk)).toBe(false);
   });
 
   it("rejects case variations", () => {
-    expect(valid.includes("LOW")).toBe(false);
-    expect(valid.includes("Medium")).toBe(false);
-    expect(valid.includes("HIGH")).toBe(false);
+    expect(valid.includes("LOW" as unknown as ItemRisk)).toBe(false);
+    expect(valid.includes("Medium" as unknown as ItemRisk)).toBe(false);
+    expect(valid.includes("HIGH" as unknown as ItemRisk)).toBe(false);
   });
 });
 

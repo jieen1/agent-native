@@ -31,7 +31,11 @@ const OWNER = "owner@example.com";
 const ORG_ID = "org-f8";
 
 function asUser<T>(fn: () => Promise<T> | T): Promise<T> {
-  return runWithRequestContext({ userEmail: OWNER, orgId: ORG_ID }, fn);
+  // runWithRequestContext's return type mirrors fn's own sync/async-ness
+  // (T | Promise<T>) — normalize to a real Promise so callers can always await.
+  return Promise.resolve(
+    runWithRequestContext({ userEmail: OWNER, orgId: ORG_ID }, fn),
+  );
 }
 
 let client: Client;

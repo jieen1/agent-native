@@ -80,7 +80,7 @@ export default defineAction({
 
     if (hasArtifactId) {
       // EXACT mode
-      resolvedArtifactId = args.artifactId;
+      resolvedArtifactId = args.artifactId ?? null;
       resolvedVersion = args.version ?? null;
     } else if (hasSprintId && hasDocKey) {
       // LATEST-BY-DOCKEY mode

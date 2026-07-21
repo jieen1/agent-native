@@ -24,7 +24,7 @@ type ProjectRow = {
   gitRemote: string;
   defaultBranch: string;
 } | null;
-type SprintRow = { id: string; name: string; status: string } | null;
+type SprintRow = { id: string; name: string; status: string | null } | null;
 
 /**
  * Read-compat fallback for items dispatched BEFORE `tracker_work_item_runs`

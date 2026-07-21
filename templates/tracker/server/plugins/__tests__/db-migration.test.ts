@@ -73,7 +73,7 @@ describe("T-F3-12 / T-F5-07 / T-F6-08: tracker v24/v25/v26 迁移冒烟 (SQLite 
 
       // Every table schema.ts declares as a Drizzle table object must exist.
       const declaredTables = Object.values(trackerSchema)
-        .filter((v): v is object => typeof v === "object" && v !== null)
+        .filter((v) => typeof v === "object" && v !== null)
         .map((t) => {
           try {
             return getTableName(t as any);

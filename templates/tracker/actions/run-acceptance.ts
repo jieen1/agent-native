@@ -234,6 +234,11 @@ export default defineAction({
     const passed = results.filter((r) => r.pass).length;
     const failed = results.length - passed;
     const verdictResult: "pass" | "reject" = failed === 0 ? "pass" : "reject";
+    // complete-stage's verdict.result is a separate, mandatory enum (F3 verdict
+    // 语义收紧) distinct from this action's own "pass"/"reject" vocabulary —
+    // translate rather than reuse the string so the call matches its real schema.
+    const stageVerdictResult: "PASSED" | "CHANGES_REQUESTED" =
+      verdictResult === "pass" ? "PASSED" : "CHANGES_REQUESTED";
 
     // --- Generate markdown evidence document ---
     const markdown = [
@@ -301,7 +306,7 @@ export default defineAction({
       workItemId: args.workItemId,
       stageName: "验收",
       verdict: {
-        result: verdictResult,
+        result: stageVerdictResult,
         passed,
         failed,
         total: results.length,
