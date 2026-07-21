@@ -11,5 +11,11 @@ export default createAuthPlugin({
       "Track progress, activity, and completion across your team",
     ],
   },
-  publicPaths: ["/f", "/api/forms/public", "/api/forms/og", "/api/submit"],
+  publicPaths: [
+    "/f",
+    "/api/forms/public",
+    "/api/forms/og",
+    "/api/submit",
+    "/api/deploy-version",
+  ],
 });

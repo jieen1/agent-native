@@ -15,4 +15,5 @@ export default createAuthPlugin({
       "Isolated microVM / ACP workspaces with full observability",
     ],
   },
+  publicPaths: ["/api/deploy-version"],
 });
