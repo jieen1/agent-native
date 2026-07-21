@@ -3,7 +3,7 @@ import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
-import { eq, and, max } from "drizzle-orm";
+import { eq, and, max, inArray } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
 
@@ -261,12 +261,15 @@ export default defineAction({
           version: nextVersion,
         };
 
+        // Build the per-approval write payloads up front so the actual writes
+        // can run as one atomic unit below.
+        const reconfirmInserts: Array<typeof schema.approvals.$inferInsert> =
+          [];
+        const activityInserts: Array<typeof schema.activities.$inferInsert> =
+          [];
+
         for (const approval of toStale) {
-          // a. Mark stale
-          await db
-            .update(schema.approvals)
-            .set({ staleAt: now })
-            .where(eq(schema.approvals.id, approval.id));
+          // a. Mark stale (collected for a single batched UPDATE below)
           staleApprovals.push({
             id: approval.id,
             gateKey: approval.gateKey,
@@ -279,7 +282,7 @@ export default defineAction({
             newArtifact,
           );
           const reconfirmId = nanoid();
-          await db.insert(schema.approvals).values({
+          reconfirmInserts.push({
             id: reconfirmId,
             sprintId: reconfirmInput.sprintId,
             workItemId: reconfirmInput.workItemId,
@@ -307,7 +310,7 @@ export default defineAction({
           // c. Activity log (only if workItemId is present)
           if (approval.workItemId != null) {
             // approval.stale activity
-            await db.insert(schema.activities).values({
+            activityInserts.push({
               id: `act_ast_${approval.id.slice(0, 6)}_${nanoid()}`,
               workItemId: approval.workItemId,
               actorKind: "agent",
@@ -329,7 +332,7 @@ export default defineAction({
             });
 
             // approval.reconfirm_requested activity
-            await db.insert(schema.activities).values({
+            activityInserts.push({
               id: `act_ars_${reconfirmId.slice(0, 6)}_${nanoid()}`,
               workItemId: approval.workItemId,
               actorKind: "agent",
@@ -347,6 +350,33 @@ export default defineAction({
               visibility: "private",
             });
           }
+        }
+
+        // Commit all three write kinds atomically: a mid-way failure rolls the
+        // whole unit back so no half-written stale/reconfirm/activity state is
+        // left behind. Mirrors the `db.transaction(async (tx) => ...)` idiom
+        // used elsewhere (e.g. templates/design/actions/duplicate-design.ts).
+        if (toStale.length > 0) {
+          await db.transaction(async (tx) => {
+            // a. Mark stale — single batched UPDATE across all stale ids.
+            await tx
+              .update(schema.approvals)
+              .set({ staleAt: now })
+              .where(
+                inArray(
+                  schema.approvals.id,
+                  staleApprovals.map((a) => a.id),
+                ),
+              );
+
+            // b. Reconfirmation approvals — single multi-row INSERT.
+            await tx.insert(schema.approvals).values(reconfirmInserts);
+
+            // c. Activity log — single multi-row INSERT.
+            if (activityInserts.length > 0) {
+              await tx.insert(schema.activities).values(activityInserts);
+            }
+          });
         }
       }
     }
