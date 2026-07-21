@@ -22,11 +22,8 @@
 
 import { runWithRequestContext } from "@agent-native/core/server/request-context";
 
-import { MicrosandboxRuntime } from "./microsandbox-runtime.js";
-import { NodeRunner } from "./node-runner.js";
+import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
 import { ClaudeCodeExecutor } from "./executors/index.js";
-import { wslMsb } from "./wsl-msb.js";
-import { ensureHostProxy } from "./networking.js";
 import {
   checkoutRunBranch,
   addAll,
@@ -35,8 +32,11 @@ import {
   runBranchName,
   type GitContext,
 } from "./git-wrapper.js";
+import { MicrosandboxRuntime } from "./microsandbox-runtime.js";
+import { ensureHostProxy } from "./networking.js";
+import { NodeRunner } from "./node-runner.js";
 import { VM_HOME } from "./vm-creds.js";
-import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
+import { wslMsb } from "./wsl-msb.js";
 
 /** The structured result of the claude-in-VM E2E (pretty-printed by the CLI). */
 export interface ClaudeVmE2eResult {
@@ -52,7 +52,11 @@ export interface ClaudeVmE2eResult {
   tokensSpent: number;
   toolCallCount: number;
   /** Egress picture (proves DNS-fixed direct egress or a working proxy). */
-  egress: { gateway: string | null; directEgress: boolean; proxyUrl: string | null };
+  egress: {
+    gateway: string | null;
+    directEgress: boolean;
+    proxyUrl: string | null;
+  };
   /** Whether the `~/.claude` subscription mounted (apiKeySource:none auth). */
   claudeMounted: boolean;
   durationMs: number;
@@ -135,7 +139,9 @@ export async function runClaudeVmE2e(
   const result = await runWithRequestContext(
     { userEmail: ownerEmail, orgId: undefined },
     async () => {
-      log(`[1/6] run NodeRunner (provision + egress + ~/.claude + claude EXECUTE) …`);
+      log(
+        `[1/6] run NodeRunner (provision + egress + ~/.claude + claude EXECUTE) …`,
+      );
       return runner.run(
         { node, deps: {}, ownerEmail, orgId: null },
         new AbortController().signal,
@@ -245,7 +251,11 @@ export async function runClaudeVmE2e(
 
 /** Egress/creds bag recorded on the VM meta by MOUNT. */
 interface VmMeta {
-  egress: { gateway: string | null; directEgress: boolean; proxyUrl: string | null };
+  egress: {
+    gateway: string | null;
+    directEgress: boolean;
+    proxyUrl: string | null;
+  };
   creds: { claudeMounted: boolean; githubTokenPresent: boolean };
 }
 
@@ -260,7 +270,10 @@ async function readVmMeta(
   runtime: MicrosandboxRuntime,
   vm: { name: string; spec: NodeRuntimeSpec },
 ): Promise<VmMeta> {
-  const gwRes = await runtime.exec(vm, "ip route 2>/dev/null | awk '/^default/{print $3; exit}'");
+  const gwRes = await runtime.exec(
+    vm,
+    "ip route 2>/dev/null | awk '/^default/{print $3; exit}'",
+  );
   const gateway = gwRes.stdout.trim() || null;
   const egressRes = await runtime.exec(
     vm,

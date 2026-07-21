@@ -31,8 +31,9 @@
 // 'error'; otherwise 'done' (the same default a clean run-to-completion gives).
 // A clear error message records that this was a reconcile, not a real failure.
 
-import { getDbExec } from "../db/index.js";
 import { isPostgres } from "@agent-native/core/db";
+
+import { getDbExec } from "../db/index.js";
 
 /**
  * A 'running' brain thread is eligible for reconcile only after this long with no

@@ -1,4 +1,3 @@
-
 <callout color="blue_bg">
 	本文档是路线图(`docs/sdlc-implementation-roadmap.md`)§1 地基 F5–F10 六项的
 	实施细化,体例与 `docs/sdlc-impl-f1-f4.md` 一致:纲(五段式)在路线图,
@@ -21,38 +20,39 @@
 	**F5=v25、F6=v26、F8=v27**;orchestrator 命名迁移 **f7-telemetry=`version:4`、
 	f10-spawn-conduction=`version:5`**(接 F2 已占的 `version:3 / name:"f2-spawn-context"`;F9 无 schema 变更)。
 
-	**基线多树实核(2026-07-11,R2 亲验;2026-07-12,R3 复核 101 更新为准)**:
-	①**tracker**——**F3 已合入 tracker 主干**(101 dogfood `main` 复核:`265ec04a2` 状态迁移守卫本体 +
-	评审修复轮 `2d2fc5498`「封死全部残留 done 直写通道 + done 源态约束」均已合并,
-	`server/plugins/db.ts` 顶格实测 **v24**——`exec_state`/`closed_reason`/`closed_at` 三列;
-	R2 当时所据的 `9027753a5` v23 顶格 + `impl/f3-transition-guard` 未合并是彼时快照,现已推进);
-	v25/v26/v27 与 v24 只需号唯一即无撞(v20 已因 `eb7d7d5a` 改号成永久空号,不复用即可)。
-	②**orchestrator——两棵分叉的树,F7/F10/F9-orch 落在「交付主干」那棵**:交付主干
-	(`main`=76a4213 → F1/F2/F4 worktree → F2 的 `04d47225e`)已在
-	`1ccf7a027(refactor #1:migrate V3 off its own pool onto the framework DB layer)` **退役 `server/db/v3.ts`**
-	(R3 复核:101 `an-orchestrator` 容器内 `/app/templates/orchestrator/server/db/` 仍是独立
-	`v3-migrations/0001_init.sql` 式旧结构、`v3_migrations` 表仅应用到 version 2,未见此重构——
-	101 当前所跑是更早的第三棵树,**不代表**交付主干;「交付主干」的唯一权威锚点是本仓 `main` 分支 +
-	F1/F2/F4 worktree 链,F5–F10 落地对齐这条线,不对齐 101 现跑版本),
-	V3 迁移改由 `server/plugins/db.ts` 的 `migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" })`
-	驱动——**与 tracker 用同一个 core `runMigrations`**:带 `name:` 的项按名单点登记于伴表 **`v3_migrations_named`**
-	(`name TEXT PRIMARY KEY`,同名只应用一次;**列表内重名启动即抛错=内置并行防撞**),无名项走 `MAX(version)` 旧门。
-	F2 已按此登记 `f2-spawn-context`。**新迁移 = 追加 `V3_MIGRATIONS` 数组一项(带 `version:`+`name:`)+ drizzle
-	表/列定义进 `server/db/v3-schema.ts`**;`server/db/v3.ts` 与 `v3-migrations/*.sql` 在此树**已不存在**。这正是
-	02 §8「命名空间登记身份 + 数字序仅合并线性化」的现成实现,也印证 **F2 实施者的实核成立、101 的
-	`v3_migrations_named`(行 `v3-schema-init`/`v3-p4-additive-columns`)是该伴表早期迭代产物**。而 **R1 据以改写
-	前言/F6 的「orchestrator 无登记表、`v3.ts` 只幂等重放」是另一棵树**——本文所在的 `claude/awesome-wing` 文档
-	分支(`5df52832c`)与 dogfood/main,均**早于** `1ccf7a027`、仍留旧 `v3.ts` 与不含 name-tracking 的旧 core;R1 把
-	pre-refactor 树的机制误加到落在 post-refactor mainline 的 F7/F10 上。**F0「交付主干统一」把实施收敛到 mainline,
-	故本文一律按交付主干(migrateV3)陈述,F7/F10 的 C 节据此可照做。** 残留弱点=同名/同号异内容仍静默跳过(无
-	内容哈希),与 tracker 对称,归 F6 §2A 对齐项。
+    **基线多树实核(2026-07-11,R2 亲验;2026-07-12,R3 复核 101 更新为准)**:
+    ①**tracker**——**F3 已合入 tracker 主干**(101 dogfood `main` 复核:`265ec04a2` 状态迁移守卫本体 +
+    评审修复轮 `2d2fc5498`「封死全部残留 done 直写通道 + done 源态约束」均已合并,
+    `server/plugins/db.ts` 顶格实测 **v24**——`exec_state`/`closed_reason`/`closed_at` 三列;
+    R2 当时所据的 `9027753a5` v23 顶格 + `impl/f3-transition-guard` 未合并是彼时快照,现已推进);
+    v25/v26/v27 与 v24 只需号唯一即无撞(v20 已因 `eb7d7d5a` 改号成永久空号,不复用即可)。
+    ②**orchestrator——两棵分叉的树,F7/F10/F9-orch 落在「交付主干」那棵**:交付主干
+    (`main`=76a4213 → F1/F2/F4 worktree → F2 的 `04d47225e`)已在
+    `1ccf7a027(refactor #1:migrate V3 off its own pool onto the framework DB layer)` **退役 `server/db/v3.ts`**
+    (R3 复核:101 `an-orchestrator` 容器内 `/app/templates/orchestrator/server/db/` 仍是独立
+    `v3-migrations/0001_init.sql` 式旧结构、`v3_migrations` 表仅应用到 version 2,未见此重构——
+    101 当前所跑是更早的第三棵树,**不代表**交付主干;「交付主干」的唯一权威锚点是本仓 `main` 分支 +
+    F1/F2/F4 worktree 链,F5–F10 落地对齐这条线,不对齐 101 现跑版本),
+    V3 迁移改由 `server/plugins/db.ts` 的 `migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" })`
+    驱动——**与 tracker 用同一个 core `runMigrations`**:带 `name:` 的项按名单点登记于伴表 **`v3_migrations_named`**
+    (`name TEXT PRIMARY KEY`,同名只应用一次;**列表内重名启动即抛错=内置并行防撞**),无名项走 `MAX(version)` 旧门。
+    F2 已按此登记 `f2-spawn-context`。**新迁移 = 追加 `V3_MIGRATIONS` 数组一项(带 `version:`+`name:`)+ drizzle
+    表/列定义进 `server/db/v3-schema.ts`**;`server/db/v3.ts` 与 `v3-migrations/*.sql` 在此树**已不存在**。这正是
+    02 §8「命名空间登记身份 + 数字序仅合并线性化」的现成实现,也印证 **F2 实施者的实核成立、101 的
+    `v3_migrations_named`(行 `v3-schema-init`/`v3-p4-additive-columns`)是该伴表早期迭代产物**。而 **R1 据以改写
+    前言/F6 的「orchestrator 无登记表、`v3.ts` 只幂等重放」是另一棵树**——本文所在的 `claude/awesome-wing` 文档
+    分支(`5df52832c`)与 dogfood/main,均**早于** `1ccf7a027`、仍留旧 `v3.ts` 与不含 name-tracking 的旧 core;R1 把
+    pre-refactor 树的机制误加到落在 post-refactor mainline 的 F7/F10 上。**F0「交付主干统一」把实施收敛到 mainline,
+    故本文一律按交付主干(migrateV3)陈述,F7/F10 的 C 节据此可照做。** 残留弱点=同名/同号异内容仍静默跳过(无
+    内容哈希),与 tracker 对称,归 F6 §2A 对齐项。
 
-	**吸收 F3 修复轮收紧语义**(下游 F6/F9 必须一致):done 源态收紧为仅「待人工评审」
-	(= DB 阶段 **验收**;守卫层把 DB 的 `验收` 归一化为 `待人工评审`,DB 侧无同名
-	`待人工评审` 阶段——`VALID_STAGES = 待办/分析/设计/实施/测试/验收/交付`);
-	`advance-stage`/`get-activity` 的自动回写**封顶「验收」**(不得越到 `交付`/`done`——现状
-	advance-stage 的 `isFinalDelivery` 到 `交付` 直写 `status=done` 的旁路即由此封死);
-	`bulk-dispatch` 依「派发不推进」同法收紧(派发不再把阶段推到 `实施`)。
+    **吸收 F3 修复轮收紧语义**(下游 F6/F9 必须一致):done 源态收紧为仅「待人工评审」
+    (= DB 阶段 **验收**;守卫层把 DB 的 `验收` 归一化为 `待人工评审`,DB 侧无同名
+    `待人工评审` 阶段——`VALID_STAGES = 待办/分析/设计/实施/测试/验收/交付`);
+    `advance-stage`/`get-activity` 的自动回写**封顶「验收」**(不得越到 `交付`/`done`——现状
+    advance-stage 的 `isFinalDelivery` 到 `交付` 直写 `status=done` 的旁路即由此封死);
+    `bulk-dispatch` 依「派发不推进」同法收紧(派发不再把阶段推到 `实施`)。
+
 </callout>
 
 ---
@@ -654,7 +654,7 @@ SQLite best-effort + 同一套一次性 Postgres 容器机制断言 `information
 ### 5B. 前端实施
 
 无新控件(F9 的可见效果=S4 阶段自动推进+runs/branch 自动补全)。S10 健康页
-「调度器」卡加一行「回写:最近成功/失败计数」(数据源 v3_events writeback.*)。
+「调度器」卡加一行「回写:最近成功/失败计数」(数据源 v3_events writeback.\*)。
 
 ### 5C. 数据与迁移
 

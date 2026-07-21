@@ -5,6 +5,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export const runArchive = defineAction({
@@ -47,38 +48,36 @@ export const runArchive = defineAction({
 
     // If already archived, return early
     if (run.archived !== 0) {
-      return { runId: args.runId, archived: true, purged: false, message: "Already archived" };
+      return {
+        runId: args.runId,
+        archived: true,
+        purged: false,
+        message: "Already archived",
+      };
     }
 
     // Mark archived (reuse the owner-scoped filter).
-    await db
-      .update(v3Schema.v3Runs)
-      .set({ archived: 1 })
-      .where(runFilter);
+    await db.update(v3Schema.v3Runs).set({ archived: 1 }).where(runFilter);
 
     if (!args.purge) {
       return { runId: args.runId, archived: true, purged: false };
     }
 
     // Cascade purge: artifacts first (FK dependency), then spawns, nodes, events, patches
-    const artifactResult = await db
-      .delete(v3Schema.v3Artifacts)
-      .where(
-        sql`${v3Schema.v3Artifacts.spawnId} IN (
+    const artifactResult = await db.delete(v3Schema.v3Artifacts).where(
+      sql`${v3Schema.v3Artifacts.spawnId} IN (
           SELECT id FROM v3_spawns
           WHERE node_id IN (
             SELECT id FROM v3_nodes WHERE run_id = ${args.runId}
           )
         )`,
-      );
+    );
 
-    const spawnResult = await db
-      .delete(v3Schema.v3Spawns)
-      .where(
-        sql`${v3Schema.v3Spawns.nodeId} IN (
+    const spawnResult = await db.delete(v3Schema.v3Spawns).where(
+      sql`${v3Schema.v3Spawns.nodeId} IN (
           SELECT id FROM v3_nodes WHERE run_id = ${args.runId}
         )`,
-      );
+    );
 
     const nodeResult = await db
       .delete(v3Schema.v3Nodes)

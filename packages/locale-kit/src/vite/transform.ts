@@ -64,12 +64,12 @@
  * a `// i18n-ignore` comment on the node (or its JSX parent) exempts it.
  */
 
+import _generate, { type GeneratorResult } from "@babel/generator";
 import { parse } from "@babel/parser";
 import _traverse, {
   type NodePath,
   type TraverseOptions,
 } from "@babel/traverse";
-import _generate, { type GeneratorResult } from "@babel/generator";
 import * as t from "@babel/types";
 
 // Babel ships CJS default exports; under ESM interop the callable lives on

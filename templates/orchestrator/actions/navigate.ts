@@ -1,6 +1,6 @@
 import { defineAction } from "@agent-native/core/action";
-import { z } from "zod";
 import { writeAppState } from "@agent-native/core/application-state";
+import { z } from "zod";
 
 // Orchestrator views. v1 views (home/task/workflows/workflow/runs/run) are
 // retained; P3d adds the PM surfaces (board/projects/project/library/item) so
@@ -55,7 +55,9 @@ export default defineAction({
     id: z
       .string()
       .optional()
-      .describe("Task / work-item / project / workflow / run id for detail views"),
+      .describe(
+        "Task / work-item / project / workflow / run id for detail views",
+      ),
     path: z.string().optional().describe("Explicit URL path override"),
   }),
   http: false,

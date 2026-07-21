@@ -1,5 +1,8 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { useNavigate } from "react-router";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -9,6 +12,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -16,12 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
 import { useCreateWorkItem, useProjects } from "@/hooks/use-tracker";
-import { toast } from "sonner";
 
 const TYPES = ["requirement", "task", "defect", "incident", "epic"] as const;
 
@@ -44,7 +45,7 @@ export function NewWorkItemDialog({
 
   useEffect(() => {
     if (open) {
-      setProjectId(defaultProjectId ?? (projects[0]?.id ?? ""));
+      setProjectId(defaultProjectId ?? projects[0]?.id ?? "");
     }
   }, [open, defaultProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
 

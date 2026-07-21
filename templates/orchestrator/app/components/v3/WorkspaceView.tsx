@@ -1,5 +1,4 @@
-import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useActionMutation } from "@agent-native/core/client";
 import {
   IconArrowLeft,
   IconBrandGithub,
@@ -18,12 +17,11 @@ import {
   IconServer,
   IconUser,
 } from "@tabler/icons-react";
-import { useActionMutation } from "@agent-native/core/client";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -32,10 +30,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
-import { fmtDateTime, agentPresentation } from "./v3-format";
-import { V3StatusBadge } from "./V3StatusBadge";
-import { DiffViewer } from "./DiffViewer";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useWorkspace,
   useWorkspaceDiff,
@@ -44,6 +41,11 @@ import {
   useWorkspaceRuns,
   type V3SpawnLite,
 } from "@/hooks/use-v3-workspace";
+import { cn } from "@/lib/utils";
+
+import { DiffViewer } from "./DiffViewer";
+import { fmtDateTime, agentPresentation } from "./v3-format";
+import { V3StatusBadge } from "./V3StatusBadge";
 
 // ── Workspace state → colored badge ──────────────────────────────────────────
 
@@ -100,7 +102,11 @@ function ownerPresentation(
     if (kind === "run") {
       return { label: id, kind: "run", title: id };
     }
-    return { label: id, kind: kind && !isPlaceholder(kind) ? kind : null, title: id };
+    return {
+      label: id,
+      kind: kind && !isPlaceholder(kind) ? kind : null,
+      title: id,
+    };
   }
 
   // No usable identity → unknown (never the "cc" token).
@@ -226,9 +232,7 @@ function FilesPanel({
         </div>
         <ScrollArea className="min-h-0 flex-1">
           {error ? (
-            <div className="p-3 text-xs text-destructive">
-              无法列出文件。
-            </div>
+            <div className="p-3 text-xs text-destructive">无法列出文件。</div>
           ) : isLoading ? (
             <div className="space-y-1.5 p-3">
               {Array.from({ length: 8 }).map((_, i) => (
@@ -640,10 +644,7 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
             const owner = ownerPresentation(ws.ownerKind, ws.ownerId);
             return (
               <span className="flex flex-wrap items-center gap-2">
-                <span
-                  className="font-medium"
-                  title={owner.title ?? undefined}
-                >
+                <span className="font-medium" title={owner.title ?? undefined}>
                   {owner.label}
                 </span>
                 {owner.kind ? (
@@ -673,7 +674,9 @@ export function WorkspaceView({ workspaceId }: WorkspaceViewProps) {
             // Never surface the legacy "cc"/"cc:cc" placeholder as a creator.
             const by = ws.createdBy?.trim();
             const clean =
-              by && by !== "cc" && by !== "cc:cc" ? by.replace(/^cc:/, "") : null;
+              by && by !== "cc" && by !== "cc:cc"
+                ? by.replace(/^cc:/, "")
+                : null;
             return clean ? (
               <span className="ml-2 text-xs text-muted-foreground">
                 由 {clean}

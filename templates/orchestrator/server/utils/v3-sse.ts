@@ -3,6 +3,7 @@
 // Reads v3_events via getV3Db(), filters seq_num > since, and streams via
 // EventSource with keep-alive ping.
 
+import { and, eq, gt, sql } from "drizzle-orm";
 import {
   defineEventHandler,
   getRouterParam,
@@ -10,10 +11,10 @@ import {
   createError,
   setHeader,
 } from "h3";
-import { and, eq, gt, sql } from "drizzle-orm";
-import { v3Events } from "../db/v3-schema.js";
-import { getV3Db } from "../db/index.js";
 import type { H3Event } from "h3";
+
+import { getV3Db } from "../db/index.js";
+import { v3Events } from "../db/v3-schema.js";
 
 /**
  * SSE event types emitted by the V3 reconciler pipeline.

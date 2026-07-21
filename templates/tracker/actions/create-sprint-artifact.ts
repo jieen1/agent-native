@@ -6,6 +6,7 @@ import {
 import { eq, and, max } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -99,7 +100,9 @@ export default defineAction({
     kind: z
       .string()
       .min(1)
-      .describe("Document kind/category, e.g. 文档 / 测试计划 / 设计 / 审计报告"),
+      .describe(
+        "Document kind/category, e.g. 文档 / 测试计划 / 设计 / 审计报告",
+      ),
     name: z.string().min(1).describe("Human-readable artifact name"),
     producedByKind: z
       .enum(["agent", "human"])
@@ -130,7 +133,9 @@ export default defineAction({
       await db
         .select({ id: schema.sprints.id })
         .from(schema.sprints)
-        .where(and(eq(schema.sprints.id, args.sprintId), ownerScope(schema.sprints)))
+        .where(
+          and(eq(schema.sprints.id, args.sprintId), ownerScope(schema.sprints)),
+        )
         .limit(1)
     )[0];
     if (!sprint) throw new Error("Sprint not found");
@@ -205,7 +210,11 @@ export default defineAction({
     });
 
     // ── B2 stale logic: when nextVersion > 1, stale anchored approvals ─────
-    const staleApprovals: Array<{ id: string; gateKey: string; staleAt: string }> = [];
+    const staleApprovals: Array<{
+      id: string;
+      gateKey: string;
+      staleAt: string;
+    }> = [];
     const reconfirmationApprovals: Array<{
       id: string;
       gateKey: string;
@@ -265,7 +274,10 @@ export default defineAction({
           });
 
           // b. Create reconfirmation approval
-          const reconfirmInput = buildReconfirmationApprovalInput(approval, newArtifact);
+          const reconfirmInput = buildReconfirmationApprovalInput(
+            approval,
+            newArtifact,
+          );
           const reconfirmId = nanoid();
           await db.insert(schema.approvals).values({
             id: reconfirmId,

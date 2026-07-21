@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { canEscalateWorkItem, stageNeighbors } from "../work-item-header.js";
 
-const STAGES = ["待办", "分析", "设计", "实施", "测试", "验收", "交付"] as const;
+const STAGES = [
+  "待办",
+  "分析",
+  "设计",
+  "实施",
+  "测试",
+  "验收",
+  "交付",
+] as const;
 
 describe("stageNeighbors", () => {
   it("returns both neighbors for a middle stage", () => {

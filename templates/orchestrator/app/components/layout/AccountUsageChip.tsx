@@ -1,5 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
+import { useActionQuery, callAction } from "@agent-native/core/client";
 import {
   IconChevronDown,
   IconRefresh,
@@ -9,13 +8,15 @@ import {
   IconLoader2,
   IconGauge,
 } from "@tabler/icons-react";
-import { useActionQuery, callAction } from "@agent-native/core/client";
+import { useState, type MouseEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+
+import { Badge } from "@/components/ui/badge";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 // Single GLOBAL account-usage indicator (left sidebar, bottom — beside the

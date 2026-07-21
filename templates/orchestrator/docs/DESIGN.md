@@ -17,9 +17,9 @@ provider pluggable per node**, plus a finished runtime-model configuration.
 > (canary.13) is **non-functional** — it requires a `HarnessV1SandboxProvider` the
 > framework never supplies and none ships, so `createSession` crashes in
 > `_acquireSandbox` (§7.0b); (2) once **every** node already runs in its own
-> microVM, the harness's *own* sandbox is a redundant nested layer. The resolution:
+> microVM, the harness's _own_ sandbox is a redundant nested layer. The resolution:
 > run the **real** Claude Code (`claude --output-format stream-json`) as one
-> *executor* inside the node's microVM — not through the broken canary wrapper —
+> _executor_ inside the node's microVM — not through the broken canary wrapper —
 > which also makes the old `cwd`-gap blocker moot.
 
 > **Grounding note.** Every framework API named here was verified against
@@ -56,7 +56,7 @@ provider pluggable per node**, plus a finished runtime-model configuration.
    and re-run cleanly, independently** of every other node. Code work
    commits/pushes to GitHub; non-code work writes deliverables to a local dir.
    **Every node run is journaled so a run resumes without re-spending on completed
-   work** — "resume" replays the journal of *completed* NodeRuns, not re-derives
+   work** — "resume" replays the journal of _completed_ NodeRuns, not re-derives
    identical outputs (agent outputs are non-deterministic; §1.7, §14). Resumable
    and repeatable, **not** bit-reproducible.
 6. **Runtime config** — pick the engine/model per node; connect local Claude Code
@@ -76,7 +76,7 @@ just gesture at them.
 
 A dynamic workflow is **a JavaScript file Claude writes and a runtime executes in
 the background**, separate from the conversation. The decisive shift: with
-sub-agents/skills, *Claude is the orchestrator* and every intermediate result
+sub-agents/skills, _Claude is the orchestrator_ and every intermediate result
 lands in its context window; with a workflow, **the loop, branching, and
 intermediate results live in script variables**, so the model's context only ever
 sees the final answer. That is what lets one run coordinate **dozens to hundreds
@@ -87,7 +87,7 @@ loops, conditionals); **only leaf `agent()` calls consume tokens or spawn model
 work.** Module shape:
 
 ```js
-export const meta = { name, description, phases: [{ title, detail }] } // PURE LITERAL
+export const meta = { name, description, phases: [{ title, detail }] }; // PURE LITERAL
 // body: agent() / parallel() / pipeline() / phase() / log()
 ```
 
@@ -97,7 +97,7 @@ and intermediate state in plain variables. Our engine mirrors this: the
 **scheduler** is pure orchestration; only `agent`/`tool` **NodeRuns** perform
 side effects.
 
-> **Framework reinforcement (verified).** The agent-native chat agent's *own*
+> **Framework reinforcement (verified).** The agent-native chat agent's _own_
 > context is compacted by Observational Memory. Mechanism, exactly: once a
 > thread's **unobserved** messages exceed ~30k tokens
 > (`AGENT_NATIVE_OM_OBSERVATION_TOKEN_THRESHOLD`, default `30_000` —
@@ -114,14 +114,14 @@ side effects.
 
 ### 1.2 Primitives the runtime exposes
 
-| Primitive | Meaning |
-|-----------|---------|
-| `agent(prompt, opts?)` | spawn one sub-agent in an isolated context; returns final text, or validated structured data if `opts.schema` is set |
-| `parallel(thunks)` | **barrier** fan-out — run all, wait for all (see §1.3) |
-| `pipeline(items, ...stages)` | **streaming** fan-out — no barrier between stages (see §1.3) |
-| `phase(title)` / `log(msg)` | progress grouping + narrator line |
-| `args` | global holding the JSON passed at launch (structured, no parsing) |
-| `budget` | global token target (or null); used to scale depth/fleet (§1.8) |
+| Primitive                    | Meaning                                                                                                                                 |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent(prompt, opts?)`       | spawn one sub-agent in an isolated context; returns final text, or validated structured data if `opts.schema` is set                    |
+| `parallel(thunks)`           | **barrier** fan-out — run all, wait for all (see §1.3)                                                                                  |
+| `pipeline(items, ...stages)` | **streaming** fan-out — no barrier between stages (see §1.3)                                                                            |
+| `phase(title)` / `log(msg)`  | progress grouping + narrator line                                                                                                       |
+| `args`                       | global holding the JSON passed at launch (structured, no parsing)                                                                       |
+| `budget`                     | global token target (or null); used to scale depth/fleet (§1.8)                                                                         |
 | `workflow(nameOrRef, args?)` | compose another workflow inline; **one nesting level only**; child shares the parent's concurrency cap, agent counter, and token budget |
 
 `opts` on `agent()`: `schema` (force structured output, §1.6), `model`, `effort`,
@@ -132,7 +132,7 @@ side effects.
 This is the subtlest mechanism and the v1 draft omitted it entirely.
 
 - **`parallel(thunks)` is a BARRIER.** Run all thunks concurrently, **wait for
-  every one before returning.** The *waiting* is the point. A thrown thunk
+  every one before returning.** The _waiting_ is the point. A thrown thunk
   resolves to `null` (the call never rejects) → `.filter(Boolean)`.
 - **`pipeline(items, ...stages)` has NO BARRIER between stages.** Each item flows
   through stages on its own clock: **item A can be at stage 3 while item B is
@@ -142,7 +142,7 @@ This is the subtlest mechanism and the v1 draft omitted it entirely.
 
 **Rule we adopt for the engine and the editor:** default to pipeline semantics
 between dependent nodes; only insert a **`join` barrier** when a node genuinely
-needs *all* upstream results at once — full-set dedupe, an aggregate early-exit
+needs _all_ upstream results at once — full-set dedupe, an aggregate early-exit
 ("0 found → skip verify"), or a prompt that references "the other findings."
 Choosing a barrier when a pipeline would do blocks the whole fleet on the slowest
 item at every stage boundary — a real throughput regression. The editor should
@@ -150,12 +150,12 @@ make `join` an explicit, deliberate node, not the default wiring.
 
 ### 1.4 Concurrency model — split by substrate (do not conflate)
 
-| Substrate | Concurrent | Total / roster | Delegation depth |
-|-----------|-----------|----------------|------------------|
-| **Claude Code workflow runtime** | up to **16** (fewer on low-core) | **1,000** total (runaway backstop); excess **queues** | n/a (script-driven) |
-| **Claude Agent SDK managed-agents** | **25** threads | **20** unique agents in a roster | **1** (deeper ignored) |
+| Substrate                           | Concurrent                       | Total / roster                                        | Delegation depth       |
+| ----------------------------------- | -------------------------------- | ----------------------------------------------------- | ---------------------- |
+| **Claude Code workflow runtime**    | up to **16** (fewer on low-core) | **1,000** total (runaway backstop); excess **queues** | n/a (script-driven)    |
+| **Claude Agent SDK managed-agents** | **25** threads                   | **20** unique agents in a roster                      | **1** (deeper ignored) |
 
-Our engine targets the *workflow-runtime* model: a global concurrency cap
+Our engine targets the _workflow-runtime_ model: a global concurrency cap
 (default 8, configurable) + per-`fanout` `maxConcurrency`, with a per-run total
 node backstop. Nested `workflow()`-style sub-workflows share the parent's caps.
 **Do not present one set of numbers as universal** — the SDK roster model is a
@@ -170,8 +170,8 @@ data). Patterns the engine must support first-class:
 - **Fan-out N for N discovered items** — `fanout` whose `itemsFrom` is a
   discovery node's array output.
 - **Loop-until-dry** — keep spawning finders until **K consecutive rounds surface
-  nothing new**, deduping against everything *seen* (not just everything
-  *confirmed*). Strictly stronger than a fixed counter; adapts depth to the
+  nothing new**, deduping against everything _seen_ (not just everything
+  _confirmed_). Strictly stronger than a fixed counter; adapts depth to the
   problem. (Dedupe against `seen`, never against `confirmed`, or judge-rejected
   items reappear forever and the loop never converges.)
 - **Loop-until-budget** — gate the loop on `budget.total` (§1.8).
@@ -179,7 +179,7 @@ data). Patterns the engine must support first-class:
 - **Routing / classify-and-act** — one `agent({schema})` classifies, a JS
   `switch`/`branch` picks the path.
 - **Orchestrator-workers** — discovery agent decomposes → dynamic fan-out →
-  synthesis agent merges. Subtasks are *determined at runtime*, not pre-listed.
+  synthesis agent merges. Subtasks are _determined at runtime_, not pre-listed.
 - **Evaluator-optimizer** — generate → critique → regenerate until convergence.
 
 ### 1.6 Sub-agent isolation & structured output
@@ -204,7 +204,7 @@ The runtime **journals every `agent()` call by a deterministic key.** On resume,
 agents that already completed **return cached results; the rest run live** (a
 cached prefix replays at zero token cost; only the divergent tail re-runs).
 
-This is *why* scripts must be deterministic: **`Date.now()`, `Math.random()`, and
+This is _why_ scripts must be deterministic: **`Date.now()`, `Math.random()`, and
 argless `new Date()` throw inside a workflow** — a non-deterministic value would
 change the derived key and break cache/resume. Workarounds: **pass timestamps via
 `args`**; get variety across agents by **varying prompt/label by index**, not RNG.
@@ -219,13 +219,13 @@ branching**; any needed timestamp/seed is an explicit run input.
 **Two preconditions the key depends on (state them or the model is fictional):**
 
 1. **The key is stable only over a fully-replayed completed prefix.** A
-   `fanout`'s width N comes from a *non-deterministic agent's* array output. If
+   `fanout`'s width N comes from a _non-deterministic agent's_ array output. If
    the array-producing node itself is the failed/divergent node, re-running it
    yields a different N → `fanoutIndex 0..N'-1` no longer matches the journaled
    `0..N-1`. **Rule: resume reuses a fanout subtree only if its array-producer
    completed and is replayed from journal; if the producer re-runs, its entire
    fanout subtree is invalidated, not partially reused.** Likewise loop depth can
-   differ on re-run — `tokens_spent` and the deliverable are *not* reproducible
+   differ on re-run — `tokens_spent` and the deliverable are _not_ reproducible
    (this is the resumable-not-reproducible point, Goal 5 / §14).
 2. **Claude-code microVM nodes are atomic and re-run whole.** A claude node's VM is
    disposable (§7.4): a partially-complete claude NodeRun is journaled `failed` and
@@ -251,7 +251,7 @@ For "deliver a PR/artifact" work, a single agent's output is not trustworthy by
 default. Support these as reusable sub-graphs:
 
 - **Adversarial refute** — for a candidate finding, spawn N independent skeptics
-  *prompted to refute it*; keep only if a majority survives. Prefer **diverse-lens
+  _prompted to refute it_; keep only if a majority survives. Prefer **diverse-lens
   judges** (correctness / security / perf / does-it-build) over redundant
   identical ones.
 - **Judge panel / tournament** — score N attempts, synthesize the winner +
@@ -303,8 +303,8 @@ NodeRun[] (one per executed node; dynamic nodes added at runtime,
   **Not a model.** This is what makes runs replayable (§1.7) and the queue
   parallel (§6.4).
 - **Orchestrator brain (default: a "planner" node running real Claude Code in its
-  own microVM, §7.4).** *Decomposes* a work item into a graph, makes *decision-point*
-  calls (`branch`/routing), *adds dynamic nodes* (§6.5), and *intervenes*
+  own microVM, §7.4).** _Decomposes_ a work item into a graph, makes _decision-point_
+  calls (`branch`/routing), _adds dynamic nodes_ (§6.5), and _intervenes_
   (override/retry) when a node goes wrong. It does **not** hand-run every node. The
   brain is just another node (executor = claude `stream-json`), so it goes through
   the same NodeRunner — "一切皆 node".
@@ -325,14 +325,14 @@ A2A (`invokeAgent`) is for app-to-app "do the whole thing" delegation, **not** f
 calling individual actions.
 
 > **Design rule (do not regress).** The brain steers; it does not babysit. Giving
-> the harness *full visibility + control hooks* (via MCP) is correct; making it
+> the harness _full visibility + control hooks_ (via MCP) is correct; making it
 > manually execute every node throws away "plan as artifact, not in the model's
 > head" (§1.1) — more cost, no replay. Decision points and exceptions go to the
 > brain; mechanical scheduling stays in the engine.
 >
 > **Default-runtime wiring.** `orchestrator-runtime = claude-code` (written by
-> `activate-runtime`) selects **claude** as the *brain* executor and the default
-> *code-node* executor — both run as real `claude` in their own microVMs (§7.4),
+> `activate-runtime`) selects **claude** as the _brain_ executor and the default
+> _code-node_ executor — both run as real `claude` in their own microVMs (§7.4),
 > not the framework harness. Concurrency is bound by host microVM capacity
 > (`maxConcurrentVMs`, §4.1/§7.4.7); the brain can run on a cheaper engine (vLLM)
 > to save cost.
@@ -343,19 +343,19 @@ calling individual actions.
 
 ### 3.1 Node types
 
-| Type | Purpose | Control-flow role |
-|------|---------|-------------------|
-| `start` | Entry | single source |
-| `agent` | Run a sub-agent (local or `@app` A2A) with engine/model/prompt | unit of work |
-| `tool` | Call a single action directly (no LLM) | deterministic step |
-| `parallel` | Container: run children concurrently, **barrier** | fan-out (static N) |
-| `fanout` | Run one child template **per item** of an upstream list | fan-out (dynamic N) |
-| `join` | Barrier: wait for all incoming, merge results | synchronize (§1.3) |
-| `branch` | Evaluate a condition, pick one outgoing edge | conditional |
-| `loop` | Repeat a sub-graph until condition / max iters (evaluator-optimizer, retry, loop-until-dry) | cycle (bounded) |
-| `subworkflow` | Embed another template | composition |
-| `human` | Pause for approval / input (gate) | manual gate |
-| `end` | Terminal; collects the deliverable | sink |
+| Type          | Purpose                                                                                     | Control-flow role   |
+| ------------- | ------------------------------------------------------------------------------------------- | ------------------- |
+| `start`       | Entry                                                                                       | single source       |
+| `agent`       | Run a sub-agent (local or `@app` A2A) with engine/model/prompt                              | unit of work        |
+| `tool`        | Call a single action directly (no LLM)                                                      | deterministic step  |
+| `parallel`    | Container: run children concurrently, **barrier**                                           | fan-out (static N)  |
+| `fanout`      | Run one child template **per item** of an upstream list                                     | fan-out (dynamic N) |
+| `join`        | Barrier: wait for all incoming, merge results                                               | synchronize (§1.3)  |
+| `branch`      | Evaluate a condition, pick one outgoing edge                                                | conditional         |
+| `loop`        | Repeat a sub-graph until condition / max iters (evaluator-optimizer, retry, loop-until-dry) | cycle (bounded)     |
+| `subworkflow` | Embed another template                                                                      | composition         |
+| `human`       | Pause for approval / input (gate)                                                           | manual gate         |
+| `end`         | Terminal; collects the deliverable                                                          | sink                |
 
 ### 3.2 Cycles, async, fan-out — how each is expressed
 
@@ -365,7 +365,7 @@ calling individual actions.
 - **Pipeline (no barrier):** the default between two dependent `agent`/`tool`
   nodes — the scheduler advances a downstream NodeRun for item X as soon as X's
   upstream NodeRun is done, without waiting for sibling items. A `join` is the
-  *only* place a barrier is introduced (§1.3).
+  _only_ place a barrier is introduced (§1.3).
 - **Async:** every `agent` node runs as a background run; the scheduler never
   blocks — it advances any node whose deps are satisfied. `await: false` =
   fire-and-forget, joined later.
@@ -376,7 +376,7 @@ calling individual actions.
   iteration n+1 cannot start until iteration n's nodes (including any
   `await:false` ones) settle, or convergence checks race.
   - **Loop accumulator state is a journaled artifact** keyed by `(runId,
-    loopNodeId, iteration)`; iteration n+1 reads iteration n's accumulator. This
+loopNodeId, iteration)`; iteration n+1 reads iteration n's accumulator. This
     keeps the scheduler pure (§1.1) while letting loops carry growing state.
   - **Loop-until-dry** config: `dedupeKey` is a JSONPath into each item's output
     that identifies it; the loop accumulates a **`seen`** set of those keys
@@ -390,6 +390,7 @@ calling individual actions.
 ```
 Edge { id, from: nodeId, to: nodeId, when?: Condition }
 ```
+
 `when` lets `branch` gate an edge. Absent = unconditional.
 
 ### 3.4 Node config (shared)
@@ -421,6 +422,7 @@ Node {
 ### 3.5 Condition (no arbitrary code execution in the engine)
 
 A small, safe expression evaluated against run state — **not** `eval`:
+
 - `{ kind: "jsonpath", path, op, value }` (e.g. `deps.review.output.score >= 8`)
 - `{ kind: "status", node, equals: "done" }`
 - `{ kind: "agent", prompt }` → an `agent` returns `{ decision: "yes|no|<edge>" }`
@@ -437,8 +439,8 @@ convenience, not the primary path.
 
 ### 3.7 Reusable node library (fixed / pre-built nodes)
 
-Node *types* (§3.1) are primitives; a **node library** is a catalog of
-*pre-configured, named, reusable* nodes you define once and drop into any
+Node _types_ (§3.1) are primitives; a **node library** is a catalog of
+_pre-configured, named, reusable_ nodes you define once and drop into any
 workflow — the answer to "I want to define specific review / commit-push /
 open-MR nodes." Stored in a `node_defs` table (`id, key, kind, title, config(JSON),
 ownable`) and referenced from a graph by `nodeDefKey` (the node inherits the
@@ -460,14 +462,14 @@ Two flavors:
 Authoring: the editor palette has a **"Library" tab** (drag a `code-review` or
 `git-push` node onto the canvas); the orchestrator brain references library nodes
 by `key` when it builds a graph (so a dynamically-authored bug-fix DAG ends with
-the *same* vetted `run-tests → git-commit → open-pr` tail every time). A
+the _same_ vetted `run-tests → git-commit → open-pr` tail every time). A
 template-supplied **starter library** ships the common code nodes; users add their
 own. Library nodes carry their own `version` so a workflow can pin a known-good
 review step.
 
 > Why a library, not just inline nodes: it makes the **trust boundary** explicit.
-> The dynamic/LLM-authored part of a graph is the *middle* (analysis, fixes); the
-> *gates* (review, tests, push, MR) are fixed library nodes the agent composes but
+> The dynamic/LLM-authored part of a graph is the _middle_ (analysis, fixes); the
+> _gates_ (review, tests, push, MR) are fixed library nodes the agent composes but
 > cannot silently reshape. This is how "let Claude build the workflow" (§6.5) stays
 > safe — it wires together vetted nodes, it doesn't reinvent the push step.
 
@@ -505,7 +507,7 @@ loop:
   one microVM**, §7.4.7), plus per-`fanout` `maxConcurrency` and a per-run
   total-node backstop. VM-provision/resource-exhaustion failures are surfaced
   distinctly, not folded into token budget.
-- **Budget:** stop scheduling new *dynamic* nodes when `tokenBudget` is exhausted
+- **Budget:** stop scheduling new _dynamic_ nodes when `tokenBudget` is exhausted
   (§1.8). **Caveat:** only `local`/`tool` spend is counted; `@app` A2A returns no
   usage, so a mostly-`@app` workflow never self-limits (§14).
 - **Termination:** acyclic base graph + bounded loops ⇒ guaranteed to finish.
@@ -526,7 +528,7 @@ identity. This is a hard engine spec, not a detail:
   that, `join` is not ready; after, it waits for exactly N incoming. This prevents
   a join firing early (3 of an eventual 10) or deadlocking (waiting for an 11th).
 - **Mid-pipeline item failure drops that item, siblings continue** (`.filter
-  (Boolean)`, §1.3). A failed `B_i` removes item i from the downstream join's
+(Boolean)`, §1.3). A failed `B_i` removes item i from the downstream join's
   expected set; it does not fail the whole run unless a node is marked
   `failFast`.
 - **`run-step` is dropped as infeasible-as-described** — a detached `startRun`
@@ -535,15 +537,15 @@ identity. This is a hard engine spec, not a detail:
 
 ### 4.2 Where work actually runs (grounded APIs — see §13)
 
-| Node assignee | Mechanism (real framework API) |
-|---------------|-------------------------------|
-| `local` agent | server-side background run: `startRun(runId, threadId, runFn)` → inside `runFn`, `resolveEngine({ engineOption, model })` then `runAgentLoop({ engine, model, systemPrompt, tools, messages, send, signal, … })`. **This already works headless** — `jobs/scheduler.ts` does exactly this; copy that pattern. |
-| `@app` A2A | `invokeAgent({ target, prompt, … })` from `@agent-native/core` (a2a) |
-| `tool` | direct action call (the action's `run`) |
+| Node assignee                 | Mechanism (real framework API)                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local` agent                 | server-side background run: `startRun(runId, threadId, runFn)` → inside `runFn`, `resolveEngine({ engineOption, model })` then `runAgentLoop({ engine, model, systemPrompt, tools, messages, send, signal, … })`. **This already works headless** — `jobs/scheduler.ts` does exactly this; copy that pattern.                                                                                                                                                                                   |
+| `@app` A2A                    | `invokeAgent({ target, prompt, … })` from `@agent-native/core` (a2a)                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `tool`                        | direct action call (the action's `run`)                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | code execution (any provider) | **`NodeRunner` over a microVM** (§7.4): provision microsandbox → mount repo+creds → checkout branch → **EXECUTE via the node's executor** → commit/push → destroy. The executor is `runAgentLoop` (vLLM/cloud, tools = `createCodingToolRegistry` re-pointed at `vm.exec`) or the **real `claude --output-format stream-json`** in-VM for a claude node. **Not** the framework `@ai-sdk/harness-claude-code` (non-functional, §7.0b). For trusted JS snippets only: `coding-tools/run-code.ts`. |
 
 The orchestrator agent is **not** required to babysit every node — the scheduler
-schedules nodes and delegates only the *thinking* steps to agents (§1.1). This is
+schedules nodes and delegates only the _thinking_ steps to agents (§1.1). This is
 the key upgrade over v1, where `run-orchestrator` merely seeds rows and **returns
 an instruction string that the UI (`tasks.$id.tsx`) hands to the chat agent via
 `sendToAgentChat`** to walk by hand.
@@ -576,14 +578,14 @@ an instruction string that the UI (`tasks.$id.tsx`) hands to the chat agent via
 
 ### 4.3 Control API (actions)
 
-| Action | Effect |
-|--------|--------|
-| `run-start(workItemId, { tokenBudget? })` | instantiate template → WorkflowRun, schedule |
-| `run-pause(runId)` | stop scheduling new nodes; let running finish |
-| `run-resume(runId)` | replay journaled NodeRuns, schedule the rest (§1.7) |
-| `run-cancel(runId)` | `abortRun` running NodeRuns, skip pending |
-| `run-retry-node(runId, nodeRunId)` | reset a failed node to `ready`, re-run live |
-| `node-override(runId, nodeRunId, patch)` | edit a node's prompt/model and re-run |
+| Action                                    | Effect                                              |
+| ----------------------------------------- | --------------------------------------------------- |
+| `run-start(workItemId, { tokenBudget? })` | instantiate template → WorkflowRun, schedule        |
+| `run-pause(runId)`                        | stop scheduling new nodes; let running finish       |
+| `run-resume(runId)`                       | replay journaled NodeRuns, schedule the rest (§1.7) |
+| `run-cancel(runId)`                       | `abortRun` running NodeRuns, skip pending           |
+| `run-retry-node(runId, nodeRunId)`        | reset a failed node to `ready`, re-run live         |
+| `node-override(runId, nodeRunId, patch)`  | edit a node's prompt/model and re-run               |
 
 **Abort is cooperative, not immediate.** `run-cancel` calls `abortRun(runId)`,
 which fires each NodeRun's `AbortController`; the engine-model loop checks
@@ -596,12 +598,12 @@ surprised.
 
 ### 4.4 Observability API (status queries)
 
-| Action | Returns |
-|--------|---------|
-| `run-get(runId)` | run status, counts, deliverable, timing, budget remaining |
-| `run-graph(runId)` | live graph: every NodeRun (status/iteration/dynamic flag) + edges, for the canvas overlay |
-| `node-get(runId, nodeRunId)` | one node: input, output artifact, logs, sub-agent runId, model, timings |
-| `run-events(runId, sinceSeq)` | streamed events bridged from `subscribeToRun(runId, fromSeq)` |
+| Action                        | Returns                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| `run-get(runId)`              | run status, counts, deliverable, timing, budget remaining                                 |
+| `run-graph(runId)`            | live graph: every NodeRun (status/iteration/dynamic flag) + edges, for the canvas overlay |
+| `node-get(runId, nodeRunId)`  | one node: input, output artifact, logs, sub-agent runId, model, timings                   |
+| `run-events(runId, sinceSeq)` | streamed events bridged from `subscribeToRun(runId, fromSeq)`                             |
 
 Live updates ride the existing `useDbSync()` + the run-event stream so the canvas
 animates node state in real time.
@@ -676,7 +678,7 @@ Project {
   (§7.1) and deliver a PR.
 - **No `repo`** → still a full project for docs/decks/research; those workflows
   write file deliverables into `workingDir` via the `local-artifacts` module
-  (`workingDir` exists for *every* project, so the §7.2 delivery target is never
+  (`workingDir` exists for _every_ project, so the §7.2 delivery target is never
   null). No "docs project" type exists — it's just a workflow whose `end` node
   produces files.
 
@@ -706,6 +708,7 @@ WorkItem {
 ```
 
 Lifecycle:
+
 ```
 create work item → assign to orchestrator
   → orchestrator decomposes into a WorkflowRun (dynamic DAG)
@@ -726,27 +729,28 @@ create work item → assign to orchestrator
 `status` ≠ `execState`. Conflating them deletes the PM tool. Status meaning is
 carried by **six orthogonal dimensions**:
 
-| Dimension | Field | Values | Managed by |
-|-----------|-------|--------|-----------|
-| Stage category | `statusCategory` | `todo` · `in-progress` · `completed` · `cancelled` — **completed ≠ cancelled** so throughput reporting separates shipped from killed (the Linear fix Jira lacks) | derived from `status` |
-| Pipeline stage | `status` | per-type ordered set (below), **configurable per project** | human (drag) + agent (`transition-work-item`, §6.2b) |
-| Environment | `environment` | nullable, from `project.environments` (default `dev · SIT · UAT · prod`) — **where** a test/release stage runs; **orthogonal**, NOT baked into stage names | set with the stage by `transition-work-item` |
-| Blocked | `blocked` + `blockedReason` + `blockedBy?` | flag overlaying any in-progress stage; `blockedBy` optionally links the blocking item (auto-suggest unblock when it closes) | human / agent on external dep |
-| Resolution | `resolution` | `shipped` · `cancelled` · `rejected` · `duplicate` · `cannot-reproduce` · `rolled-back` · `deferred` | **required** on entering a completed/cancelled stage |
-| Severity | `severity` | `SEV1 · SEV2 · SEV3 · SEV4`, nullable (used by `prod-issue`) | human / agent at triage |
+| Dimension      | Field                                      | Values                                                                                                                                                           | Managed by                                           |
+| -------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Stage category | `statusCategory`                           | `todo` · `in-progress` · `completed` · `cancelled` — **completed ≠ cancelled** so throughput reporting separates shipped from killed (the Linear fix Jira lacks) | derived from `status`                                |
+| Pipeline stage | `status`                                   | per-type ordered set (below), **configurable per project**                                                                                                       | human (drag) + agent (`transition-work-item`, §6.2b) |
+| Environment    | `environment`                              | nullable, from `project.environments` (default `dev · SIT · UAT · prod`) — **where** a test/release stage runs; **orthogonal**, NOT baked into stage names       | set with the stage by `transition-work-item`         |
+| Blocked        | `blocked` + `blockedReason` + `blockedBy?` | flag overlaying any in-progress stage; `blockedBy` optionally links the blocking item (auto-suggest unblock when it closes)                                      | human / agent on external dep                        |
+| Resolution     | `resolution`                               | `shipped` · `cancelled` · `rejected` · `duplicate` · `cannot-reproduce` · `rolled-back` · `deferred`                                                             | **required** on entering a completed/cancelled stage |
+| Severity       | `severity`                                 | `SEV1 · SEV2 · SEV3 · SEV4`, nullable (used by `prod-issue`)                                                                                                     | human / agent at triage                              |
 
 **Default per-type pipelines** — stages are **environment-agnostic** (env is the
 separate `environment` field, so "测试中 @ SIT", "验收中 @ UAT", "已上线 @ prod"):
 
-| type | todo | in-progress | completed | cancelled |
-|------|------|-------------|-----------|-----------|
-| **requirement** | 待分析 · 待开发 | 开发中 · 待评审 · 评审中 · 待提测 · 测试中 · 待验收 · 验收中 · 待发布 | 已上线 | 已取消 · 已拒绝 |
-| **bug** | 待确认 · 待修复 | 修复中 · 待评审 · 评审中 · 待提测 · 测试中 · 待验收 · 验收中 · 待发布 | 已关闭 | 已取消 · 不予处理 |
-| **prod-issue** | 已触发 | 止血中 · 已恢复 · 复盘中 · 根因修复中 · 修复验证中 · 灰度发布中 · 待发布 | 已关闭 | 已取消 |
-| **task** | 待办 | 进行中 · 待评审 · 待测试 · 测试中 · 待验收 | 已完成 | 已取消 |
+| type            | todo            | in-progress                                                              | completed | cancelled         |
+| --------------- | --------------- | ------------------------------------------------------------------------ | --------- | ----------------- |
+| **requirement** | 待分析 · 待开发 | 开发中 · 待评审 · 评审中 · 待提测 · 测试中 · 待验收 · 验收中 · 待发布    | 已上线    | 已取消 · 已拒绝   |
+| **bug**         | 待确认 · 待修复 | 修复中 · 待评审 · 评审中 · 待提测 · 测试中 · 待验收 · 验收中 · 待发布    | 已关闭    | 已取消 · 不予处理 |
+| **prod-issue**  | 已触发          | 止血中 · 已恢复 · 复盘中 · 根因修复中 · 修复验证中 · 灰度发布中 · 待发布 | 已关闭    | 已取消            |
+| **task**        | 待办            | 进行中 · 待评审 · 待测试 · 测试中 · 待验收                               | 已完成    | 已取消            |
 
 **Transition rules (buildable, not prose — this is the validator spec):**
-- **Forward = skip-forward allowed.** Any move to a *later* in-progress/completed
+
+- **Forward = skip-forward allowed.** Any move to a _later_ in-progress/completed
   stage in the type's order is legal (so `finalize-status` can jump 开发中→待发布
   in one call; the agent need not walk every intermediate stage). The validator
   rule = "to-stage index > from-stage index, same type, not crossing into
@@ -784,12 +788,12 @@ because only the agent knows when it actually hit a blocker, a rework, or produc
 a deliverable. Typical points (the `orchestrating` skill mandates these; node
 prompts remind them):
 
-| moment in the run | the agent calls |
-|-------------------|-----------------|
-| starts real work | → 开发中 / 修复中 |
-| hits an external blocker mid-run | `transition-work-item({blocked:true, reason})` |
-| its own tests + review pass (it judges) | → 待验收 / 待发布 |
-| delivers the PR / artifact | → the near-terminal stage |
+| moment in the run                       | the agent calls                                |
+| --------------------------------------- | ---------------------------------------------- |
+| starts real work                        | → 开发中 / 修复中                              |
+| hits an external blocker mid-run        | `transition-work-item({blocked:true, reason})` |
+| its own tests + review pass (it judges) | → 待验收 / 待发布                              |
+| delivers the PR / artifact              | → the near-terminal stage                      |
 
 `execState` (queued/running/failed) is the engine's automation state and **never
 overwrites business `status`**; a human can also drag a card manually. **Why
@@ -839,7 +843,7 @@ this 已上线 / did the AI skip a gate," and the data the watchdog reconciles a
 
 **Terminal closure (PR merge / prod deploy).** The agent's last write is the
 **near-terminal** stage (`待发布`) when it opens the PR / produces the artifact — it
-does **not** mark `已上线`/`已关闭`, because shipping is an event that happens *after*
+does **not** mark `已上线`/`已关闭`, because shipping is an event that happens _after_
 the run (PR merged, deployed to prod). The terminal move is made by **either** a
 human (board "Mark shipped" → `transition-work-item(→已上线, resolution:shipped)`)
 **or** an optional **PR-merge / deploy webhook** (the framework `integration-webhooks`
@@ -871,23 +875,23 @@ config); the orchestrator **pulls and runs them, N at a time**, at a concurrency
 degree you set. No per-task hand-holding.
 
 **The queue uses `execState`, NOT business `status` (§6.2a) — do not conflate.**
-Feeding the orchestrator is an *automation* concern; it must never touch the PM
+Feeding the orchestrator is an _automation_ concern; it must never touch the PM
 pipeline. So the queue/worker operates on a separate `work_item.execState`:
 
 `execState`: `idle → queued → claimed → running → done | failed`, plus `paused`,
 `cancelled`. (`workflow_run.status` is the per-run detail under it; the Run console
 shows that.)
 
-| execState | meaning | board signal |
-|-----------|---------|--------------|
-| `idle` | no AI run active (default) | no badge |
-| `queued` | enqueued to the orchestrator, waiting for a worker slot (priority-ordered) | "queued" badge |
-| `claimed` | a worker atomically grabbed it, run starting — **transient, sub-second** | folded into "running" |
-| `running` | its `workflow_run` is executing | pulsing "AI running" badge |
-| `paused` | run paused | "paused" badge |
-| `done` | the latest run finished (its outcome advanced business `status`, §6.2a) | no badge |
-| `failed` | run failed after retries | "failed" badge |
-| `cancelled` | AI run cancelled (business `status` unchanged) | no badge |
+| execState   | meaning                                                                    | board signal               |
+| ----------- | -------------------------------------------------------------------------- | -------------------------- |
+| `idle`      | no AI run active (default)                                                 | no badge                   |
+| `queued`    | enqueued to the orchestrator, waiting for a worker slot (priority-ordered) | "queued" badge             |
+| `claimed`   | a worker atomically grabbed it, run starting — **transient, sub-second**   | folded into "running"      |
+| `running`   | its `workflow_run` is executing                                            | pulsing "AI running" badge |
+| `paused`    | run paused                                                                 | "paused" badge             |
+| `done`      | the latest run finished (its outcome advanced business `status`, §6.2a)    | no badge                   |
+| `failed`    | run failed after retries                                                   | "failed" badge             |
+| `cancelled` | AI run cancelled (business `status` unchanged)                             | no badge                   |
 
 - The **board groups by business `status`** (§6.2a); `execState` is a **badge** on
   the card, plus an optional separate "Queue" view grouped by `execState` for
@@ -916,9 +920,10 @@ N items run concurrently; you watch the board, not a single run
 ```
 
 **Built on existing primitives (no framework queue exists — verified):**
+
 - **Atomic claim** — copy the proven `claimA2ATaskForProcessing` pattern
   (`a2a/task-store.ts:147-172`, used at `a2a/handlers.ts:128`): **`UPDATE … WHERE
-  exec_state='queued'` → check affected-row count → separate `SELECT`** (NOT
+exec_state='queued'` → check affected-row count → separate `SELECT`** (NOT
   `RETURNING` — the framework portability rule forbids `RETURNING` in shared app
   code, `portability/SKILL.md:76`; the cited primitive uses the affected-rows+SELECT
   form). Single-flight so one item is never double-run; the stuck-item reclaim
@@ -933,6 +938,7 @@ N items run concurrently; you watch the board, not a single run
   self-dispatch rather than a long-lived in-memory loop.
 
 **⚠ Two concurrency ceilings to expose, not hide:**
+
 1. **Task-level** = `concurrencyDegree` (how many work items run at once).
 2. **Within a run** = node concurrency (§4.1) and the **microVM capacity cap**
    (§7.4.7: each running node = one microVM; total bounded by the KVM host's
@@ -942,13 +948,13 @@ N items run concurrently; you watch the board, not a single run
    `runtime.resources`).
 
 **Ordering is the orchestrator's job, not a formal task-DAG.** Cross-task
-sequencing stays simple: a **flat priority queue**, and the orchestrator *brain*
+sequencing stays simple: a **flat priority queue**, and the orchestrator _brain_
 plans order/batching by reading `queue-status` (the whole queue) — serialize tasks
 touching the same module, parallelize across modules, reprioritize. **No
-cross-task `dependsOn` edges, no task-level topo sort** at the *queue* level (the
+cross-task `dependsOn` edges, no task-level topo sort** at the _queue_ level (the
 per-item business `blocked` flag in §6.2a is a different thing — it marks one item
 stuck at its stage, not a queue dependency). The DAG belongs
-*inside* a task's workflow (§3), where execution order genuinely needs it; between
+_inside_ a task's workflow (§3), where execution order genuinely needs it; between
 tasks, a `priority` field + the brain's judgment is enough. (If hard cross-task
 ordering is ever required, the brain simply enqueues the dependent task only after
 the prerequisite reports `done` — a planning decision, not a scheduler mechanism.)
@@ -959,7 +965,7 @@ single item you want to steer.
 
 ### 6.5 Dynamic workflow authoring (Claude-Code-style) + promotion
 
-The orchestrator brain (§2a) doesn't only *instantiate* templates — it **authors**
+The orchestrator brain (§2a) doesn't only _instantiate_ templates — it **authors**
 them, the dynamic-workflow capability:
 
 1. **NL → new template.** From a work item's description the brain calls
@@ -969,7 +975,7 @@ them, the dynamic-workflow capability:
    `fanout` over a discovered list, an extra `loop` round, a `branch` it chose
    (§4.1). The run canvas renders these live so you see what it actually grew.
 3. **Promote a run → reusable template.** When a dynamically-authored run succeeds,
-   one action — `promote-run-to-template(runId)` — distills the *actual* executed
+   one action — `promote-run-to-template(runId)` — distills the _actual_ executed
    graph (minus one-off dynamic indices) into a saved `workflow_template`. Next
    time the same kind of work reuses it as a fixed `defaultWorkflow`. This is the
    loop that turns "let the agent figure it out once" into "a vetted standard
@@ -985,19 +991,19 @@ nodes (§3.7); it does not hand-roll the push/MR step.
 
 ### 7.0 Decision: every node runs in its own microVM (microsandbox); claude-code is one executor, not a nested sandbox
 
-**Decision (this revision): the isolation boundary is a per-node *microVM* via
+**Decision (this revision): the isolation boundary is a per-node _microVM_ via
 [microsandbox](https://github.com/microsandbox/microsandbox) (libkrun/KVM).** Not
 git-worktree-on-host (no boundary), not the framework harness `sandbox` flag
 (cosmetic, and broken — §7.0b). **microsandbox is the sole runtime backend** —
 there is no alternative or fallback backend; a **real VM-grade boundary is
 mandatory**, and **every** node (vLLM / remote-API / claude-code) gets one, under
-**one unified lifecycle** (§7.4). A git worktree is only *how the repo is checked
-out inside* the microVM, never the boundary itself.
+**one unified lifecycle** (§7.4). A git worktree is only _how the repo is checked
+out inside_ the microVM, never the boundary itself.
 
 **Honest status: there is no container/microVM runtime in the repo at all — it is
 built new** (verified repo-wide: no `dockerode`/`podman`/`microsandbox`/`e2b`, no
 git deps; the harness `sandbox:true` is a flag forwarded to an external SDK with
-no boundary we control). What *does* exist and is reused: the `run-code` JS
+no boundary we control). What _does_ exist and is reused: the `run-code` JS
 child-process sandbox (`coding-tools/run-code.ts`, JS-snippet only) and
 `createCodingToolRegistry` (`coding-tools/index.ts:114`, the model-agnostic
 bash/edit/read/write surface we re-point at `microsandbox exec`).
@@ -1015,7 +1021,7 @@ everything the NodeRunner (§7.4) needs.
 constraints, not hedged against a fallback):** (1) **beta** (v0.5.x, breaking
 changes expected) — **pin versions**; the P0 spike is the go/no-go gate before
 committing (§16). (2) needs **`/dev/kvm`** — verified available on the dev host
-*inside WSL2 Ubuntu 24.04* (nested virt on; CPU VT-x on; `/dev/kvm` present). KVM is
+_inside WSL2 Ubuntu 24.04_ (nested virt on; CPU VT-x on; `/dev/kvm` present). KVM is
 a **hard requirement**: a production host must be bare-metal or a
 nested-virt-enabled VPS. The orchestrator app + scheduler are plain Node and run
 anywhere; only the microVM runtime needs KVM, and on Windows that means running it
@@ -1041,11 +1047,11 @@ The framework's `@ai-sdk/harness-claude-code@canary.9` + `@ai-sdk/harness@canary
    throws, can't execute a real native `claude`) and `@ai-sdk/sandbox-vercel@canary.13`
    (a **cloud** Firecracker sandbox needing a Vercel account; the local subscription
    login isn't in it). Neither fits "real local claude on my subscription."
-3. **Even fixed, it would nest.** The framework *does* expose the extension point —
+3. **Even fixed, it would nest.** The framework _does_ expose the extension point —
    `AgentHarnessCreateSessionOptions.sandbox?: unknown` (`harness/types.ts:46`) is
    forwarded into the HarnessAgent (`ai-sdk-adapter.ts:151`) — so a microsandbox
    provider **could** be injected with **zero framework change**. But in the
-   per-node-microVM model that provider would open a **second** sandbox *inside* the
+   per-node-microVM model that provider would open a **second** sandbox _inside_ the
    node's microVM = redundant nesting + the bridge/port/canary-version fragility.
 
 **Resolution: run the real Claude Code as a normal executor inside the node's
@@ -1058,7 +1064,7 @@ not a harness option, sets the working directory. (The framework harness stays
 available behind the seam for a future hosted/no-microVM mode, but is not on the
 v2 path.)
 
-### 7.1 Code work items (git) — checkout + commit + push happen *inside* the node microVM
+### 7.1 Code work items (git) — checkout + commit + push happen _inside_ the node microVM
 
 The whole git story moves inside the node's microVM, which removes the v1.5
 `cwd`-gap blocker entirely (the microVM's working directory is set by
@@ -1099,8 +1105,8 @@ the VM) and the only durable artifact is the pushed branch/PR.
 - **Naming:** one branch per run, deterministically unique — `an/run-<runId>` — so
   concurrent or retried runs of the same work item never collide.
 - **States:** `provision VM → checkout branch from baseRef (in-VM) → execute
-  (cwd = worktree) → on success: commit + push + open PR → on failure: per
-  runtime.onFailure (§7.4.5) → destroy VM (the branch survives only via push)`.
+(cwd = worktree) → on success: commit + push + open PR → on failure: per
+runtime.onFailure (§7.4.5) → destroy VM (the branch survives only via push)`.
 - **Cancel races (§4.3).** Abort is cooperative; the in-VM process may still be
   writing after a run is marked cancelled. **Destroy waits for the VM's process to
   exit**; a half-done branch is simply never pushed.
@@ -1137,10 +1143,10 @@ re-runnable, comparable across models, and disposable by construction.
 
 A node has **two independent axes**:
 
-- **Brain** (`engine` + `model` + `executor`) — *how it reasons/acts at EXECUTE*:
+- **Brain** (`engine` + `model` + `executor`) — _how it reasons/acts at EXECUTE_:
   cloud API, local **vLLM**, or **real Claude Code** (`stream-json`) in-VM. Per
   node (§8.3).
-- **Runtime** — *where it runs*: its **own microVM** (§7.0), provisioned and torn
+- **Runtime** — _where it runs_: its **own microVM** (§7.0), provisioned and torn
   down **identically regardless of brain**.
 
 "Each node supports a different model" and "each node runs in its own virtual
@@ -1150,15 +1156,15 @@ whichever **executor** the node selected into the EXECUTE slot.
 
 #### 7.4.1a The 7-stage lifecycle (identical for every node; only stage 4 differs)
 
-| Stage | vLLM node | remote-API node | claude-code node |
-|-------|-----------|-----------------|------------------|
-| 1. **PROVISION** microVM | same | same | same |
-| 2. **MOUNT** dirs + creds | + vLLM key | + remote key | + `~/.claude` |
-| 3. **INIT** git branch/worktree + env + `setup` | same | same | same |
-| 4. **EXECUTE** ⭐ *only difference* | run script → call host vLLM | run script → call remote API | `claude --output-format stream-json` in-VM |
-| 5. **COLLECT** output + events + metrics (duration, tokens, exit) | same | same | same |
-| 6. **EXTRACT** copy results out / `git push` + PR | same | same | same |
-| 7. **TEARDOWN** destroy VM (or snapshot) | same | same | same |
+| Stage                                                             | vLLM node                   | remote-API node              | claude-code node                           |
+| ----------------------------------------------------------------- | --------------------------- | ---------------------------- | ------------------------------------------ |
+| 1. **PROVISION** microVM                                          | same                        | same                         | same                                       |
+| 2. **MOUNT** dirs + creds                                         | + vLLM key                  | + remote key                 | + `~/.claude`                              |
+| 3. **INIT** git branch/worktree + env + `setup`                   | same                        | same                         | same                                       |
+| 4. **EXECUTE** ⭐ _only difference_                               | run script → call host vLLM | run script → call remote API | `claude --output-format stream-json` in-VM |
+| 5. **COLLECT** output + events + metrics (duration, tokens, exit) | same                        | same                         | same                                       |
+| 6. **EXTRACT** copy results out / `git push` + PR                 | same                        | same                         | same                                       |
+| 7. **TEARDOWN** destroy VM (or snapshot)                          | same                        | same                         | same                                       |
 
 Stages 1–3 and 5–7 are **shared infrastructure**; stage 4 is the **only**
 pluggable part. That is the whole "unified design".
@@ -1166,21 +1172,23 @@ pluggable part. That is the whole "unified design".
 ```ts
 // NodeRunner — the shared skeleton (owns the microVM lifecycle)
 async function runNode(node, ctx): Promise<NodeResult> {
-  const vm = await runtime.provision(node.runtime);              // 1
+  const vm = await runtime.provision(node.runtime); // 1
   try {
-    await runtime.mount(vm, node.workspace, node.creds);         // 2
-    await runtime.init(vm, node.branch, node.env, node.setup);   // 3
-    const result = await node.executor.run({ vm, node, deps });  // 4 ← only provider-specific
-    const out = await runtime.collect(vm, result);              // 5 (output + AgentLoopUsage + timing)
-    await runtime.extract(vm, node.output);                     // 6 (copyOut / push+PR)
+    await runtime.mount(vm, node.workspace, node.creds); // 2
+    await runtime.init(vm, node.branch, node.env, node.setup); // 3
+    const result = await node.executor.run({ vm, node, deps }); // 4 ← only provider-specific
+    const out = await runtime.collect(vm, result); // 5 (output + AgentLoopUsage + timing)
+    await runtime.extract(vm, node.output); // 6 (copyOut / push+PR)
     return out;
   } finally {
-    await runtime.teardown(vm, node.runtime.onSuccess);          // 7 (destroy | snapshot | keep)
+    await runtime.teardown(vm, node.runtime.onSuccess); // 7 (destroy | snapshot | keep)
   }
 }
 
 // NodeExecutor — the ONLY thing that varies by provider
-interface NodeExecutor { run(c: ExecCtx): Promise<ExecResult> }   // c.vm = exec/spawn/fs handle
+interface NodeExecutor {
+  run(c: ExecCtx): Promise<ExecResult>;
+} // c.vm = exec/spawn/fs handle
 //   VllmExecutor       → runAgentLoop(engine=ai-sdk:openai, baseUrl) with tools = createCodingToolRegistry re-pointed at vm.exec
 //   RemoteApiExecutor  → same shape, hosted engine + key
 //   ClaudeCodeExecutor → vm.spawn(`claude --output-format stream-json -p …`), parse the event stream
@@ -1208,7 +1216,7 @@ native tools, working dir = the in-VM worktree.
 > `coding-tools/index.ts:450`, local `process.env`). For a microVM node you reuse
 > its **tool contract/shape** (the 4 `ActionEntry` schemas the model sees) but
 > implement them against the VM: `bash → vm.exec`, `read/write → vm.fs`. The agent
-> loop runs on the host (the scheduler process); only the *tool side effects* cross
+> loop runs on the host (the scheduler process); only the _tool side effects_ cross
 > into the VM. Don't pass the host-spawning impl a `cwd` and expect VM isolation.
 
 #### 7.4.2 `NodeRuntime` interface (the microVM abstraction) + microsandbox backend
@@ -1309,9 +1317,9 @@ special code path — it is the lifecycle used again.
 #### 7.4.6 Repeatability & recovery = the §1.7 journal made physical
 
 - Each NodeRun journals `{ input artifact ids, baseRef (exact commit forked), brain
-  model, checkpoint ref }`.
+model, checkpoint ref }`.
 - **Repeat** a node = re-provision from the **same `baseRef`** → identical
-  *starting* environment. (Agent output is non-deterministic, §1.7: "repeatable"
+  _starting_ environment. (Agent output is non-deterministic, §1.7: "repeatable"
   means same inputs + same env, **not** identical bytes.)
 - **Resume** a whole run = completed NodeRuns replay from their checkpoint refs
   (zero re-spend); only `failed`/`pending` nodes re-provision and run.
@@ -1320,16 +1328,16 @@ special code path — it is the lifecycle used again.
 
 Credential handling is **mostly reuse**, contrary to "build it all":
 
-| Need | Reuse | Build |
-|------|-------|-------|
-| Scoped secret store + grants + request/approval + audit | dispatch **Vault** (`dispatch/src/server/lib/vault-store.ts:44-71, 911-1020`) | — |
-| Resolve a secret headless | `resolveSecret(key)` inside `runWithRequestContext({userEmail,orgId})` (`credential-provider.ts:870`) | — |
-| Resolve model API key | `getOwnerActiveApiKey()` → provider env-var map (`production-agent.ts:273`, `provider-env-vars.ts`) | — |
-| Resolve connector OAuth (github/slack/…) | `resolveWorkspaceConnectionCredentialForApp()` access-checked (`workspace-connections/credentials.ts:543`) | — |
-| Encrypt at rest | AES-256-GCM (`secrets/crypto.ts`) | — |
-| **Inject resolved creds into the VM env** | precedent: codex `auth.json` copy (`ai-sdk-adapter.ts:220-255`) | **build** — microsandbox `--mount-file` / `fs().copyFromHost()` (RO) + scoped VM env; never bake into source |
-| **Claude subscription into a claude node** | the local `~/.claude` OAuth (the dev host's Max login, verified) | **build** — mount `~/.claude` **read-only** into the VM so the in-VM `claude` reuses your subscription. (Token refresh won't persist on a RO mount; tokens last weeks. RW mount if refresh-persistence is needed — the one isolation/subscription trade-off, §14.) |
-| **git push auth** | `GITHUB_TOKEN` resolves, but **no push wiring exists** | **build** — `https://x-access-token:$GITHUB_TOKEN@github.com/...` remote or a credential helper |
+| Need                                                    | Reuse                                                                                                      | Build                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Scoped secret store + grants + request/approval + audit | dispatch **Vault** (`dispatch/src/server/lib/vault-store.ts:44-71, 911-1020`)                              | —                                                                                                                                                                                                                                                                  |
+| Resolve a secret headless                               | `resolveSecret(key)` inside `runWithRequestContext({userEmail,orgId})` (`credential-provider.ts:870`)      | —                                                                                                                                                                                                                                                                  |
+| Resolve model API key                                   | `getOwnerActiveApiKey()` → provider env-var map (`production-agent.ts:273`, `provider-env-vars.ts`)        | —                                                                                                                                                                                                                                                                  |
+| Resolve connector OAuth (github/slack/…)                | `resolveWorkspaceConnectionCredentialForApp()` access-checked (`workspace-connections/credentials.ts:543`) | —                                                                                                                                                                                                                                                                  |
+| Encrypt at rest                                         | AES-256-GCM (`secrets/crypto.ts`)                                                                          | —                                                                                                                                                                                                                                                                  |
+| **Inject resolved creds into the VM env**               | precedent: codex `auth.json` copy (`ai-sdk-adapter.ts:220-255`)                                            | **build** — microsandbox `--mount-file` / `fs().copyFromHost()` (RO) + scoped VM env; never bake into source                                                                                                                                                       |
+| **Claude subscription into a claude node**              | the local `~/.claude` OAuth (the dev host's Max login, verified)                                           | **build** — mount `~/.claude` **read-only** into the VM so the in-VM `claude` reuses your subscription. (Token refresh won't persist on a RO mount; tokens last weeks. RW mount if refresh-persistence is needed — the one isolation/subscription trade-off, §14.) |
+| **git push auth**                                       | `GITHUB_TOKEN` resolves, but **no push wiring exists**                                                     | **build** — `https://x-access-token:$GITHUB_TOKEN@github.com/...` remote or a credential helper                                                                                                                                                                    |
 
 VM env = real credential isolation (per-VM, not host process). **One microVM per
 running node** — VM count = node concurrency; cap it on CPU/mem/disk
@@ -1337,13 +1345,14 @@ running node** — VM count = node concurrency; cap it on CPU/mem/disk
 
 #### 7.4.8 Base image (prebake, or every node is slow)
 
-The node image must carry the fixed toolchain so INIT is fast: **node + pnpm + git
-+ the `claude` CLI (`@anthropic-ai/claude-code`) prebaked**, plus the project's
-language runtime. Without prebaking, every node re-runs `pnpm install
+The node image must carry the fixed toolchain so INIT is fast: \*\*node + pnpm + git
+
+- the `claude` CLI (`@anthropic-ai/claude-code`) prebaked**, plus the project's
+  language runtime. Without prebaking, every node re-runs `pnpm install
 @anthropic-ai/claude-code` (+ project deps) on cold boot — the dominant cost.
-Build one OCI image per language/runtime (projects have no "kind"; §6.1), version
-it, and pin `runtime.image`. Warm re-starts use a microsandbox **snapshot**
-(§7.4.2) of the post-`setup` state.
+  Build one OCI image per language/runtime (projects have no "kind"; §6.1), version
+  it, and pin `runtime.image`. Warm re-starts use a microsandbox **snapshot\*\*
+  (§7.4.2) of the post-`setup` state.
 
 #### 7.4.9 Networking (host vLLM + outbound)
 
@@ -1363,23 +1372,23 @@ it, and pin `runtime.image`. Warm re-starts use a microsandbox **snapshot**
 ## 8. Runtime Model Configuration — **mostly built (v1.5); v2 finishes it**
 
 The v1 draft said "no first-class UI exists." **That is now false.** A working
-slice ships in this template. v2 *completes* it, it does not start it.
+slice ships in this template. v2 _completes_ it, it does not start it.
 
 ### 8.1 What already exists (do not rebuild)
 
-| Piece | Where |
-|-------|-------|
-| `runtime_configs` table (`id, name, kind, baseUrl, model, active, ownerEmail, orgId, …`) | `server/db/schema.ts` |
-| `save-runtime-config`, `list-runtime-configs`, `delete-runtime-config` | `actions/` |
-| `activate-runtime` — vLLM → writes `agent-engine` setting; Claude Code → writes `orchestrator-runtime` marker | `actions/activate-runtime.ts` |
-| `get-runtime-status` — current chat engine/model/baseUrl + execution runtime + `claudeCodeInstalled` probe | `actions/get-runtime-status.ts` |
-| **Claude Code login detection + real test result** (reads `~/.claude` expiry server-side; shows logged-in/expired + actionable `claude login`; test surfaces the real output/error, no fake "success") — **added this session** | `server/claude-code-status.ts`, `get-runtime-status.ts`, `start-claude-code.ts`, `settings.tsx` |
-| `start-claude-code` — attempts a `startAgentHarnessRun`, **but the framework harness is non-functional** (§7.0b); kept only as the login-detection probe + superseded by the microVM `ClaudeCodeExecutor` (§7.4) | `actions/start-claude-code.ts` |
-| Harness registration (`registerBuiltinAgentHarnesses()`), idempotent — kept for the probe; **not the v2 execution path** | `server/register-runtime.ts` |
-| vLLM activation = **built-in `ai-sdk:openai` engine + baseUrl** (NOT a custom engine): writes `agent-engine` setting `{ engine:"ai-sdk:openai", model, config:{ baseUrl } }` + a server-written placeholder `OPENAI_API_KEY` secret | `actions/activate-runtime.ts` |
-| Settings → Runtime UI (vLLM form, Claude Code connect/use/test, status card) | `app/routes/settings.tsx` |
-| Client hooks (`useRuntimeConfigs`, `useRuntimeStatus`, `useActivateRuntime`, `useStartClaudeCode`, …) | `app/hooks/use-orchestrator.ts` |
-| Harness packages **installed**: `@ai-sdk/harness@1.0.0-canary.13`, `@ai-sdk/harness-claude-code@1.0.0-canary.9` | `package.json` |
+| Piece                                                                                                                                                                                                                               | Where                                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `runtime_configs` table (`id, name, kind, baseUrl, model, active, ownerEmail, orgId, …`)                                                                                                                                            | `server/db/schema.ts`                                                                           |
+| `save-runtime-config`, `list-runtime-configs`, `delete-runtime-config`                                                                                                                                                              | `actions/`                                                                                      |
+| `activate-runtime` — vLLM → writes `agent-engine` setting; Claude Code → writes `orchestrator-runtime` marker                                                                                                                       | `actions/activate-runtime.ts`                                                                   |
+| `get-runtime-status` — current chat engine/model/baseUrl + execution runtime + `claudeCodeInstalled` probe                                                                                                                          | `actions/get-runtime-status.ts`                                                                 |
+| **Claude Code login detection + real test result** (reads `~/.claude` expiry server-side; shows logged-in/expired + actionable `claude login`; test surfaces the real output/error, no fake "success") — **added this session**     | `server/claude-code-status.ts`, `get-runtime-status.ts`, `start-claude-code.ts`, `settings.tsx` |
+| `start-claude-code` — attempts a `startAgentHarnessRun`, **but the framework harness is non-functional** (§7.0b); kept only as the login-detection probe + superseded by the microVM `ClaudeCodeExecutor` (§7.4)                    | `actions/start-claude-code.ts`                                                                  |
+| Harness registration (`registerBuiltinAgentHarnesses()`), idempotent — kept for the probe; **not the v2 execution path**                                                                                                            | `server/register-runtime.ts`                                                                    |
+| vLLM activation = **built-in `ai-sdk:openai` engine + baseUrl** (NOT a custom engine): writes `agent-engine` setting `{ engine:"ai-sdk:openai", model, config:{ baseUrl } }` + a server-written placeholder `OPENAI_API_KEY` secret | `actions/activate-runtime.ts`                                                                   |
+| Settings → Runtime UI (vLLM form, Claude Code connect/use/test, status card)                                                                                                                                                        | `app/routes/settings.tsx`                                                                       |
+| Client hooks (`useRuntimeConfigs`, `useRuntimeStatus`, `useActivateRuntime`, `useStartClaudeCode`, …)                                                                                                                               | `app/hooks/use-orchestrator.ts`                                                                 |
+| Harness packages **installed**: `@ai-sdk/harness@1.0.0-canary.13`, `@ai-sdk/harness-claude-code@1.0.0-canary.9`                                                                                                                     | `package.json`                                                                                  |
 
 Three storage locations to keep straight: the **`runtime_configs` table**
 (catalog + which row is `active`), the **`agent-engine` setting** (the live chat
@@ -1392,7 +1401,7 @@ Claude-Code execution marker).
   order (options → `AGENT_ENGINE` env → app default → user `app_secrets` →
   settings row → env auto-detect → default `anthropic`).
 - Built-in engines: `builder`, `anthropic`, and `ai-sdk:{anthropic,openai,
-  openrouter,google,groq,mistral,cohere,ollama}` (registered by
+openrouter,google,groq,mistral,cohere,ollama}` (registered by
   `registerBuiltinEngines()`).
 - **`ai-sdk:openai` supports a `baseUrl` override** (`AISDKEngineConfig.baseUrl`),
   and when set it flips OpenAI to Chat-Completions mode — this is what makes vLLM
@@ -1442,7 +1451,7 @@ built-in engine instead of a custom one, and they must stay true:
 
 1. **Dual-registry pitfall — a template-registered engine is invisible to the
    framework.** `registerAgentEngine` from a template writes to a `_registry`
-   Map that, in the dev runtime, is a *different module instance* than the one
+   Map that, in the dev runtime, is a _different module instance_ than the one
    `resolveEngine` / `listAgentEngines` / the engine-status route read (template
    imports the package dist; the framework runs its own copy). A custom `"vllm"`
    engine registered in the template **never appears** to the framework → status
@@ -1543,19 +1552,20 @@ artifacts           (id, run_id, node_run_id, kind, ref, summary, created_at)
   `workflow_runs.tokens_spent`). Per-node **logs are an artifact** (kind
   `"log"`), not a column. Per-node `effort`/`timeoutMs`/`await`/retry-policy are
   **template-graph config** (stored in `workflow_templates.graph` JSON), not
-  `node_runs` columns — only their runtime *outcomes* are columns.
+  `node_runs` columns — only their runtime _outcomes_ are columns.
 - **Artifact references:** `node_runs.input_ref`/`output_ref` point at
   `artifacts.id`; `artifacts.ref` holds the Resources-store id/path
   (`resources/store.ts`) or a local-file path (§7.2). There is one artifact
   index (`artifacts`) over one content store (Resources) — not two stores.
 
 Notes:
+
 - **Do not "replace" v1 tables.** The data contract forbids destructive
   migrations. `workflows`/`tasks`/`step_runs` stay; v2 introduces the new tables
   alongside. A one-way **backfill** (not a schema drop) can copy `task→work_item`,
   `workflow→workflow_template`, `step_run→node_run` for users who want their old
   runs visible in the new UI.
-- **`runtime_configs` already exists** with a *different* shape than the v1 draft
+- **`runtime_configs` already exists** with a _different_ shape than the v1 draft
   imagined (`kind`/`model`/`active`/hand-rolled `ownerEmail`+`orgId`, **not**
   `ownableColumns()`). Keep it as-is; if v2 wants `ownableColumns()` scoping,
   that's an **additive column migration**, not a rename.
@@ -1574,6 +1584,7 @@ Notes:
 `get-runtime-status`, `start-claude-code`**.
 
 **v2 adds:**
+
 - Templates: `save-template`, `list-templates`, `get-template`, `delete-template`,
   `promote-run-to-template` (§6.5).
 - Node library: `save-node-def`, `list-node-defs`, `delete-node-def` (§3.7).
@@ -1608,44 +1619,45 @@ or top-level `access` field** — scope inside `run` via `accessFilter`/
 
 ## 11. Current Status vs To-Build (corrected, honest gap)
 
-| Capability | v1 / v1.5 (now) | v2 (this design) |
-|------------|-----------------|------------------|
-| Linear step list (`step_runs`) | ✅ built | superseded by graph (kept for migration) |
-| JSON workflow storage | ✅ built | kept; canvas added |
-| **Runtime config table + CRUD actions** | ✅ **built (v1.5)** | reuse; extend per-node |
-| **vLLM / OpenAI-compatible engine + UI** | ✅ **built (v1.5)** | add Test button + model list |
-| **Settings → Runtime UI + Claude Code login detection** | ✅ **built (v1.5)** — reads `~/.claude` expiry, shows logged-in/expired, real test result | reuse |
-| **Framework Claude Code harness (exec)** | ❌ **non-functional** (canary needs a SandboxProvider; crashes in `_acquireSandbox`, §7.0b) | **dropped** — replaced by real `claude` in a microVM (§7.4) |
-| **microVM execution (microsandbox) per node** | ❌ (no runtime code; survey done, §7.0a) | **to build** (§7.4) — the core |
-| Visual editor | ❌ (raw JSON textarea) | **to build** (React Flow) |
-| Parallel/fanout/loop/branch/join | ❌ (ordered list only) | **to build** (engine §4) |
-| Pipeline-vs-barrier semantics | ❌ | **to build** (§1.3, §4.1) |
-| Dynamic runtime expansion | ❌ | **to build** |
-| Determinism / journaled resume | ❌ | **to build** (§1.7) |
-| Budget-aware scaling | ❌ | **to build** (§1.8) |
-| Control API (pause/resume/cancel/retry) | partial (`stop-task` only) | **to build** |
-| Status/graph API | partial (`list-step-runs`) | **to build** |
-| Projects / work items | ❌ | **to build** |
-| Work queue + cross-task concurrency (pull model, degree) | ❌ (no queue/pool primitive) | **to build** (§6.4) |
-| Per-node execution runtime (provision/mount/branch/recover) | ❌ | **to build** (§7.4) |
-| Model-agnostic acting tools (bash/edit/read/write bound to a `cwd`) | ✅ `createCodingToolRegistry` exists | re-point at `microsandbox exec` (§7.4.1a) |
-| microVM `NodeRuntime` (provision/exec/fs/snapshot/destroy per node) | ❌ (no runtime code; microsandbox not installed) | **to build** (§7.4.2) — microsandbox SDK |
-| Credential store + grants + approval + injection | ✅ dispatch **Vault** + core resolvers (reuse) | build only **VM env injection** + `~/.claude` mount + git-push auth (§7.4.7) |
-| Human approval gate (`human` node) | ✅ dispatch approval state machine (reuse) | register changeType (`dispatch-store.ts:426-604`) |
-| Git branch / commit / push / PR | ❌ (no git deps in repo) | **to build** — thin `git` CLI wrapper over `runCodingCommand` |
-| Reusable node library (fixed review/commit/push/MR nodes) | ❌ | **to build** (§3.7) |
-| Orchestrator brain controls graph via MCP action surface | partial (MCP auto-mounted; harness not connected, passes no tools) | **wire** `connect` (§2a) |
-| Dynamic authoring (Claude builds workflow) + promote-to-template | partial (decomposition concept only) | **to build** (§6.5) |
-| Server-side DAG execution (scheduler) | ❌ (action returns an instruction; the UI calls `sendToAgentChat`) | **to build** (`startRun`+`runAgentLoop`, model on `jobs/scheduler.ts`) |
-| Headless single-run trigger | ✅ **partial** (`start-claude-code` probes login + attempts a run) | generalize to the microVM `NodeRunner` for all node types (§7.4) |
-| **Complete isolated/virtual exec env (microVM per node)** | ❌ **(code runs unisolated on host today)** | **to build** (§7.4 — microsandbox) |
-| `run-code` JS sandbox (Node perm-model + scrubbed env + bridge) | ✅ built (JS snippets only) | reuse for trusted `tool`-node snippets |
-| In-microVM git checkout + commit + push + PR | ❌ (no git deps) | **to build** (§7.1 — thin git wrapper over `microsandbox exec`) |
-| Harness working-dir (`cwd`) for code nodes | ⚠️ adapter drops `cwd` (verified) | **moot** — code runs claude in-microVM (cwd set by VM); framework harness dropped (§7.0b) |
-| Non-code deliverables to local dir | ❌ | **to build** (`local-artifacts`) |
-| PTY/terminal streaming | ✅ deps present (`node-pty`+`@xterm/*`) | wire into run terminal panel |
+| Capability                                                          | v1 / v1.5 (now)                                                                             | v2 (this design)                                                                          |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Linear step list (`step_runs`)                                      | ✅ built                                                                                    | superseded by graph (kept for migration)                                                  |
+| JSON workflow storage                                               | ✅ built                                                                                    | kept; canvas added                                                                        |
+| **Runtime config table + CRUD actions**                             | ✅ **built (v1.5)**                                                                         | reuse; extend per-node                                                                    |
+| **vLLM / OpenAI-compatible engine + UI**                            | ✅ **built (v1.5)**                                                                         | add Test button + model list                                                              |
+| **Settings → Runtime UI + Claude Code login detection**             | ✅ **built (v1.5)** — reads `~/.claude` expiry, shows logged-in/expired, real test result   | reuse                                                                                     |
+| **Framework Claude Code harness (exec)**                            | ❌ **non-functional** (canary needs a SandboxProvider; crashes in `_acquireSandbox`, §7.0b) | **dropped** — replaced by real `claude` in a microVM (§7.4)                               |
+| **microVM execution (microsandbox) per node**                       | ❌ (no runtime code; survey done, §7.0a)                                                    | **to build** (§7.4) — the core                                                            |
+| Visual editor                                                       | ❌ (raw JSON textarea)                                                                      | **to build** (React Flow)                                                                 |
+| Parallel/fanout/loop/branch/join                                    | ❌ (ordered list only)                                                                      | **to build** (engine §4)                                                                  |
+| Pipeline-vs-barrier semantics                                       | ❌                                                                                          | **to build** (§1.3, §4.1)                                                                 |
+| Dynamic runtime expansion                                           | ❌                                                                                          | **to build**                                                                              |
+| Determinism / journaled resume                                      | ❌                                                                                          | **to build** (§1.7)                                                                       |
+| Budget-aware scaling                                                | ❌                                                                                          | **to build** (§1.8)                                                                       |
+| Control API (pause/resume/cancel/retry)                             | partial (`stop-task` only)                                                                  | **to build**                                                                              |
+| Status/graph API                                                    | partial (`list-step-runs`)                                                                  | **to build**                                                                              |
+| Projects / work items                                               | ❌                                                                                          | **to build**                                                                              |
+| Work queue + cross-task concurrency (pull model, degree)            | ❌ (no queue/pool primitive)                                                                | **to build** (§6.4)                                                                       |
+| Per-node execution runtime (provision/mount/branch/recover)         | ❌                                                                                          | **to build** (§7.4)                                                                       |
+| Model-agnostic acting tools (bash/edit/read/write bound to a `cwd`) | ✅ `createCodingToolRegistry` exists                                                        | re-point at `microsandbox exec` (§7.4.1a)                                                 |
+| microVM `NodeRuntime` (provision/exec/fs/snapshot/destroy per node) | ❌ (no runtime code; microsandbox not installed)                                            | **to build** (§7.4.2) — microsandbox SDK                                                  |
+| Credential store + grants + approval + injection                    | ✅ dispatch **Vault** + core resolvers (reuse)                                              | build only **VM env injection** + `~/.claude` mount + git-push auth (§7.4.7)              |
+| Human approval gate (`human` node)                                  | ✅ dispatch approval state machine (reuse)                                                  | register changeType (`dispatch-store.ts:426-604`)                                         |
+| Git branch / commit / push / PR                                     | ❌ (no git deps in repo)                                                                    | **to build** — thin `git` CLI wrapper over `runCodingCommand`                             |
+| Reusable node library (fixed review/commit/push/MR nodes)           | ❌                                                                                          | **to build** (§3.7)                                                                       |
+| Orchestrator brain controls graph via MCP action surface            | partial (MCP auto-mounted; harness not connected, passes no tools)                          | **wire** `connect` (§2a)                                                                  |
+| Dynamic authoring (Claude builds workflow) + promote-to-template    | partial (decomposition concept only)                                                        | **to build** (§6.5)                                                                       |
+| Server-side DAG execution (scheduler)                               | ❌ (action returns an instruction; the UI calls `sendToAgentChat`)                          | **to build** (`startRun`+`runAgentLoop`, model on `jobs/scheduler.ts`)                    |
+| Headless single-run trigger                                         | ✅ **partial** (`start-claude-code` probes login + attempts a run)                          | generalize to the microVM `NodeRunner` for all node types (§7.4)                          |
+| **Complete isolated/virtual exec env (microVM per node)**           | ❌ **(code runs unisolated on host today)**                                                 | **to build** (§7.4 — microsandbox)                                                        |
+| `run-code` JS sandbox (Node perm-model + scrubbed env + bridge)     | ✅ built (JS snippets only)                                                                 | reuse for trusted `tool`-node snippets                                                    |
+| In-microVM git checkout + commit + push + PR                        | ❌ (no git deps)                                                                            | **to build** (§7.1 — thin git wrapper over `microsandbox exec`)                           |
+| Harness working-dir (`cwd`) for code nodes                          | ⚠️ adapter drops `cwd` (verified)                                                           | **moot** — code runs claude in-microVM (cwd set by VM); framework harness dropped (§7.0b) |
+| Non-code deliverables to local dir                                  | ❌                                                                                          | **to build** (`local-artifacts`)                                                          |
+| PTY/terminal streaming                                              | ✅ deps present (`node-pty`+`@xterm/*`)                                                     | wire into run terminal panel                                                              |
 
 **Housekeeping (Phase 0) — DONE (verified this session, no longer open):**
+
 - ✅ `orchestrating` skill synced into `.claude/skills/orchestrating/SKILL.md`
   (identical to `.agents/skills/`).
 - ✅ `server/plugins/agent-chat.ts` now uses `appId:"orchestrator"`, an
@@ -1676,7 +1688,7 @@ and is verified before the next begins.
    modeled on `jobs/scheduler.ts`. Verify via CLI (`pnpm action run-start …`).
    **Also wire the orchestrator brain's control channel now (§2a):** connect the
    Claude Code orchestrator (planner) node to the app's MCP surface (`claude mcp
-   add` / `agent-native connect …/mcp`) so it can read+drive the graph — without it,
+add` / `agent-native connect …/mcp`) so it can read+drive the graph — without it,
    it can't author or steer.
 2. **Run viewer first, editor later.** Build a **read-only graph overlay** (live
    NodeRun status on a canvas) — high value, low effort. Keep **JSON/YAML as the
@@ -1685,25 +1697,25 @@ and is verified before the next begins.
    developer-user it is the highest-effort, lowest-marginal-value phase, so it is
    explicitly deferred, not assumed.
 3. **Projects, work items & the queue (the primary usage model)** — project +
-   work-item tables, CRUD, kanban-by-status board, **the full status model
+   work-item tables, CRUD, kanban-by-status board, \*\*the full status model
    (§6.2a/§6.2b): `transition-work-item` validator + watchdog + `work_item_status_log`
-   + `work_item_links`**, **the work queue + atomic-claim worker pool with a
-   configurable `concurrencyDegree` (§6.4)**, the **reusable node library (§3.7)**
-   (ship a starter set: `code-review`, `run-tests`, `git-commit`, `git-push`,
-   `open-pr`, **`finalize-status`**), and **dynamic authoring + promote (§6.5)**.
-   Tables use **`ownableColumns()`** for owner scoping (the framework standard);
-   the **shares tables + sharing UI are deferred** until multi-user is needed —
-   additive later (§9). **Also rewrite `orchestrating/SKILL.md` + `CLAUDE.md` to the
-   v2 surface** — they are still v1 (task/`step_runs`); they must mandate the agent's
-   `transition-work-item` calls at the §6.2a judgement points (the writer half of
-   §6.2b), or the watchdog fires on every run. **Ship a docs-shaped default scheme
-   too** (e.g. requirement-docs: 待写作 · 撰写中 · 评审中 · 定稿) so a non-code
-   project isn't forced through 测试/发布 stages it can't reach.
+   - `work_item_links`**, **the work queue + atomic-claim worker pool with a
+     configurable `concurrencyDegree` (§6.4)**, the **reusable node library (§3.7)**
+     (ship a starter set: `code-review`, `run-tests`, `git-commit`, `git-push`,
+     `open-pr`, **`finalize-status`**), and **dynamic authoring + promote (§6.5)**.
+     Tables use **`ownableColumns()`** for owner scoping (the framework standard);
+     the **shares tables + sharing UI are deferred** until multi-user is needed —
+     additive later (§9). **Also rewrite `orchestrating/SKILL.md` + `CLAUDE.md` to the
+     v2 surface** — they are still v1 (task/`step_runs`); they must mandate the agent's
+     `transition-work-item` calls at the §6.2a judgement points (the writer half of
+     §6.2b), or the watchdog fires on every run. **Ship a docs-shaped default scheme
+     too\*\* (e.g. requirement-docs: 待写作 · 撰写中 · 评审中 · 定稿) so a non-code
+     project isn't forced through 测试/发布 stages it can't reach.
 4. **Unified `NodeRunner` over a microVM (§7.4) — microsandbox.** Build the
    `NodeRuntime` (microsandbox SDK: provision/mount/init/exec/spawn/fs/snapshot/
    teardown) + the 7-stage `NodeRunner` skeleton + the three executors
    (`VllmExecutor`, `RemoteApiExecutor`, `ClaudeCodeExecutor` = `claude
-   --output-format stream-json` in-VM). Prebake the base image (node+pnpm+git+claude,
+--output-format stream-json` in-VM). Prebake the base image (node+pnpm+git+claude,
    §7.4.8); inject creds as scoped VM env + mount `~/.claude` (§7.4.7); wire host
    vLLM networking (§7.4.9). Build the thin **git wrapper** (branch/commit/push over
    `microsandbox exec`) + **git-push auth** + **PR creation**. Validate the headline
@@ -1724,16 +1736,18 @@ and is verified before the next begins.
 Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
 
 **Engines**
+
 - `resolveEngine(config)` — `agent/engine/registry.ts:404`; config
   `{ engineOption?, apiKey?, model?, appId? }`.
 - `registerAgentEngine(entry)` — `agent/engine/registry.ts:52`; entry =
   `{ name, label, description, installPackage?, capabilities, defaultModel,
-  supportedModels, requiredEnvVars, create }`.
+supportedModels, requiredEnvVars, create }`.
 - `registerBuiltinEngines()` — `agent/engine/builtin.ts:37` (engines).
 - `createAISDKEngine(provider, config)` — `agent/engine/ai-sdk-engine.ts:412`;
   `baseUrl` at `:188`/`:390`; openai+baseUrl→chat-completions `:402`.
 
 **Harness (framework wrapper — NOT used for v2 execution; §7.0b)**
+
 - `registerBuiltinAgentHarnesses()` — `agent/harness/builtin.ts:13`
   (ids `ai-sdk-harness:{claude-code,codex,pi}`).
 - `resolveAgentHarness(name, config?)` — `agent/harness/registry.ts:38`.
@@ -1754,11 +1768,12 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
 - Sandbox provider interface (for reference / the `NodeRuntime` shape): types in
   `@ai-sdk/harness/dist/agent/index.d.ts` (`HarnessV1SandboxProvider`,
   `HarnessV1NetworkSandboxSession` — `run/spawn/readFile/writeFile/getPortUrl/ports/
-  stop/destroy/restricted/defaultWorkingDirectory`); concrete reference impl =
+stop/destroy/restricted/defaultWorkingDirectory`); concrete reference impl =
   `@ai-sdk/sandbox-vercel@canary.13` (473 LOC, the blueprint our `MicrosandboxRuntime`
   mirrors).
 
 **Runs (headless)**
+
 - `runAgentLoop(opts)` — **`agent/production-agent.ts:2228`** (single options
   object: `{ engine, model, systemPrompt, tools, messages, send, signal, … }`,
   returns `AgentLoopUsage`).
@@ -1770,35 +1785,40 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
   `resolveEngine` → `createThread` → `startRun` → `runAgentLoop`.
 
 **Agent teams (background controller per CLAUDE.md)**
+
 - `spawnTask`, `processAgentTeamRun`, controllers — `server/agent-teams.ts`.
 
 **A2A**
+
 - `invokeAgent({ target, prompt, … })` — `a2a/invoke.ts:142`; re-export
   `a2a/index.ts:10`; `callAgent` re-exported from `a2a/client.js`. (`call-agent`
   is the script `scripts/call-agent.ts`, not a function.) **A2A returns response
   text only — no usage/token data** (relevant to §1.8 budget; see §14).
 
 **Orchestrator brain control surface (§2a)**
+
 - Action→MCP-tools bridge: `createMCPServerForRequest` — `mcp/build-server.ts`;
   mounted at `/_agent-native/mcp` by `mountMCP` — `server/agent-chat-plugin.ts`
   (auto-wired by the template's `createAgentChatPlugin`). Connect a harness with
   `agent-native connect <url>/_agent-native/mcp --client claude-code`
   (`--full-catalog` to skip `tool-search`).
 - CLI fallback: `runScript()` — `scripts/runner.ts:58` (`pnpm action <name>
-  --args`); needs `AGENT_USER_EMAIL`/`AGENT_ORG_ID` for scoping.
+--args`); needs `AGENT_USER_EMAIL`/`AGENT_ORG_ID` for scoping.
 - Harness session **does not** get `mcpServers` as a first-class option
   (`harness/types.ts:36-56`); `tools`/`skills` are forwarded but
   `start-claude-code.ts` passes none today.
 
 **Work queue (§6.4) — no ready primitive; build from these**
+
 - Atomic single-flight claim pattern: `claimA2ATaskForProcessing` —
   `a2a/task-store.ts` (used `a2a/handlers.ts:128`), stuck-reclaim
   `handlers.ts:779-815`.
 - Concurrency-limited worker pool pattern: `Promise.all(Array.from({length:N},
-  worker))` — `cli/workspace-dev.ts:1259` (only example in repo; not exported).
+worker))` — `cli/workspace-dev.ts:1259` (only example in repo; not exported).
 - The cron scheduler is **sequential**, not a pool (`jobs/scheduler.ts:210-260`).
 
 **Sandbox / code exec**
+
 - `registerSandboxAdapter`, `getSandboxAdapter`, `AGENT_NATIVE_SANDBOX` —
   `coding-tools/sandbox/index.ts:58/68`; only `local` wired; Docker =
   `blueprints/sandbox/docker.md` (doc, not code).
@@ -1812,6 +1832,7 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
   the export).
 
 **Artifacts / files (three distinct layers — don't conflate)**
+
 - Resources store (id-addressable): `resources/store.ts` — `resourcePut`,
   `resourceGetByPath`.
 - `workspace-files/store.ts` — thin compat wrapper over Resources (`scratch/` →
@@ -1820,6 +1841,7 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
   truth).
 
 **Data / actions / scoping**
+
 - `ownableColumns()` — `sharing/schema.ts:36`; `createSharesTable(name)` — `:66`.
 - `accessFilter` — `sharing/access.ts:91`; `resolveAccess` — `:219`;
   `assertAccess` — `:308`.
@@ -1827,6 +1849,7 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
   (**no `handler`, no top-level `access`**).
 
 **Secrets**
+
 - `GITHUB_TOKEN` registered — `secrets/register-framework-secrets.ts:66`.
 - `writeAppSecret`/`readAppSecret` — `secrets/storage.ts:103/157`;
   `resolveSecret(key)` — `server/credential-provider.ts:870`.
@@ -1834,6 +1857,7 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
   `server/agent-engine-api-key-route.ts` (`createAgentEngineApiKeyHandler`).
 
 **Credentials & approvals — reuse from dispatch + core (verified §7.4.7)**
+
 - Scoped vault (store + grants + request/approval + audit + env push):
   `dispatch/src/server/lib/vault-store.ts:44-71` (ctx scope), `:801-832`
   (`syncGrantsToApp` env push), `:911-1020` (request/approve).
@@ -1847,8 +1871,9 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
   changeType apply switch — `dispatch/src/server/lib/dispatch-store.ts:426-604`.
 
 **microVM / git execution — build new (verified: nothing to reuse but primitives)**
+
 - microVM runtime: the **`microsandbox`** npm SDK (libkrun) — `Sandbox.builder()
-  .image().port().create()`, `.exec()`, `.execStream()`, `.fs()`, `.stop()/.remove()`,
+.image().port().create()`, `.exec()`, `.execStream()`, `.fs()`, `.stop()/.remove()`,
   snapshots. **Beta (v0.5.x), Apache-2.0.** Not installed yet; needs `/dev/kvm`
   (verified on the dev host's WSL2). Reference provider impl to mirror:
   `@ai-sdk/sandbox-vercel@1.0.0-canary.13` (`dist/index.js`, 473 LOC).
@@ -1860,6 +1885,7 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
   over `microsandbox exec`.
 
 **Verified gotchas (won't surface from signatures alone)**
+
 - **`startRun` per-thread singleton** — one run per `threadId`; a new `startRun`
   on the same thread **aborts** the prior (`run-manager.ts:222-226`). → distinct
   thread + runId per concurrent NodeRun (§4.2).
@@ -1878,7 +1904,7 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
 - **Settings are global, key-only** (`settings/store.ts`, no owner/org column).
   `orchestrator-runtime` / `agent-engine` are deployment-wide — fine for solo
   self-host, not per-user. The headless scheduler reads them with no context, which
-  is *why* the read works (§8.5).
+  is _why_ the read works (§8.5).
 - **`resolveEngine` vLLM path is gated by `OPENAI_API_KEY`** (usability gate) and
   **Builder creds outrank the stored row** (`detectEngineFromUserSecrets` runs
   first). The placeholder secret must be resolvable in the run's context (§8.5.2).
@@ -1891,8 +1917,8 @@ Use these exact symbols; do not reinvent. Paths under `packages/core/src`.
 ## 14. Open Risks & Decisions
 
 - **Determinism vs live agents.** Agent outputs are non-deterministic, so
-  "replay" means *replay the journal* (cached completed NodeRuns), not
-  *re-derive identical outputs*. `run-resume` replays journaled artifacts;
+  "replay" means _replay the journal_ (cached completed NodeRuns), not
+  _re-derive identical outputs_. `run-resume` replays journaled artifacts;
   `run-retry-node` is the explicit "re-run this node live" escape hatch. Make this
   distinction loud in the UI so users aren't surprised.
 - **microsandbox is beta (the biggest unknown).** v0.5.x, breaking changes
@@ -1984,7 +2010,7 @@ re-architecture:**
 
 1. **microVM execution spike (gates phase 4).** Prove microsandbox end-to-end on the
    target host: boot a VM from a prebaked image, mount `~/.claude`, run `claude
-   --output-format stream-json`, reach the host vLLM, and destroy+reboot for a clean
+--output-format stream-json`, reach the host vLLM, and destroy+reboot for a clean
    re-run — plus N concurrent VMs for the resource cap. Beta + KVM are the
    unknowns (§14); microsandbox is the sole backend, so this spike is a hard
    go/no-go on KVM + beta stability. **Run it before committing phase 4.**

@@ -1,7 +1,11 @@
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail, getRequestOrgId } from "@agent-native/core/server/request-context";
+import {
+  getRequestUserEmail,
+  getRequestOrgId,
+} from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -14,7 +18,10 @@ export default defineAction({
     "exist yet), set its status to 执行中, and update the work item to running.",
   schema: z.object({
     workItemId: z.string().min(1).describe("Work item to trigger a stage on"),
-    stageName: z.string().min(1).describe("Stage name (e.g. 分析, 设计, 实施, 测试, 验收, 交付)"),
+    stageName: z
+      .string()
+      .min(1)
+      .describe("Stage name (e.g. 分析, 设计, 实施, 测试, 验收, 交付)"),
   }),
   http: { method: "POST" },
   run: async (args) => {
@@ -24,16 +31,29 @@ export default defineAction({
 
     const db = getDb();
     const now = new Date().toISOString();
-    const VALID_STAGES = ['待办','分析','设计','实施','测试','验收','交付'];
-    if (!VALID_STAGES.includes(args.stageName)) throw new Error(`Invalid stage: ${args.stageName}`);
-
+    const VALID_STAGES = [
+      "待办",
+      "分析",
+      "设计",
+      "实施",
+      "测试",
+      "验收",
+      "交付",
+    ];
+    if (!VALID_STAGES.includes(args.stageName))
+      throw new Error(`Invalid stage: ${args.stageName}`);
 
     // --- Confirm the work item is owned / visible ---
     const item = (
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found or not accessible");

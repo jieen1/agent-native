@@ -14,6 +14,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 type WaitingFor = "deps" | "vm" | "approval" | "acp";
@@ -36,7 +37,9 @@ export const dispatchQueue = defineAction({
     // (fail-closed) so no request can read another owner's queued nodes.
     const statusCondition = sql`${v3Schema.v3Nodes.status} IN ('pending', 'ready', 'awaiting-approval')`;
     const ownerCondition = sql`${v3Schema.v3Nodes.ownerEmail} = ${resolveOwnerEmail()}`;
-    const runCondition = args.runId ? eq(v3Schema.v3Nodes.runId, args.runId) : undefined;
+    const runCondition = args.runId
+      ? eq(v3Schema.v3Nodes.runId, args.runId)
+      : undefined;
     const whereCondition = and(statusCondition, ownerCondition, runCondition);
 
     const nodeRows = await db
@@ -76,14 +79,18 @@ export const dispatchQueue = defineAction({
     // Resolve agent names from DAG to detect acp runtime — load DAGs lazily
     const dagCache = new Map<string, Array<{ id: string; agent?: string }>>();
 
-    async function getRunDag(runId: string): Promise<Array<{ id: string; agent?: string }>> {
+    async function getRunDag(
+      runId: string,
+    ): Promise<Array<{ id: string; agent?: string }>> {
       if (dagCache.has(runId)) return dagCache.get(runId)!;
       const rows = await db
         .select({ dag: v3Schema.v3Runs.dag })
         .from(v3Schema.v3Runs)
         .where(eq(v3Schema.v3Runs.id, runId))
         .limit(1);
-      const dag = rows[0]?.dag as { nodes?: Array<{ id: string; agent?: string }> } | null;
+      const dag = rows[0]?.dag as {
+        nodes?: Array<{ id: string; agent?: string }>;
+      } | null;
       const nodes = dag?.nodes ?? [];
       dagCache.set(runId, nodes);
       return nodes;
@@ -145,4 +152,3 @@ export const dispatchQueue = defineAction({
     return { queue, total: queue.length };
   },
 });
-

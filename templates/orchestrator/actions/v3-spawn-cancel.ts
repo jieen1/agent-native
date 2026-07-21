@@ -7,6 +7,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export const spawnCancel = defineAction({
@@ -38,7 +39,9 @@ export const spawnCancel = defineAction({
 
     const prev = rows[0].status;
     if (!["pending", "running"].includes(prev)) {
-      throw new Error(`Spawn is already ${prev}; can only cancel pending or running spawns`);
+      throw new Error(
+        `Spawn is already ${prev}; can only cancel pending or running spawns`,
+      );
     }
 
     await db

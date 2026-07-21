@@ -162,7 +162,7 @@ output-tokens 告警、engine-loop 32k、brain-model 目录)。**生产环境是
   SDLC-052);spec 作者自审对自身设计决定零质疑(B2 事务债、B3 N+1 均为 spec
   写入,审计实证)。这两件事让"评审通过"四个字失去意义。
 - **现状证据**:`brain-session.ts` argv `--allowedTools mcp__orchestrator Bash Read
-  Edit Write` 全开;评审=同一 brain 会话;质量调研:小单里 brain 自查零深层缺陷。
+Edit Write` 全开;评审=同一 brain 会话;质量调研:小单里 brain 自查零深层缺陷。
 - **可证伪验收**:①评审相位实测:让评审节点执行 `printf ... >> 源文件`(经 Bash 工具)→被机制
   拒绝(只读挂载/写类工具裁剪,非提示词劝阻)。②**门是结构性的、可确定判定**:评审执行者的
   会话/节点标识 ≠ spec 作者的会话/节点标识(从 run 证据上二者 sessionId/nodeId 不同即通过);把
@@ -203,7 +203,7 @@ output-tokens 告警、engine-loop 32k、brain-model 目录)。**生产环境是
 ### F7 遥测与身份单一事实源【已交付 2026-07-12】(设计出处 04 §7 模型注册表 / §13 采集契约 / §10 遥测可信卡 / §6 turn 终态判定)
 
 - **做什么**:①spawn 用量只取流终 usage(修 tok_in=0/tok_out 平方膨胀);
-  ②model_registry(真名+别名映射),spawn.model_ref 记真名,claude-* 禁止映射
+  ②model_registry(真名+别名映射),spawn.model_ref 记真名,claude-\* 禁止映射
   非 Claude 权重;③harness 声明开启而初始化失败=健康页红灯+error 日志(禁静默降级);
   ④turn 终态判定契约:交付摘要存在时收尾竞态不得覆盖为 error。
 - **为什么是地基**:遥测不可信则一切复盘/成本/质量归因全错(1.33M tok/4min、
@@ -422,7 +422,7 @@ gap-analysis 仅场景② 专用故不入地基,但必须与场景② 同阶段�
 ## 附:与 open issue 的映射
 
 > 消歧提示:SDLC-033/034/056/057 是 F8 所指重号 itemKey(各两条 open),引用时必须带
-> 义项后缀——本表消歧本身正是 F8 要根治的问题。与 tracker open 池(35 条 SDLC-*)双向对账,
+> 义项后缀——本表消歧本身正是 F8 要根治的问题。与 tracker open 池(35 条 SDLC-\*)双向对账,
 > 无失引(所引 issue 全部存在且 open),下列为新补全的映射。
 
 **地基项↔issue**:F1(056-基线过期 / 057-无测试环境 / 059) F2(058 / 057b-64k钳制)

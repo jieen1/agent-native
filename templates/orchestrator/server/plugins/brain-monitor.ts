@@ -1,5 +1,6 @@
-import { startBrainMonitorTick } from "../brain/brain-monitor.js";
 import { isPostgres } from "@agent-native/core/db";
+
+import { startBrainMonitorTick } from "../brain/brain-monitor.js";
 
 // Brain monitor scheduler plugin — the CONFIGURABLE TIMED/periodic wake.
 //

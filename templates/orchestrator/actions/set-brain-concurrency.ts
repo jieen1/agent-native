@@ -9,12 +9,13 @@
 
 import { defineAction } from "@agent-native/core";
 import { z } from "zod";
+
+import { admitBrainTasks } from "../server/queue/brain-admit.js";
 import {
   setBrainConcurrency,
   MIN_BRAIN_CONCURRENCY,
   MAX_BRAIN_CONCURRENCY,
 } from "../server/queue/brain-concurrency.js";
-import { admitBrainTasks } from "../server/queue/brain-admit.js";
 
 export default defineAction({
   description:

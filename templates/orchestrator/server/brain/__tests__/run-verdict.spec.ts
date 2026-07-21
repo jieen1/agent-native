@@ -4,6 +4,7 @@
 // 运行期验证属 101 集成)。
 
 import { describe, it, expect } from "vitest";
+
 import { v3Events, v3Runs } from "../../db/v3-schema.js";
 import { recordRunVerdict } from "../run-verdict.js";
 

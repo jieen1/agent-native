@@ -21,6 +21,13 @@
 //     must be STOPPED first), `msb stop`, `msb rm -f`, `msb list -q` all work.
 
 import { newId } from "../../actions/_util.js";
+import type { NodeRuntimeSpec } from "../../shared/types.js";
+import {
+  checkoutRunBranch,
+  cloneRepo,
+  type GitContext,
+} from "./git-wrapper.js";
+import { resolveEgress } from "./networking.js";
 import type {
   ExecOptions,
   ExecResult,
@@ -31,16 +38,9 @@ import type {
   TeardownPolicy,
   VmHandle,
 } from "./node-runtime.js";
-import type { NodeRuntimeSpec } from "../../shared/types.js";
-import { shArg, wslMsb, wslMsbStream, type WslMsbOptions } from "./wsl-msb.js";
-import { resolveEgress } from "./networking.js";
 import { mountVmCredentials, VM_HOME } from "./vm-creds.js";
 import { ensureToolchain, type ToolchainNeeds } from "./vm-setup.js";
-import {
-  checkoutRunBranch,
-  cloneRepo,
-  type GitContext,
-} from "./git-wrapper.js";
+import { shArg, wslMsb, wslMsbStream, type WslMsbOptions } from "./wsl-msb.js";
 
 /** Default node image until the prebaked image lands (DESIGN §7.4.8, P2c). */
 const DEFAULT_IMAGE = "alpine";

@@ -30,6 +30,13 @@
 // incremental (SSE flush-per-frame); fs roundtrip; force teardown ~0.11s.
 
 import { newId } from "../../actions/_util.js";
+import type { NodeRuntimeSpec } from "../../shared/types.js";
+import {
+  checkoutRunBranch,
+  cloneRepo,
+  type GitContext,
+} from "./git-wrapper.js";
+import { resolveEgress } from "./networking.js";
 import type {
   ExecOptions,
   ExecResult,
@@ -40,15 +47,8 @@ import type {
   TeardownPolicy,
   VmHandle,
 } from "./node-runtime.js";
-import type { NodeRuntimeSpec } from "../../shared/types.js";
-import { resolveEgress } from "./networking.js";
 import { mountVmCredentials, VM_HOME } from "./vm-creds.js";
 import { ensureToolchain, type ToolchainNeeds } from "./vm-setup.js";
-import {
-  checkoutRunBranch,
-  cloneRepo,
-  type GitContext,
-} from "./git-wrapper.js";
 
 /**
  * True when `image` is a prebaked worker image that already carries the full
@@ -95,7 +95,10 @@ function bridgeToken(): string {
 }
 
 function bridgeHeaders(extra?: Record<string, string>): Record<string, string> {
-  const h: Record<string, string> = { "content-type": "application/json", ...extra };
+  const h: Record<string, string> = {
+    "content-type": "application/json",
+    ...extra,
+  };
   const t = bridgeToken();
   if (t) h["authorization"] = `Bearer ${t}`;
   return h;
@@ -274,7 +277,8 @@ export class MsbRuntime implements NodeRuntime {
 
     const image = (vm.meta?.image as string | undefined) ?? vm.spec.image;
     if (isPrebakedImage(image)) {
-      if (vm.meta) vm.meta.toolchain = { prebaked: true, image, installed: false };
+      if (vm.meta)
+        vm.meta.toolchain = { prebaked: true, image, installed: false };
     } else {
       const tc = await ensureToolchain(this, vm, toolchainNeedsFor(vm), runEnv);
       if (vm.meta)
@@ -289,7 +293,10 @@ export class MsbRuntime implements NodeRuntime {
 
     let branchPickedUp = false;
     if (vm.spec.gitRemote && vm.spec.gitRemote.trim() !== "") {
-      const cloned = await cloneRepo(gitCtx, { remoteUrl: vm.spec.gitRemote, branch });
+      const cloned = await cloneRepo(gitCtx, {
+        remoteUrl: vm.spec.gitRemote,
+        branch,
+      });
       if (!cloned.cloned) {
         throw new Error(
           `init: clone ${vm.spec.gitRemote} failed (${cloned.reason}): ${cloned.detail}`,
@@ -318,10 +325,15 @@ export class MsbRuntime implements NodeRuntime {
    * features work and a single command string is accepted — exactly like
    * MicrosandboxRuntime's `msb exec … -- sh -lc <body>`.
    */
-  async exec(vm: VmHandle, cmd: string, opts?: ExecOptions): Promise<ExecResult> {
+  async exec(
+    vm: VmHandle,
+    cmd: string,
+    opts?: ExecOptions,
+  ): Promise<ExecResult> {
     const o = withRuntimeEnv(vm, opts);
     const body = this.execBody(cmd, o);
-    const timeoutMs = o?.timeoutMs && o.timeoutMs > 0 ? o.timeoutMs : DEFAULT_TIMEOUT_MS;
+    const timeoutMs =
+      o?.timeoutMs && o.timeoutMs > 0 ? o.timeoutMs : DEFAULT_TIMEOUT_MS;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs + 30_000);
     try {
@@ -338,11 +350,22 @@ export class MsbRuntime implements NodeRuntime {
         const text = await res.text().catch(() => "");
         // A bridge-level failure (not an in-VM non-zero exit) is surfaced as a
         // failed ExecResult so callers see the detail; never throw a non-zero exit.
-        return { code: -1, stdout: "", stderr: `exec bridge ${res.status}: ${text.slice(0, 400)}` };
+        return {
+          code: -1,
+          stdout: "",
+          stderr: `exec bridge ${res.status}: ${text.slice(0, 400)}`,
+        };
       }
-      const json = (await res.json()) as Partial<ExecResult> & { error?: string; detail?: string };
+      const json = (await res.json()) as Partial<ExecResult> & {
+        error?: string;
+        detail?: string;
+      };
       if (json.error) {
-        return { code: -1, stdout: "", stderr: `${json.error}: ${json.detail ?? ""}` };
+        return {
+          code: -1,
+          stdout: "",
+          stderr: `${json.error}: ${json.detail ?? ""}`,
+        };
       }
       return {
         code: typeof json.code === "number" ? json.code : -1,
@@ -370,7 +393,10 @@ export class MsbRuntime implements NodeRuntime {
   }
 
   /** Build the {cmd:"sh", args:["-lc", body], cwd, env, timeoutMs} request body. */
-  private execBody(cmd: string, opts: ExecOptions | undefined): Record<string, unknown> {
+  private execBody(
+    cmd: string,
+    opts: ExecOptions | undefined,
+  ): Record<string, unknown> {
     // cd into cwd belt-and-braces (the SDK also honors `cwd`); harmless if unset.
     const body = opts?.cwd ? `cd ${shArg(opts.cwd)} && ${cmd}` : cmd;
     const out: Record<string, unknown> = { cmd: "sh", args: ["-lc", body] };
@@ -392,7 +418,9 @@ export class MsbRuntime implements NodeRuntime {
         );
         if (!res.ok) {
           const text = await res.text().catch(() => "");
-          throw new Error(`fs.read ${path} failed (bridge ${res.status}): ${text.slice(0, 300)}`);
+          throw new Error(
+            `fs.read ${path} failed (bridge ${res.status}): ${text.slice(0, 300)}`,
+          );
         }
         const json = (await res.json()) as { contentB64?: string };
         return Buffer.from(json.contentB64 ?? "", "base64").toString("utf8");
@@ -408,7 +436,9 @@ export class MsbRuntime implements NodeRuntime {
         });
         if (!res.ok) {
           const text = await res.text().catch(() => "");
-          throw new Error(`fs.write ${path} failed (bridge ${res.status}): ${text.slice(0, 300)}`);
+          throw new Error(
+            `fs.write ${path} failed (bridge ${res.status}): ${text.slice(0, 300)}`,
+          );
         }
       },
       copyFromHost: async (hostPath: string, vmPath: string): Promise<void> => {
@@ -439,12 +469,16 @@ export class MsbRuntime implements NodeRuntime {
 
   /** Not needed by the chosen design (claude streams via spawn, not a port). */
   async getPortUrl(_vm: VmHandle, _port: number): Promise<string> {
-    throw new Error("getPortUrl is not supported by MsbRuntime (DESIGN §7.4.2)");
+    throw new Error(
+      "getPortUrl is not supported by MsbRuntime (DESIGN §7.4.2)",
+    );
   }
 
   /** Snapshot is an MVP no-op for the SDK bridge (the bridge exposes no snapshot endpoint yet). */
   async snapshot(_vm: VmHandle): Promise<string> {
-    throw new Error("snapshot is not supported by MsbRuntime (MVP — no bridge endpoint)");
+    throw new Error(
+      "snapshot is not supported by MsbRuntime (MVP — no bridge endpoint)",
+    );
   }
 
   /**
@@ -555,7 +589,12 @@ function sseSpawn(
     }
     if (!response.ok || !response.body) {
       const text = await response.text().catch(() => "");
-      settle(null, new Error(`msb bridge exec-stream ${response.status}: ${text.slice(0, 300)}`));
+      settle(
+        null,
+        new Error(
+          `msb bridge exec-stream ${response.status}: ${text.slice(0, 300)}`,
+        ),
+      );
       return;
     }
 
@@ -574,7 +613,12 @@ function sseSpawn(
         else if (line.startsWith("data:")) data += line.slice(5).trim();
       }
       if (data === "" && event === "message") return;
-      let payload: { b64?: string; code?: number; pid?: number; message?: string } = {};
+      let payload: {
+        b64?: string;
+        code?: number;
+        pid?: number;
+        message?: string;
+      } = {};
       try {
         payload = data ? JSON.parse(data) : {};
       } catch {

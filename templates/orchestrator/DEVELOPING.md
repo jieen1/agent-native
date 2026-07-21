@@ -292,14 +292,14 @@ SHAPE is the bridge target for P2/P3, so the UI contract will not change.
 
 ### Where to look
 
-| Concern | File |
-|---|---|
-| Scheduler / DAG advancement / readiness | `server/engine/scheduler.ts` |
-| Journal + artifact persistence | `server/engine/store.ts` |
-| Topology analysis (containment, fanout) | `server/engine/graph-model.ts` |
-| Deterministic ids | `server/engine/ids.ts` |
-| Echo executor (P1 test executor) | `server/engine/echo-executor.ts` |
-| Control verbs (pause/resume/cancel/…) | `server/engine/control.ts` |
-| Promote distill | `server/engine/promote.ts` |
-| Control-flow fixtures | `server/engine/fixtures.ts` |
-| Engine tests | `server/engine/__tests__/*.test.ts` |
+| Concern                                 | File                                |
+| --------------------------------------- | ----------------------------------- |
+| Scheduler / DAG advancement / readiness | `server/engine/scheduler.ts`        |
+| Journal + artifact persistence          | `server/engine/store.ts`            |
+| Topology analysis (containment, fanout) | `server/engine/graph-model.ts`      |
+| Deterministic ids                       | `server/engine/ids.ts`              |
+| Echo executor (P1 test executor)        | `server/engine/echo-executor.ts`    |
+| Control verbs (pause/resume/cancel/…)   | `server/engine/control.ts`          |
+| Promote distill                         | `server/engine/promote.ts`          |
+| Control-flow fixtures                   | `server/engine/fixtures.ts`         |
+| Engine tests                            | `server/engine/__tests__/*.test.ts` |

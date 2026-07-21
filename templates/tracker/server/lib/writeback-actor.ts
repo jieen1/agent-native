@@ -27,10 +27,13 @@
  * （T-F9-04），不需要给 transition-guard 再开一个特例分支。
  */
 
-export type WritebackCallerLike = {
-  caller?: string | null;
-  userEmail?: string | null;
-} | null | undefined;
+export type WritebackCallerLike =
+  | {
+      caller?: string | null;
+      userEmail?: string | null;
+    }
+  | null
+  | undefined;
 
 const DEFAULT_WRITEBACK_ACTOR_EMAIL = "writeback@orchestrator.internal";
 
@@ -38,7 +41,9 @@ const DEFAULT_WRITEBACK_ACTOR_EMAIL = "writeback@orchestrator.internal";
  *  outbound A2A JWT when calling the tracker's writeback-only actions.
  *  Overridable via env so a deployment can rotate it without a code change. */
 export function writebackActorEmail(): string {
-  return process.env.WRITEBACK_ACTOR_EMAIL?.trim() || DEFAULT_WRITEBACK_ACTOR_EMAIL;
+  return (
+    process.env.WRITEBACK_ACTOR_EMAIL?.trim() || DEFAULT_WRITEBACK_ACTOR_EMAIL
+  );
 }
 
 /** True when this call presents BOTH the cross-app MCP surface AND the
@@ -57,7 +62,9 @@ export type WritebackGuardErrorCode = "actor-denied";
 
 export class WritebackGuardError extends Error {
   readonly code: WritebackGuardErrorCode = "actor-denied";
-  constructor(message = "此通道仅接受回写身份 (writeback actor) 调用 —— 人工/普通 agent 调用拒绝") {
+  constructor(
+    message = "此通道仅接受回写身份 (writeback actor) 调用 —— 人工/普通 agent 调用拒绝",
+  ) {
     super(message);
     this.name = "WritebackGuardError";
   }

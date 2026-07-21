@@ -3,6 +3,7 @@
 // "隔离窗口跑一单查 v3_runs.tags 与 brain_threads" 属 101 集成)。
 
 import { describe, it, expect } from "vitest";
+
 import { buildReviewWakeMessage, deriveReviewWake } from "../review-thread.js";
 
 describe("T-F4-04 (unit) — deriveReviewWake 结构性分叉", () => {

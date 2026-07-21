@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  useCallback,
-  useMemo,
-} from "react";
+import { appPath } from "@agent-native/core/client/api-path";
 import {
   IconPlayerPlay,
   IconSend,
@@ -13,10 +7,12 @@ import {
   IconGitBranch,
   IconActivity,
 } from "@tabler/icons-react";
-import { appPath } from "@agent-native/core/client/api-path";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
 import type { V3Event } from "@/hooks/use-v3-run";
+import { cn } from "@/lib/utils";
+
 import { fmtTime } from "./v3-format";
 
 // ── Event kind presentation ──────────────────────────────────────────────────
@@ -69,7 +65,9 @@ interface FeedEvent {
   payload: Record<string, unknown>;
 }
 
-function parseSseLine(line: string): Partial<FeedEvent> & { raw?: string } | null {
+function parseSseLine(
+  line: string,
+): (Partial<FeedEvent> & { raw?: string }) | null {
   if (!line || line.startsWith(":")) return null;
   const [key, ...rest] = line.split(":");
   const value = rest.join(":").trimStart();
@@ -195,8 +193,7 @@ export function EventFeed({
   }, [events]);
 
   const sorted = useMemo(
-    () =>
-      [...events].sort((a, b) => (a.seqNum ?? 0) - (b.seqNum ?? 0)),
+    () => [...events].sort((a, b) => (a.seqNum ?? 0) - (b.seqNum ?? 0)),
     [events],
   );
 
@@ -236,7 +233,10 @@ export function EventFeed({
               const detail = payloadSummary(evt.payload);
               const isLast = idx === sorted.length - 1;
               return (
-                <li key={`${evt.id}-${idx}`} className="relative flex gap-3 pb-4">
+                <li
+                  key={`${evt.id}-${idx}`}
+                  className="relative flex gap-3 pb-4"
+                >
                   {/* Rail + dot */}
                   <div className="flex flex-col items-center">
                     <span

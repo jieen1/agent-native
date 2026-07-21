@@ -6,26 +6,39 @@ import {
 import { eq, and } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
 const repoFieldsSchema = z.object({
-  name: z.string().min(1).describe("Short repo name, unique within the project"),
+  name: z
+    .string()
+    .min(1)
+    .describe("Short repo name, unique within the project"),
   gitRemote: z.string().optional().describe("Git remote URL"),
   baseBranch: z.string().optional().describe("Base branch (default: main)"),
   testCmdUnit: z.string().optional().describe("Unit test command"),
   testCmdFull: z.string().optional().describe("Full test command"),
   e2eTestPath: z.string().optional().describe("E2E test path"),
   integrationTestPath: z.string().optional().describe("Integration test path"),
-  buildTool: z.string().optional().describe("Build tool (e.g. npm, pnpm, gradle)"),
-  ciMode: z.enum(["none", "github"]).optional().describe("CI mode (default: none)"),
+  buildTool: z
+    .string()
+    .optional()
+    .describe("Build tool (e.g. npm, pnpm, gradle)"),
+  ciMode: z
+    .enum(["none", "github"])
+    .optional()
+    .describe("CI mode (default: none)"),
   gateMode: z
     .enum(["tests-only", "stack", "none"])
     .optional()
     .describe("Gate mode (default: tests-only)"),
-  devModel: z.string().optional().describe("Optional model override for agent work"),
+  devModel: z
+    .string()
+    .optional()
+    .describe("Optional model override for agent work"),
 });
 
 export default defineAction({
@@ -156,17 +169,25 @@ export default defineAction({
           updatedAt: now,
         };
 
-        if (args.repo.gitRemote !== undefined) patch.gitRemote = args.repo.gitRemote;
-        if (args.repo.baseBranch !== undefined) patch.baseBranch = args.repo.baseBranch || "main";
-        if (args.repo.testCmdUnit !== undefined) patch.testCmdUnit = args.repo.testCmdUnit;
-        if (args.repo.testCmdFull !== undefined) patch.testCmdFull = args.repo.testCmdFull;
-        if (args.repo.e2eTestPath !== undefined) patch.e2eTestPath = args.repo.e2eTestPath;
+        if (args.repo.gitRemote !== undefined)
+          patch.gitRemote = args.repo.gitRemote;
+        if (args.repo.baseBranch !== undefined)
+          patch.baseBranch = args.repo.baseBranch || "main";
+        if (args.repo.testCmdUnit !== undefined)
+          patch.testCmdUnit = args.repo.testCmdUnit;
+        if (args.repo.testCmdFull !== undefined)
+          patch.testCmdFull = args.repo.testCmdFull;
+        if (args.repo.e2eTestPath !== undefined)
+          patch.e2eTestPath = args.repo.e2eTestPath;
         if (args.repo.integrationTestPath !== undefined)
           patch.integrationTestPath = args.repo.integrationTestPath;
-        if (args.repo.buildTool !== undefined) patch.buildTool = args.repo.buildTool;
+        if (args.repo.buildTool !== undefined)
+          patch.buildTool = args.repo.buildTool;
         if (args.repo.ciMode !== undefined) patch.ciMode = args.repo.ciMode;
-        if (args.repo.gateMode !== undefined) patch.gateMode = args.repo.gateMode;
-        if (args.repo.devModel !== undefined) patch.devModel = args.repo.devModel || null;
+        if (args.repo.gateMode !== undefined)
+          patch.gateMode = args.repo.gateMode;
+        if (args.repo.devModel !== undefined)
+          patch.devModel = args.repo.devModel || null;
 
         await db
           .update(schema.projectRepos)

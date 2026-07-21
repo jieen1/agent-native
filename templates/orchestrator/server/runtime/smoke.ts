@@ -14,9 +14,9 @@
 
 import { spawn } from "node:child_process";
 
+import type { NodeRuntimeSpec } from "../../shared/types.js";
 import { MicrosandboxRuntime } from "./microsandbox-runtime.js";
 import { wslMsb } from "./wsl-msb.js";
-import type { NodeRuntimeSpec } from "../../shared/types.js";
 
 /** The structured result of a smoke run (also pretty-printed by the CLI). */
 export interface SmokeResult {

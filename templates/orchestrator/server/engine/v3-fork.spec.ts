@@ -3,8 +3,8 @@
 // Tests forkRun: basic clone, fromNode reset, artifact reuse, tag merge.
 // All DB queries are mocked.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mock dependencies ───────────────────────────────────────────────────────
 
@@ -126,7 +126,9 @@ function createMockDb(
       }),
     }),
     insert: (_table: unknown) => ({
-      values: async (rows: Record<string, unknown> | Record<string, unknown>[]) => {
+      values: async (
+        rows: Record<string, unknown> | Record<string, unknown>[],
+      ) => {
         const table = _table as any;
         const rowArray = Array.isArray(rows) ? rows : [rows];
         for (const row of rowArray) {
@@ -166,7 +168,13 @@ function makeRun(overrides: Partial<MockRunRow> = {}): MockRunRow {
     dag: {
       nodes: [
         { id: "a", type: "agent", agent: "impl", prompt: "Do it", deps: [] },
-        { id: "b", type: "agent", agent: "review", prompt: "Review", deps: ["a"] },
+        {
+          id: "b",
+          type: "agent",
+          agent: "review",
+          prompt: "Review",
+          deps: ["a"],
+        },
       ],
     },
     dagVersion: 1,
@@ -232,7 +240,9 @@ function makeSpawn(overrides: Partial<MockSpawnRow> = {}): MockSpawnRow {
   };
 }
 
-function makeArtifact(overrides: Partial<MockArtifactRow> = {}): MockArtifactRow {
+function makeArtifact(
+  overrides: Partial<MockArtifactRow> = {},
+): MockArtifactRow {
   return {
     id: "src-art-1",
     spawnId: "src-spawn-1",
@@ -264,10 +274,10 @@ describe("forkRun", () => {
   describe("Basic clone", () => {
     it("forkRun creates new run with cloned DAG and inputs", async () => {
       const forkRun = await getForkRun();
-      const { db, insertedRuns, insertedNodes } = createMockDb(
-        makeRun(),
-        [makeNode({ nodeIdInDag: "a" }), makeNode({ nodeIdInDag: "b", id: "src-node-b" })],
-      );
+      const { db, insertedRuns, insertedNodes } = createMockDb(makeRun(), [
+        makeNode({ nodeIdInDag: "a" }),
+        makeNode({ nodeIdInDag: "b", id: "src-node-b" }),
+      ]);
 
       const result = await forkRun(db, "src-run");
 
@@ -291,7 +301,9 @@ describe("forkRun", () => {
 
     it("forkRun throws when source run not found", async () => {
       const forkRun = await getForkRun();
-      const { db } = createMockDb(makeRun(), [], [], [], { notFoundForRunId: "nonexistent" });
+      const { db } = createMockDb(makeRun(), [], [], [], {
+        notFoundForRunId: "nonexistent",
+      });
 
       await expect(forkRun(db, "nonexistent")).rejects.toThrow(
         "Source run not found: nonexistent",
@@ -302,13 +314,10 @@ describe("forkRun", () => {
   describe("fromNode semantics", () => {
     it("fromNode resets target node and descendants to pending", async () => {
       const forkRun = await getForkRun();
-      const { db, insertedNodes } = createMockDb(
-        makeRun(),
-        [
-          makeNode({ nodeIdInDag: "a", id: "src-node-a", status: "done" }),
-          makeNode({ nodeIdInDag: "b", id: "src-node-b", status: "done" }),
-        ],
-      );
+      const { db, insertedNodes } = createMockDb(makeRun(), [
+        makeNode({ nodeIdInDag: "a", id: "src-node-a", status: "done" }),
+        makeNode({ nodeIdInDag: "b", id: "src-node-b", status: "done" }),
+      ]);
 
       await forkRun(db, "src-run", { fromNode: "b" });
 
@@ -328,8 +337,20 @@ describe("forkRun", () => {
           dag: {
             nodes: [
               { id: "a", type: "agent", agent: "impl", prompt: "A", deps: [] },
-              { id: "b", type: "agent", agent: "mid", prompt: "B", deps: ["a"] },
-              { id: "c", type: "agent", agent: "end", prompt: "C", deps: ["b"] },
+              {
+                id: "b",
+                type: "agent",
+                agent: "mid",
+                prompt: "B",
+                deps: ["a"],
+              },
+              {
+                id: "c",
+                type: "agent",
+                agent: "end",
+                prompt: "C",
+                deps: ["b"],
+              },
             ],
           },
         }),
@@ -353,12 +374,9 @@ describe("forkRun", () => {
 
     it("without fromNode, resolved nodes keep their status (artifact cache)", async () => {
       const forkRun = await getForkRun();
-      const { db, insertedNodes } = createMockDb(
-        makeRun(),
-        [
-          makeNode({ nodeIdInDag: "a", status: "done" }),
-        ],
-      );
+      const { db, insertedNodes } = createMockDb(makeRun(), [
+        makeNode({ nodeIdInDag: "a", status: "done" }),
+      ]);
 
       await forkRun(db, "src-run");
 
@@ -430,10 +448,9 @@ describe("forkRun", () => {
 
     it("mergeTags handles null source tags", async () => {
       const forkRun = await getForkRun();
-      const { db, insertedRuns } = createMockDb(
-        makeRun({ tags: null }),
-        [makeNode({ nodeIdInDag: "a" })],
-      );
+      const { db, insertedRuns } = createMockDb(makeRun({ tags: null }), [
+        makeNode({ nodeIdInDag: "a" }),
+      ]);
 
       await forkRun(db, "src-run", {
         extraTags: { env: "prod" },
@@ -445,10 +462,9 @@ describe("forkRun", () => {
 
     it("mergeTags returns null when both source and extra are empty", async () => {
       const forkRun = await getForkRun();
-      const { db, insertedRuns } = createMockDb(
-        makeRun({ tags: null }),
-        [makeNode({ nodeIdInDag: "a" })],
-      );
+      const { db, insertedRuns } = createMockDb(makeRun({ tags: null }), [
+        makeNode({ nodeIdInDag: "a" }),
+      ]);
 
       await forkRun(db, "src-run");
 

@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq, desc } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -30,9 +31,7 @@ const METRIC_RE =
  * Returns the array of lines between that heading and the next heading (or EOF).
  * Returns null if the heading is not present.
  */
-export function extractSuccessMetricsSection(
-  content: string,
-): string[] | null {
+export function extractSuccessMetricsSection(content: string): string[] | null {
   const lines = content.split("\n");
   let startIdx: number | undefined;
 
@@ -137,10 +136,7 @@ export default defineAction({
         .select({ id: schema.sprints.id, goal: schema.sprints.goal })
         .from(schema.sprints)
         .where(
-          and(
-            eq(schema.sprints.id, args.sprintId),
-            ownerScope(schema.sprints),
-          ),
+          and(eq(schema.sprints.id, args.sprintId), ownerScope(schema.sprints)),
         )
         .limit(1)
     )[0];

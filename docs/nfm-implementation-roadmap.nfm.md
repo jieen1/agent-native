@@ -103,7 +103,7 @@
 
 ### F7 遥测与身份单一事实源【已交付 2026-07-12】(设计出处 04 §7 / §13 / §10 / §6)
 
-- **做什么**:①spawn 用量只取流终 usage(修 tok_in=0/tok_out 膨胀);②model_registry 真名+别名映射,spawn.model_ref 记真名,claude-* 禁映射非 Claude 权重;③harness 声明开启而初始化失败=健康页红灯+error 日志;④turn 终态判定契约:交付摘要存在时收尾竞态不得覆盖为 error。
+- **做什么**:①spawn 用量只取流终 usage(修 tok_in=0/tok_out 膨胀);②model_registry 真名+别名映射,spawn.model_ref 记真名,claude-\* 禁映射非 Claude 权重;③harness 声明开启而初始化失败=健康页红灯+error 日志;④turn 终态判定契约:交付摘要存在时收尾竞态不得覆盖为 error。
 - **为什么**:遥测不可信则复盘/成本/质量归因全错(1.33M tok/4min、一模四名、B5 成功标 error 均实证);降级静默=不知道自己在用什么跑生产。
 - **现状**:v3_spawns 实测 tokens_input 231/231 恒 0、tokens_output 最大约 10M(物理不可能);spawn.model_ref 出现 claude-sonnet-4-6(53 次)冒用本地 qwen3.6 权重,别名在 registry/chat 多处漂移(SDLC-054);ACP 包已随构建(部分修复)但静默降级语义未改;B5 error 误标在案(SDLC-060)。
 - **验收**:①跑单后 tok_in 大于 0 且 tok_out 不超时长×合理吞吐;②按 model_ref 的报表能区分真 Claude 与本地权重;③人为删 ACP 包重启→健康页红灯;④重放 B5 收尾竞态→终态 done 附异常记录。
@@ -289,7 +289,7 @@
 </tr>
 </table>
 
-消歧提示:SDLC-033/034/056/057 是 F8 所指重号 itemKey(各两条 open),引用须带义项后缀——消歧本身正是 F8 要根治的。与 tracker open 池(35 条 SDLC-*)双向对账无失引(所引 issue 全部存在且 open)。
+消歧提示:SDLC-033/034/056/057 是 F8 所指重号 itemKey(各两条 open),引用须带义项后缀——消歧本身正是 F8 要根治的。与 tracker open 池(35 条 SDLC-\*)双向对账无失引(所引 issue 全部存在且 open)。
 
 场景层承接:场景①③ = SDLC-029(全流程纯页面可驱动审计)/ 044(TDD红先行+测试执行证据未强制);场景② = SDLC-047(Success Metrics 行文法)/ 033-PhaseH(目标审计即 gap-analysis)。
 

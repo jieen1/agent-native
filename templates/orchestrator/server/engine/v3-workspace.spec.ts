@@ -3,8 +3,8 @@
 // Tests workspace lifecycle: createWorkspace, destroyWorkspace, getWorkspace.
 // Mocks MicrosandboxRuntime, git-wrapper, vm-creds, networking, and DB.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mock dependencies ───────────────────────────────────────────────────────
 
@@ -58,14 +58,14 @@ vi.mock("../db/index.js", () => ({
 
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
-import { MicrosandboxRuntime } from "../runtime/microsandbox-runtime.js";
 import {
   cloneRepo,
   checkoutRunBranch,
   runBranchName,
 } from "../runtime/git-wrapper.js";
-import { mountVmCredentials, VM_HOME } from "../runtime/vm-creds.js";
+import { MicrosandboxRuntime } from "../runtime/microsandbox-runtime.js";
 import { resolveEgress } from "../runtime/networking.js";
+import { mountVmCredentials, VM_HOME } from "../runtime/vm-creds.js";
 
 // ── Mock DB Builder ──────────────────────────────────────────────────────────
 

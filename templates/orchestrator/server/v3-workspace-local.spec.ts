@@ -13,11 +13,12 @@
 // reconciler tick — outside this pass's file boundary) and T-F1-14 (S7 UI,
 // 本期不做) are deferred — see the deviations note in the implementation report.
 
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 // ── Mock the DB layer (only `localWorkspaceDiff`'s row lookup needs it —
 // resolveDiffBase/refreshMirror/assertW1BaselineFresh are pure-git and never

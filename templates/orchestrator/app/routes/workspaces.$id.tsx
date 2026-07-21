@@ -1,6 +1,7 @@
 import { useParams } from "react-router";
-import { APP_TITLE } from "@/lib/app-config";
+
 import { WorkspaceView } from "@/components/v3/WorkspaceView";
+import { APP_TITLE } from "@/lib/app-config";
 
 export function meta() {
   return [{ title: `${APP_TITLE} — Workspace` }];

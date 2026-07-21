@@ -42,15 +42,15 @@ executor. Proceed with P1 now; finish the two open items inside P2.
 
 ## Host environment (verified)
 
-| Item | Value |
-|---|---|
-| OS | Windows 11 + WSL2 **Ubuntu 24.04.4 LTS** (default distro `ubuntu2404`) |
-| Kernel (WSL) | 6.6.114.1-microsoft-standard-WSL2 |
-| `/dev/kvm` | **present** (`crw-rw---- root kvm`) |
-| KVM access | user `bot` was **not** in the `kvm` group; fixed with `wsl -u root usermod -aG kvm bot` (WSL root needs no Linux password). After `wsl --shutdown`, `bot` opens `/dev/kvm` (`KVM_OPEN_OK`). |
-| Host RAM (WSL) | 24030 MB (~24 GB) |
-| Local vLLM | `http://localhost:8000/v1` — model `qwen3.6` (Qwen3.6-27B-AWQ-INT4). **NOTE: design D-6 wrote `:8080`; the actual host endpoint is `:8000`.** |
-| claude CLI (WSL) | `/home/bot/.local/bin/claude` v2.1.183; `~/.claude/.credentials.json` **present** (subscription login exists → RO mount feasible) |
+| Item             | Value                                                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OS               | Windows 11 + WSL2 **Ubuntu 24.04.4 LTS** (default distro `ubuntu2404`)                                                                                                                      |
+| Kernel (WSL)     | 6.6.114.1-microsoft-standard-WSL2                                                                                                                                                           |
+| `/dev/kvm`       | **present** (`crw-rw---- root kvm`)                                                                                                                                                         |
+| KVM access       | user `bot` was **not** in the `kvm` group; fixed with `wsl -u root usermod -aG kvm bot` (WSL root needs no Linux password). After `wsl --shutdown`, `bot` opens `/dev/kvm` (`KVM_OPEN_OK`). |
+| Host RAM (WSL)   | 24030 MB (~24 GB)                                                                                                                                                                           |
+| Local vLLM       | `http://localhost:8000/v1` — model `qwen3.6` (Qwen3.6-27B-AWQ-INT4). **NOTE: design D-6 wrote `:8080`; the actual host endpoint is `:8000`.**                                               |
+| claude CLI (WSL) | `/home/bot/.local/bin/claude` v2.1.183; `~/.claude/.credentials.json` **present** (subscription login exists → RO mount feasible)                                                           |
 
 ## Install (real)
 
@@ -88,13 +88,13 @@ sandbox ready  boot_time_ms=122  init_time_ms=71  ready_time_ms=194
 
 8 detached alpine VMs (`msb run -d alpine -- sleep 25`), all reached `running`:
 
-| | host used (MB) | host avail (MB) |
-|---|---|---|
-| before | 1435 | 22594 |
-| with 8 VMs | 1857 | 22172 |
-| delta | **+422 (≈ 53 MB / idle VM)** | |
+|            | host used (MB)               | host avail (MB) |
+| ---------- | ---------------------------- | --------------- |
+| before     | 1435                         | 22594           |
+| with 8 VMs | 1857                         | 22172           |
+| delta      | **+422 (≈ 53 MB / idle VM)** |                 |
 
-✅ No OOM. Each VM *reports* 517 MB total internally, but actual host footprint is
+✅ No OOM. Each VM _reports_ 517 MB total internally, but actual host footprint is
 ~53 MB/idle-VM (lazy/ballooned). On 24 GB, dozens of concurrent VMs fit before real
 workload memory. **Suggested initial `maxConcurrentVMs` = 8** (conservative; raise
 after measuring real claude/node workload memory in P2).
@@ -123,34 +123,34 @@ allow egress → group "public", all protocols/ports (public internet allowed by
 `msb run` flags: `-p/--port` (host→guest forward), `--net-default-egress`,
 `--net-rule` (`allow@host` / `allow@public` / `allow@<ip>:tcp:<port>`).
 
-| Target | Result |
-|---|---|
-| VM → **host vLLM** at `http://<VM-default-gateway>:8000/v1/models` with `--net-default-egress allow` | ✅ **WORKS** — returned the `qwen3.6` model list (1392 bytes). **D-6 answer: the in-VM reachable host-vLLM address is the VM's own default-gateway IP at port 8000** (per-boot, e.g. `172.16.0.x`). Needs egress allowed to the **host group on :8000** (the default policy only opens host:53/DNS, so `--net-default-egress allow` or a scoped `--net-rule allow@host:tcp:8000` is required). |
-| VM → public internet (`1.1.1.1` raw IP; `example.com`) | ❌ **fails** even though the default policy **allows** the `public` group. **Root-caused (2026-06-21):** the WSL *host itself* reaches the public internet fine (`1.1.1.1` 56 KB, `github.com` 563 KB, `api.anthropic.com` connects), but the **VM does not** — and adding an `iptables -t nat MASQUERADE` for the microsandbox subnet `172.16.0.0/12` on the WSL host does **not** fix it. There is no host tap/veth for the VM (`ip -br link` shows none), so libkrun uses a **userspace network** (the msb process proxies VM connections) and host iptables NAT does not apply. The msb userspace net routes VM→host (vLLM at the gateway works) but not VM→public on this WSL2 host. This is a microsandbox 0.5.x (beta) networking limitation under WSL2, not a host-NAT or policy problem. **Blocks only ClaudeCodeExecutor (real `claude` running *inside* the VM, hitting api.anthropic.com) and in-VM `git push`.** VllmExecutor + RemoteApiExecutor run their agent loop on the HOST (host has internet) and only push tool side-effects into the VM, so they are unaffected; the local-vLLM path is unaffected. **Candidate fixes (P2c / deferred):** (a) run an HTTP/HTTPS forward-proxy on the WSL host and set `HTTPS_PROXY=http://<vm-gateway>:<port>` in the VM (the VM→host path works), (b) a newer microsandbox with fixed WSL2 networking, or (c) use API-key Claude via RemoteApiExecutor (host loop) instead of the in-VM subscription. |
+| Target                                                                                               | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VM → **host vLLM** at `http://<VM-default-gateway>:8000/v1/models` with `--net-default-egress allow` | ✅ **WORKS** — returned the `qwen3.6` model list (1392 bytes). **D-6 answer: the in-VM reachable host-vLLM address is the VM's own default-gateway IP at port 8000** (per-boot, e.g. `172.16.0.x`). Needs egress allowed to the **host group on :8000** (the default policy only opens host:53/DNS, so `--net-default-egress allow` or a scoped `--net-rule allow@host:tcp:8000` is required).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| VM → public internet (`1.1.1.1` raw IP; `example.com`)                                               | ❌ **fails** even though the default policy **allows** the `public` group. **Root-caused (2026-06-21):** the WSL _host itself_ reaches the public internet fine (`1.1.1.1` 56 KB, `github.com` 563 KB, `api.anthropic.com` connects), but the **VM does not** — and adding an `iptables -t nat MASQUERADE` for the microsandbox subnet `172.16.0.0/12` on the WSL host does **not** fix it. There is no host tap/veth for the VM (`ip -br link` shows none), so libkrun uses a **userspace network** (the msb process proxies VM connections) and host iptables NAT does not apply. The msb userspace net routes VM→host (vLLM at the gateway works) but not VM→public on this WSL2 host. This is a microsandbox 0.5.x (beta) networking limitation under WSL2, not a host-NAT or policy problem. **Blocks only ClaudeCodeExecutor (real `claude` running _inside_ the VM, hitting api.anthropic.com) and in-VM `git push`.** VllmExecutor + RemoteApiExecutor run their agent loop on the HOST (host has internet) and only push tool side-effects into the VM, so they are unaffected; the local-vLLM path is unaffected. **Candidate fixes (P2c / deferred):** (a) run an HTTP/HTTPS forward-proxy on the WSL host and set `HTTPS_PROXY=http://<vm-gateway>:<port>` in the VM (the VM→host path works), (b) a newer microsandbox with fixed WSL2 networking, or (c) use API-key Claude via RemoteApiExecutor (host loop) instead of the in-VM subscription. |
 
 ### Items still PENDING (blocked on public egress — to finish in P2)
 
 These P0-acceptance items could **not** be completed yet and are **not** faked:
 
 - [ ] in-VM `claude --output-format stream-json` real run + event sample — needs a
-  prebaked image carrying `@anthropic-ai/claude-code` **and** public egress (claude
-  API). Subscription login (`~/.claude`) is present; RO mount is feasible.
+      prebaked image carrying `@anthropic-ai/claude-code` **and** public egress (claude
+      API). Subscription login (`~/.claude`) is present; RO mount is feasible.
 - [ ] `~/.claude` RO mount end-to-end verification (in-VM claude reuses subscription).
 - [ ] `git push` of a test branch + PR URL — needs public egress + a `GITHUB_TOKEN`
-  and a throwaway test repo.
+      and a throwaway test repo.
 
 ## Thresholds vs measured (IMPLEMENTATION.md P0 acceptance)
 
-| Threshold | Target | Measured | Pass? |
-|---|---|---|---|
-| VM cold boot | ≤ 2 s | **194 ms** (VM ready); ~8.5 s CLI round-trip | ✅ (VM); CLI overhead noted |
-| Warm-snapshot restart | ≤ 300 ms | ~8.5 s via CLI | ❌ via CLI; needs SDK/server (P2) |
-| Destroy + restart clean re-run | succeeds | ✅ destroy + fresh boot verified | ✅ |
-| Concurrent VMs without OOM | ≥ N (N≈8) | 8 VMs, +422 MB, no OOM | ✅ |
-| Per-VM resident memory | ≤ threshold | ~53 MB/idle-VM | ✅ |
-| RO `~/.claude` mount verified | yes | login present; mount not yet run | ⏳ pending (egress) |
-| In-VM host vLLM reachable + address form | yes | ✅ `<gateway>:8000` + egress allow | ✅ |
-| `git push` test-branch URL | yes | — | ⏳ pending (egress) |
+| Threshold                                | Target      | Measured                                     | Pass?                             |
+| ---------------------------------------- | ----------- | -------------------------------------------- | --------------------------------- |
+| VM cold boot                             | ≤ 2 s       | **194 ms** (VM ready); ~8.5 s CLI round-trip | ✅ (VM); CLI overhead noted       |
+| Warm-snapshot restart                    | ≤ 300 ms    | ~8.5 s via CLI                               | ❌ via CLI; needs SDK/server (P2) |
+| Destroy + restart clean re-run           | succeeds    | ✅ destroy + fresh boot verified             | ✅                                |
+| Concurrent VMs without OOM               | ≥ N (N≈8)   | 8 VMs, +422 MB, no OOM                       | ✅                                |
+| Per-VM resident memory                   | ≤ threshold | ~53 MB/idle-VM                               | ✅                                |
+| RO `~/.claude` mount verified            | yes         | login present; mount not yet run             | ⏳ pending (egress)               |
+| In-VM host vLLM reachable + address form | yes         | ✅ `<gateway>:8000` + egress allow           | ✅                                |
+| `git push` test-branch URL               | yes         | —                                            | ⏳ pending (egress)               |
 
 ## Decisions / config to carry into P2
 

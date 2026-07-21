@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import {
   chmodSync,
   mkdirSync,
@@ -5,10 +6,10 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createHash, randomBytes } from "node:crypto";
-import { join } from "node:path";
 import http from "node:http";
+import { join } from "node:path";
 import tls from "node:tls";
+
 import { managedClaudeConfigDir } from "./claude-managed-auth.js";
 
 /**
@@ -408,8 +409,7 @@ async function postToken(body: Record<string, string>): Promise<TokenResponse> {
     // the code-exchange and the single-use refresh. Overridable via env so the
     // version can be bumped without a rebuild.
     "User-Agent":
-      process.env.CLAUDE_CLI_USER_AGENT ||
-      "claude-cli/2.1.191 (external, cli)",
+      process.env.CLAUDE_CLI_USER_AGENT || "claude-cli/2.1.191 (external, cli)",
     Accept: "application/json",
   };
 

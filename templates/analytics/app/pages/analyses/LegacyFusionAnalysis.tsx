@@ -12,6 +12,11 @@ import {
   IconTrophy,
   IconUsers,
 } from "@tabler/icons-react";
+import {
+  formatCurrency as formatCurrencyLocale,
+  formatDate as formatDateLocale,
+  formatNumber as formatNumberLocale,
+} from "locale-kit/format";
 import { useEffect, type ComponentType, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -24,11 +29,6 @@ import {
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  formatCurrency as formatCurrencyLocale,
-  formatDate as formatDateLocale,
-  formatNumber as formatNumberLocale,
-} from "locale-kit/format";
 
 type TablerIcon = ComponentType<{ className?: string }>;
 

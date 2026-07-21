@@ -13,8 +13,8 @@
 // executor still builds and resolves an engine, and surfaces a clear error if
 // the key is missing rather than silently inheriting a deployment key.
 
-import { getOwnerActiveApiKey } from "@agent-native/core/server";
 import { resolveEngine } from "@agent-native/core/agent/engine";
+import { getOwnerActiveApiKey } from "@agent-native/core/server";
 
 import { runEngineLoopInVm } from "./engine-loop.js";
 import type {

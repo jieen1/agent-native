@@ -1,7 +1,7 @@
-import { SprintDetailPage } from '@/pages/SprintDetailPage';
+import { SprintDetailPage } from "@/pages/SprintDetailPage";
 
 export function meta() {
-  return [{ title: 'Sprint 详情 · Tracker' }];
+  return [{ title: "Sprint 详情 · Tracker" }];
 }
 
 export default function SprintDetailRoute() {

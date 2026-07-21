@@ -95,51 +95,52 @@ Foundry 是一个**工程驾驶舱**设计系统：
 	  --primary: oklch(0.21 0.006 285.89);          /* 近黑，主按钮 */
 	  --primary-foreground: oklch(0.985 0 0);
 
-	  /* 品牌与语义 */
-	  --brand: oklch(0.55 0.16 255);
-	  --brand-foreground: oklch(0.985 0 0);
-	  --success: oklch(0.55 0.16 145);
-	  --warning: oklch(0.75 0.16 85);
-	  --info: oklch(0.55 0.18 250);
-	  --destructive: oklch(0.577 0.245 27.33);
+      /* 品牌与语义 */
+      --brand: oklch(0.55 0.16 255);
+      --brand-foreground: oklch(0.985 0 0);
+      --success: oklch(0.55 0.16 145);
+      --warning: oklch(0.75 0.16 85);
+      --info: oklch(0.55 0.18 250);
+      --destructive: oklch(0.577 0.245 27.33);
 
-	  /* 特有语义（Foundry 扩展） */
-	  --agent: oklch(0.55 0.14 300);
-	  --human: oklch(0.55 0.16 255);
-	  --evidence: oklch(0.48 0.10 180);
+      /* 特有语义（Foundry 扩展） */
+      --agent: oklch(0.55 0.14 300);
+      --human: oklch(0.55 0.16 255);
+      --evidence: oklch(0.48 0.10 180);
 
-	  /* 图表阶梯 */
-	  --chart-1: oklch(0.55 0.16 255);
-	  --chart-2: oklch(0.65 0.13 255);
-	  --chart-3: oklch(0.75 0.10 255);
-	  --chart-4: oklch(0.84 0.07 255);
-	  --chart-5: oklch(0.92 0.04 255);
+      /* 图表阶梯 */
+      --chart-1: oklch(0.55 0.16 255);
+      --chart-2: oklch(0.65 0.13 255);
+      --chart-3: oklch(0.75 0.10 255);
+      --chart-4: oklch(0.84 0.07 255);
+      --chart-5: oklch(0.92 0.04 255);
 
-	  --radius: 0.625rem;                            /* 10px */
-	}
+      --radius: 0.625rem;                            /* 10px */
+    }
 
-	.dark {
-	  --background: oklch(0.18 0.005 285.82);
-	  --foreground: oklch(0.985 0 0);
-	  --card: oklch(0.21 0.006 285.89);
-	  --panel: oklch(0.215 0.006 285.9);
-	  --sidebar: oklch(0.16 0.005 285.82);
-	  --muted: oklch(0.274 0.006 286.03);
-	  --muted-foreground: oklch(0.705 0.015 286.07);
-	  --border: oklch(1 0 0 / 8%);
-	  --input: oklch(1 0 0 / 15%);
-	  --brand: oklch(0.65 0.16 255);
-	  --success: oklch(0.65 0.14 145);
-	  --warning: oklch(0.80 0.14 85);
-	  --info: oklch(0.65 0.16 250);
-	  --destructive: oklch(0.66 0.20 27);
-	  --agent: oklch(0.68 0.13 300);
-	  --evidence: oklch(0.62 0.09 180);
-	  --chart-1: oklch(0.72 0.14 255);  --chart-2: oklch(0.62 0.13 255);
-	  --chart-3: oklch(0.52 0.11 255);  --chart-4: oklch(0.42 0.09 255);
-	  --chart-5: oklch(0.32 0.06 255);
-	}
-	```
+    .dark {
+      --background: oklch(0.18 0.005 285.82);
+      --foreground: oklch(0.985 0 0);
+      --card: oklch(0.21 0.006 285.89);
+      --panel: oklch(0.215 0.006 285.9);
+      --sidebar: oklch(0.16 0.005 285.82);
+      --muted: oklch(0.274 0.006 286.03);
+      --muted-foreground: oklch(0.705 0.015 286.07);
+      --border: oklch(1 0 0 / 8%);
+      --input: oklch(1 0 0 / 15%);
+      --brand: oklch(0.65 0.16 255);
+      --success: oklch(0.65 0.14 145);
+      --warning: oklch(0.80 0.14 85);
+      --info: oklch(0.65 0.16 250);
+      --destructive: oklch(0.66 0.20 27);
+      --agent: oklch(0.68 0.13 300);
+      --evidence: oklch(0.62 0.09 180);
+      --chart-1: oklch(0.72 0.14 255);  --chart-2: oklch(0.62 0.13 255);
+      --chart-3: oklch(0.52 0.11 255);  --chart-4: oklch(0.42 0.09 255);
+      --chart-5: oklch(0.32 0.06 255);
+    }
+    ```
+
 </details>
 
 **铁律**：组件与页面**严禁硬编码颜色**，一律使用语义 token（`bg-success/15 text-success`、`text-brand`、`border-destructive/30`）。状态底色统一用 `color-mix(in oklch, var(--语义色) 15%, transparent)`（Tailwind 写法 `<语义色>/15`），保证双主题成立。

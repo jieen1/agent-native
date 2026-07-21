@@ -1,5 +1,6 @@
-import { startBrainDriver } from "../queue/brain-driver.js";
 import { isPostgres } from "@agent-native/core/db";
+
+import { startBrainDriver } from "../queue/brain-driver.js";
 
 // LEVEL-1 brain-task driver plugin — the durable admission/reap loop for the
 // brain concurrency limiter. Auto-loaded on boot. Gated on V3 Postgres being

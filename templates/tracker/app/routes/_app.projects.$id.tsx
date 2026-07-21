@@ -1,22 +1,17 @@
+import { useActionMutation } from "@agent-native/core/client";
+import {
+  IconArrowLeft,
+  IconDeviceFloppy,
+  IconLoader2,
+  IconPlus,
+  IconPencil,
+  IconTrash,
+} from "@tabler/icons-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router";
-import { useProjects } from "@/hooks/use-tracker";
-import { useActionMutation } from "@agent-native/core/client";
-import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +22,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -34,6 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -42,14 +49,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  IconArrowLeft,
-  IconDeviceFloppy,
-  IconLoader2,
-  IconPlus,
-  IconPencil,
-  IconTrash,
-} from "@tabler/icons-react";
+import { Textarea } from "@/components/ui/textarea";
+import { useProjects } from "@/hooks/use-tracker";
 
 export function meta() {
   return [{ title: "项目设置 · Tracker" }];
@@ -244,7 +245,12 @@ function ProjectReposSection({ projectId }: { projectId: string }) {
       <Card className="mt-6">
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-base">代码仓库</CardTitle>
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={openAdd}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={openAdd}
+          >
             <IconPlus className="size-4" />
             添加仓库
           </Button>
@@ -695,7 +701,9 @@ export default function ProjectSettingsRoute() {
               <p className="text-sm text-muted-foreground">
                 按阶段名配置推进门槛（JSON）。未配置的阶段可自由推进。示例：
                 <code className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-xs">
-                  {'{"分析":{"requireArtifacts":["sprint-doc"],"requireApproval":"plan-signoff"}}'}
+                  {
+                    '{"分析":{"requireArtifacts":["sprint-doc"],"requireApproval":"plan-signoff"}}'
+                  }
                 </code>
               </p>
               <div className="space-y-1.5">

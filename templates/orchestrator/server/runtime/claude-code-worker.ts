@@ -14,22 +14,27 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+
+import {
+  claudeWorkerEnv,
+  getManagedClaudeStatus,
+} from "../claude-managed-auth.js";
 import {
   parseClaudeStreamJson,
   stepsFromEvent,
 } from "./executors/claude-stream.js";
 import type { RuntimeExecStep } from "./executors/types.js";
 import type { NodeRunnerResult } from "./node-runner.js";
-import {
-  claudeWorkerEnv,
-  getManagedClaudeStatus,
-} from "../claude-managed-auth.js";
 
 /** True when an agent's runtime selects Claude Code via ACP (DESIGN §7.3). */
-export function isClaudeCodeRuntime(runtime: string | undefined | null): boolean {
+export function isClaudeCodeRuntime(
+  runtime: string | undefined | null,
+): boolean {
   if (!runtime) return false;
   const r = runtime.toLowerCase();
-  return r === "acp:claude-code" || r === "claude-code" || r.startsWith("acp:claude");
+  return (
+    r === "acp:claude-code" || r === "claude-code" || r.startsWith("acp:claude")
+  );
 }
 
 /**
@@ -59,7 +64,7 @@ export async function runClaudeCodeWorker(opts: {
       status.expired
         ? "Claude Code login expired — reconnect in Settings → Claude Code."
         : "Claude Code is not connected — connect it in Settings → Claude Code " +
-          "(the orchestrator runs its own login; it never uses your host credentials).",
+            "(the orchestrator runs its own login; it never uses your host credentials).",
     );
   }
 

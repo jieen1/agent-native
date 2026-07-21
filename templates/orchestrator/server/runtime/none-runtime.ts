@@ -23,6 +23,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import type { NodeRuntimeSpec } from "../../shared/types.js";
 import type {
   ExecOptions,
   ExecResult,
@@ -33,7 +34,6 @@ import type {
   TeardownPolicy,
   VmHandle,
 } from "./node-runtime.js";
-import type { NodeRuntimeSpec } from "../../shared/types.js";
 
 /** A generous default; host commands here are lightweight (no VM boot). */
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -73,7 +73,8 @@ export class NoneRuntime implements NodeRuntime {
    */
   async provision(spec: NodeRuntimeSpec): Promise<VmHandle> {
     const root = await mkdtemp(join(tmpdir(), "an-none-"));
-    const externalWork = typeof spec.hostDir === "string" && spec.hostDir !== "";
+    const externalWork =
+      typeof spec.hostDir === "string" && spec.hostDir !== "";
     if (externalWork) {
       // `${root}/work` is exactly `scopedPath(root, "/work")` (DEFAULT_WORKDIR),
       // so every `/work`-rooted tool path follows this symlink into spec.hostDir.

@@ -37,37 +37,37 @@ Foundry 是一个**工程驾驶舱**设计系统：
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.82);
   --card: oklch(1 0 0);
-  --panel: oklch(0.972 0.002 286.35);           /* 次级面板表面（列表栏/检查器/轨道） */
-  --sidebar: oklch(0.985 0.001 286.38);         /* 应用侧边栏表面 */
+  --panel: oklch(0.972 0.002 286.35); /* 次级面板表面（列表栏/检查器/轨道） */
+  --sidebar: oklch(0.985 0.001 286.38); /* 应用侧边栏表面 */
   --muted: oklch(0.967 0.001 286.38);
   --muted-foreground: oklch(0.552 0.016 285.94);
   --border: oklch(0.945 0.003 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.07);
-  --primary: oklch(0.21 0.006 285.89);          /* 近黑，主按钮 */
+  --primary: oklch(0.21 0.006 285.89); /* 近黑，主按钮 */
   --primary-foreground: oklch(0.985 0 0);
 
   /* 品牌与语义 */
-  --brand: oklch(0.55 0.16 255);                /* 工程蓝：品牌动作、选中、链接 */
+  --brand: oklch(0.55 0.16 255); /* 工程蓝：品牌动作、选中、链接 */
   --brand-foreground: oklch(0.985 0 0);
-  --success: oklch(0.55 0.16 145);              /* 绿：done/passed/approved */
-  --warning: oklch(0.75 0.16 85);               /* 琥珀：queued/awaiting/degraded */
-  --info: oklch(0.55 0.18 250);                 /* 蓝：running/info */
-  --destructive: oklch(0.577 0.245 27.33);      /* 红：failed/rejected/blocked */
+  --success: oklch(0.55 0.16 145); /* 绿：done/passed/approved */
+  --warning: oklch(0.75 0.16 85); /* 琥珀：queued/awaiting/degraded */
+  --info: oklch(0.55 0.18 250); /* 蓝：running/info */
+  --destructive: oklch(0.577 0.245 27.33); /* 红：failed/rejected/blocked */
 
   /* 特有语义（Foundry 扩展） */
-  --agent: oklch(0.55 0.14 300);                /* 紫：agent 行为者（区别于人） */
-  --human: oklch(0.55 0.16 255);                /* 人＝品牌蓝 */
-  --evidence: oklch(0.48 0.10 180);             /* 青：证据/审计引用 */
+  --agent: oklch(0.55 0.14 300); /* 紫：agent 行为者（区别于人） */
+  --human: oklch(0.55 0.16 255); /* 人＝品牌蓝 */
+  --evidence: oklch(0.48 0.1 180); /* 青：证据/审计引用 */
 
   /* 图表阶梯：沿 hue 255 的明度梯（chart-1 锚定品牌） */
   --chart-1: oklch(0.55 0.16 255);
   --chart-2: oklch(0.65 0.13 255);
-  --chart-3: oklch(0.75 0.10 255);
+  --chart-3: oklch(0.75 0.1 255);
   --chart-4: oklch(0.84 0.07 255);
   --chart-5: oklch(0.92 0.04 255);
 
-  --radius: 0.625rem;                            /* 10px */
+  --radius: 0.625rem; /* 10px */
 }
 
 .dark {
@@ -82,13 +82,15 @@ Foundry 是一个**工程驾驶舱**设计系统：
   --input: oklch(1 0 0 / 15%);
   --brand: oklch(0.65 0.16 255);
   --success: oklch(0.65 0.14 145);
-  --warning: oklch(0.80 0.14 85);
+  --warning: oklch(0.8 0.14 85);
   --info: oklch(0.65 0.16 250);
-  --destructive: oklch(0.66 0.20 27);
+  --destructive: oklch(0.66 0.2 27);
   --agent: oklch(0.68 0.13 300);
   --evidence: oklch(0.62 0.09 180);
-  --chart-1: oklch(0.72 0.14 255);  --chart-2: oklch(0.62 0.13 255);
-  --chart-3: oklch(0.52 0.11 255);  --chart-4: oklch(0.42 0.09 255);
+  --chart-1: oklch(0.72 0.14 255);
+  --chart-2: oklch(0.62 0.13 255);
+  --chart-3: oklch(0.52 0.11 255);
+  --chart-4: oklch(0.42 0.09 255);
   --chart-5: oklch(0.32 0.06 255);
 }
 ```
@@ -102,12 +104,12 @@ Foundry 是一个**工程驾驶舱**设计系统：
 
 界面纵深只允许四级表面，每级绑定一个 token；**靠表面色分层，不靠阴影**：
 
-| 层级 | token | 用途 | 边界 |
-|---|---|---|---|
-| L0 页面背景 | `--background` | 内容区底 | — |
-| L1 次级面板 | `--panel`（侧边栏用 `--sidebar`） | 列表栏、检查器、线程轨、会话轨、抽屉内衬 | 1px `--border` |
-| L2 卡片 | `--card` | 卡片、输入框、弹出菜单的表面 | 1px `--border` + 圆角 |
-| L3 浮层 | `--card` + `shadow-lg` | Dialog、Popover、Toast、Tooltip | 阴影仅此层允许 |
+| 层级        | token                             | 用途                                     | 边界                  |
+| ----------- | --------------------------------- | ---------------------------------------- | --------------------- |
+| L0 页面背景 | `--background`                    | 内容区底                                 | —                     |
+| L1 次级面板 | `--panel`（侧边栏用 `--sidebar`） | 列表栏、检查器、线程轨、会话轨、抽屉内衬 | 1px `--border`        |
+| L2 卡片     | `--card`                          | 卡片、输入框、弹出菜单的表面             | 1px `--border` + 圆角 |
+| L3 浮层     | `--card` + `shadow-lg`            | Dialog、Popover、Toast、Tooltip          | 阴影仅此层允许        |
 
 规则：
 
@@ -134,22 +136,22 @@ Foundry 是一个**工程驾驶舱**设计系统：
 
 ### 2.4 字体
 
-| 角色 | 字体栈 | 用途 |
-|---|---|---|
-| Sans | `Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif` | 全部 UI 正文 |
-| Mono | `"JetBrains Mono", ui-monospace, "SF Mono", monospace` | 代码、id、key、数字（`tabular-nums`）、kbd |
+| 角色 | 字体栈                                                           | 用途                                       |
+| ---- | ---------------------------------------------------------------- | ------------------------------------------ |
+| Sans | `Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif` | 全部 UI 正文                               |
+| Mono | `"JetBrains Mono", ui-monospace, "SF Mono", monospace`           | 代码、id、key、数字（`tabular-nums`）、kbd |
 
 字号阶梯（密度优先，全部字号只从此表取）：
 
-| 档位 | 字号/字重 | 用途 |
-|---|---|---|
-| 页面标题 | 16–18 / 600 | PageHeader h1 |
-| 分区标题 | 13 / 600 | 卡片标题、section-title |
-| 分组眉题 | 10 / 600 / uppercase / tracking .08em / muted | group-label、表头、侧栏分组 |
-| 正文 | 13 / 400 | 列表、表格、表单 |
-| 辅助 | 12 / 400 / muted | 说明、时间戳、次要元信息 |
-| 微标 | 11 / 500 | badge、chip 内文字 |
-| 数据 | mono 11–12 | id、key、计数、耗时、token 数 |
+| 档位     | 字号/字重                                     | 用途                          |
+| -------- | --------------------------------------------- | ----------------------------- |
+| 页面标题 | 16–18 / 600                                   | PageHeader h1                 |
+| 分区标题 | 13 / 600                                      | 卡片标题、section-title       |
+| 分组眉题 | 10 / 600 / uppercase / tracking .08em / muted | group-label、表头、侧栏分组   |
+| 正文     | 13 / 400                                      | 列表、表格、表单              |
+| 辅助     | 12 / 400 / muted                              | 说明、时间戳、次要元信息      |
+| 微标     | 11 / 500                                      | badge、chip 内文字            |
+| 数据     | mono 11–12                                    | id、key、计数、耗时、token 数 |
 
 - 中文排版启用 `text-autospace: ideograph-alpha ideograph-numeric`
   （中英/中数间自动间距）。
@@ -163,21 +165,21 @@ Foundry 是一个**工程驾驶舱**设计系统：
 - **禁止** emoji、文字符号（＋ ↗ ✓ → 等）充当图标——包括原型与设计稿。
 - 核心图标映射（组件库常量，全局唯一出处）：
 
-| 语义 | Tabler 图标 | 语义 | Tabler 图标 |
-|---|---|---|---|
-| 项目 | `folder` | Brain | `brain` |
-| Sprint | `run` | 工作流 | `topology-star-3` |
-| 工作项 | `clipboard-list` | 运行 | `player-play` |
-| Epic | `sitemap` | 节点/Spawn | `cpu` |
-| 看板 | `layout-kanban` | 工作区 | `git-branch` |
-| 队列 | `list-numbers` | 健康 | `heart-rate-monitor` |
-| 审批/签核 | `rubber-stamp` | 洞察/度量 | `chart-dots` |
-| 产物 | `file-text` | 证据 | `certificate` |
-| 依赖 | `arrow-ramp-right` | 人工门 | `hand-stop` |
-| 收件箱 | `inbox` | 设置 | `settings` |
-| 人 | `user` | 智能体 | `robot` |
-| UI 设计 | `layout-2` | 文档 | `book` |
-| 守门 | `shield-check` | 确定性动作 | `list-check` |
+| 语义      | Tabler 图标        | 语义       | Tabler 图标          |
+| --------- | ------------------ | ---------- | -------------------- |
+| 项目      | `folder`           | Brain      | `brain`              |
+| Sprint    | `run`              | 工作流     | `topology-star-3`    |
+| 工作项    | `clipboard-list`   | 运行       | `player-play`        |
+| Epic      | `sitemap`          | 节点/Spawn | `cpu`                |
+| 看板      | `layout-kanban`    | 工作区     | `git-branch`         |
+| 队列      | `list-numbers`     | 健康       | `heart-rate-monitor` |
+| 审批/签核 | `rubber-stamp`     | 洞察/度量  | `chart-dots`         |
+| 产物      | `file-text`        | 证据       | `certificate`        |
+| 依赖      | `arrow-ramp-right` | 人工门     | `hand-stop`          |
+| 收件箱    | `inbox`            | 设置       | `settings`           |
+| 人        | `user`             | 智能体     | `robot`              |
+| UI 设计   | `layout-2`         | 文档       | `book`               |
+| 守门      | `shield-check`     | 确定性动作 | `list-check`         |
 
 ### 2.6 动效
 
@@ -193,15 +195,15 @@ Foundry 是一个**工程驾驶舱**设计系统：
 16px（列表内 14px）圆环，纯 CSS 几何绘制（border + conic-gradient），
 只承担**非终态**语义：
 
-| 状态 | 图形 | 颜色 |
-|---|---|---|
-| 待办 / pending | 虚线空环 | muted-foreground |
-| 排队 / queued | 空环 + 中心点 | warning |
-| 进行中 / running | 半饼（180°填充）+ 呼吸动画 | info |
-| 评审中 / review | 3/4 饼 | info |
-| 门前等待 / awaiting-gate | 空环 + 竖条（暂停形） | warning |
-| 已跳过 / skipped | 空环 + 斜线 | muted-foreground |
-| 已驳回 / rejected | 禁止符（环 + 斜杠） | destructive |
+| 状态                     | 图形                       | 颜色             |
+| ------------------------ | -------------------------- | ---------------- |
+| 待办 / pending           | 虚线空环                   | muted-foreground |
+| 排队 / queued            | 空环 + 中心点              | warning          |
+| 进行中 / running         | 半饼（180°填充）+ 呼吸动画 | info             |
+| 评审中 / review          | 3/4 饼                     | info             |
+| 门前等待 / awaiting-gate | 空环 + 竖条（暂停形）      | warning          |
+| 已跳过 / skipped         | 空环 + 斜线                | muted-foreground |
+| 已驳回 / rejected        | 禁止符（环 + 斜杠）        | destructive      |
 
 使用规则：非终态的图形一律复用状态环同一实现；**完成/失败等带字形的终态
 必须用 3.1a 的 StatusIcon**，禁止用伪元素手绘勾叉——绝对定位像素微调
@@ -214,13 +216,13 @@ Foundry 是一个**工程驾驶舱**设计系统：
 `<i class="ti ti-*">` 字形，字形尺寸 ≈ 容器 70%，`line-height:1`，
 `vertical-align:-2px` 与正文 x 高对齐——居中由布局引擎保证，永不漂移。
 
-| 变体 | 底色 | 默认字形 | 语义 |
-|---|---|---|---|
-| ok | success | ti-check | 完成 / 通过 / 签核有效 |
-| err | destructive | ti-x | 失败 / 驳回 / 判据未过 |
-| warn | warning | ti-exclamation-mark | 需注意 / 部分通过 |
-| inf | info | ti-arrow-right | 流转 / 进入下一步 |
-| mut | muted-foreground | ti-minus | 中性 / 不适用 |
+| 变体 | 底色             | 默认字形            | 语义                   |
+| ---- | ---------------- | ------------------- | ---------------------- |
+| ok   | success          | ti-check            | 完成 / 通过 / 签核有效 |
+| err  | destructive      | ti-x                | 失败 / 驳回 / 判据未过 |
+| warn | warning          | ti-exclamation-mark | 需注意 / 部分通过      |
+| inf  | info             | ti-arrow-right      | 流转 / 进入下一步      |
+| mut  | muted-foreground | ti-minus            | 中性 / 不适用          |
 
 尺寸三档：`sm` 12px / 默认 14px / `lg` 18px；嵌套语境用组件级选择器缩放
 （如 `.runbadge .st-icon`），**禁止逐处内联 width/height 微调**，禁止用
@@ -253,21 +255,21 @@ agent=方圆角(6px) + `robot` 图标 + `--agent` 紫描边；brain=方圆角 + 
 
 ### 3.5 状态→语义色总映射（唯一出处）
 
-| 域 | 状态 | 色 | 环 |
-|---|---|---|---|
-| run | pending/queued | warning | 空环+点 |
-| run | running | info | 半饼呼吸 |
-| run | paused | warning | 暂停形 |
-| run | done | success | 实心勾 |
-| run | failed | destructive | 实心叉 |
-| run | cancelled | muted | 斜线 |
-| node | awaiting-approval | warning | 暂停形+hand-stop |
-| stage | 已驳回 | destructive | 禁止符 |
-| approval | pending / approved / rejected | warning / success / destructive | — |
-| 健康 | ok / degraded / down | success / warning / destructive | 圆点 hdot |
-| errorClass | transient / schema / permanent | warning / info / destructive | — |
-| 行为者 | agent / human / brain | agent紫 / 品牌蓝 / 品牌蓝 | — |
-| 溯源 | from-audit / 证据引用 | evidence（青） | — |
+| 域         | 状态                           | 色                              | 环               |
+| ---------- | ------------------------------ | ------------------------------- | ---------------- |
+| run        | pending/queued                 | warning                         | 空环+点          |
+| run        | running                        | info                            | 半饼呼吸         |
+| run        | paused                         | warning                         | 暂停形           |
+| run        | done                           | success                         | 实心勾           |
+| run        | failed                         | destructive                     | 实心叉           |
+| run        | cancelled                      | muted                           | 斜线             |
+| node       | awaiting-approval              | warning                         | 暂停形+hand-stop |
+| stage      | 已驳回                         | destructive                     | 禁止符           |
+| approval   | pending / approved / rejected  | warning / success / destructive | —                |
+| 健康       | ok / degraded / down           | success / warning / destructive | 圆点 hdot        |
+| errorClass | transient / schema / permanent | warning / info / destructive    | —                |
+| 行为者     | agent / human / brain          | agent紫 / 品牌蓝 / 品牌蓝       | —                |
+| 溯源       | from-audit / 证据引用          | evidence（青）                  | —                |
 
 ## 4. 组件规范
 
@@ -557,13 +559,13 @@ outline）+ 自由输入；已回答的问题折叠为"问题→答案"摘要行
 
 分层有向图（dagre 式布局），节点 = 200px 宽 L2 卡片：
 
-| 节点类型 | 图标 | 视觉编码 |
-|---|---|---|
-| agent | `cpu`（vllm）/`robot`（cc） | 行1=图标+名+StatusRing；行2=引擎徽标(b-agent)+模型徽标(mono) |
-| action（确定性） | `list-check` | 行2=`b-evidence 确定性` 徽标，无模型徽标 |
-| gate 签核门 | `shield-check`/`rubber-stamp` | warning 描边常态，通过后转常规 |
-| human 人工门 | `hand-stop` | warning 描边 + ActorAvatar(人) |
-| fanout 扇出 | `cpu` + 叠片 | 叠片卡效果 + `×N` mono 徽标 |
+| 节点类型         | 图标                          | 视觉编码                                                     |
+| ---------------- | ----------------------------- | ------------------------------------------------------------ |
+| agent            | `cpu`（vllm）/`robot`（cc）   | 行1=图标+名+StatusRing；行2=引擎徽标(b-agent)+模型徽标(mono) |
+| action（确定性） | `list-check`                  | 行2=`b-evidence 确定性` 徽标，无模型徽标                     |
+| gate 签核门      | `shield-check`/`rubber-stamp` | warning 描边常态，通过后转常规                               |
+| human 人工门     | `hand-stop`                   | warning 描边 + ActorAvatar(人)                               |
+| fanout 扇出      | `cpu` + 叠片                  | 叠片卡效果 + `×N` mono 徽标                                  |
 
 - 状态：pending=muted 边；running=info 边 + border-beam 光带；done=success
   边 2%tint；failed=destructive 边 + 错误行；selected=brand 2px 描边
@@ -608,18 +610,18 @@ outline）+ 自由输入；已回答的问题折叠为"问题→答案"摘要行
 
 ## 5. 组件 ↔ 场景对照表
 
-| 界面 | 主要组件 |
-|---|---|
-| 看板（s1） | BoardColumn/BoardCard、mini-step、PriorityBars、RunBadge、FilterChip、SegmentedControl、Toast |
-| 规划工作台（s2） | StepsRail、InterviewCard、Composer、ArtifactCard、GateBanner(签核行)、quality 徽标 |
-| UI 评审（s3） | 嵌入 design 应用 + GateBanner、EvidenceCard |
-| 工作项（s4） | StageStepper、PropRow/InspectorPanel、TimelineCollapse、EvidenceCard、RunBadge、AttemptRow |
-| 收件箱（s5） | ListGrid、GateBanner、escalation 卡（GateBanner 变体）、TabBarUnderline |
+| 界面                | 主要组件                                                                                           |
+| ------------------- | -------------------------------------------------------------------------------------------------- |
+| 看板（s1）          | BoardColumn/BoardCard、mini-step、PriorityBars、RunBadge、FilterChip、SegmentedControl、Toast      |
+| 规划工作台（s2）    | StepsRail、InterviewCard、Composer、ArtifactCard、GateBanner(签核行)、quality 徽标                 |
+| UI 评审（s3）       | 嵌入 design 应用 + GateBanner、EvidenceCard                                                        |
+| 工作项（s4）        | StageStepper、PropRow/InspectorPanel、TimelineCollapse、EvidenceCard、RunBadge、AttemptRow         |
+| 收件箱（s5）        | ListGrid、GateBanner、escalation 卡（GateBanner 变体）、TabBarUnderline                            |
 | Sprint 驾驶舱（s6） | GoalCard、miniboard(BoardCard 微缩)、phase-bar(StageStepper 变体)、ArtifactCard、gate-row、KpiCard |
-| 运行详情（s7） | DagCanvas/DagNodeCard、NodeInspector、AttemptRow、TimelineCollapse、RunBadge、StatusPill |
-| 工作流库（s8） | Card 网格、Badge(模板域)、DagMiniMap、Table |
-| Brain 控制台（s9） | ThreadRail、Transcript、ContextGauge、Composer、MetricRow、StatusPill、engine chip |
-| 健康与洞察（s10） | KpiCard、hdot、Table、图表（chart-1..5）、CapabilityBanner |
+| 运行详情（s7）      | DagCanvas/DagNodeCard、NodeInspector、AttemptRow、TimelineCollapse、RunBadge、StatusPill           |
+| 工作流库（s8）      | Card 网格、Badge(模板域)、DagMiniMap、Table                                                        |
+| Brain 控制台（s9）  | ThreadRail、Transcript、ContextGauge、Composer、MetricRow、StatusPill、engine chip                 |
+| 健康与洞察（s10）   | KpiCard、hdot、Table、图表（chart-1..5）、CapabilityBanner                                         |
 
 ## 6. 禁则（全局红线）
 
@@ -652,13 +654,19 @@ design 应用中创建设计系统 **Foundry**（`create-design-system`）：
 ```json
 {
   "colors": {
-    "primary":  "#1c1c22",  "secondary": "#52525b",
-    "accent":   "#2f6fde",  "background": "#ffffff",
-    "surface":  "#f7f7f8",  "text": "#18181b", "textMuted": "#71717a"
+    "primary": "#1c1c22",
+    "secondary": "#52525b",
+    "accent": "#2f6fde",
+    "background": "#ffffff",
+    "surface": "#f7f7f8",
+    "text": "#18181b",
+    "textMuted": "#71717a"
   },
   "typography": {
-    "headingFont": "Inter", "bodyFont": "Inter",
-    "headingWeight": "600", "bodyWeight": "400",
+    "headingFont": "Inter",
+    "bodyFont": "Inter",
+    "headingWeight": "600",
+    "bodyWeight": "400",
     "headingSizes": { "h1": "20px", "h2": "16px", "h3": "13px" }
   },
   "spacing": { "pagePadding": "24px", "elementGap": "16px" },

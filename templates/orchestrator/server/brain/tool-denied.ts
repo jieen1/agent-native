@@ -21,8 +21,10 @@
 // `db` is injected so the write path is unit-testable with a mock.
 
 import { randomUUID } from "node:crypto";
+
 import { eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+
 import type * as v3SchemaTypes from "../db/v3-schema.js";
 import { spawnEvents, v3Events } from "../db/v3-schema.js";
 import { isToolAllowedForPhase, type BrainPhase } from "./brain-capability.js";

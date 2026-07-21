@@ -16,11 +16,11 @@ import { existsSync } from "node:fs";
 
 import { runWithRequestContext } from "@agent-native/core/server/request-context";
 
+import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
+import { VllmExecutor, DEFAULT_VLLM_MODEL } from "./executors/index.js";
 import { MicrosandboxRuntime } from "./microsandbox-runtime.js";
 import { NodeRunner } from "./node-runner.js";
-import { VllmExecutor, DEFAULT_VLLM_MODEL } from "./executors/index.js";
 import { wslMsb } from "./wsl-msb.js";
-import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
 
 /** The structured result of the E2E (also pretty-printed by the CLI). */
 export interface VllmE2eResult {

@@ -53,7 +53,8 @@ const TABLE_DECL_RE = /\btable\(\s*["']([a-zA-Z_][a-zA-Z0-9_]*)["']/g;
 
 /** Matches `CREATE TABLE IF NOT EXISTS xxx` (case-insensitive, as emitted by
  *  tracker's migration SQL strings). */
-const CREATE_TABLE_RE = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)/gi;
+const CREATE_TABLE_RE =
+  /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)/gi;
 
 /** Matches `ALTER TABLE ... ADD COLUMN IF NOT EXISTS col_name`. */
 const ADD_COLUMN_RE =
@@ -80,7 +81,10 @@ const NEW_TABLE_FIELD_BLOCK_RE =
 
 function uniqueMatches(re: RegExp, source: string, group = 1): string[] {
   const names = new Set<string>();
-  const fresh = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+  const fresh = new RegExp(
+    re.source,
+    re.flags.includes("g") ? re.flags : re.flags + "g",
+  );
   let m: RegExpExecArray | null;
   while ((m = fresh.exec(source))) {
     const value = m[group];
@@ -98,14 +102,18 @@ export function extractSchemaTableNames(schemaSource: string): string[] {
 
 /** Extract every table name created via `CREATE TABLE IF NOT EXISTS xxx` in a
  *  migrations source blob (concatenated migration SQL text). */
-export function extractMigrationCreatedTables(migrationsSource: string): string[] {
+export function extractMigrationCreatedTables(
+  migrationsSource: string,
+): string[] {
   return uniqueMatches(CREATE_TABLE_RE, migrationsSource, 1);
 }
 
 /** Extract every `table.column` pair added via `ALTER TABLE t ADD COLUMN IF
  *  NOT EXISTS c` in a migrations source blob. Returned as lowercase `t.c`
  *  strings for case-insensitive comparison. */
-export function extractMigrationAddedColumns(migrationsSource: string): string[] {
+export function extractMigrationAddedColumns(
+  migrationsSource: string,
+): string[] {
   const pairs = new Set<string>();
   const re = new RegExp(ADD_COLUMN_RE.source, "gi");
   let m: RegExpExecArray | null;
@@ -124,7 +132,10 @@ export function extractMigrationAddedColumns(migrationsSource: string): string[]
 export function extractDiffAddedColumns(diffAddedText: string): string[] {
   // Strip whole new-table field blocks first — see NEW_TABLE_FIELD_BLOCK_RE's
   // docblock for why a new table's own fields aren't "added columns".
-  const withoutNewTableBlocks = diffAddedText.replace(NEW_TABLE_FIELD_BLOCK_RE, "");
+  const withoutNewTableBlocks = diffAddedText.replace(
+    NEW_TABLE_FIELD_BLOCK_RE,
+    "",
+  );
   const names = new Set<string>();
   for (const line of withoutNewTableBlocks.split("\n")) {
     const m = DIFF_ADDED_COLUMN_RE.exec(line);
@@ -170,7 +181,10 @@ export function auditMigrations(
 ): MigrationAuditResult {
   const schemaTables = extractSchemaTableNames(schemaSource);
   const created = new Set(extractMigrationCreatedTables(migrationsSource));
-  const tables = schemaTables.map((name) => ({ name, hasCreate: created.has(name) }));
+  const tables = schemaTables.map((name) => ({
+    name,
+    hasCreate: created.has(name),
+  }));
   const missing = tables.filter((t) => !t.hasCreate).map((t) => t.name);
   return { tables, missing };
 }
@@ -195,11 +209,18 @@ export interface ColumnAuditResult {
  * `split_parent_id`, `hash`) that name-only matching is a safe, testable
  * heuristic for a machine-prefill advisory check, not a hard gate.
  */
-export function auditColumns(diffText: string, migrationsSource: string): ColumnAuditResult {
+export function auditColumns(
+  diffText: string,
+  migrationsSource: string,
+): ColumnAuditResult {
   const added = extractDiffAddedColumns(stripDiffMarkers(diffText));
   const migratedPairs = extractMigrationAddedColumns(migrationsSource);
-  const migratedColumnNames = new Set(migratedPairs.map((p) => p.split(".")[1]!));
-  const missing = added.filter((c) => !migratedColumnNames.has(c.toLowerCase()));
+  const migratedColumnNames = new Set(
+    migratedPairs.map((p) => p.split(".")[1]!),
+  );
+  const missing = added.filter(
+    (c) => !migratedColumnNames.has(c.toLowerCase()),
+  );
   return { columns: added, missing };
 }
 
@@ -240,12 +261,16 @@ export async function resolveRuntimeSchemaSource(): Promise<string> {
  */
 export async function resolveRuntimeMigrationsSource(): Promise<string> {
   const dbPluginModule = (await import("../plugins/db.js")) as {
-    TRACKER_MIGRATIONS: Array<{ sql: string | { postgres?: string; sqlite?: string } }>;
+    TRACKER_MIGRATIONS: Array<{
+      sql: string | { postgres?: string; sqlite?: string };
+    }>;
   };
   const migrations = dbPluginModule.TRACKER_MIGRATIONS ?? [];
   return migrations
     .map((m) =>
-      typeof m.sql === "string" ? m.sql : [m.sql.postgres, m.sql.sqlite].filter(Boolean).join("\n"),
+      typeof m.sql === "string"
+        ? m.sql
+        : [m.sql.postgres, m.sql.sqlite].filter(Boolean).join("\n"),
     )
     .join("\n");
 }

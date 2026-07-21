@@ -1,26 +1,4 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router";
-import { useSprints, useCreateSprint, useProjects } from "@/hooks/use-tracker";
 import type { Sprint } from "@shared/types";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   IconCalendar,
   IconFilter,
@@ -29,11 +7,36 @@ import {
   IconPlus,
   IconSearch,
 } from "@tabler/icons-react";
+import { useMemo, useState } from "react";
+import { Link } from "react-router";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useSprints, useCreateSprint, useProjects } from "@/hooks/use-tracker";
 import { cn } from "@/lib/utils";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function sprintStatusVariant(status: string): "default" | "secondary" | "outline" {
+function sprintStatusVariant(
+  status: string,
+): "default" | "secondary" | "outline" {
   switch (status) {
     case "进行中":
       return "default";
@@ -62,23 +65,23 @@ function sprintStatusColor(status: string): string {
 }
 
 const SPRINT_PHASE_LABEL: Record<string, string> = {
-  planning: '规划',
-  executing: '执行中',
-  done: '已完成',
+  planning: "规划",
+  executing: "执行中",
+  done: "已完成",
 };
 function sprintPhaseLabel(phase: string): string {
   return SPRINT_PHASE_LABEL[phase] ?? phase;
 }
 function sprintPhaseColor(phase: string): string {
   switch (phase) {
-    case 'planning':
-      return 'bg-secondary text-secondary-foreground';
-    case 'executing':
-      return 'bg-blue-500 text-white';
-    case 'done':
-      return 'bg-emerald-500 text-white';
+    case "planning":
+      return "bg-secondary text-secondary-foreground";
+    case "executing":
+      return "bg-blue-500 text-white";
+    case "done":
+      return "bg-emerald-500 text-white";
     default:
-      return 'bg-muted text-muted-foreground';
+      return "bg-muted text-muted-foreground";
   }
 }
 
@@ -123,8 +126,7 @@ function StatCard({
 // ── Sprint Card ──────────────────────────────────────────────────────────────
 
 function SprintCard({ sprint }: { sprint: Sprint }) {
-  const completed =
-    sprint.status === "已完成" || sprint.status === "已发布";
+  const completed = sprint.status === "已完成" || sprint.status === "已发布";
 
   const delivered = sprint.delivered ?? 0;
   const total = sprint.itemCount ?? 0;
@@ -145,7 +147,10 @@ function SprintCard({ sprint }: { sprint: Sprint }) {
             {sprint.status}
           </Badge>
           <Badge
-            className={cn("px-2 text-[11px]", sprintPhaseColor(sprint.phase ?? "planning"))}
+            className={cn(
+              "px-2 text-[11px]",
+              sprintPhaseColor(sprint.phase ?? "planning"),
+            )}
           >
             {sprintPhaseLabel(sprint.phase ?? "planning")}
           </Badge>
@@ -225,7 +230,11 @@ export function SprintsPage() {
   async function handleCreateSprint() {
     const projectId = newProjectId || projects[0]?.id;
     if (!projectId || !newName.trim()) return;
-    await createSprint.mutateAsync({ projectId, name: newName.trim(), goal: newGoal.trim() || undefined });
+    await createSprint.mutateAsync({
+      projectId,
+      name: newName.trim(),
+      goal: newGoal.trim() || undefined,
+    });
     setCreateOpen(false);
     setNewName("");
     setNewGoal("");
@@ -283,7 +292,9 @@ export function SprintsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {projects.map((p: any) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -310,7 +321,9 @@ export function SprintsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+              取消
+            </Button>
             <Button
               onClick={handleCreateSprint}
               disabled={!newName.trim() || createSprint.isPending}
@@ -329,7 +342,11 @@ export function SprintsPage() {
             跟踪每个 Sprint 的目标、进度与交付情况。
           </p>
         </div>
-        <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+        <Button
+          size="sm"
+          className="gap-1.5"
+          onClick={() => setCreateOpen(true)}
+        >
           <IconPlus className="size-4" />
           新建 Sprint
         </Button>
@@ -341,25 +358,33 @@ export function SprintsPage() {
           value={stats.inProgress}
           label="进行中"
           dot="bg-blue-100 dark:bg-blue-900/30"
-          icon={<IconPackage className="size-4 text-blue-600 dark:text-blue-400" />}
+          icon={
+            <IconPackage className="size-4 text-blue-600 dark:text-blue-400" />
+          }
         />
         <StatCard
           value={stats.toPublish}
           label="待发布"
           dot="bg-emerald-100 dark:bg-emerald-900/30"
-          icon={<IconPackage className="size-4 text-emerald-600 dark:text-emerald-400" />}
+          icon={
+            <IconPackage className="size-4 text-emerald-600 dark:text-emerald-400" />
+          }
         />
         <StatCard
           value={stats.activeItems}
           label="活跃工作项"
           dot="bg-amber-100 dark:bg-amber-900/30"
-          icon={<IconPackage className="size-4 text-amber-600 dark:text-amber-400" />}
+          icon={
+            <IconPackage className="size-4 text-amber-600 dark:text-amber-400" />
+          }
         />
         <StatCard
           value={stats.queued}
           label="队列中"
           dot="bg-purple-100 dark:bg-purple-900/30"
-          icon={<IconPackage className="size-4 text-purple-600 dark:text-purple-400" />}
+          icon={
+            <IconPackage className="size-4 text-purple-600 dark:text-purple-400" />
+          }
         />
       </div>
 
@@ -405,7 +430,11 @@ export function SprintsPage() {
           <p className="max-w-sm text-sm text-muted-foreground">
             点击「新建 Sprint」开始创建第一个迭代。
           </p>
-          <Button size="sm" className="mt-1 gap-1.5" onClick={() => setCreateOpen(true)}>
+          <Button
+            size="sm"
+            className="mt-1 gap-1.5"
+            onClick={() => setCreateOpen(true)}
+          >
             <IconPlus className="size-4" />
             新建 Sprint
           </Button>

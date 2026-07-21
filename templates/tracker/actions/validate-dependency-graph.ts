@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
@@ -17,8 +18,13 @@ export default defineAction({
     "epic (project) or a sprint: self-dependency, cycles, chain depth, lack " +
     "of parallelism, and orphan nodes. Purely deterministic — no LLM calls.",
   schema: z.object({
-    scope: z.enum(["epic", "sprint"]).describe("'epic' scopes by project, 'sprint' scopes by sprint"),
-    id: z.string().min(1).describe("The projectId (scope=epic) or sprintId (scope=sprint)"),
+    scope: z
+      .enum(["epic", "sprint"])
+      .describe("'epic' scopes by project, 'sprint' scopes by sprint"),
+    id: z
+      .string()
+      .min(1)
+      .describe("The projectId (scope=epic) or sprintId (scope=sprint)"),
   }),
   http: { method: "GET" },
   run: async (args) => {
@@ -70,7 +76,11 @@ export default defineAction({
             inArray(schema.links.toItemId, ids),
           ),
         )
-        .limit(5000)) as { fromItemId: string; toItemId: string; linkType: string }[];
+        .limit(5000)) as {
+        fromItemId: string;
+        toItemId: string;
+        linkType: string;
+      }[];
 
       // "A blocked-by B" means A depends on B — the validator's edge
       // direction (fromId depends on toId) matches the link as stored.

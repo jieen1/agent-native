@@ -1,6 +1,3 @@
-import { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
-import { useTranslation } from "react-i18next";
 import { useActionMutation, useActionQuery } from "@agent-native/core/client";
 import {
   IconDots,
@@ -10,18 +7,14 @@ import {
   IconPlus,
   IconUpload,
 } from "@tabler/icons-react";
-import { APP_TITLE } from "@/lib/app-config";
+import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router";
+
 import { DataTable } from "@/components/board/DataTable";
 import { EmptyState } from "@/components/board/EmptyState";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -37,11 +30,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { NewWorkspaceDialog } from "@/components/v3/NewWorkspaceDialog";
 import {
   WorkspaceCommitDialog,
   type WorkspaceCommitTarget,
 } from "@/components/v3/WorkspaceCommitDialog";
+import { APP_TITLE } from "@/lib/app-config";
 
 export function meta() {
   return [{ title: `${APP_TITLE} — 工作区` }];

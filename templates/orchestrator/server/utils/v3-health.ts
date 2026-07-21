@@ -2,9 +2,10 @@
 // GET /_v3/health — returns JSON health report.
 // Checks: Postgres connection, msb CLI, KVM backend, network egress.
 
-import { defineEventHandler } from "h3";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+
+import { defineEventHandler } from "h3";
 
 const execFileP = promisify(execFile);
 
@@ -133,18 +134,20 @@ async function checkEgress(): Promise<HealthStatus> {
  * Returns a JSON health report covering Postgres, msb CLI, KVM backend,
  * and network egress. All checks run in parallel.
  */
-export const v3HealthEventHandler = defineEventHandler(async (): Promise<V3HealthReport> => {
-  const [postgres, msb, kvm, egress] = await Promise.all([
-    checkPostgres(),
-    checkMsbCli(),
-    checkKvm(),
-    checkEgress(),
-  ]);
+export const v3HealthEventHandler = defineEventHandler(
+  async (): Promise<V3HealthReport> => {
+    const [postgres, msb, kvm, egress] = await Promise.all([
+      checkPostgres(),
+      checkMsbCli(),
+      checkKvm(),
+      checkEgress(),
+    ]);
 
-  return {
-    postgres,
-    msb,
-    kvm,
-    egress,
-  };
-});
+    return {
+      postgres,
+      msb,
+      kvm,
+      egress,
+    };
+  },
+);

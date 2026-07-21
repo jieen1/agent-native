@@ -53,7 +53,7 @@ function emit(entry: LogEntry): void {
  * Create a structured logger scoped to a V3 module.
  */
 export function createV3Logger(
-  context: string | Omit<LogContext, "module"> & { module: string },
+  context: string | (Omit<LogContext, "module"> & { module: string }),
 ): {
   error: (msg: string, extra?: Record<string, unknown>) => void;
   warn: (msg: string, extra?: Record<string, unknown>) => void;

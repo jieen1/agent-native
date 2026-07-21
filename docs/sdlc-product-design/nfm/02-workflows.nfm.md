@@ -10,7 +10,7 @@
 
 ### 1.1 Sprint 八相位状态机
 
-<Mermaid id="wf02-phase-machine" source={"stateDiagram-v2\n  [*] --> planning\n  planning --> designing: plan-signoff\n  designing --> executing: design-signoff 含UI时追加ui-signoff\n  executing --> verifying: 全部工作项合入\n  verifying --> verifying: RED 建 from-audit 单 修复后重跑\n  verifying --> auditing: GREEN\n  auditing --> auditing: blocking 建单修复 最多 3 轮\n  auditing --> promoting: NO_GAPS\n  promoting --> storytelling: 晋升合入 base\n  storytelling --> done: story 实走验证\n  done --> [*]"} />
+<Mermaid id="wf02-phase-machine" source={"stateDiagram-v2\n [*] --> planning\n planning --> designing: plan-signoff\n designing --> executing: design-signoff 含UI时追加ui-signoff\n executing --> verifying: 全部工作项合入\n verifying --> verifying: RED 建 from-audit 单 修复后重跑\n verifying --> auditing: GREEN\n auditing --> auditing: blocking 建单修复 最多 3 轮\n auditing --> promoting: NO_GAPS\n promoting --> storytelling: 晋升合入 base\n storytelling --> done: story 实走验证\n done --> [*]"} />
 
 三道人工签核门（plan-signoff、ui-signoff、design-signoff）全部集中在前两个相位；从 executing 起直到 done，理想路径上没有任何人工介入点——人只在 escalation、audit-deferral、accept-defer 三类例外裁决时被打断。
 
@@ -214,7 +214,7 @@ Epic 拆解刻意不做成技能：`decompose-epic` action 只接受**人写好�
 
 适用：executing 相位内每个开发类工作项一个 run。
 
-<Mermaid id="wf02-issue-pipeline" source={"flowchart LR\n  ws[workspace 基于 sprint 分支] --> dev[dev vLLM TDD 红测试先行]\n  dev --> qa[qa vLLM 双工件]\n  qa -->|失败| dev\n  qa --> rv[review 交替模型 最多3轮]\n  rv -->|驳回| dev\n  rv -->|超限| hg[human_gate 升级]\n  rv --> gate[gate 按 gateMode 实测]\n  gate -->|失败| dev\n  gate --> da[diff-audit 确定性防污染]\n  da -->|越界| dev\n  da --> pr[commit 与 PR]\n  pr --> ci[ci-watch]\n  ci --> mg[merge 顺序锁]\n  mg -->|断言失败 rebase 重验| qa\n  mg --> wb[终态回写 tracker]"} />
+<Mermaid id="wf02-issue-pipeline" source={"flowchart LR\n ws[workspace 基于 sprint 分支] --> dev[dev vLLM TDD 红测试先行]\n dev --> qa[qa vLLM 双工件]\n qa -->|失败| dev\n qa --> rv[review 交替模型 最多3轮]\n rv -->|驳回| dev\n rv -->|超限| hg[human_gate 升级]\n rv --> gate[gate 按 gateMode 实测]\n gate -->|失败| dev\n gate --> da[diff-audit 确定性防污染]\n da -->|越界| dev\n da --> pr[commit 与 PR]\n pr --> ci[ci-watch]\n ci --> mg[merge 顺序锁]\n mg -->|断言失败 rebase 重验| qa\n mg --> wb[终态回写 tracker]"} />
 
 节点要点：
 
@@ -506,10 +506,9 @@ brain 只做：接收派发、按 runbook 选模板或 authoring DAG、发起 wo
 </tr>
 </table>
 
-
 ## 6. 回写通道与健康前置门
 
-<Mermaid id="wf02-writeback" source={"flowchart TD\n  rt[run 或节点终态] --> rc[reconciler 确定性回写 主通道]\n  rc --> tc[tracker-client 以 run tags 身份铸 JWT]\n  tc --> ad[tracker advance-stage 幂等推进]\n  rt -.兜底.-> gp[get-activity 轮询]\n  gp --> ad\n  rt -.叙述.-> br[brain 被唤醒 review 汇报 不推状态]"} />
+<Mermaid id="wf02-writeback" source={"flowchart TD\n rt[run 或节点终态] --> rc[reconciler 确定性回写 主通道]\n rc --> tc[tracker-client 以 run tags 身份铸 JWT]\n tc --> ad[tracker advance-stage 幂等推进]\n rt -.兜底.-> gp[get-activity 轮询]\n gp --> ad\n rt -.叙述.-> br[brain 被唤醒 review 汇报 不推状态]"} />
 
 - 三层通道的分工：确定性回写是主链路（不依赖 LLM 主动性）；轮询是兜底；brain 只做叙述。幂等 advance 保证双通道并存不重复推进。
 - 健康前置门：sprint 进 executing、以及每次派发前，确定性检查 vLLM、CC 登录、brain 并发槽。人工与常规派发不健康时**立即拒绝**并把原因写到 sprint 页与队列页——是门口的拒绝，不是深处的超时；**系统内生的修复派发（from-audit 回环）改为排队等待恢复**，避免修复链因瞬时不健康断裂（与 1.3 节一致）。

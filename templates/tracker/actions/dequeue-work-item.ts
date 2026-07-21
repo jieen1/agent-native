@@ -5,6 +5,7 @@ import {
 } from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -30,7 +31,12 @@ export default defineAction({
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!workItem) throw new Error("Work item not found or not accessible");

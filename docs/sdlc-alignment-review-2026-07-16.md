@@ -227,20 +227,25 @@
 按依赖与价值排序(每条带验收判据)(执行级展开见《SDLC 实施规划(R1–R5 执行版)》):
 
 ### R1 让系统重新转起来(先决,当周可完成)
+
 - ✅ 已收编 recover/sdlc-issue-pipeline(运行限额兜底 + workspaceCiWatch + workspaceMergePr)并合入 main(1fd9783fb)。移植适配:迁移改写为 name-based 幂等(sdlc-run-limits);修复原提交 mergePr 的 session 级 advisory lock 连接池泄漏隐患(改事务级 xact_lock);验证 workspace-local 12/12、真实 PG 迁移冒烟 2/2、零新增失败。**待办:部署到 101——门槛是先跑一次真实运行验证 checkRunLimits(该函数无既有测试覆盖,且 v3-reconciler.spec.ts 在纯净 main 上即卡死,见下)。**
 - 🆕 独立发现:`v3-reconciler.spec.ts` 在未经改动的 main 上以 99% CPU 卡死(疑似某 test 顶层同步死循环),vitest testTimeout 无法拯救——仓库既有 bug,修复后才能给 reconciler 变更以自动化回归保障。
 - 清理孤儿状态(SDLC-042 无 run_id 的 running 项)并复活「SDLC自举」dogfood 循环:从 tracker 建一张小票 → dispatch → orchestrator 跑通一个 V3 run。**验收:v3_runs 出现 07-16 后的新 run;F4 phase、F7 model_real_name、F9 回写事件三个计数从 0 变为正数——这一条同时是 F 项机制的首次真实验证。**
 
 ### R2 场景①端到端走通(脊柱场景)
+
 单 issue 全流程:建单→规模门→派发→自动开发→评审→写回→守卫流转→验收→PR 合并(用 R1 的 CI watch/PR merge)。**验收:一张真实 issue 从 open 到交付全程零人工 SQL,状态轨迹与证据链完整可查。**
 
 ### R3 给机制接上 UI 通路(机制已有、只缺界面的三处优先)
+
 收件箱(list-inbox/resolve)、issue 页证据链(run/diff/test)、队列审批真实化(替换排队人工门一路的 toast 桩;签核/裁决审批卡一路已接真)。原列首位的"守卫流转对话框接线 transition-work-item"经 2026-07-16 复核已于 41fe0b51b 交付(GuardedTransitionDialog),从待办转为回归核对项。随后:模型注册表页、健康页(后端 action 已在)。**验收:一个人不碰 agent 聊天窗,纯 UI 走完场景①的人工环节。**
 
 ### R4 工作流族与规划技能链
+
 把 sdlc-issue-pipeline 扩成第一个真实多节点 DAG 模板(dev→qa→reviewer→gatekeeper→diff-audit→PR→CI→merge)入库带版本;随后 hotfix/docs-task/quick-task 族;规划域六技能(brainstorm/sprint-plan/sprint-test-plan/ui-spec/sprint-design/sprint-review)+ gap-analysis action 支撑场景②(Sprint Goal 闭环)。**验收:场景②③按路线图 §2 判据走通。**
 
 ### R5 四域打通(design/content 集成)
+
 ui-spec 子流程(设计稿→评审→实现比对)、content 项目文档库自动归档。**验收:一个带 UI 的 issue 走完 05 章旅程,产物自动落库。**
 
 > 工程卫生并行项:接入 agent-native doctor;audit backlog 里的 O12(action 面收敛)、T-D(automations 替代 4s 轮询)、O13(去残余硬编码)按机会处理;F2b(已交付,见 T-F2-06)、回写持久 outbox 排入 R2 之后。
@@ -252,8 +257,8 @@ ui-spec 子流程(设计稿→评审→实现比对)、content 项目文档库�
 - **动效 tokens**:时长梯度 120/240/400/700ms + 氛围循环档 1.6/2.5/3.2s;曲线收敛为 standard(0.4,0,0.2,1)/enter/exit 三件套,回弹曲线(0.5,1.5,0.4,1)仅限完成/庆祝时刻。
 - **招牌模式**(源码移植):thinking 文字扫光(agent 运行态,替代 spinner)、导航进度扫条(1.4s,路由 pending 态)、活跃态克制脉动(1.6s,只动色彩与阴影)、两段式完成动效(徽章回弹→打勾描边)、数字计数动画。
 - **红线**(实证背书):无 stagger 表演、无视差、无自定义光标;overflow 容器内禁位移动效(防滚动条闪烁);拖拽/手势进行中禁用一切 transition;全量 prefers-reduced-motion 降级。
-- **落地**:design 服务的 Foundry design system(customCSS+custom_instructions)、《Foundry·组件规范》新增动效章、_foundry-skeleton 内嵌 motion 基建、11 屏原型逐屏套用;生产应用(React+Tailwind+shadcn)以同一套 token 通过 tailwind 主题扩展 + data-state 全局覆盖统一 shadcn 组件节奏。
+- **落地**:design 服务的 Foundry design system(customCSS+custom_instructions)、《Foundry·组件规范》新增动效章、\_foundry-skeleton 内嵌 motion 基建、11 屏原型逐屏套用;生产应用(React+Tailwind+shadcn)以同一套 token 通过 tailwind 主题扩展 + data-state 全局覆盖统一 shadcn 组件节奏。
 
 ---
 
-*本文取代所有更早文档中的「现状」表述;机制细节见《F0–F10 实现说明》(/page/eC0amjYq04IE)与两份实施细则;架构约束见 agent-native-alignment-audit(其 §5 裁决的合理偏离不再作为问题重提)。*
+_本文取代所有更早文档中的「现状」表述;机制细节见《F0–F10 实现说明》(/page/eC0amjYq04IE)与两份实施细则;架构约束见 agent-native-alignment-audit(其 §5 裁决的合理偏离不再作为问题重提)。_

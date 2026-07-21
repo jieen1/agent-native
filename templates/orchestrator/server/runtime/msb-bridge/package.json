@@ -2,18 +2,18 @@
   "name": "an-msb-bridge",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Host-side microsandbox SDK bridge for the orchestrator. Runs on the WSL2 host (needs /dev/kvm); the an-orchestrator container drives microVMs over HTTP via server/runtime/msb-runtime.ts.",
   "bin": {
     "an-msb-bridge": "server.mjs"
   },
+  "type": "module",
   "scripts": {
     "start": "node server.mjs"
   },
-  "engines": {
-    "node": ">= 22"
-  },
   "dependencies": {
     "microsandbox": "0.5.10"
+  },
+  "engines": {
+    "node": ">= 22"
   }
 }

@@ -4,11 +4,11 @@
 // for every tool/code/agent node); `kind:"none"` → NoneRuntime (pure-reasoning
 // only). There is no third backend (DESIGN §7.0).
 
+import type { NodeRuntimeSpec } from "../../shared/types.js";
 import { MicrosandboxRuntime } from "./microsandbox-runtime.js";
 import { MsbRuntime } from "./msb-runtime.js";
-import { NoneRuntime } from "./none-runtime.js";
 import type { NodeRuntime } from "./node-runtime.js";
-import type { NodeRuntimeSpec } from "../../shared/types.js";
+import { NoneRuntime } from "./none-runtime.js";
 
 export type {
   ExecOptions,

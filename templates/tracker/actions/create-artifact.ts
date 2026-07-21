@@ -6,6 +6,7 @@ import {
 import { eq, and, max } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -17,7 +18,10 @@ export default defineAction({
     workItemId: z.string().min(1),
     stageId: z.string().min(1),
     stageName: z.string().min(1),
-    kind: z.string().min(1).describe("e.g. 分析报告 / 设计稿 / 代码变更 / 测试集 / 验收报告"),
+    kind: z
+      .string()
+      .min(1)
+      .describe("e.g. 分析报告 / 设计稿 / 代码变更 / 测试集 / 验收报告"),
     name: z.string().min(1),
     contentRef: z.string().optional(),
     producedByKind: z.enum(["agent", "human"]).optional(),
@@ -34,7 +38,12 @@ export default defineAction({
       await db
         .select({ id: schema.workItems.id })
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found");
@@ -98,13 +107,25 @@ export default defineAction({
       actorKind: args.producedByKind ?? "agent",
       actorName: ownerEmail,
       eventType: "产物新版",
-      payload: JSON.stringify({ kind: args.kind, name: args.name, version: nextVersion }),
+      payload: JSON.stringify({
+        kind: args.kind,
+        name: args.name,
+        version: nextVersion,
+      }),
       createdAt: now,
       ownerEmail,
       orgId,
       visibility: "private",
     });
 
-    return { id, workItemId: args.workItemId, stageName: args.stageName, kind: args.kind, name: args.name, version: nextVersion, createdAt: now };
+    return {
+      id,
+      workItemId: args.workItemId,
+      stageName: args.stageName,
+      kind: args.kind,
+      name: args.name,
+      version: nextVersion,
+      createdAt: now,
+    };
   },
 });

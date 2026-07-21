@@ -1,9 +1,10 @@
+import { getOrgContext } from "@agent-native/core/org";
 import {
   createAgentChatPlugin,
   loadActionsFromStaticRegistry,
 } from "@agent-native/core/server";
+
 import actionsRegistry from "../../.generated/actions-registry.js";
-import { getOrgContext } from "@agent-native/core/org";
 import { registerVllmEngine, getVllmEngine } from "../vllm-engine.js";
 
 // Register the local vLLM engine so the composer gate/model picker see it,

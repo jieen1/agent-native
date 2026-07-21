@@ -8,10 +8,10 @@
 
 ## §0 结论速览
 
-| 发现 | 结论 | 核心依据 | 量级 | 优先级 |
-|---|---|---|---|---|
-| 智能体页(`/agents`)对非 owner 账号完全空白 | **改成应用级共享注册表**(全用户可见),不保持 per-user 归属模型;用框架原生 `visibility="public"` + `includePublic` 实现,不复制 workflowList 的"整表去 scope"偏离 | 派发器 `agent-loader.ts` 解析 agent def 时**本来就不做任何访问过滤**——执行语义早已全局,只有 UI 读面在装作私有 | WP-AG.1+AG.2 合计 1–2 天 | 缺陷级,填缝优先(不抢 Sprint 主线) |
-| 资源池页(`/pool`)是废弃架构遗留 | **直接移除页面与入口**;`poolStatus`/`dispatchQueue` 两个 action **保留**(健康页容量区在消费);不重建 | 04 章 §10 已裁定"容量区(合并现 pool 页)",且 `health.tsx` 的 `CapacitySection` 已实现该合并;页面引用的 "design §8.7" 出自旧 `v3-DESIGN.md`,当前产品设计 v2.x 全文零匹配"资源池" | WP-PL.1 约 0.5 天 | 债务清理,可与 WP-AG 同周随行 |
+| 发现                                       | 结论                                                                                                                                                           | 核心依据                                                                                                                                                                       | 量级                     | 优先级                            |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------------------- |
+| 智能体页(`/agents`)对非 owner 账号完全空白 | **改成应用级共享注册表**(全用户可见),不保持 per-user 归属模型;用框架原生 `visibility="public"` + `includePublic` 实现,不复制 workflowList 的"整表去 scope"偏离 | 派发器 `agent-loader.ts` 解析 agent def 时**本来就不做任何访问过滤**——执行语义早已全局,只有 UI 读面在装作私有                                                                  | WP-AG.1+AG.2 合计 1–2 天 | 缺陷级,填缝优先(不抢 Sprint 主线) |
+| 资源池页(`/pool`)是废弃架构遗留            | **直接移除页面与入口**;`poolStatus`/`dispatchQueue` 两个 action **保留**(健康页容量区在消费);不重建                                                            | 04 章 §10 已裁定"容量区(合并现 pool 页)",且 `health.tsx` 的 `CapacitySection` 已实现该合并;页面引用的 "design §8.7" 出自旧 `v3-DESIGN.md`,当前产品设计 v2.x 全文零匹配"资源池" | WP-PL.1 约 0.5 天        | 债务清理,可与 WP-AG 同周随行      |
 
 ---
 
@@ -53,11 +53,11 @@
    `loadAgent(name)` 明确注释"no access filtering (name is globally unique)",
    按名字裸查——任何用户的 DAG 节点写 `agent: "vllm"`,解析到的都是同一条行,
    **不管这条行归谁、可见性是什么**。当前模型的实际效果是三重不一致:
-   - *可见 ≠ 可用*:看不到 vllm 的用户照样能在 DAG 里用它(还执行了一条他看不到的
+   - _可见 ≠ 可用_:看不到 vllm 的用户照样能在 DAG 里用它(还执行了一条他看不到的
      systemPrompt);
-   - *私有 ≠ 隔离*:vllm 行的 owner 改 systemPrompt/model,**所有人**的 DAG 节点
+   - _私有 ≠ 隔离_:vllm 行的 owner 改 systemPrompt/model,**所有人**的 DAG 节点
      行为跟着变——私有归属 + 全局执行,两头的坏处都占了;
-   - *跨租户名字冲突*:`save-agent-def.ts:33-37` 先按名全局查再 `resolveAccess`,
+   - _跨租户名字冲突_:`save-agent-def.ts:33-37` 先按名全局查再 `resolveAccess`,
      用户 A 想创建与用户 B 私有 agent 同名的定义,得到的是错误信息
      `Agent 'x' not found`(误导),若撞上 builtin 名则收到
      `Builtin agent is read-only`(顺带泄露行存在性)。
@@ -78,10 +78,10 @@
 
 ### 1.3 方案比较
 
-| 方案 | 做法 | 评价 |
-|---|---|---|
-| A. 保持现状 + 给新用户逐个共享 | 用 shares 表把 5 条行 share 给每个账号 | 驳回:每新增一个账号都要补共享;跨租户名字冲突、"私有但全局可执行"的不一致原样保留;运维负担换不来任何产品价值 |
-| B. workflowList 式整表去 scope | `list/get-agent-defs` 去掉 `accessFilter` | 可行且与工作流库对称,但违反"`ownableColumns()` 表必须 scoped reads"的框架红线,需要在 `docs/agent-native-alignment-audit.md` §5 新登记一条偏离;放弃了行级角色语义 |
+| 方案                              | 做法                                                                              | 评价                                                                                                                                                                                                                                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A. 保持现状 + 给新用户逐个共享    | 用 shares 表把 5 条行 share 给每个账号                                            | 驳回:每新增一个账号都要补共享;跨租户名字冲突、"私有但全局可执行"的不一致原样保留;运维负担换不来任何产品价值                                                                                                                                                                                       |
+| B. workflowList 式整表去 scope    | `list/get-agent-defs` 去掉 `accessFilter`                                         | 可行且与工作流库对称,但违反"`ownableColumns()` 表必须 scoped reads"的框架红线,需要在 `docs/agent-native-alignment-audit.md` §5 新登记一条偏离;放弃了行级角色语义                                                                                                                                  |
 | **C. 框架原生 public 可见(推荐)** | worker 行 `visibility="public"`;读面 `accessFilter(..., { includePublic: true })` | `accessFilter` 明文支持此用法(`packages/core/src/sharing/access.ts:88-92`:"Pass `{ includePublic: true }` for the rare list endpoint that wants cross-user public discovery (a public template gallery, for example)")——语义完全对口;**零框架改动、零偏离登记**;写面 owner/admin 角色语义原样保留 |
 
 推荐 **方案 C**。它和方案 B 的用户可见效果相同,但走的是框架给这个场景预留的
@@ -111,7 +111,7 @@ visibility 字段还在,退路完整。
    在 `agent-defs-seed.ts` 内追加(或并列新建)一段启动回填,模式照抄
    `workflow-templates-seed.ts` 的 insert-or-tag:
    `UPDATE orchestrator_agent_defs SET visibility='public'
-   WHERE kind='worker' AND visibility='private'`(幂等、纯 additive、每次启动
+WHERE kind='worker' AND visibility='private'`(幂等、纯 additive、每次启动
    自愈)。要点:
    - **不把 101 的 vllm/auditor/reviewer 翻成 builtin=1**——它们是真实 dogfood
      作品,owner 还要继续维护;翻 builtin 会把它们锁死只读。归属保持
@@ -201,11 +201,11 @@ visibility 字段还在,退路完整。
 
 ### 2.2 维度边界澄清:三个并发上限,资源池页没有独占任何一个
 
-| 上限 | 真实来源 | 现有 UI 承接 |
-|---|---|---|
-| Brain 线程并发(brain_tasks 槽) | `brain-queue-status` action(读 `brain_tasks` + driver 心跳) | Brain 控制台「并发槽」卡(`brain.tsx:2004-2030`)+ 健康页「Brain 槽」卡(`health.tsx:391-450`)✔ |
-| V3 spawn 派发上限(G18) | reconciler `poolCapacity=8`(`v3-reconciler.ts:102,142`);`poolStatus` 真正反映的就是这个维度 | 健康页容量区 `CapacitySection` ✔ |
-| microVM 供给信号量 | `backpressure.ts` 的 `VmSemaphore`(`maxConcurrentVMs=4`,`engine/types.ts:118`),仅在 `ORCH_FORCE_MICROVM=1` + `ORCH_MSB_BRIDGE_URL` 时是常态路径(`v3-dispatcher.ts:605-615`) | 任何页面都未呈现——但 04 §10 裁定它**只应**在开关启用时显示,当前部署非常态,不显示是对的 |
+| 上限                           | 真实来源                                                                                                                                                                    | 现有 UI 承接                                                                                 |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Brain 线程并发(brain_tasks 槽) | `brain-queue-status` action(读 `brain_tasks` + driver 心跳)                                                                                                                 | Brain 控制台「并发槽」卡(`brain.tsx:2004-2030`)+ 健康页「Brain 槽」卡(`health.tsx:391-450`)✔ |
+| V3 spawn 派发上限(G18)         | reconciler `poolCapacity=8`(`v3-reconciler.ts:102,142`);`poolStatus` 真正反映的就是这个维度                                                                                 | 健康页容量区 `CapacitySection` ✔                                                             |
+| microVM 供给信号量             | `backpressure.ts` 的 `VmSemaphore`(`maxConcurrentVMs=4`,`engine/types.ts:118`),仅在 `ORCH_FORCE_MICROVM=1` + `ORCH_MSB_BRIDGE_URL` 时是常态路径(`v3-dispatcher.ts:605-615`) | 任何页面都未呈现——但 04 §10 裁定它**只应**在开关启用时显示,当前部署非常态,不显示是对的       |
 
 即:资源池页想覆盖的是第 2、3 个维度(V3 spawn 级执行资源,与 brain 并发无关的
 判断正确),但第 2 维已被健康页容量区承接,第 3 维按设计就不该常态显示。
@@ -217,14 +217,14 @@ visibility 字段还在,退路完整。
 
 移除清单(精确到落点):
 
-| 项 | 位置 |
-|---|---|
-| 路由文件 | `templates/orchestrator/app/routes/pool._index.tsx`(整文件删除) |
-| 侧栏入口 | `app/components/layout/Sidebar.tsx:104-110`(`nav.pool` 项,含 `view:"pool"`) |
-| 布局高亮 | `app/components/layout/Layout.tsx:40` 的 `pathname.startsWith("/pool")` 分支 |
-| 首页链接网格 | `app/routes/_index.tsx:19` NAV_ITEMS 的 `/pool` 项 |
-| i18n | `app/lib/i18n.ts:55`(en "Pool")与 `:765`(zh "资源池") |
-| 健康页反链 | `health.tsx:666-676` DataSourceNote 中"完整 VM 管理见 资源池"改写为不再指向已删页面(直接删句或改述容量区即全部事实) |
+| 项           | 位置                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------- |
+| 路由文件     | `templates/orchestrator/app/routes/pool._index.tsx`(整文件删除)                                                     |
+| 侧栏入口     | `app/components/layout/Sidebar.tsx:104-110`(`nav.pool` 项,含 `view:"pool"`)                                         |
+| 布局高亮     | `app/components/layout/Layout.tsx:40` 的 `pathname.startsWith("/pool")` 分支                                        |
+| 首页链接网格 | `app/routes/_index.tsx:19` NAV_ITEMS 的 `/pool` 项                                                                  |
+| i18n         | `app/lib/i18n.ts:55`(en "Pool")与 `:765`(zh "资源池")                                                               |
+| 健康页反链   | `health.tsx:666-676` DataSourceNote 中"完整 VM 管理见 资源池"改写为不再指向已删页面(直接删句或改述容量区即全部事实) |
 
 保留决策:
 

@@ -561,13 +561,15 @@ describe("W2/W3 timeout resolution (board #88)", () => {
       JSON.stringify({ devDependencies: { vitest: "^4.1.5" } }),
     );
 
-    const exec = vi.fn(async (command: string, _execOpts: { timeoutMs: number }) =>
-      command.includes("install") ? fail(1, "offline") : ok("4.1.5"),
+    const exec = vi.fn(
+      async (command: string, _execOpts: { timeoutMs: number }) =>
+        command.includes("install") ? fail(1, "offline") : ok("4.1.5"),
     );
     // First probe misses (forces the install path), so both probeTimeoutMs
     // (the initial probe) AND installTimeoutMs get exercised in one call.
-    exec.mockImplementationOnce(async (_command: string, _execOpts: { timeoutMs: number }) =>
-      fail(1, "cold"),
+    exec.mockImplementationOnce(
+      async (_command: string, _execOpts: { timeoutMs: number }) =>
+        fail(1, "cold"),
     );
 
     await assertDependenciesWarm(root, { exec });
@@ -584,8 +586,9 @@ describe("W2/W3 timeout resolution (board #88)", () => {
 
   it("runTestCmdSmoke uses the resolved (env-overridable) smoke timeout when the caller passes none", async () => {
     process.env.ORCH_SMOKE_TIMEOUT_MS = "7777";
-    const exec = vi.fn(async (_command: string, _execOpts: { timeoutMs: number }) =>
-      ok("Tests 1 passed"),
+    const exec = vi.fn(
+      async (_command: string, _execOpts: { timeoutMs: number }) =>
+        ok("Tests 1 passed"),
     );
 
     await runTestCmdSmoke(process.cwd(), { exec });

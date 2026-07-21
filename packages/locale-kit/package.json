@@ -2,8 +2,8 @@
   "name": "locale-kit",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "description": "Runtime i18n foundation (t/tx, locale store, provider, sync) for Agent-Native templates. TS source is compiled by the consuming app's Vite/esbuild — no build step.",
+  "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./format": "./src/format.ts",
@@ -23,15 +23,6 @@
     "i18n:audit:missing": "tsx src/cli/index.ts audit --missing",
     "i18n:audit:unwrapped": "tsx src/cli/index.ts audit --unwrapped"
   },
-  "peerDependencies": {
-    "react": "*",
-    "vite": ">=5"
-  },
-  "peerDependenciesMeta": {
-    "vite": {
-      "optional": true
-    }
-  },
   "dependencies": {
     "@babel/core": "^7.29.7",
     "@babel/generator": "^7.29.7",
@@ -40,16 +31,25 @@
     "@babel/types": "^7.29.7"
   },
   "devDependencies": {
+    "@agent-native/core": "workspace:*",
+    "@tanstack/react-query": "^5.99.2",
     "@types/babel__core": "^7.20.5",
     "@types/babel__generator": "^7.27.0",
     "@types/babel__traverse": "^7.28.0",
-    "@agent-native/core": "workspace:*",
-    "@tanstack/react-query": "^5.99.2",
     "@types/node": "^24.2.1",
     "@types/react": "catalog:",
     "react": "catalog:",
     "typescript": "^6.0.3",
     "vite": "catalog:",
     "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "vite": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
   }
 }

@@ -6,6 +6,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { allocateItemKey } from "../server/lib/item-key-sequencer.js";
@@ -24,14 +25,43 @@ export default defineAction({
       .optional()
       .describe("The requirement / intent handed to the orchestrator brain"),
     type: z
-      .enum(["需求", "任务", "缺陷", "测试", "生产问题", "集合", "from-audit", "requirement", "task", "defect", "incident", "story", "epic"])
+      .enum([
+        "需求",
+        "任务",
+        "缺陷",
+        "测试",
+        "生产问题",
+        "集合",
+        "from-audit",
+        "requirement",
+        "task",
+        "defect",
+        "incident",
+        "story",
+        "epic",
+      ])
       .optional()
-      .describe("Work item type: 需求/任务/缺陷/测试/生产问题/集合(epic,汇总子项的容器)/from-audit(审计发起,阶段子集实施+测试) (or legacy English names)"),
-    priority: z.coerce.number().int().optional().describe("Priority: 1=P0 (紧急/Critical), 2=P1 (高/High), 3=P2 (中/Medium, 默认), 4=P3 (低/Low)"),
+      .describe(
+        "Work item type: 需求/任务/缺陷/测试/生产问题/集合(epic,汇总子项的容器)/from-audit(审计发起,阶段子集实施+测试) (or legacy English names)",
+      ),
+    priority: z.coerce
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Priority: 1=P0 (紧急/Critical), 2=P1 (高/High), 3=P2 (中/Medium, 默认), 4=P3 (低/Low)",
+      ),
     risk: z.enum(["low", "medium", "high"]).optional().describe("Risk level"),
     tags: z.array(z.string()).optional().describe("Feature/label tags"),
-    nature: z.array(z.string()).optional().describe("Nature tags (性质): 前端 | 后端 | API | 数据"),
-    owner: z.string().nullable().optional().describe("Owner email or 'agent'. Null = unassigned."),
+    nature: z
+      .array(z.string())
+      .optional()
+      .describe("Nature tags (性质): 前端 | 后端 | API | 数据"),
+    owner: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Owner email or 'agent'. Null = unassigned."),
     sprintId: z.string().optional().describe("Sprint to assign this item to"),
     executionMode: z
       .enum(["auto", "manual"])
@@ -50,7 +80,12 @@ export default defineAction({
       await db
         .select({ id: schema.projects.id, key: schema.projects.key })
         .from(schema.projects)
-        .where(and(eq(schema.projects.id, args.projectId), ownerScope(schema.projects)))
+        .where(
+          and(
+            eq(schema.projects.id, args.projectId),
+            ownerScope(schema.projects),
+          ),
+        )
         .limit(1)
     )[0];
     if (!project) throw new Error("Project not found or not accessible");
@@ -71,7 +106,9 @@ export default defineAction({
       args.type === "defect" ||
       args.type === "from-audit" ||
       tags.includes("from-audit");
-    const defaultPlannedStages = isNarrowScope ? ["实施", "测试"] : ["待办","分析","设计","实施","测试","验收","交付"];
+    const defaultPlannedStages = isNarrowScope
+      ? ["实施", "测试"]
+      : ["待办", "分析", "设计", "实施", "测试", "验收", "交付"];
     const defaultCurrentStageName = defaultPlannedStages[0];
 
     await db.insert(schema.workItems).values({

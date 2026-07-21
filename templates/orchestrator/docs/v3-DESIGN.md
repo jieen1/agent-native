@@ -59,15 +59,18 @@ Every spawn (= one worker invocation = one agent context window) sees **EXACTLY*
 4. **Optional workspace** (mounted as `/work`, when agent isolation = workspace)
 
 Every spawn returns **EXACTLY**:
+
 - Default: a **single string** (the final assistant text)
 - With `output_schema` set: a **validated JSON object** per the schema (worker re-prompts on mismatch, errors after retry budget)
 
 **No other channel exists.** Specifically:
+
 - A spawn does NOT see the parent run's state, other nodes' outputs, the orchestrator's history, peer subagents' work, or any backend internal.
 - Upstream node outputs reach downstream ONLY via **explicit prompt interpolation** the author wrote (`{{deps.upstream.output.field}}`). Author controls what crosses.
 - The backend does NOT auto-dump dependencies into prompts. If you want B to see A's plan, write `{{deps.A.output.plan}}` in B's prompt. Otherwise B sees nothing about A.
 
 This mirrors Claude Code Subagents exactly:
+
 > "The only channel from parent to subagent is the Agent tool's prompt string, so include any file paths, error messages, or decisions the subagent needs directly in that prompt." — code.claude.com/docs/en/agent-sdk/subagents
 
 > "A workflow script holds the loop, the branching, and the intermediate results itself, so Claude's context holds only the final answer. Intermediate results stay in script variables instead of landing in Claude's context." — code.claude.com/docs/en/workflows
@@ -84,7 +87,7 @@ control flow win, and the engine only has to durably run what was written.
 
 Our author is different. The author is **Claude Code, re-planning a live run
 mid-flight.** The headline requirement (§8.6) is: an hour into a run, with several
-nodes already done, CC inspects progress and rewrites the *not-yet-executed* part —
+nodes already done, CC inspects progress and rewrites the _not-yet-executed_ part —
 effective immediately, without re-running what completed. That demands the
 unexecuted plan be **inspectable, addressable, mutable state, stored separately
 from the execution that already happened.**
@@ -106,7 +109,7 @@ So the data model is **not** a concession versus code; for this system's definin
 capability it is the correct and essentially the only clean representation. The
 cost of data — weaker expressiveness than a real language — is paid down by the
 layering: **complex logic lives in CC (the brain) and in agent prompts, never in
-the DAG.** Engines without a brain (Temporal, Camunda, Argo) are *forced* to grow a
+the DAG.** Engines without a brain (Temporal, Camunda, Argo) are _forced_ to grow a
 DSL plus a code escape hatch (`rawscript`, Code node, script task) because nothing
 above them can hold the logic. **CC is that escape hatch here — the structural
 advantage this design must protect.** The rule that protects it: when a
@@ -118,7 +121,7 @@ expression language into a programming language.
 
 Picture a run as a moving line — the **execution frontier** — separating what has
 happened from what is planned. The frontier is the **dispatch boundary**: a node is
-*ahead* of it until a worker has been handed its rendered prompt.
+_ahead_ of it until a worker has been handed its rendered prompt.
 
 - **Ahead of the frontier** (`pending`, or `ready` but not yet dispatched): the
   **mutable plan.** Editable in place via `workflow.patch` (§8.6).
@@ -127,10 +130,10 @@ happened from what is planned. The frontier is the **dispatch boundary**: a node
 
 This single line answers every "what can I change in a live run?" question:
 
-| Want to change… | Node status | Mechanism |
-|---|---|---|
-| A future node not yet dispatched — its prompt, model, guard, deps, or the forward node set | `pending` / `ready` | **`workflow.patch`** — in place, live (§8.6) |
-| A node already dispatched, or its produced output | `running` / `done` | **`run.fork`** — branch a new run, done artifacts reused as cache (§8.4) |
+| Want to change…                                                                            | Node status         | Mechanism                                                                |
+| ------------------------------------------------------------------------------------------ | ------------------- | ------------------------------------------------------------------------ |
+| A future node not yet dispatched — its prompt, model, guard, deps, or the forward node set | `pending` / `ready` | **`workflow.patch`** — in place, live (§8.6)                             |
+| A node already dispatched, or its produced output                                          | `running` / `done`  | **`run.fork`** — branch a new run, done artifacts reused as cache (§8.4) |
 
 **Litmus test: is it ahead of the frontier? Yes → patch. At/behind → you cannot
 edit it in place; fork instead.** "Patch the future, fork the past" is the whole
@@ -141,17 +144,17 @@ frontier) defines exactly which nodes are patchable as the set moves.
 
 ### Invariants (never broken)
 
-| ID | Invariant |
-|----|-----------|
-| I1 | Worker intermediate output never enters CC's main context. CC sees results CC explicitly pulled. |
-| I2 | Every spawn has its own context window. Spawn inputs limited to the 4 above; outputs limited to string or schema'd object. |
-| I3 | Output discipline per spawn: bounded by `output_schema` (if set) and `max_summary_tokens` (always). Full content kept separate from summary. |
-| I4 | Backend state is durable. Reconciler restart resumes any run. |
-| I5 | Running or done nodes are immutable. Outputs referenced by ID. |
-| I6 | Backend never inferences about tasks. No task state machine, no "task done" signal, no auto-summary at run boundary. |
-| I7 | **No implicit cross-node data injection.** Author writes every `{{deps.X.output.Y}}` reference. Backend never auto-stuffs upstream output into downstream context. |
-| I8 | Orchestrator is callable from any app (via MCP or A2A). No special knowledge of any dispatching app. |
-| I9 | **Patch the future, fork the past.** Only nodes not yet dispatched to a worker (`pending`/`ready`) are mutable in place via `workflow.patch`. Nodes `running`/`done` and their artifacts are an immutable journal — change them only by `run.fork`. |
+| ID  | Invariant                                                                                                                                                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I1  | Worker intermediate output never enters CC's main context. CC sees results CC explicitly pulled.                                                                                                                                                    |
+| I2  | Every spawn has its own context window. Spawn inputs limited to the 4 above; outputs limited to string or schema'd object.                                                                                                                          |
+| I3  | Output discipline per spawn: bounded by `output_schema` (if set) and `max_summary_tokens` (always). Full content kept separate from summary.                                                                                                        |
+| I4  | Backend state is durable. Reconciler restart resumes any run.                                                                                                                                                                                       |
+| I5  | Running or done nodes are immutable. Outputs referenced by ID.                                                                                                                                                                                      |
+| I6  | Backend never inferences about tasks. No task state machine, no "task done" signal, no auto-summary at run boundary.                                                                                                                                |
+| I7  | **No implicit cross-node data injection.** Author writes every `{{deps.X.output.Y}}` reference. Backend never auto-stuffs upstream output into downstream context.                                                                                  |
+| I8  | Orchestrator is callable from any app (via MCP or A2A). No special knowledge of any dispatching app.                                                                                                                                                |
+| I9  | **Patch the future, fork the past.** Only nodes not yet dispatched to a worker (`pending`/`ready`) are mutable in place via `workflow.patch`. Nodes `running`/`done` and their artifacts are an immutable journal — change them only by `run.fork`. |
 
 ---
 
@@ -216,6 +219,7 @@ frontier) defines exactly which nodes are patchable as the set moves.
 ```
 
 Reuses framework facilities — does not reinvent:
+
 - **Models** = framework's engine registry (`@agent-native/core/agent/engine`: `resolveEngine`).
 - **Agents** = framework's `.claude/agents/*.md` subagent format + loader.
 - **ACP** = framework's `acp-adapter` (upstream PR #1349).
@@ -226,18 +230,18 @@ Reuses framework facilities — does not reinvent:
 
 ## 2. Core Concepts
 
-| Concept | Definition |
-|---------|-----------|
-| **Workflow Template** | Named, versioned DAG + input schema. Immutable. |
-| **Run** | One execution instance of a DAG. Holds DAG snapshot + inputs + live state. Optional opaque `tags`. |
-| **Node** | One unit in a DAG. Has a type (`agent`, `parallel_over`, `loop`, `human_gate`). |
-| **Spawn** | One worker invocation. Smallest unit. May be ad-hoc (no run) OR a node's execution attempt. |
-| **Spawn Context** | What the worker sees: agent system_prompt + rendered prompt + tools + optional workspace. NOTHING ELSE. |
-| **Spawn Result** | What the worker returns: string (default) OR validated object (when output_schema set). |
-| **Workspace** | Long-lived microVM with git checkout. Shared across spawns. Owned by a run or by CC ad-hoc. |
-| **Agent** | A `.md` with YAML frontmatter declaring runtime/engine/model/tools/system_prompt. Reuses framework subagent format. |
-| **Artifact** | A spawn's persisted result + metadata. May reference a separate full-content blob. |
-| **Patch** | A mutation operation against a live run's DAG. Versioned, CAS-protected. |
+| Concept               | Definition                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Workflow Template** | Named, versioned DAG + input schema. Immutable.                                                                     |
+| **Run**               | One execution instance of a DAG. Holds DAG snapshot + inputs + live state. Optional opaque `tags`.                  |
+| **Node**              | One unit in a DAG. Has a type (`agent`, `parallel_over`, `loop`, `human_gate`).                                     |
+| **Spawn**             | One worker invocation. Smallest unit. May be ad-hoc (no run) OR a node's execution attempt.                         |
+| **Spawn Context**     | What the worker sees: agent system_prompt + rendered prompt + tools + optional workspace. NOTHING ELSE.             |
+| **Spawn Result**      | What the worker returns: string (default) OR validated object (when output_schema set).                             |
+| **Workspace**         | Long-lived microVM with git checkout. Shared across spawns. Owned by a run or by CC ad-hoc.                         |
+| **Agent**             | A `.md` with YAML frontmatter declaring runtime/engine/model/tools/system_prompt. Reuses framework subagent format. |
+| **Artifact**          | A spawn's persisted result + metadata. May reference a separate full-content blob.                                  |
+| **Patch**             | A mutation operation against a live run's DAG. Versioned, CAS-protected.                                            |
 
 ---
 
@@ -365,6 +369,7 @@ events (
 ```
 
 **Notable decisions:**
+
 - `spawns.rendered_prompt` stores the EXACT string sent to the worker (post-`{{ }}` interpolation). Reproducibility + debugging.
 - `artifacts` split `text_content` / `object_content` by `output_kind` — type-safe storage.
 - No `agents` table (use framework subagents).
@@ -421,6 +426,7 @@ events (
 **Required fields are exactly 4:** `id`, `type`, `agent`, `prompt`. Everything else has defaults (from `agent.md` or from `runs.dag` defaults).
 
 **Output:**
+
 - Without `output_schema`: returns a **string** (the final assistant text).
 - With `output_schema`: returns a **validated object** per the schema.
 
@@ -431,7 +437,7 @@ events (
   "id": "impl",
   "type": "parallel_over",
   "deps": ["design"],
-  "items_from": "deps.design.output.files",   // expression yielding array
+  "items_from": "deps.design.output.files", // expression yielding array
   "max_concurrency": 4,
   "body": { "type": "agent", "agent": "impl", "prompt": "Impl {{item}}" }
 }
@@ -456,7 +462,7 @@ events (
   "id": "fix_loop",
   "type": "loop",
   "deps": ["review"],
-  "body": ["fix", "retest", "rereview"],     // node ids run sequentially per iter
+  "body": ["fix", "retest", "rereview"], // node ids run sequentially per iter
   "until": "deps.rereview.output.verdict == 'pass'",
   "max_iterations": 3
 }
@@ -522,14 +528,15 @@ Renderer substitutes `{{ ... }}` at render time (right before spawn dispatch). O
 
 **Interpolation rules:**
 
-| Resolved type | Rendered as |
-|---|---|
-| `string` | inserted verbatim |
-| `number` / `boolean` / `null` | inserted as literal |
-| `object` / `array` | inserted as compact `JSON.stringify(...)` |
+| Resolved type                      | Rendered as                                                   |
+| ---------------------------------- | ------------------------------------------------------------- |
+| `string`                           | inserted verbatim                                             |
+| `number` / `boolean` / `null`      | inserted as literal                                           |
+| `object` / `array`                 | inserted as compact `JSON.stringify(...)`                     |
 | `undefined` (path doesn't resolve) | **render fails** → node `schema-violation` → retry per policy |
 
 Example:
+
 ```
 "Requirement: {{inputs.requirement}}\nPrior plan: {{deps.design.output.plan}}\nFiles to touch ({{len(deps.design.output.files)}}): {{deps.design.output.files}}"
 ```
@@ -548,6 +555,7 @@ Used in: `guard`, `until`, `items_from`, and the future top-level `condition` fi
 **Forbidden:** function definitions, IO, object method calls, member assignment, control flow keywords. Anything outside grammar rejected at template save AND at run start.
 
 Examples:
+
 ```
 deps.review.output.verdict == "pass"
 len(deps.design.output.files) > 0 && inputs.dryRun != true
@@ -579,6 +587,7 @@ A spawn (= one worker invocation) sees:
 4. **Workspace** (`/work` mount when `isolation: workspace`)
 
 It does NOT see:
+
 - The DAG. Other nodes. Other nodes' outputs (unless explicitly interpolated into prompt). Run-level state. Backend state. Peer spawns. Parent CC session. Prior turns. Anything else.
 
 This means: **author controls what each spawn sees by writing `{{ }}` references in its prompt**. No auto-injection. Exactly like CC subagents.
@@ -588,11 +597,16 @@ This means: **author controls what each spawn sees by writing `{{ }}` references
 **Default = string.** The agent's final assistant message text, captured and stored verbatim. No parsing.
 
 ```json
-{ "type": "agent", "agent": "summarizer", "prompt": "Summarize: {{inputs.text}}" }
+{
+  "type": "agent",
+  "agent": "summarizer",
+  "prompt": "Summarize: {{inputs.text}}"
+}
 // output: "The text discusses..."   ← raw string
 ```
 
 **Opt-in structured = JSON object.** Set `output_schema` (JSON Schema subset). The worker:
+
 1. Renders agent system_prompt + appends a structural directive: "Respond with ONLY JSON matching the following schema: <schema>. Field meanings from `description`: <list>."
 2. Runs the agent loop.
 3. Parses the final assistant text as JSON.
@@ -602,15 +616,22 @@ This means: **author controls what each spawn sees by writing `{{ }}` references
 
 ```json
 {
-  "type": "agent", "agent": "reviewer",
+  "type": "agent",
+  "agent": "reviewer",
   "prompt": "Review diff: {{deps.impl.output}}",
   "output_schema": {
     "type": "object",
     "properties": {
-      "verdict":  { "type": "string", "enum": ["pass", "fail"],
-                    "description": "Final verdict" },
-      "feedback": { "type": "string", "maxLength": 500,
-                    "description": "If fail, what to fix next round" }
+      "verdict": {
+        "type": "string",
+        "enum": ["pass", "fail"],
+        "description": "Final verdict"
+      },
+      "feedback": {
+        "type": "string",
+        "maxLength": 500,
+        "description": "If fail, what to fix next round"
+      }
     },
     "required": ["verdict"]
   }
@@ -620,16 +641,16 @@ This means: **author controls what each spawn sees by writing `{{ }}` references
 
 ### 6.3 Schema language (JSON Schema subset)
 
-| Keyword | Supported |
-|---|---|
-| `type` | string, number, integer, boolean, array, object, null |
-| `properties` + `required` | yes (object) |
-| `items` | yes (array, homogeneous element schema) |
-| `enum` | yes |
-| `minLength` / `maxLength` | yes (string) |
-| `minimum` / `maximum` | yes (number) |
-| `description` | yes — **doubles as instruction for the model** (fed into the structural directive prompt) |
-| `oneOf` / `anyOf` / `allOf` / `$ref` / regex `pattern` / conditionals | **No** |
+| Keyword                                                               | Supported                                                                                 |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `type`                                                                | string, number, integer, boolean, array, object, null                                     |
+| `properties` + `required`                                             | yes (object)                                                                              |
+| `items`                                                               | yes (array, homogeneous element schema)                                                   |
+| `enum`                                                                | yes                                                                                       |
+| `minLength` / `maxLength`                                             | yes (string)                                                                              |
+| `minimum` / `maximum`                                                 | yes (number)                                                                              |
+| `description`                                                         | yes — **doubles as instruction for the model** (fed into the structural directive prompt) |
+| `oneOf` / `anyOf` / `allOf` / `$ref` / regex `pattern` / conditionals | **No**                                                                                    |
 
 Keep schemas small enough to fit in a prompt suffix and for the model to reliably follow. Schema validation is the **runtime** layer — not the LLM tool layer (mirrors CC: the `Agent` tool itself has no `output_schema`; the workflow runtime layer adds it).
 
@@ -648,6 +669,7 @@ Author writes explicit references in the downstream prompt:
 ```
 
 This is the ENTIRE data-passing mechanism. The reconciler renders the prompt by:
+
 1. Resolving each `{{ ... }}` against `{ inputs, deps, item, iteration }`.
 2. Substituting per §5.1 rules.
 3. Storing the final rendered string in `spawns.rendered_prompt`.
@@ -668,10 +690,11 @@ A spawn may produce up to `max_summary_tokens` worth of "summary" (the validated
 Concrete example: a `code-search` agent grepping 50 files might find 200 results. Its prompt instructs it to summarize: "Output `{matches: Array<{path,line,context}>}` with at most 20 entries; if more found, set `truncated: true` and put the full list in `/work/_orchestrator/full_matches.json`." The 20-entry summary goes downstream via `{{deps.code-search.output.matches}}`; downstream prompts also tell THEIR agent to read the full file if needed.
 
 CC's mental mapping:
+
 - CC's workflow `await agent("...")` → our `agent` node, default string output
 - CC's `await agent("...", { schema })` → our `agent` node with `output_schema`
-- CC's `\`Use A: ${JSON.stringify(a)}\`` → our `{{deps.A.output}}` interpolation
-- CC's `\`Field X: ${a.field}\`` → our `{{deps.A.output.field}}`
+- CC's `\`Use A: ${JSON.stringify(a)}\``→ our`{{deps.A.output}}` interpolation
+- CC's `\`Field X: ${a.field}\``→ our`{{deps.A.output.field}}`
 - CC's variable scope = our DAG-as-data state (reconciler holds it)
 - CC's subagent isolation = our spawn channel contract
 
@@ -686,17 +709,18 @@ CC's mental mapping:
 name: implementer
 description: |
   Implements one file per the design plan. Returns a brief change summary.
-runtime: microvm                  # microvm | acp:<runtime>
-engine: ai-sdk:openai             # framework engine id (microvm only)
-model: qwen3.6                    # upstream model id (microvm only)
+runtime: microvm # microvm | acp:<runtime>
+engine: ai-sdk:openai # framework engine id (microvm only)
+model: qwen3.6 # upstream model id (microvm only)
 tools: [Read, Edit, Write, Bash, Glob, Grep]
-isolation: workspace              # workspace | none
+isolation: workspace # workspace | none
 max_summary_tokens: 2000
 ---
 
 You are a backend implementation agent operating inside an isolated workspace.
 
 Inputs you'll receive in the user-turn prompt:
+
 - A design plan.
 - A target file path.
 
@@ -704,6 +728,7 @@ Task: implement the target file strictly per the plan. Use Read/Edit/Write/Bash
 tools. After your change, run `git --no-pager diff <file>` to self-verify.
 
 Constraints:
+
 - Only modify the target file.
 - Do not modify other files.
 
@@ -712,13 +737,13 @@ When done, reply with a concise summary (<200 words).
 
 Orchestrator additions to framework subagent format:
 
-| Field | Required | Meaning |
-|-------|----------|---------|
-| `runtime` | yes | `microvm` (default) OR `acp:<runtime>` (drives local CLI agent) |
-| `engine` | yes (microvm) | Framework engine id (`ai-sdk:openai`, `anthropic`, etc.) |
-| `model` | yes (microvm) | Upstream model id |
-| `isolation` | yes | `workspace` or `none` |
-| `max_summary_tokens` | no | Default 2000 |
+| Field                | Required      | Meaning                                                         |
+| -------------------- | ------------- | --------------------------------------------------------------- |
+| `runtime`            | yes           | `microvm` (default) OR `acp:<runtime>` (drives local CLI agent) |
+| `engine`             | yes (microvm) | Framework engine id (`ai-sdk:openai`, `anthropic`, etc.)        |
+| `model`              | yes (microvm) | Upstream model id                                               |
+| `isolation`          | yes           | `workspace` or `none`                                           |
+| `max_summary_tokens` | no            | Default 2000                                                    |
 
 Tools: same six as CC native — `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`.
 
@@ -729,6 +754,7 @@ Agent precedence: project `.claude/agents/` > orchestrator app `agents/` > frame
 No orchestrator-local models table. The orchestrator calls framework `resolveEngine(engine_id, ...)` and gets back a callable.
 
 Common engine ids:
+
 - `anthropic`, `ai-sdk:anthropic` — Anthropic API
 - `ai-sdk:openai` — OpenAI API OR any OpenAI-compatible (e.g. vLLM via `OPENAI_BASE_URL` env)
 - `ai-sdk:google`, `ai-sdk:groq`, ... — others as framework supports
@@ -871,14 +897,15 @@ workflow.patch(runId, expected_dag_version, ops[])
 **Patchability is decided by the frontier — whether a node has been dispatched to a
 worker:**
 
-| Node status | Patchable? | Behavior on patch |
-|---|---|---|
-| `pending` (deps not all done) | YES | edited in place |
-| `ready` (deps done, queued, **not yet dispatched**) | YES | atomically demoted to `pending`, edited, re-evaluated next pass |
-| `running` (worker dispatched) | NO | rejected `node_not_patchable`; use `run.fork` |
-| `done` / `failed` / `skipped` | NO | rejected; immutable journal (I5) |
+| Node status                                         | Patchable? | Behavior on patch                                               |
+| --------------------------------------------------- | ---------- | --------------------------------------------------------------- |
+| `pending` (deps not all done)                       | YES        | edited in place                                                 |
+| `ready` (deps done, queued, **not yet dispatched**) | YES        | atomically demoted to `pending`, edited, re-evaluated next pass |
+| `running` (worker dispatched)                       | NO         | rejected `node_not_patchable`; use `run.fork`                   |
+| `done` / `failed` / `skipped`                       | NO         | rejected; immutable journal (I5)                                |
 
 Rules:
+
 1. **CAS** via `expected_dag_version`. On mismatch → `version_conflict` with the
    current version; CC re-reads (`run.state`) and rebuilds the patch — patches are
    optimistic (retry contract in §9).
@@ -984,6 +1011,7 @@ on event(run_id):
 ### Restart safety
 
 On startup: scan `runs.status in (pending, running, paused)`.
+
 - Load full state.
 - For each in-flight spawn: check VM/ACP session liveness. If dead, mark spawn `cancelled`, re-evaluate node retry.
 - Resume.
@@ -1001,7 +1029,7 @@ recomputed.
 **The frontier is a set, not a point.** With `parallel_over` fan-out and implicit
 parallelism, many nodes run at once and the frontier advances as each finishes. A
 patch is applied atomically against `expected_dag_version`, and each target node's
-*current* status is re-checked inside that transaction (§8.6 rule 2): a node that
+_current_ status is re-checked inside that transaction (§8.6 rule 2): a node that
 slipped `pending`→`running` between CC's read and the patch is rejected
 (`node_not_patchable`), never silently raced.
 
@@ -1024,7 +1052,7 @@ item set is then **frozen** (part of the journal).
   `modify_node` on the body applies to them, in item order.
 - To change the item **set** after expansion has begun you cannot patch it — use
   `run.fork` with a modified `items_from`, or model the item list as its own
-  upstream node you patch *before* it expands.
+  upstream node you patch _before_ it expands.
 
 **`guard` mid-run.** A guard is evaluated when its node becomes ready. Editing a
 pending node's `guard` takes effect at that node's ready-time; if its deps are
@@ -1084,9 +1112,9 @@ branch a new run with a modified `impl`, reusing `design`'s artifact as cache.
 
 ### 10.1 Runtime selection (per agent.md)
 
-| Runtime | Backend |
-|---------|---------|
-| `microvm` | msb microVM pool |
+| Runtime         | Backend                                     |
+| --------------- | ------------------------------------------- |
+| `microvm`       | msb microVM pool                            |
 | `acp:<runtime>` | Framework ACP adapter, drives local install |
 
 ### 10.2 microVM pool
@@ -1131,15 +1159,18 @@ branch a new run with a modified `impl`, reusing `design`'s artifact as cache.
 Node.js bundled with prebaked image.
 
 #### Engine: `anthropic`
+
 - `@anthropic-ai/sdk`.
 - Agent loop: send messages with tool definitions; tool_use → execute → tool_result; repeat to end_turn.
 
 #### Engine: `ai-sdk:openai` (and other ai-sdk providers)
+
 - `openai` SDK pointed at base_url.
 - Same loop with OpenAI tools/tool_calls schema.
 - Shim translates Anthropic-style tool defs to OpenAI function format.
 
 #### Tools
+
 `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep` — same as CC native. Paths resolved within /work, no symlink escape.
 
 #### Output extraction
@@ -1147,6 +1178,7 @@ Node.js bundled with prebaked image.
 **Default (no schema):** captured assistant final text → spawn output kind = "string".
 
 **With schema:**
+
 - Worker appends a structural directive to system prompt: `"Respond with ONLY JSON matching this schema: <serialized schema>. Field meanings: <each field's description>."`
 - After agent loop ends, parse the final assistant text as JSON.
 - Validate with `ajv`.
@@ -1178,12 +1210,15 @@ Workspace handled via ACP's `isolation: worktree` when agent.isolation = workspa
 Three layers — ALL operate per-spawn, NEVER auto-synthesize across spawns.
 
 ### Layer 1: Agent system prompt
+
 The agent.md system_prompt instructs the agent to be concise. Soft layer.
 
 ### Layer 2: Output schema (optional)
+
 When set, the worker validates output structure and field constraints. Violations retryable.
 
 ### Layer 3: Token cap (always)
+
 `max_summary_tokens` is a hard ceiling. Over → truncate + `truncated: true` flag + `summary_truncated` event. Both string outputs and object outputs are size-capped (the JSON-serialized form for objects).
 
 ### Full content separation
@@ -1204,12 +1239,12 @@ ONLY what the author explicitly wrote into the downstream prompt via `{{ }}` int
 
 ### Error classes
 
-| Class | Examples | Default policy |
-|-------|----------|---------------|
-| `transient` | API 5xx, network timeout, rate-limit (429), VM pool exhaustion, ACP connect timeout | Retry with backoff |
-| `schema-violation` | Output didn't match schema after self-correction | Retry with corrective prompt |
-| `permanent` | Agent not found, engine not configured, prompt template render failure (e.g. dep path doesn't resolve), ACP adapter not installed | Fail immediately |
-| `cancelled` | Run cancelled, VM killed, parent cancelled | Fail immediately |
+| Class              | Examples                                                                                                                          | Default policy               |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `transient`        | API 5xx, network timeout, rate-limit (429), VM pool exhaustion, ACP connect timeout                                               | Retry with backoff           |
+| `schema-violation` | Output didn't match schema after self-correction                                                                                  | Retry with corrective prompt |
+| `permanent`        | Agent not found, engine not configured, prompt template render failure (e.g. dep path doesn't resolve), ACP adapter not installed | Fail immediately             |
+| `cancelled`        | Run cancelled, VM killed, parent cancelled                                                                                        | Fail immediately             |
 
 ### Node-level config
 
@@ -1259,7 +1294,7 @@ Pull-based. Backend doesn't push unrequested.
 - Spawn list (run-bound + ad-hoc)
 - Workspaces list
 - Templates editor
-- Agents directory (read-only catalog of .claude/agents/*.md)
+- Agents directory (read-only catalog of .claude/agents/\*.md)
 - Pool dashboard
 
 ### Persisted
@@ -1276,6 +1311,7 @@ Pull-based. Backend doesn't push unrequested.
 Templates use `{{inputs.X}}` placeholders. `input_schema` (JSON Schema) validated at `workflow.run`.
 
 Flow:
+
 1. Validate inputs against `template.input_schema`.
 2. Deep-clone `template.dag`.
 3. (Do NOT substitute `{{inputs.X}}` here — substitution happens per-node at spawn-dispatch time, same as deps. This keeps templating uniform.)
@@ -1295,16 +1331,25 @@ Orchestrator exposes its MCP surface ALSO via A2A. Any agent-native app in the s
 Every dispatching action accepts an opaque `tags` field. **CC and dispatching apps SHOULD pass tags on EVERY operation related to a logical unit of work** (a tracker item, an external ticket, a chat-session task), so that downstream queries can reassemble the full activity stream.
 
 The 3 resources that accept `tags`:
+
 - `workflow.run({..., tags})` — run-level
 - `spawn.once({..., tags})` — ad-hoc spawn
 - `workspace.create({..., tags})` — workspace
 
 Typical convention (when dispatched from tracker):
+
 ```json
-{ "tags": { "source": "tracker", "item_id": "PAY-14", "actor_email": "alice@..." } }
+{
+  "tags": {
+    "source": "tracker",
+    "item_id": "PAY-14",
+    "actor_email": "alice@..."
+  }
+}
 ```
 
 Orchestrator stores tags opaquely:
+
 - **Never interpreted** by orchestrator logic
 - **Queryable** by partial match: `runs.list({tag_match})`, `spawns.list({tag_match})`, `workspaces.list({tag_match})`
 - **Displayable** in orchestrator UI ("dispatched from tracker for PAY-14")
@@ -1312,11 +1357,13 @@ Orchestrator stores tags opaquely:
 ### How dispatching apps reassemble activity for a logical task
 
 A dispatching app (e.g. tracker) wanting "all orchestrator activity for item PAY-14" issues 3 parallel queries:
+
 ```
 runs.list({       tag_match: { source: "tracker", item_id: "PAY-14" } })
 spawns.list({     tag_match: { source: "tracker", item_id: "PAY-14" } })
 workspaces.list({ tag_match: { source: "tracker", item_id: "PAY-14" } })
 ```
+
 Merges results, sorts by timestamp, displays as a single activity stream. This is how the tracker `/items/:id` "Activity" tab is populated (see `tracker/docs/v1-DESIGN.md` §7).
 
 ### Outbound
@@ -1403,45 +1450,45 @@ Two complementary surfaces:
 
 ## 18. Consistency & Concurrency Invariants
 
-| Invariant | Enforcement |
-|-----------|-------------|
-| Patches cannot modify `running` / `done` nodes | Reconciler checks `node.status` |
-| DAG mutations atomic | All ops in one PG transaction; `dag_version` increment in same transaction |
-| Done nodes' artifacts immutable | `artifacts` append-only |
-| Spawn failure doesn't corrupt workspace | `git reset --hard origin/<branch> && git clean -fdx` in workspace VM before next spawn |
-| microVM never reused across spawns | Dispatcher always destroys post-spawn |
-| API keys never in artifacts/logs | Worker shim sanitizes stderr |
-| Run state survives backend restart | All state in Postgres; reconciler loads pending/running/paused on startup |
-| Concurrent patches don't race | `workflow.patch` requires `expected_dag_version`; mismatch → 409 |
-| Reconciler doesn't double-dispatch | `nodes.status` transition `ready → running` via atomic UPDATE (single-process assumption) |
-| Spawn context isolation | Worker dispatcher provides ONLY system_prompt + rendered_prompt + tools + workspace to worker shim; nothing else (I2, I7) |
-| Rendered prompts reproducible | `spawns.rendered_prompt` stores exact string sent |
-| Patch the future, fork the past | Patch targets only nodes not yet dispatched (`pending`/`ready`); `running`/`done` rejected `node_not_patchable`; behind-frontier change → `run.fork` (I9) |
-| Patch race is closed | Each target node's status re-checked inside the patch transaction at `expected_dag_version`; a node dispatched between CC's read and the patch is rejected, not raced |
-| Loop/parallel patches are next-boundary | Loop body/`until` edits apply at the next iteration; `parallel_over` body edits apply to not-yet-dispatched items; a frozen item set needs `run.fork` |
+| Invariant                                      | Enforcement                                                                                                                                                           |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Patches cannot modify `running` / `done` nodes | Reconciler checks `node.status`                                                                                                                                       |
+| DAG mutations atomic                           | All ops in one PG transaction; `dag_version` increment in same transaction                                                                                            |
+| Done nodes' artifacts immutable                | `artifacts` append-only                                                                                                                                               |
+| Spawn failure doesn't corrupt workspace        | `git reset --hard origin/<branch> && git clean -fdx` in workspace VM before next spawn                                                                                |
+| microVM never reused across spawns             | Dispatcher always destroys post-spawn                                                                                                                                 |
+| API keys never in artifacts/logs               | Worker shim sanitizes stderr                                                                                                                                          |
+| Run state survives backend restart             | All state in Postgres; reconciler loads pending/running/paused on startup                                                                                             |
+| Concurrent patches don't race                  | `workflow.patch` requires `expected_dag_version`; mismatch → 409                                                                                                      |
+| Reconciler doesn't double-dispatch             | `nodes.status` transition `ready → running` via atomic UPDATE (single-process assumption)                                                                             |
+| Spawn context isolation                        | Worker dispatcher provides ONLY system_prompt + rendered_prompt + tools + workspace to worker shim; nothing else (I2, I7)                                             |
+| Rendered prompts reproducible                  | `spawns.rendered_prompt` stores exact string sent                                                                                                                     |
+| Patch the future, fork the past                | Patch targets only nodes not yet dispatched (`pending`/`ready`); `running`/`done` rejected `node_not_patchable`; behind-frontier change → `run.fork` (I9)             |
+| Patch race is closed                           | Each target node's status re-checked inside the patch transaction at `expected_dag_version`; a node dispatched between CC's read and the patch is rejected, not raced |
+| Loop/parallel patches are next-boundary        | Loop body/`until` edits apply at the next iteration; `parallel_over` body edits apply to not-yet-dispatched items; a frozen item set needs `run.fork`                 |
 
 ---
 
 ## 19. Explicit Non-Goals
 
-| Non-goal | Why |
-|----------|-----|
-| Backend infers task done | Tasks live outside orchestrator |
-| Backend pushes notifications to CC | CC pulls. No server-initiated MCP push |
-| Backend auto-summarizes runs at completion | On-demand only via `run.summary` |
-| Backend decides what to do next after a run | Always CC's job |
-| In-place edit of a node at/behind the execution frontier | `running`/`done` nodes are immutable (I5/I9). Change the executed past via `run.fork`, not patch |
-| **Auto-injection of deps into prompts** | I7. Author writes every `{{deps.X.output.Y}}`. Backend never auto-dumps |
-| **Mandatory output_schema on every agent node** | CC default is text-only. Schema is opt-in for structured |
-| **Schema enforcement at LLM-tool layer** | CC's Agent tool has no schema parameter. Schema lives in workflow runtime layer. We match: schema enforced by worker shim |
-| Multiple sandbox backends | microVM only. (ACP is not a sandbox — it's a remote-driving protocol) |
-| Multiple agent engine types beyond framework's set | Whatever `resolveEngine` supports |
-| Workflow code as JavaScript | DAG-as-data only. No eval, no JS sandbox |
-| Claude subscription OAuth via cloned `~/.claude` | Multi-machine broken. Use `runtime: acp:claude-code` |
-| Multi-tenant RBAC | Single-user single-tenant |
-| Custom user-defined tools beyond the 6 fixed | `Read/Edit/Write/Bash/Glob/Grep` same as CC native |
-| Graphical DAG editor | CC writes JSON, humans edit JSON |
-| Cost accounting / billing dashboards | Tokens tracked per spawn for observability only |
+| Non-goal                                                 | Why                                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Backend infers task done                                 | Tasks live outside orchestrator                                                                                           |
+| Backend pushes notifications to CC                       | CC pulls. No server-initiated MCP push                                                                                    |
+| Backend auto-summarizes runs at completion               | On-demand only via `run.summary`                                                                                          |
+| Backend decides what to do next after a run              | Always CC's job                                                                                                           |
+| In-place edit of a node at/behind the execution frontier | `running`/`done` nodes are immutable (I5/I9). Change the executed past via `run.fork`, not patch                          |
+| **Auto-injection of deps into prompts**                  | I7. Author writes every `{{deps.X.output.Y}}`. Backend never auto-dumps                                                   |
+| **Mandatory output_schema on every agent node**          | CC default is text-only. Schema is opt-in for structured                                                                  |
+| **Schema enforcement at LLM-tool layer**                 | CC's Agent tool has no schema parameter. Schema lives in workflow runtime layer. We match: schema enforced by worker shim |
+| Multiple sandbox backends                                | microVM only. (ACP is not a sandbox — it's a remote-driving protocol)                                                     |
+| Multiple agent engine types beyond framework's set       | Whatever `resolveEngine` supports                                                                                         |
+| Workflow code as JavaScript                              | DAG-as-data only. No eval, no JS sandbox                                                                                  |
+| Claude subscription OAuth via cloned `~/.claude`         | Multi-machine broken. Use `runtime: acp:claude-code`                                                                      |
+| Multi-tenant RBAC                                        | Single-user single-tenant                                                                                                 |
+| Custom user-defined tools beyond the 6 fixed             | `Read/Edit/Write/Bash/Glob/Grep` same as CC native                                                                        |
+| Graphical DAG editor                                     | CC writes JSON, humans edit JSON                                                                                          |
+| Cost accounting / billing dashboards                     | Tokens tracked per spawn for observability only                                                                           |
 
 ---
 

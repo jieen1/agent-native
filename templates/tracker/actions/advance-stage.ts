@@ -5,10 +5,14 @@ import {
 } from "@agent-native/core/server/request-context";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
-import { actorFromCaller, type ActorKind } from "../server/lib/transition-guard.js";
 import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
+import {
+  actorFromCaller,
+  type ActorKind,
+} from "../server/lib/transition-guard.js";
 import { validateDependencyGraph } from "../shared/graph-validation.js";
 
 const FULL_STAGE_ORDER = [
@@ -65,10 +69,9 @@ async function advanceOneItem(
   // --- Determine stage order (plannedStages or fallback) ---
   let stageOrder: string[];
   try {
-    stageOrder =
-      Array.isArray(item.plannedStages)
-        ? item.plannedStages
-        : JSON.parse(item.plannedStages || "[]");
+    stageOrder = Array.isArray(item.plannedStages)
+      ? item.plannedStages
+      : JSON.parse(item.plannedStages || "[]");
   } catch {
     stageOrder = [];
   }
@@ -101,10 +104,7 @@ async function advanceOneItem(
     .select({ stageGateConfig: schema.projects.stageGateConfig })
     .from(schema.projects)
     .where(
-      and(
-        eq(schema.projects.id, item.projectId),
-        ownerScope(schema.projects),
-      ),
+      and(eq(schema.projects.id, item.projectId), ownerScope(schema.projects)),
     )
     .limit(1);
   const gateConfigRaw = projectRows[0]?.stageGateConfig ?? "{}";
@@ -181,17 +181,15 @@ async function advanceOneItem(
         ? eq(schema.workItems.sprintId, sprintId)
         : eq(schema.workItems.projectId, item.projectId);
 
-      const items = (
-        await db
-          .select({
-            id: schema.workItems.id,
-            projectId: schema.workItems.projectId,
-            itemKey: schema.workItems.itemKey,
-          })
-          .from(schema.workItems)
-          .where(and(ownerScope(schema.workItems), scopeFilter))
-          .limit(2000)
-      ) as { id: string; projectId: string; itemKey: string }[];
+      const items = (await db
+        .select({
+          id: schema.workItems.id,
+          projectId: schema.workItems.projectId,
+          itemKey: schema.workItems.itemKey,
+        })
+        .from(schema.workItems)
+        .where(and(ownerScope(schema.workItems), scopeFilter))
+        .limit(2000)) as { id: string; projectId: string; itemKey: string }[];
 
       // F8: itemKey 消歧(读路径) — see validate-dependency-graph.ts (same
       // check, invoked inline here for the requireGraphValid gate).
@@ -204,30 +202,25 @@ async function advanceOneItem(
       let edges: { fromId: string; toId: string }[] = [];
       if (nodes.length > 0) {
         const ids = nodes.map((n) => n.id);
-        const links = (
-          await db
-            .select({
-              fromItemId: schema.links.fromItemId,
-              toItemId: schema.links.toItemId,
-            })
-            .from(schema.links)
-            .where(
-              and(
-                ownerScope(schema.links),
-                eq(schema.links.linkType, "blocked-by"),
-                inArray(schema.links.fromItemId, ids),
-                inArray(schema.links.toItemId, ids),
-              ),
-            )
-            .limit(5000)
-        ) as { fromItemId: string; toItemId: string }[];
+        const links = (await db
+          .select({
+            fromItemId: schema.links.fromItemId,
+            toItemId: schema.links.toItemId,
+          })
+          .from(schema.links)
+          .where(
+            and(
+              ownerScope(schema.links),
+              eq(schema.links.linkType, "blocked-by"),
+              inArray(schema.links.fromItemId, ids),
+              inArray(schema.links.toItemId, ids),
+            ),
+          )
+          .limit(5000)) as { fromItemId: string; toItemId: string }[];
         edges = links.map((l) => ({ fromId: l.fromItemId, toId: l.toItemId }));
       }
 
-      const graphResult = validateDependencyGraph(
-        nodes,
-        edges,
-      );
+      const graphResult = validateDependencyGraph(nodes, edges);
       if (graphResult.errors.length > 0) {
         missing.push(
           `依赖图存在错误: ${graphResult.errors.map((e) => e.message).join("; ")}`,
@@ -349,9 +342,20 @@ export default defineAction({
     "before transitioning. Supports scope='item' (single) or scope='sprint' (batch).",
   schema: z.object({
     scope: z.enum(["item", "sprint"]),
-    id: z.string().min(1).describe("workItemId when scope=item, sprintId when scope=sprint"),
-    fromStage: z.string().min(1).describe("Expected current stage — mismatch is a no-op"),
-    expectedRunId: z.string().optional().describe("If provided and item.orchestratorRunId is set but differs, no-op"),
+    id: z
+      .string()
+      .min(1)
+      .describe("workItemId when scope=item, sprintId when scope=sprint"),
+    fromStage: z
+      .string()
+      .min(1)
+      .describe("Expected current stage — mismatch is a no-op"),
+    expectedRunId: z
+      .string()
+      .optional()
+      .describe(
+        "If provided and item.orchestratorRunId is set but differs, no-op",
+      ),
   }),
   http: { method: "POST" },
   run: async (args, ctx) => {
@@ -370,10 +374,7 @@ export default defineAction({
           .select()
           .from(schema.workItems)
           .where(
-            and(
-              eq(schema.workItems.id, args.id),
-              ownerScope(schema.workItems),
-            ),
+            and(eq(schema.workItems.id, args.id), ownerScope(schema.workItems)),
           )
           .limit(1)
       )[0];
@@ -431,12 +432,7 @@ export default defineAction({
       await db
         .select()
         .from(schema.sprints)
-        .where(
-          and(
-            eq(schema.sprints.id, args.id),
-            ownerScope(schema.sprints),
-          ),
-        )
+        .where(and(eq(schema.sprints.id, args.id), ownerScope(schema.sprints)))
         .limit(1)
     )[0];
     if (!sprint) throw new Error("Sprint not found or not accessible");

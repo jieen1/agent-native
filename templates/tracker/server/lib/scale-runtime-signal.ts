@@ -24,6 +24,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
+
 import type { getDb, schema as trackerSchema } from "../db/index.js";
 import { ownerScope } from "./access.js";
 

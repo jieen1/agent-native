@@ -100,7 +100,13 @@ export const ALL_GUARD_STATES: readonly GuardState[] = [
 ];
 
 /** Forward-progression ladder (rank 0..4). `done`/`closed` sit outside it. */
-const LADDER: readonly GuardState[] = ["待办", "实施", "测试", "待人工评审", "交付"];
+const LADDER: readonly GuardState[] = [
+  "待办",
+  "实施",
+  "测试",
+  "待人工评审",
+  "交付",
+];
 
 /** Minimal work-item shape the guard needs — callers pass a projection. */
 export interface GuardWorkItem {
@@ -136,7 +142,11 @@ export type TransitionGuardErrorCode =
 export class TransitionGuardError extends Error {
   readonly code: TransitionGuardErrorCode;
   readonly need: string[];
-  constructor(code: TransitionGuardErrorCode, message: string, need: string[] = []) {
+  constructor(
+    code: TransitionGuardErrorCode,
+    message: string,
+    need: string[] = [],
+  ) {
     super(message);
     this.name = "TransitionGuardError";
     this.code = code;
@@ -230,7 +240,8 @@ function describeTransition(
 
   if (target === "done") {
     const need = ["verdict", "commit"];
-    const summary = "仅可自「待人工评审」进入,需 PASSED verdict + 合并 commit(7-40 位 hex)";
+    const summary =
+      "仅可自「待人工评审」进入,需 PASSED verdict + 合并 commit(7-40 位 hex)";
     if (actor.kind !== "human") {
       return {
         target,
@@ -410,7 +421,11 @@ export function assertTransition(
   const desc = describeTransition(item, target, actor);
   if (!desc.ok) {
     const code = desc.denyCode ?? "actor-denied";
-    throw new TransitionGuardError(code, describeDenyMessage(code, desc), desc.need);
+    throw new TransitionGuardError(
+      code,
+      describeDenyMessage(code, desc),
+      desc.need,
+    );
   }
 
   // desc.ok === true: actor + source-state eligibility cleared. Now check the

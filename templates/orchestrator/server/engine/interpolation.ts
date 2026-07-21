@@ -1,8 +1,14 @@
-import { evaluateExpression, type ExpressionContext } from "./expression-parser.js";
+import {
+  evaluateExpression,
+  type ExpressionContext,
+} from "./expression-parser.js";
 
 export type { ExpressionContext } from "./expression-parser.js";
 
-export function renderTemplate(template: string, context: ExpressionContext): string {
+export function renderTemplate(
+  template: string,
+  context: ExpressionContext,
+): string {
   if (!template.includes("{{")) return template;
 
   return template.replace(/\{\{([^}]+)\}\}/g, (_match, rawExpr) => {

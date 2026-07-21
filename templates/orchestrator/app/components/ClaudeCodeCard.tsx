@@ -1,21 +1,22 @@
+import { IconExternalLink } from "@tabler/icons-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconExternalLink } from "@tabler/icons-react";
-import {
-  useClaudeConnect,
-  useClaudeConnectComplete,
-  useClaudeDisconnect,
-  useClaudeStatus,
-} from "@/hooks/use-orchestrator";
+
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Spinner } from "@/components/ui/spinner";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import {
+  useClaudeConnect,
+  useClaudeConnectComplete,
+  useClaudeDisconnect,
+  useClaudeStatus,
+} from "@/hooks/use-orchestrator";
 
 // Relative date like "in 3 days" / "12 days ago" — keeps the connected row to one
 // short line without a verbose absolute timestamp.
@@ -25,7 +26,8 @@ function relativeDate(iso: string | null): string {
   if (Number.isNaN(target)) return "—";
   const diffDays = Math.round((target - Date.now()) / 86_400_000);
   const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-  if (Math.abs(diffDays) >= 30) return rtf.format(Math.round(diffDays / 30), "month");
+  if (Math.abs(diffDays) >= 30)
+    return rtf.format(Math.round(diffDays / 30), "month");
   return rtf.format(diffDays, "day");
 }
 

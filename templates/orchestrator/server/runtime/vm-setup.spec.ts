@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 
-import { probeTools, ensureToolchain } from "./vm-setup.js";
 import type {
   ExecOptions,
   ExecResult,
   NodeRuntime,
   VmHandle,
 } from "./node-runtime.js";
+import { probeTools, ensureToolchain } from "./vm-setup.js";
 
 /** Fake runtime where each `command -v` probe echoes the tools we say exist. */
 function fakeRuntime(present: {
@@ -48,7 +48,10 @@ function fakeRuntime(present: {
   return { runtime, calls };
 }
 
-const VM = { name: "vm", spec: { kind: "microvm", onFailure: "recreate" } } as VmHandle;
+const VM = {
+  name: "vm",
+  spec: { kind: "microvm", onFailure: "recreate" },
+} as VmHandle;
 
 describe("probeTools", () => {
   it("reports which tools are on PATH", async () => {
@@ -85,18 +88,15 @@ describe("ensureToolchain", () => {
     });
     expect(res.installed).toBe(true);
     expect(calls.some((c) => /apk add/.test(c))).toBe(true);
-    expect(calls.some((c) => /npm install -g @anthropic-ai\/claude-code/.test(c))).toBe(
-      true,
-    );
+    expect(
+      calls.some((c) => /npm install -g @anthropic-ai\/claude-code/.test(c)),
+    ).toBe(true);
     expect(res.after.claude).toBe(true);
   });
 
   it("throws clearly when a required tool is STILL missing after install", async () => {
     // npm install is a no-op here, so claude never appears → hard fail.
-    const exec = async (
-      _vm: VmHandle,
-      cmd: string,
-    ): Promise<ExecResult> => {
+    const exec = async (_vm: VmHandle, cmd: string): Promise<ExecResult> => {
       if (/command -v/.test(cmd) && /echo node/.test(cmd))
         return { code: 0, stdout: "node\nnpm\ngit", stderr: "" }; // never claude
       return { code: 0, stdout: "", stderr: "" };

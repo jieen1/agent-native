@@ -19,7 +19,7 @@ Sidebar（Foundry 外壳）
 ├─ Team / Extensions / 设置
 ```
 
-<Mermaid id="tracker-ia" source={"flowchart TD\n  S[侧栏] --> H[问 Tracker /]\n  S --> I[收件箱 /inbox]\n  S --> B[看板 /board]\n  S --> SP[Sprint 列表 /sprints]\n  SP --> CK[Sprint 驾驶舱]\n  CK --> ST[规划工作台 studio]\n  S --> Q[队列 /queue]\n  S --> M[度量 /metrics]\n  S --> P[项目 /projects]\n  B --> W[工作项详情 /items/:id]\n  I --> W\n  W -.深链.-> R[orchestrator 运行详情]\n  ST -.内嵌.-> D[design 应用 Present 视图]"} />
+<Mermaid id="tracker-ia" source={"flowchart TD\n S[侧栏] --> H[问 Tracker /]\n S --> I[收件箱 /inbox]\n S --> B[看板 /board]\n S --> SP[Sprint 列表 /sprints]\n SP --> CK[Sprint 驾驶舱]\n CK --> ST[规划工作台 studio]\n S --> Q[队列 /queue]\n S --> M[度量 /metrics]\n S --> P[项目 /projects]\n B --> W[工作项详情 /items/:id]\n I --> W\n W -.深链.-> R[orchestrator 运行详情]\n ST -.内嵌.-> D[design 应用 Present 视图]"} />
 
 路由收敛：删除重复的 `/new-work-item`（保留 `/items/new`）；`navigation` 应用状态补齐 `sprints`、`sprint`、`studio`、`queue`、`inbox`、`metrics`、`new-item` 视图——现状缺失导致 agent 对这些页面失明；`view-screen` 相应返回各页焦点对象（sprint、审批项、队列位）。
 
@@ -308,4 +308,4 @@ action 增量（与页面一一对应）：`list-inbox`、`resolve-inbox-item`�
 
 新增：`brainstorm`、`sprint-plan`、`sprint-test-plan`、`ui-spec`、`sprint-design`、`sprint-review`、`draft-fix-issue`、`sprint-story`、`sprint-recap`（产物模板与质量门按 02 章）；`orchestrating-dispatch`（派发协议：载荷白名单、tags 身份、模板选择）。
 
-清理：残留的 form-* 技能移除；AGENTS.md 按本章导航与类型枚举重写（类型统一为 需求、任务、缺陷、测试、生产问题，并补全样式映射）。
+清理：残留的 form-\* 技能移除；AGENTS.md 按本章导航与类型枚举重写（类型统一为 需求、任务、缺陷、测试、生产问题，并补全样式映射）。

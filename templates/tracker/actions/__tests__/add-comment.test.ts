@@ -6,7 +6,15 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { createClient, type Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 import { writebackActorEmail } from "../../server/lib/writeback-actor.js";
@@ -219,7 +227,11 @@ describe("add-comment author identity derivation", () => {
     await asUser(
       () =>
         addComment.run(
-          { workItemId: id, body: "writeback comment", authorName: "Steve(评审)" },
+          {
+            workItemId: id,
+            body: "writeback comment",
+            authorName: "Steve(评审)",
+          },
           ctxFor("mcp", sentinel),
         ),
       sentinel,

@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -7,7 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 // Shared data table (FRONTEND §C3 — "wrap in one <DataTable>"). A thin, typed

@@ -25,9 +25,7 @@ describe("<InspectorSection> — 属性/执行/时间分组 (原型 s4-work-item
         <div>x</div>
       </InspectorSection>,
     );
-    expect(
-      firstContainer.querySelector(".border-t"),
-    ).toBeNull();
+    expect(firstContainer.querySelector(".border-t")).toBeNull();
 
     const { container } = render(
       <InspectorSection label="执行">

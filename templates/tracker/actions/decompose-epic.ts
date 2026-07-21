@@ -6,6 +6,7 @@ import {
 import { and, eq, inArray } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { allocateItemKey } from "../server/lib/item-key-sequencer.js";
@@ -24,7 +25,10 @@ export default defineAction({
     "dependsOnTitles reference doesn't match a sibling title in this same " +
     "call, the entire operation fails before anything is written.",
   schema: z.object({
-    epicId: z.string().min(1).describe("The epic (集合) work item id to decompose"),
+    epicId: z
+      .string()
+      .min(1)
+      .describe("The epic (集合) work item id to decompose"),
     children: z
       .array(
         z.object({
@@ -58,12 +62,19 @@ export default defineAction({
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.epicId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.epicId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!epic) throw new Error("Epic work item not found or not accessible");
     if (!EPIC_TYPES.has(epic.type)) {
-      throw new Error(`Work item ${args.epicId} is not an epic (type=${epic.type})`);
+      throw new Error(
+        `Work item ${args.epicId} is not an epic (type=${epic.type})`,
+      );
     }
 
     const titleKey = (t: string) => t.trim().toLowerCase();
@@ -113,11 +124,15 @@ export default defineAction({
         .select({ id: schema.workItems.id, title: schema.workItems.title })
         .from(schema.workItems)
         .where(
-          and(inArray(schema.workItems.id, existingChildIds), ownerScope(schema.workItems)),
+          and(
+            inArray(schema.workItems.id, existingChildIds),
+            ownerScope(schema.workItems),
+          ),
         );
     }
     const childIdByTitle = new Map<string, string>();
-    for (const ec of existingChildren) childIdByTitle.set(titleKey(ec.title), ec.id);
+    for (const ec of existingChildren)
+      childIdByTitle.set(titleKey(ec.title), ec.id);
 
     // Project key, for itemKey generation. F8: the actual number comes from
     // the single project-level sequencer (allocateItemKey) — NOT a
@@ -136,17 +151,30 @@ export default defineAction({
     )[0];
 
     const now = new Date().toISOString();
-    const results: { id: string; title: string; itemKey: string; created: boolean }[] = [];
+    const results: {
+      id: string;
+      title: string;
+      itemKey: string;
+      created: boolean;
+    }[] = [];
 
     for (const c of args.children) {
       const key = titleKey(c.title);
       const existingId = childIdByTitle.get(key);
       if (existingId) {
-        results.push({ id: existingId, title: c.title, itemKey: "", created: false });
+        results.push({
+          id: existingId,
+          title: c.title,
+          itemKey: "",
+          created: false,
+        });
         continue;
       }
       const id = nanoid();
-      const itemKey = await allocateItemKey(epic.projectId, project?.key ?? "ITEM");
+      const itemKey = await allocateItemKey(
+        epic.projectId,
+        project?.key ?? "ITEM",
+      );
       const tags = c.repoName ? [`repo:${c.repoName}`] : [];
       await db.insert(schema.workItems).values({
         id,
@@ -174,7 +202,11 @@ export default defineAction({
     }
 
     // Ensure a duplicate-checked link (mirrors add-link.ts's dedup pattern).
-    async function ensureLink(fromItemId: string, toItemId: string, linkType: string) {
+    async function ensureLink(
+      fromItemId: string,
+      toItemId: string,
+      linkType: string,
+    ) {
       const existing = await db
         .select({ id: schema.links.id })
         .from(schema.links)
@@ -223,7 +255,11 @@ export default defineAction({
         requested: args.children.length,
         created: createdCount,
         skipped: args.children.length - createdCount,
-        children: results.map((r) => ({ id: r.id, title: r.title, created: r.created })),
+        children: results.map((r) => ({
+          id: r.id,
+          title: r.title,
+          created: r.created,
+        })),
       }),
       createdAt: now,
       ownerEmail,

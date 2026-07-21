@@ -8,6 +8,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export default defineAction({
@@ -61,9 +62,7 @@ export default defineAction({
     await db
       .delete(v3Schema.brainTasks)
       .where(eq(v3Schema.brainTasks.threadId, args.threadId));
-    await db
-      .delete(v3Schema.brainThreads)
-      .where(ownerScope);
+    await db.delete(v3Schema.brainThreads).where(ownerScope);
 
     return { threadId: args.threadId, deleted: true };
   },

@@ -7,7 +7,7 @@
 
 补位点在 plan 与 technical-design 之间：消费 sprint-doc 的 In Scope 与成功指标，产出可被技术设计、测试场景、briefs 引用的 ui-spec 与原型。这样实施阶段的 dev 工人拿到的不是"想象中的界面"，而是已签核的屏规格与原型深链。
 
-<Mermaid id="wf05-ui-track" source={"flowchart TD\n  sd[sprint-doc 已签核 In Scope 标注 ui 面] --> us[ui-spec 技能访谈 human 定稿]\n  us --> ub[sdlc-ui-build 工作流]\n  ub --> dz[design 应用 sprint 原型 多屏]\n  dz --> rv[tracker 内嵌评审 锚点批注]\n  rv -->|批注打包 修订 spec 定点重生成| us\n  rv --> so[ui-signoff 冻结原型版本]\n  so --> td[technical-design 与 test-plan 与 briefs 引用屏编号与深链]"} />
+<Mermaid id="wf05-ui-track" source={"flowchart TD\n sd[sprint-doc 已签核 In Scope 标注 ui 面] --> us[ui-spec 技能访谈 human 定稿]\n us --> ub[sdlc-ui-build 工作流]\n ub --> dz[design 应用 sprint 原型 多屏]\n dz --> rv[tracker 内嵌评审 锚点批注]\n rv -->|批注打包 修订 spec 定点重生成| us\n rv --> so[ui-signoff 冻结原型版本]\n so --> td[technical-design 与 test-plan 与 briefs 引用屏编号与深链]"} />
 
 ## 2. `/ui-spec` 技能与产物 schema
 
@@ -243,10 +243,9 @@ SDLC 项目文档库/                       <- org 根文件夹
 
 写入一律走 create-document 与 edit-document（NFM 规范见《content 富文本写作指南》）。**登记的框架/content 增量：`resetCollabState` action**（deleteCollabState 的 action 化，现无调用面）——发布管道整文重写的标准序列：pull-document flush 握手（有活跃编辑会话先落盘）、update-document、resetCollabState；在线编辑器由 updatedAt 信号触发重载。没有这一步，在线 Yjs 会话会把重写覆盖回旧内容（已实证的故障模式）。
 
-
 ## 6. 跨应用 A2A 全景
 
-<Mermaid id="wf05-a2a" source={"flowchart LR\n  T[tracker 流程域] -->|MCP brain-send 派发 brief 与 tags 身份| O[orchestrator 执行域]\n  T -->|workflowRun 直发 ui-build 与 docs-task| O\n  O -->|回写:advance/建单/产物| T\n  O -->|create-design 与 create-file 原型入库| D[design UI 域]\n  O -->|create-document 交付文档| C[content 文档域]\n  T -->|publish 管道 产物富呈现入库| C\n  T -->|只读检出与 spawnOnce 规划技能用| O\n  T -.深链 评审嵌入.-> D\n  T -.深链 文档查看.-> C"} />
+<Mermaid id="wf05-a2a" source={"flowchart LR\n T[tracker 流程域] -->|MCP brain-send 派发 brief 与 tags 身份| O[orchestrator 执行域]\n T -->|workflowRun 直发 ui-build 与 docs-task| O\n O -->|回写:advance/建单/产物| T\n O -->|create-design 与 create-file 原型入库| D[design UI 域]\n O -->|create-document 交付文档| C[content 文档域]\n T -->|publish 管道 产物富呈现入库| C\n T -->|只读检出与 spawnOnce 规划技能用| O\n T -.深链 评审嵌入.-> D\n T -.深链 文档查看.-> C"} />
 
 连接明细：
 

@@ -1,5 +1,12 @@
-import { useState, type MouseEvent } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import {
+  DevDatabaseLink,
+  FeedbackButton,
+  appPath,
+  focusAgentChat,
+  navigateWithAgentChatViewTransition,
+} from "@agent-native/core/client";
+import { ExtensionsSidebarSection } from "@agent-native/core/client/extensions";
+import { OrgSwitcher } from "@agent-native/core/client/org";
 import {
   IconUsers,
   IconMenu2,
@@ -11,22 +18,16 @@ import {
   IconListDetails,
   IconInbox,
 } from "@tabler/icons-react";
-import { OrgSwitcher } from "@agent-native/core/client/org";
+import { useState, type MouseEvent } from "react";
+import { Link, useLocation, useNavigate } from "react-router";
+
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useProjects, useInboxItems } from "@/hooks/use-tracker";
 import { formatBadgeCount } from "@/lib/inbox";
-import {
-  DevDatabaseLink,
-  FeedbackButton,
-  appPath,
-  focusAgentChat,
-  navigateWithAgentChatViewTransition,
-} from "@agent-native/core/client";
-import { ExtensionsSidebarSection } from "@agent-native/core/client/extensions";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {

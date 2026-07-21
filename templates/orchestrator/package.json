@@ -1,12 +1,9 @@
 {
   "name": "orchestrator",
   "displayName": "Orchestrator",
-  "description": "Agent orchestrator — task management, workflow DAGs, and multi-model sub-agent delegation.",
   "private": true,
+  "description": "Agent orchestrator — task management, workflow DAGs, and multi-model sub-agent delegation.",
   "type": "module",
-  "engines": {
-    "node": ">=22"
-  },
   "scripts": {
     "dev": "agent-native dev --open",
     "build": "agent-native build",
@@ -107,5 +104,8 @@
     "vaul": "^1.1.2",
     "vite": "catalog:",
     "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

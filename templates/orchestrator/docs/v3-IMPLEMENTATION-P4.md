@@ -124,6 +124,7 @@ Worker shim 在 microVM 内运行，文件系统隔离 OK，但网络无限制�
 ---
 
 **风险**：
+
 - VM 网络限制依赖 microsandbox 是否支持网络策略 — 如不支持，只能在 shim 层拦截
 - 数据清理定时任务需独立于 reconciler tick — 建议用 Node `setInterval` 或独立 plugin
 - 多用户隔离假设 framework `ownableColumns` + `accessFilter` 可用 — 需验证

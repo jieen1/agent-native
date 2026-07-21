@@ -1,5 +1,3 @@
-import { useCallback, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { useActionMutation, useActionQuery } from "@agent-native/core/client";
 import {
   IconBolt,
@@ -7,11 +5,18 @@ import {
   IconChevronRight,
   IconTerminal2,
 } from "@tabler/icons-react";
-import { APP_TITLE } from "@/lib/app-config";
+import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+
 import { DataTable } from "@/components/board/DataTable";
 import { EmptyState } from "@/components/board/EmptyState";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Select,
   SelectContent,
@@ -19,11 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { APP_TITLE } from "@/lib/app-config";
 import { cn } from "@/lib/utils";
 
 export function meta() {

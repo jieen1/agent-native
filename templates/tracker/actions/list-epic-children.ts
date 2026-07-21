@@ -1,6 +1,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { computeItemKeyDisplays } from "../server/lib/item-key-display.js";
@@ -21,7 +22,12 @@ export default defineAction({
       await db
         .select({ id: schema.workItems.id })
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.epicId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.epicId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!epic) throw new Error("Epic work item not found or not accessible");
@@ -50,10 +56,18 @@ export default defineAction({
         priority: schema.workItems.priority,
       })
       .from(schema.workItems)
-      .where(and(inArray(schema.workItems.id, childIds), ownerScope(schema.workItems)));
+      .where(
+        and(
+          inArray(schema.workItems.id, childIds),
+          ownerScope(schema.workItems),
+        ),
+      );
 
     const depLinks = await db
-      .select({ fromItemId: schema.links.fromItemId, toItemId: schema.links.toItemId })
+      .select({
+        fromItemId: schema.links.fromItemId,
+        toItemId: schema.links.toItemId,
+      })
       .from(schema.links)
       .where(
         and(
@@ -69,7 +83,11 @@ export default defineAction({
     // via pass-through.
     const displays = await computeItemKeyDisplays(
       db,
-      children.map((c) => ({ id: c.id, projectId: c.projectId, itemKey: c.itemKey })),
+      children.map((c) => ({
+        id: c.id,
+        projectId: c.projectId,
+        itemKey: c.itemKey,
+      })),
     );
     const childrenDisplay = children.map((c) => ({
       ...c,
@@ -79,8 +97,14 @@ export default defineAction({
     const dependencies = depLinks.map((l) => ({
       fromId: l.fromItemId,
       toId: l.toItemId,
-      fromLabel: byId.get(l.fromItemId)?.itemKeyDisplay || byId.get(l.fromItemId)?.title || l.fromItemId,
-      toLabel: byId.get(l.toItemId)?.itemKeyDisplay || byId.get(l.toItemId)?.title || l.toItemId,
+      fromLabel:
+        byId.get(l.fromItemId)?.itemKeyDisplay ||
+        byId.get(l.fromItemId)?.title ||
+        l.fromItemId,
+      toLabel:
+        byId.get(l.toItemId)?.itemKeyDisplay ||
+        byId.get(l.toItemId)?.title ||
+        l.toItemId,
     }));
 
     return { children: childrenDisplay, dependencies };

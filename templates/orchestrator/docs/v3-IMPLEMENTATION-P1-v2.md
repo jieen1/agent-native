@@ -71,8 +71,8 @@ class V3Reconciler {
 }
 ```
 
-**Tick 流程详细步骤**：
-0. **Acquire lock**：`SELECT pg_try_advisory_lock(hashtext(runId))` — 失败说明另有 tick 在执行，直接返回。锁在 tick 结束时 `SELECT pg_advisory_unlock(hashtext(runId))`
+**Tick 流程详细步骤**：0. **Acquire lock**：`SELECT pg_try_advisory_lock(hashtext(runId))` — 失败说明另有 tick 在执行，直接返回。锁在 tick 结束时 `SELECT pg_advisory_unlock(hashtext(runId))`
+
 1. 读取 `v3_runs[runId]`，检查 status (paused → skip, completed/failed → skip, pending/running → continue)
 2. 读取 `v3_nodes` 中该 run 的所有节点
 3. **检测失败节点**：
@@ -90,6 +90,7 @@ class V3Reconciler {
 7. 写入 `v3_events`。`seq_num` 由 tick 内部计数器递增（非 DB auto-increment）
 
 **并发控制**：
+
 - **Postgres advisory lock 确定性选择**（不用 Redis，减少依赖）：`SELECT pg_try_advisory_lock(hashtext(runId))`。PG connection 自动持有，连接断开自动释放（无死锁）。每个 tick 一个 PG 连接，锁作用域 = 整个 tick 事务
 - `max_concurrency`：全局通过 `v3_runs` 的 `active_spawns` 字段原子计数（`SELECT ... FOR UPDATE`），per-node 字段优先覆盖
 
@@ -111,6 +112,7 @@ V3 node type（`agent | parallel_over | loop | human_gate`）需要转换为 Nod
 | VM networking | `networking.ts` | provision 阶段配置 |
 
 **V3 适配层**：`server/engine/v3-dispatcher.ts`
+
 - 封装 NodeRunner 调用，增加 V3 channel contract 约束
 - 限制 spawn 输入为 4 项（system_prompt, rendered_prompt, tools, workspace）
 - 输出路径：string / object(schema 验证) / schema-violation → 映射到 v3_artifacts
@@ -133,6 +135,7 @@ dispatcher 的 catch 块根据 NodeRunner 返回的 `onFailure` 结果写入 v3_
 #### C. Workspace + Auth + 网络（已有，只需对接）
 
 **Workspace 创建**（设计 §8.2）— 复用 `git-wrapper.ts`：
+
 ```typescript
 // server/engine/v3-workspace.ts
 async function createWorkspace(runId: string, repoUrl: string, branch: string) {
@@ -146,6 +149,7 @@ async function createWorkspace(runId: string, repoUrl: string, branch: string) {
 ```
 
 **关键参数**：
+
 - `keep_after_run: boolean` — 是否保留 workspace
 - `tag_match` — 按标签筛选 workspace
 - `mountSpec` — 挂载配置（复用 node-runtime.ts MountSpec 接口）
@@ -153,17 +157,20 @@ async function createWorkspace(runId: string, repoUrl: string, branch: string) {
 #### D. Server 启动插件 + SSE + 健康检查
 
 **Server 启动插件**：`server/plugins/v3-reconciler.ts`
+
 - Nitro plugin，应用启动时注册
 - 启动 reconciler 主循环
 - 注册 V3 SSE route
 - 注册 V3 health check route
 
 **SSE route**：`GET /_v3/runs/:runId/events?since=<seq>`
+
 - 读取 `v3_events` 表，按 `seq_num > since` 过滤
 - EventSource streaming，保持连接
 - 事件类型：`run.created`, `run.started`, `node.ready`, `spawn.started`, `spawn.completed`, `node.resolved`, `run.completed`, `run.failed`, `patch_applied`
 
 **健康检查**：`GET /_v3/health`
+
 - Postgres 连接检查（`getV3Db()` ping）
 - msb CLI 可用性检测
 - KVM 后端检测（WSL2 环境）
@@ -173,8 +180,12 @@ async function createWorkspace(runId: string, repoUrl: string, branch: string) {
 #### E. 插值上下文 + Ad-hoc spawn
 
 **插值上下文构建**（设计 §5.1, §6.4）：`buildInterpolationContext(runId, nodeId)`
+
 ```typescript
-async function buildInterpolationContext(runId: string, nodeId: string): Promise<Record<string, unknown>> {
+async function buildInterpolationContext(
+  runId: string,
+  nodeId: string,
+): Promise<Record<string, unknown>> {
   // 1. 读取 v3_nodes 中 nodeId 的 deps 列表
   // 2. 对每个 dep，读取 v3_artifacts 中对应 output
   // 3. 构建 deps 对象: { depId: { output: artifactData } }
@@ -184,12 +195,14 @@ async function buildInterpolationContext(runId: string, nodeId: string): Promise
 ```
 
 **插值渲染**：`renderTemplate(template, context)`
+
 - 扫描 `{{ ... }}` 占位
 - 解析路径表达式（`deps.X.output.Y`）
 - 类型规则：string→verbatim, number→literal, object→JSON.stringify
 - undefined → render fail → node error
 
 **Ad-hoc spawn**（设计 §8.1）：`spawn.once/get/cancel`
+
 - 不关联 run 的轻量 worker 调用
 - 复用 NodeRunner，不传 runId
 - 结果写入 v3_spawns（runId 为空）+ v3_artifacts
@@ -217,6 +230,7 @@ async function buildInterpolationContext(runId: string, nodeId: string): Promise
 ---
 
 **与原版 P1 相比的变化**：
+
 - 去掉 Worker Dispatcher 从零搭建（复用 NodeRunner）
 - 去掉 VM provision/teardown 实现（复用 MicrosandboxRuntime）
 - 去掉 Worker shim 实现（复用 engine-loop + claude-code-executor）

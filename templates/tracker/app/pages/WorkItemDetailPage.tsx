@@ -1,3 +1,8 @@
+import type {
+  ScaleEstimate,
+  TransitionOption,
+  WorkItemRunSummary,
+} from "@shared/types";
 import {
   IconAlertTriangle,
   IconArrowBackUp,
@@ -40,12 +45,6 @@ import {
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router";
 import { toast } from "sonner";
-
-import type {
-  ScaleEstimate,
-  TransitionOption,
-  WorkItemRunSummary,
-} from "@shared/types";
 
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { ArtifactsPanel } from "@/components/ArtifactsPanel";
@@ -90,7 +89,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
@@ -833,7 +836,8 @@ function EpicChildrenPanel({ workItemId }: { workItemId: string }) {
                     to={`/items/${child.id}`}
                     className="shrink-0 text-xs font-medium hover:underline"
                     title={
-                      child.itemKeyDisplay && child.itemKeyDisplay !== child.itemKey
+                      child.itemKeyDisplay &&
+                      child.itemKeyDisplay !== child.itemKey
                         ? "历史重号，已消歧显示"
                         : undefined
                     }
@@ -1350,9 +1354,10 @@ function GuardedStatusRow({
   };
 }) {
   const [open, setOpen] = useState(false);
-  const statusLabel = item.status === "done" || item.status === "closed"
-    ? item.status
-    : (item.currentStageName ?? "待办");
+  const statusLabel =
+    item.status === "done" || item.status === "closed"
+      ? item.status
+      : (item.currentStageName ?? "待办");
 
   return (
     <>
@@ -1369,7 +1374,11 @@ function GuardedStatusRow({
         <IconShieldLock className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
       </button>
       {open ? (
-        <GuardedTransitionDialog item={item} open={open} onOpenChange={setOpen} />
+        <GuardedTransitionDialog
+          item={item}
+          open={open}
+          onOpenChange={setOpen}
+        />
       ) : null}
     </>
   );
@@ -1396,7 +1405,9 @@ function GuardedTransitionDialog({
 
   const [target, setTarget] = useState<string>(options[0]?.target ?? "");
   const [reason, setReason] = useState("");
-  const [verdict, setVerdict] = useState<"PASSED" | "CHANGES_REQUESTED">("PASSED");
+  const [verdict, setVerdict] = useState<"PASSED" | "CHANGES_REQUESTED">(
+    "PASSED",
+  );
   const [commit, setCommit] = useState("");
   const [runId, setRunId] = useState("");
   const [links, setLinks] = useState<string[]>([]);
@@ -1415,17 +1426,22 @@ function GuardedTransitionDialog({
   // so it only needs `reason`, never a commit.
   const isChangesRequested = isDone && verdict === "CHANGES_REQUESTED";
   const needsEvidence = !!selected && selected.need.length > 0 && !isClosed;
-  const needsCommit = !!selected?.need.includes("commit") && !isChangesRequested;
+  const needsCommit =
+    !!selected?.need.includes("commit") && !isChangesRequested;
   const needsLinks = !!selected?.need.includes("links");
 
-  const currentStatusBadge = item.status === "done" || item.status === "closed"
-    ? item.status
-    : (item.currentStageName ?? "待办");
+  const currentStatusBadge =
+    item.status === "done" || item.status === "closed"
+      ? item.status
+      : (item.currentStageName ?? "待办");
 
   const reasonValid = reason.trim().length >= 4;
   const doneEvidenceOk =
-    !isDone || isChangesRequested || (verdict === "PASSED" && COMMIT_RE.test(commit.trim()));
-  const deliveryEvidenceOk = !isDelivery || commit.trim().length > 0 || links.length > 0;
+    !isDone ||
+    isChangesRequested ||
+    (verdict === "PASSED" && COMMIT_RE.test(commit.trim()));
+  const deliveryEvidenceOk =
+    !isDelivery || commit.trim().length > 0 || links.length > 0;
   const canSubmit =
     !!target &&
     reasonValid &&
@@ -1464,7 +1480,10 @@ function GuardedTransitionDialog({
         target: target as any,
         reason: reason.trim(),
         ...(isDone ? { verdict } : {}),
-        ...(commit.trim() || links.length > 0 || deliveryItems.length > 0 || runId.trim()
+        ...(commit.trim() ||
+        links.length > 0 ||
+        deliveryItems.length > 0 ||
+        runId.trim()
           ? {
               evidence: {
                 ...(commit.trim() ? { commit: commit.trim() } : {}),
@@ -1493,8 +1512,10 @@ function GuardedTransitionDialog({
             setMissing(e.need);
           }
           setServerError(
-            e?.message?.replace(/^Action transition-work-item failed:\s*/, "") ??
-              "状态迁移失败",
+            e?.message?.replace(
+              /^Action transition-work-item failed:\s*/,
+              "",
+            ) ?? "状态迁移失败",
           );
           // Dialog stays open (per S4 契约) with all fields intact.
         },
@@ -1507,7 +1528,9 @@ function GuardedTransitionDialog({
       <DialogContent className="w-[440px]">
         <DialogHeader>
           <DialogTitle>变更状态 · {item.itemKey ?? id.slice(0, 8)}</DialogTitle>
-          <DialogDescription>当前状态与你可执行的迁移(仅列出通过守卫的目标)。</DialogDescription>
+          <DialogDescription>
+            当前状态与你可执行的迁移(仅列出通过守卫的目标)。
+          </DialogDescription>
         </DialogHeader>
         <div className="-mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
           当前状态
@@ -1528,7 +1551,9 @@ function GuardedTransitionDialog({
               }}
               disabled={options.length === 0}
             >
-              <SelectTrigger className={cn(missing.length > 0 && "border-destructive")}>
+              <SelectTrigger
+                className={cn(missing.length > 0 && "border-destructive")}
+              >
                 <SelectValue placeholder="选择目标状态" />
               </SelectTrigger>
               <SelectContent>
@@ -1559,7 +1584,9 @@ function GuardedTransitionDialog({
               onChange={(e) => setReason(e.target.value)}
               placeholder="为什么人工变更?写入审计与活动流"
               rows={3}
-              className={cn(!reasonValid && reason.length > 0 && "border-destructive")}
+              className={cn(
+                !reasonValid && reason.length > 0 && "border-destructive",
+              )}
             />
           </div>
 
@@ -1568,7 +1595,9 @@ function GuardedTransitionDialog({
               <Label>评审结论</Label>
               <RadioGroup
                 value={verdict}
-                onValueChange={(v) => setVerdict(v as "PASSED" | "CHANGES_REQUESTED")}
+                onValueChange={(v) =>
+                  setVerdict(v as "PASSED" | "CHANGES_REQUESTED")
+                }
                 className="grid-flow-col justify-start gap-4"
               >
                 <label className="flex items-center gap-1.5 text-sm">
@@ -1637,7 +1666,12 @@ function GuardedTransitionDialog({
                         }
                       }}
                     />
-                    <Button type="button" variant="outline" size="sm" onClick={addLink}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addLink}
+                    >
                       <IconPlus className="size-3.5" />
                     </Button>
                   </div>
@@ -1652,7 +1686,9 @@ function GuardedTransitionDialog({
                           <button
                             type="button"
                             onClick={() =>
-                              setLinks((prev) => prev.filter((_, idx) => idx !== i))
+                              setLinks((prev) =>
+                                prev.filter((_, idx) => idx !== i),
+                              )
                             }
                             className="shrink-0 text-muted-foreground hover:text-foreground"
                           >
@@ -1680,7 +1716,12 @@ function GuardedTransitionDialog({
                       }
                     }}
                   />
-                  <Button type="button" variant="outline" size="sm" onClick={addDeliveryItem}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addDeliveryItem}
+                  >
                     <IconPlus className="size-3.5" />
                   </Button>
                 </div>
@@ -1695,7 +1736,9 @@ function GuardedTransitionDialog({
                         <button
                           type="button"
                           onClick={() =>
-                            setDeliveryItems((prev) => prev.filter((_, idx) => idx !== i))
+                            setDeliveryItems((prev) =>
+                              prev.filter((_, idx) => idx !== i),
+                            )
                           }
                           className="shrink-0 text-muted-foreground hover:text-foreground"
                         >
@@ -1730,7 +1773,9 @@ function GuardedTransitionDialog({
             {transition.isPending ? (
               <IconLoader2 className="size-4 animate-spin" />
             ) : null}
-            {isDone && verdict === "CHANGES_REQUESTED" ? "驳回并要求返工" : "确认变更"}
+            {isDone && verdict === "CHANGES_REQUESTED"
+              ? "驳回并要求返工"
+              : "确认变更"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1741,7 +1786,11 @@ function GuardedTransitionDialog({
 // ── F5: 任务拆分阈值(规划前置契约,02 §3.10) ────────────────────────────────
 
 /** 规模徽标 — ok=灰点、split-required=warning badge「规模 N 文件」、无估算=浅字. */
-function ScaleBadge({ estimate }: { estimate: ScaleEstimate | null | undefined }) {
+function ScaleBadge({
+  estimate,
+}: {
+  estimate: ScaleEstimate | null | undefined;
+}) {
   if (!estimate) {
     return <span className="text-[11px] text-muted-foreground/70">未估算</span>;
   }
@@ -1852,7 +1901,9 @@ function SplitWorkItemDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const splitWorkItem = useSplitWorkItem();
-  const [rows, setRows] = useState<{ title: string; description: string }[]>([]);
+  const [rows, setRows] = useState<{ title: string; description: string }[]>(
+    [],
+  );
   const [chainBlockedBy, setChainBlockedBy] = useState(true);
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -1868,8 +1919,13 @@ function SplitWorkItemDialog({
     onOpenChange(v);
   }
 
-  function updateRow(i: number, patch: Partial<{ title: string; description: string }>) {
-    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  function updateRow(
+    i: number,
+    patch: Partial<{ title: string; description: string }>,
+  ) {
+    setRows((prev) =>
+      prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)),
+    );
   }
 
   function submit() {
@@ -1885,7 +1941,9 @@ function SplitWorkItemDialog({
       },
       {
         onSuccess: (res: { children?: { id: string; itemKey: string }[] }) => {
-          toast.success(`已拆分为 ${res.children?.length ?? rows.length} 个子单`);
+          toast.success(
+            `已拆分为 ${res.children?.length ?? rows.length} 个子单`,
+          );
           onOpenChange(false);
         },
         onError: (err: unknown) => {
@@ -1925,7 +1983,9 @@ function SplitWorkItemDialog({
                   placeholder="简述(可选)"
                   rows={2}
                   value={row.description}
-                  onChange={(e) => updateRow(i, { description: e.target.value })}
+                  onChange={(e) =>
+                    updateRow(i, { description: e.target.value })
+                  }
                   className="text-xs"
                 />
               </div>
@@ -1934,7 +1994,9 @@ function SplitWorkItemDialog({
                 size="icon"
                 variant="ghost"
                 className="mt-0.5 shrink-0 text-muted-foreground hover:text-destructive"
-                onClick={() => setRows((prev) => prev.filter((_, idx) => idx !== i))}
+                onClick={() =>
+                  setRows((prev) => prev.filter((_, idx) => idx !== i))
+                }
                 title="删除"
               >
                 <IconTrash className="size-4" />
@@ -1947,15 +2009,24 @@ function SplitWorkItemDialog({
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => setRows((prev) => [...prev, { title: "", description: "" }])}
+            onClick={() =>
+              setRows((prev) => [...prev, { title: "", description: "" }])
+            }
           >
             <IconPlus className="size-4" />
             添加子单
           </Button>
 
           <div className="flex items-center gap-2 border-t pt-3">
-            <Switch checked={chainBlockedBy} onCheckedChange={setChainBlockedBy} id="chain-blocked-by" />
-            <Label htmlFor="chain-blocked-by" className="cursor-pointer text-xs font-normal">
+            <Switch
+              checked={chainBlockedBy}
+              onCheckedChange={setChainBlockedBy}
+              id="chain-blocked-by"
+            />
+            <Label
+              htmlFor="chain-blocked-by"
+              className="cursor-pointer text-xs font-normal"
+            >
               子单按顺序 blocked-by 链接
             </Label>
           </div>
@@ -2041,7 +2112,9 @@ export function WorkItemDetailPage() {
     dispatch.mutate(dispatchArgs(true), {
       onSuccess: (res: { threadId?: string; blockedBy?: string[] }) => {
         if (res.threadId) {
-          toast.success(`已覆盖规模阈值派发 — 大脑线程 ${res.threadId.slice(0, 12)}…`);
+          toast.success(
+            `已覆盖规模阈值派发 — 大脑线程 ${res.threadId.slice(0, 12)}…`,
+          );
         } else if (res.blockedBy?.length) {
           toast.info(`等待依赖完成: ${res.blockedBy.join(", ")}`);
         }
@@ -2092,7 +2165,8 @@ export function WorkItemDetailPage() {
   // to the item's own `branch` column, then the project default.
   const runs = (item as { runs?: WorkItemRunSummary[] }).runs ?? [];
   const latestRunBranch = runs.find((r) => r.branch)?.branch ?? null;
-  const branch = latestRunBranch || item.branch || item.project?.defaultBranch || "main";
+  const branch =
+    latestRunBranch || item.branch || item.project?.defaultBranch || "main";
   const ghHref = repoHref(remote);
   const ghLabel = repoLabel(remote);
 
@@ -2322,7 +2396,8 @@ export function WorkItemDetailPage() {
                   </span>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  周期性漂移检查的节奏。留空 = 默认 120 秒。0 = 仅事件触发(无定时唤醒)。
+                  周期性漂移检查的节奏。留空 = 默认 120 秒。0 =
+                  仅事件触发(无定时唤醒)。
                 </p>
               </PopoverContent>
             </Popover>
@@ -2442,7 +2517,8 @@ export function WorkItemDetailPage() {
                   itemKey: itemKeyDisplay,
                   status: item.status,
                   currentStageName,
-                  execState: (item as { execState?: string | null }).execState ?? null,
+                  execState:
+                    (item as { execState?: string | null }).execState ?? null,
                   allowedTransitions:
                     (item as { allowedTransitions?: TransitionOption[] })
                       .allowedTransitions ?? [],

@@ -14,6 +14,7 @@
 > 无 microVM、无控制/观测 API）。v2 = 在此之上叠加图引擎 + microVM 执行 + PM/队列 + 可视化编辑器。
 >
 > **本规划的硬约束（由用户拍板，覆盖 DESIGN §16 的“价值优先可缓 microVM”建议）：**
+>
 > - **microVM 执行隔离不可省、且前置**：真实代码/agent 节点执行**始终**经过 microVM（DESIGN §7.4），
 >   不存在“在宿主机直接跑代码”的发布路径。基础设施验证（§P0 spike）作为**闸门**先做。
 > - **可视化编辑器（React Flow）完整纳入主线**：不走“先 JSON 凑合”的捷径，按 FRONTEND §6 完整实现。
@@ -41,14 +42,14 @@
 
 ### 0.1 当前已实现基线（v1/v1.5，复用、不重建）
 
-| 类别 | 已有 | 文件 |
-|---|---|---|
-| 数据表 | `workflows` · `tasks` · `step_runs` · `runtime_configs` · `task_shares` · `workflow_shares` | `server/db/schema.ts`，迁移 `server/plugins/db.ts`（v1–7） |
-| 共享类型/校验 | `WorkflowStep`/`Task`/`StepRun`、`parseSteps`、`topoSortSteps`、`validateWorkflowDag`（线性/分支 DAG，**无** fanout/loop/join/branch 语义） | `shared/types.ts` |
-| Actions（21） | task CRUD、workflow CRUD、`run-orchestrator`（仅播种 + 返回指令串）、`upsert-step-run`、`list-step-runs`、`stop-task`、runtime 配置 6 个、`navigate`、`view-screen`、`run.ts`（headless 分发器） | `actions/*.ts` |
-| 前端 | `_index.tsx`（任务平铺列表，非 kanban）、`tasks.$id.tsx`（运行=调 `run-orchestrator` 后 `sendToAgentChat`）、`workflows.$id.tsx`（**原始 JSON `<Textarea>` 编辑器**）、`settings.tsx`（Runtime UI 已成形） | `app/routes/*.tsx` |
+| 类别                                | 已有                                                                                                                                                                                                                                                                  | 文件                                                                     |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------ |
+| 数据表                              | `workflows` · `tasks` · `step_runs` · `runtime_configs` · `task_shares` · `workflow_shares`                                                                                                                                                                           | `server/db/schema.ts`，迁移 `server/plugins/db.ts`（v1–7）               |
+| 共享类型/校验                       | `WorkflowStep`/`Task`/`StepRun`、`parseSteps`、`topoSortSteps`、`validateWorkflowDag`（线性/分支 DAG，**无** fanout/loop/join/branch 语义）                                                                                                                           | `shared/types.ts`                                                        |
+| Actions（21）                       | task CRUD、workflow CRUD、`run-orchestrator`（仅播种 + 返回指令串）、`upsert-step-run`、`list-step-runs`、`stop-task`、runtime 配置 6 个、`navigate`、`view-screen`、`run.ts`（headless 分发器）                                                                      | `actions/*.ts`                                                           |
+| 前端                                | `_index.tsx`（任务平铺列表，非 kanban）、`tasks.$id.tsx`（运行=调 `run-orchestrator` 后 `sendToAgentChat`）、`workflows.$id.tsx`（**原始 JSON `<Textarea>` 编辑器**）、`settings.tsx`（Runtime UI 已成形）                                                            | `app/routes/*.tsx`                                                       |
 | Runtime（v1.5 已成形，DESIGN §8.1） | `runtime_configs` CRUD、`activate-runtime`（claude-code 写 `orchestrator-runtime` marker；vLLM 写 `agent-engine`+服务端占位 `OPENAI_API_KEY`）、`get-runtime-status`（读 `~/.claude` 过期）、`start-claude-code`（仅登录探测/Test，框架 harness 不可用 DESIGN §7.0b） | `actions/`、`server/claude-code-status.ts`、`server/register-runtime.ts` |
-| 技能/Agent | `orchestrating/SKILL.md`（v1 手工走 step）、`CLAUDE.md`/`AGENTS.md`（v1 surface）、`agent-chat.ts`（已是 orchestrator 身份） | `.agents|.claude/skills/`、`server/plugins/agent-chat.ts` |
+| 技能/Agent                          | `orchestrating/SKILL.md`（v1 手工走 step）、`CLAUDE.md`/`AGENTS.md`（v1 surface）、`agent-chat.ts`（已是 orchestrator 身份）                                                                                                                                          | `.agents                                                                 | .claude/skills/`、`server/plugins/agent-chat.ts` |
 
 > 复用原则：v1 表与 actions **一律保留**（数据契约禁止破坏性迁移，DESIGN §9），v2 新表新 action **叠加**；
 > `runtime_configs` 保留其现有手搓 `ownerEmail`/`orgId` 形状（DESIGN §9 注、§14）。
@@ -70,7 +71,7 @@
    **只能**经 `transition-work-item` 写；`update-work-item` 必须拒绝 `status` 字段。`execState`（自动化态）
    **永不**覆盖业务 `status`。
 6. **状态保证三层（DESIGN §6.2b）**：`finalize-status` gate（结构）+ reconciliation watchdog（引擎硬保证）
-   + blocked fallback。run 结束绝不静默留 stale status。**生效范围**：自 **P3** 全量生效；**P1/P2 的无 work_item 绑定 run 显式豁免**（§0.6），其图不含 finalize 闸是预期。
+   - blocked fallback。run 结束绝不静默留 stale status。**生效范围**：自 **P3** 全量生效；**P1/P2 的无 work_item 绑定 run 显式豁免**（§0.6），其图不含 finalize 闸是预期。
 7. **节点原子可重跑（DESIGN §1.7 前置2、§7.4.5）**：claude microVM 节点整体重跑（销毁+从 baseRef 重启），
    不 mid-turn resume；`claude --resume` 仅用于 VM 内进程恢复，不暴露给 `run-resume`（一层 resume）。
 8. **资源凭证不入源码（DESIGN §7.4.7、CLAUDE.md）**：`resolveSecret` 在 `runWithRequestContext` 内解析，
@@ -83,14 +84,14 @@
 
 ### 0.3 已定决策（2026-06-20 用户拍板；其余取默认值）
 
-| # | 决策 | 取值（已定） | 影响阶段 |
-|---|---|---|---|
-| **D-1** | `~/.claude` 挂进 VM 的模式 | **RO（只读）** + 周期性 re-login（隔离优先；token 数周有效，DESIGN §7.4.7） | P2 |
-| **D-2** | 运行时 backend | **仅 microsandbox**，**无任何备选/fallback backend**（Podman/gVisor/E2B/Daytona/Docker 全不做；DESIGN/本文已删除其描述以免误导） | P2 |
-| **D-3** | scheduler 驻留点 | **单 server-plugin tick**（仿 `jobs/scheduler.ts` 60s loop）+ SQL heartbeat/reap；多机持久化推迟到 P6 | P1（结构）/ P6（多机） |
-| **D-6** | host vLLM 地址 | **`http://localhost:8080`**；VM 内可达地址形式在 P0 spike 实测并固化为 env（DESIGN §7.4.9） | P0 → P2 |
-| D-4 | `@app` A2A token 是否计入预算 | 默认 best-effort 记录、**不强制**扣减（A2A 无 usage 返回，DESIGN §1.8） | P1 |
-| D-5 | `runtime_configs` 是否迁 `ownableColumns()` | 默认暂不迁（自用无 sharing 需求），P6 加性可补 | P3/P6 |
+| #       | 决策                                        | 取值（已定）                                                                                                                     | 影响阶段               |
+| ------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| **D-1** | `~/.claude` 挂进 VM 的模式                  | **RO（只读）** + 周期性 re-login（隔离优先；token 数周有效，DESIGN §7.4.7）                                                      | P2                     |
+| **D-2** | 运行时 backend                              | **仅 microsandbox**，**无任何备选/fallback backend**（Podman/gVisor/E2B/Daytona/Docker 全不做；DESIGN/本文已删除其描述以免误导） | P2                     |
+| **D-3** | scheduler 驻留点                            | **单 server-plugin tick**（仿 `jobs/scheduler.ts` 60s loop）+ SQL heartbeat/reap；多机持久化推迟到 P6                            | P1（结构）/ P6（多机） |
+| **D-6** | host vLLM 地址                              | **`http://localhost:8080`**；VM 内可达地址形式在 P0 spike 实测并固化为 env（DESIGN §7.4.9）                                      | P0 → P2                |
+| D-4     | `@app` A2A token 是否计入预算               | 默认 best-effort 记录、**不强制**扣减（A2A 无 usage 返回，DESIGN §1.8）                                                          | P1                     |
+| D-5     | `runtime_configs` 是否迁 `ownableColumns()` | 默认暂不迁（自用无 sharing 需求），P6 加性可补                                                                                   | P3/P6                  |
 
 > **表按影响度排序**（D-1/2/3/6 为前置硬决策、加粗；D-4/5 取默认值），**编号不代表先后顺序**。
 > 各取值记录到对应阶段 `DEVELOPING.md`。**microsandbox 是唯一 backend**：KVM 是硬要求；P0 spike 不通过须解决
@@ -229,6 +230,7 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
 ### 工作内容
 
 #### A. 数据模型（DESIGN §9，新增表，加性）
+
 - 新增 `workflow_templates`、`workflow_runs`、`node_runs`、`artifacts`（列见 DESIGN §9，逐列对齐）。
 - `ownableColumns()` + `createSharesTable()`（仅建 shares 表结构，sharing UI 推迟，DESIGN §9/§12）。
 - 索引：`node_runs(run_id)`、`node_runs(run_id, node_id, iteration, fanout_index)` 唯一键（journal 主键，DESIGN §1.7）、
@@ -237,6 +239,7 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
   `step_run→node_run` 的映射函数（供 P3 UI 展示旧运行）；本阶段仅定义映射，执行在 P3 数据就绪后。
 
 #### B. 图 schema + 校验（DESIGN §3）
+
 - `shared/types.ts` 扩展：节点类型 11 种（DESIGN §3.1）、`Edge{from,to,when?}`（§3.3）、`Node` 配置（§3.4）、
   `Condition`（§3.5：jsonpath / status / agent）、`NodeRuntimeSpec`（§7.4.3，结构占位，P2 消费）。
 - **统一校验器**：在现有 `validateWorkflowDag` 基础上扩展（DESIGN/FRONTEND §6.3“one shared validator”）——
@@ -245,14 +248,14 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
   错误阻断 save、warning 不阻断。**client lint 与 `save-template` action 调同一函数**（无双真相）。
 
 #### C. 调度引擎（DESIGN §4，本阶段核心）
+
 - 调度循环（DESIGN §4.1 已给伪代码，按其实现）：NodeRun 状态机 `pending→ready→running→done|failed|skipped`。
 - **item-correlation（DESIGN §4.1a，硬规格）**：NodeRun 身份键、fanout index-preserving 边、join 基数封板、
   中途 item 失败丢弃。
 - **并发信号量（DESIGN §4.1，build-not-configure，框架无全局 run cap）**：`maxConcurrentModelCalls`（默认 8）、
   `maxConcurrentVMs`（P0 实测容量）、per-fanout `maxConcurrency`、per-run 节点总数 backstop。VM/资源耗尽失败
   **与 token 预算区分上报**。
-- **动态扩展（DESIGN §1.5/§4.1）**：fanout 从上游数组展开 child NodeRun；loop-until-dry（`dedupeKey`+`seen` 集
-  +`dryRounds`，去重对 `seen` 不对 `confirmed`）；loop-until-budget；loop-until-condition；routing/classify。
+- **动态扩展（DESIGN §1.5/§4.1）**：fanout 从上游数组展开 child NodeRun；loop-until-dry（`dedupeKey`+`seen` 集 +`dryRounds`，去重对 `seen` 不对 `confirmed`）；loop-until-budget；loop-until-condition；routing/classify。
   loop 累加态作为 journaled artifact（key=`(runId,loopNodeId,iteration)`，§3.2）。loop 在迭代边界 barrier。
 - **`human` 节点（审批闸，DESIGN §3.1/§11，本次审查补）**：调度器到达 `human` 节点时**挂起该 run**（NodeRun 置
   `awaiting-approval`，不分配 executor/VM、不自动完成），等待外部 resolve 信号。**复用 dispatch 审批原语**
@@ -275,6 +278,7 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
 - **调度器驱动点（D-3）**：单 server-plugin tick 推进 ready 节点 + SQL reap 回收 stranded `running`。
 
 #### D. Actions —— 控制 / 观测 / 模板（DESIGN §4.3/§4.4/§10）
+
 - 控制：`run-start({ templateId?, workItemId?, tokenBudget? })`（**二选一互斥、自始即此签名**，§0.6；P3 只是开始传 workItemId）、
   `run-pause`、`run-resume`、`run-cancel`、`run-retry-node`、`node-override`、**`resolve-human-gate(runId, nodeRunId, {decision, input?})`**
   （human 闸放行/拒绝，复用 dispatch 审批，§C；语义见 DESIGN §4.3/§11；cancel 为 cooperative abort）。
@@ -286,10 +290,12 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
 - **`run-step` 明确不做**（DESIGN §4.1a：detached startRun 不可单步；调试用 pause+inspect）。
 
 #### E. 技能/指令（四区之一）
+
 - 新增 `engine`/调度相关的内部说明（写入 `DEVELOPING.md` 或新 skill）：item-correlation、resume 语义、
   pipeline vs barrier，供后续维护者与 brain 理解。`orchestrating/SKILL.md` 的大改在 P3（绑定 work_item/状态）。
 
 #### F. 前端交付（最小切片，P4 完整化）
+
 - Item/Run console **只读骨架**（FRONTEND §13 phase1）：用 `run-graph`/`node-get` 渲染节点列表 + 状态 +
   run 控制按钮（Run/Pause/Resume/Cancel）。canvas 可先用简单列表/dagre 占位，React Flow 在 P4。
 - 应用状态：该路由经 `navigate` 写 `navigation`（DESIGN §2a/context-awareness）。
@@ -328,13 +334,7 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
 - [ ] 4 张新表迁移加性应用（v1 表零改动），journal 唯一键 `(run_id,node_id,iteration,fanout_index)` 生效。
 - [ ] `validateWorkflowDag` v2：对 fanout/loop/join/branch/subworkflow 的非法图返回明确 error（含**二层 subworkflow 嵌套被拒**、
       **join 入边来自多个 fanout 被拒**）；implicit-barrier 出 warning 不阻断；client 与 `save-template` 调用同一函数（grep 证明单一实现）。
-- [ ] **headless 跑通六类控制流**（各一个 fixture 模板，`pnpm action run-start --args ...`，用 echo 执行器；**每条带可证后置条件**）：
-      - sequential：节点严格按拓扑序进 running，前序未 done 后继不 running（journal 时间戳可证）。
-      - pipeline：`B_i` 在 `A_i` done 即启动、**不等兄弟**（时间戳证 B_0 早于 A_1 完成）。
-      - parallel（barrier）：容器内 ≥2 子节点**重叠 running**（并发可证），且下游在**全部**子 done 前**不进 ready**（断言 barrier）。
-      - fanout：N == 上游数组长度；N 条独立链 index-preserving（`A_i→B_i`）。
-      - branch：两出边仅 `when` 为真者目标被调度，另一边目标 status=**skipped**。
-      - loop-until-dry：注入重复 item，第 K 轮无新增 `seen` key 即停、去重对 `seen` 不对 `confirmed`。
+- [ ] **headless 跑通六类控制流**（各一个 fixture 模板，`pnpm action run-start --args ...`，用 echo 执行器；**每条带可证后置条件**）：- sequential：节点严格按拓扑序进 running，前序未 done 后继不 running（journal 时间戳可证）。- pipeline：`B_i` 在 `A_i` done 即启动、**不等兄弟**（时间戳证 B_0 早于 A_1 完成）。- parallel（barrier）：容器内 ≥2 子节点**重叠 running**（并发可证），且下游在**全部**子 done 前**不进 ready**（断言 barrier）。- fanout：N == 上游数组长度；N 条独立链 index-preserving（`A_i→B_i`）。- branch：两出边仅 `when` 为真者目标被调度，另一边目标 status=**skipped**。- loop-until-dry：注入重复 item，第 K 轮无新增 `seen` key 即停、去重对 `seen` 不对 `confirmed`。
 - [ ] **`await:false`（async，§3.2）**：fire-and-forget 节点不阻塞其下游 barrier 直到其 settle；`effort` 传入 `runAgentLoop` reasoning-effort（node-get 可证选用值）。
 - [ ] **`human` 节点**：含 human 节点的图 → run 推进到该节点即挂起（`awaiting-approval`）；`resolve-human-gate(approve)` → 放行下游；
       `resolve-human-gate(reject)` → 该出边分支下游置 skipped。
@@ -372,6 +372,7 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
 ### 工作内容
 
 #### A. NodeRuntime 抽象 + backend（DESIGN §7.4.2）
+
 - `NodeRuntime` 接口（provision/mount/init/exec/spawn/fs/getPortUrl/snapshot/teardown，签名见 §7.4.2）；
   接口形状参考 `@ai-sdk/sandbox-vercel` 的 shape（**仅 interface 形状参考，非可换 backend**）。
 - `MicrosandboxRuntime`（**唯一** backend；所有 tool/code/agent 节点；映射见 §7.4.2：`Sandbox.builder().image().create()` 等）。
@@ -379,6 +380,7 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
 - **无其他 backend**：Podman/gVisor/E2B/Daytona/Docker 均不实现（D-2 已定）。
 
 #### B. 七阶段 NodeRunner（DESIGN §7.4.1a，骨架伪代码已在设计给出，按其实现）
+
 - PROVISION → MOUNT（dirs+creds）→ INIT（git branch/worktree + env + setup）→ **EXECUTE（唯一可插拔）** →
   COLLECT（output + AgentLoopUsage + timing + exit）→ EXTRACT（copyOut / git push + PR）→ TEARDOWN（destroy|snapshot|keep）。
 - 固定 init 序列（§7.4.4）+ 生命周期状态机 + 异常恢复（§7.4.5：rollback / recreate / keep）。
@@ -387,12 +389,14 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
   `stop()+remove()`——防止进程崩溃后泄漏的 VM 长期占 `maxConcurrentVMs`（单 KVM 主机最稀缺资源）。
 
 #### C. 三执行器（DESIGN §7.4.1a，EXECUTE 槽）
+
 - `VllmExecutor`：host 上 `runAgentLoop`（engine=`ai-sdk:openai`+baseUrl），tools = **acting bridge**（见 D）。
 - `RemoteApiExecutor`：同形，hosted engine + key。
 - `ClaudeCodeExecutor`：`vm.spawn("claude --output-format stream-json -p ...")`，解析事件流（**非**框架 harness，§7.0b）。
   cwd = in-VM worktree。**token 计入**：从 stream-json 的 usage 事件解析（**与 `runAgentLoop` 的 `AgentLoopUsage` 路径不同**，本阶段明确实现这条解析）→ `node_runs.tokens_spent`。
 
 #### D. 模型无关 acting bridge（DESIGN §7.4.1a 关键精度）
+
 - 复用 `createCodingToolRegistry` 的**工具契约（bash/read/edit/write 4 个 ActionEntry 的 schema）**，但**重实现**
   其副作用面向 VM：`bash→vm.exec`、`read/write→vm.fs`（§7.4.1a 警告：内置实现在 host 上 spawn，必须重实现而非传 cwd）。
   agent loop 仍跑在 host（调度进程），只有**工具副作用**进 VM。
@@ -400,6 +404,7 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
   未导出则补 export **并加 `.changeset/*.md`**（核心包源改动硬要求，CLAUDE.md）。**禁止**在模板里手抄工具契约副本（违背单一来源）。
 
 #### E. git 交付（DESIGN §7.1/§7.1a）
+
 - thin git wrapper over `microsandbox exec`（branch/commit/push）——仓库无 git 依赖，自建（§7.1/§13）。
 - per-run 分支 `an/run-<runId>`（一 run 一分支，run 内节点共享累加，§7.4.3）；分支生命周期状态机（§7.1a）。
 - push 鉴权 = `resolveSecret("GITHUB_TOKEN")` 注入 VM env / credential helper（§7.4.7）；
@@ -407,30 +412,36 @@ branch → loop + 动态扩展 + 预算 + 超时/卡死检测）+ 控制/观测 
 - PR 创建经 `gh`（in-VM）。
 
 #### F. 凭证（DESIGN §7.4.7，大头是复用）
+
 - 复用 dispatch Vault + `resolveSecret` + `getOwnerActiveApiKey` + connector OAuth + AES-GCM（§7.4.7 表，全复用）。
 - **自建仅三件**：VM env 注入（`--mount-file`/`fs().copyFromHost()` RO + scoped env）、`~/.claude` 按 **RO（D-1 已定）** 挂入、git-push 鉴权。
 
 #### G. base image（DESIGN §7.4.8）
+
 - 预烤 OCI image（node+pnpm+git+`@anthropic-ai/claude-code` + 项目语言运行时），版本化，pin `runtime.image`；
   warm 重启用 microsandbox snapshot（post-setup 态）。每语言/运行时一镜像（项目无 kind，§6.1）。
 
 #### H. 网络（DESIGN §7.4.9）
+
 - in-VM → host vLLM（用 P0 确定的 host-gateway 地址，传为节点 `baseUrl` env）。
 - 默认允许出网（remote API / git push / claude API）；per-node 网络策略推迟。
 
 #### I. 非代码交付 + 中间产物（DESIGN §7.2/§7.3）
+
 - 子 agent 产物 → 项目 `workingDir`（`local-artifacts`）写最终文件（`deck.pptx`/`report.md`）。
 - 中间产物 → Resources store（`resourcePut`/`resourceGetByPath`，`agent_scratch` 可见性），按 artifact id 传递不贴正文。
 - `end` 节点写 deliverable 记录到 work item（`{kind:"pr"|"files", ref}`，§7.3）。
 - **三层别混**（§7.2/§13）：`workspace-files`（Resources 薄封装）/ `resources`（内容存储）/ `local-artifacts`（仓库文件源）。
 
 #### J. brain 控制通道（DESIGN §2a）
+
 - 把 orchestrator 的 Claude Code（planner 节点）连到 app 的 MCP surface
   （`agent-native connect http://localhost:<port>/_agent-native/mcp --client claude-code --full-catalog`），
   使 brain 能调 `run-graph`/`node-get`/`node-override`/`save-template`/`run-start` 等全控制/状态 action。
 - 验证 brain 可读+驱动整图（DESIGN §2a 设计规则：brain steers, not babysit）。
 
 #### K. 前端交付（最小切片）
+
 - Item/Run console 节点 inspector（`node-get`：engine/model/executor/timings/tokens/attempts/input-output artifact/
   runtime 信息）+ **xterm 终端**（microsandbox `execStream` → xterm，VM 自持进程，非 host node-pty，FRONTEND §4(b)）+
   `View diff` sheet（node 提交 diff）。完整 bottom tabs/9 页打磨在 P4。
@@ -483,14 +494,16 @@ brain 动态编排（NL→template）+ runtime expansion + promote。并把 v1 �
 ### 工作内容
 
 #### A. 数据模型（DESIGN §9）
+
 - 新增 `projects`、`work_items`、`work_item_links`、`work_item_status_log`、`node_defs`（列见 §9，逐列对齐；
-  含 `status_schemes`/`environments` JSON、work_item 的业务状态六维度列 + execState/claimed_* 列）。
+  含 `status_schemes`/`environments` JSON、work*item 的业务状态六维度列 + execState/claimed*\* 列）。
 - 全部用 `ownableColumns()`（owner 作用域，shares 表建结构、sharing UI 推迟，§9/§12）。
 - 索引：队列认领热路径 `work_items(exec_state, priority)`、`work_items(project_id)`、
   `work_item_status_log(work_item_id)`、`work_item_links(from_item)`/`(to_item)`、`node_defs(key)`。
 - 执行 P1 定义的 v1→v2 backfill（只读拷贝展示旧运行，不删 v1 表）。
 
 #### B. 业务状态模型（DESIGN §6.2a/§6.2b，PM 核心）
+
 - 六维度（statusCategory / status / environment / blocked / resolution / severity）+ 各 type 默认 pipeline +
   transition 规则（forward skip-forward / rework / reopen / cancel / rollback）+ `resolutionsAt` + scheme JSON 存储
   —— **全部按 DESIGN §6.2a 表实现，不在本文重列**。
@@ -498,13 +511,14 @@ brain 动态编排（NL→template）+ runtime expansion + promote。并把 v1 �
   强制“进 completed/cancelled 须给 `resolutionsAt` 内 resolution”、reopen 清 resolution、duplicate 须有 `duplicate-of` link、
   每次调用 append `work_item_status_log`。`update-work-item` **拒绝** status 字段。
 - **watchdog（§6.2b L2，引擎硬保证）**：run 到终态时查 status_log“本 run 是否动过 status”，未动 → 置 `status_stale=true`
-  + 看板 badge“AI 完成—状态未更新，请确认”。
+  - 看板 badge“AI 完成—状态未更新，请确认”。
 - **finalize-status gate（§6.2b L1，结构）**：每交付 workflow 在 `end` 前必有 `finalize-status` library 节点；
   分解/校验**缺则自动注入**（与 git-push gate 同级，brain 不能省）。
 - terminal closure（§6.2b）：agent 最后只到近终态（待发布）；终态（已上线/已关闭）本阶段**只实现人工“Mark shipped”**
   （经 `transition-work-item`）。**PR-merge/deploy webhook 整体推迟到 P6**（本阶段不做“接口预留”，避免空交付）。
 
 #### C. 队列 + 跨任务并发（DESIGN §6.4）
+
 - execState 机 `idle→queued→claimed→running→done|failed`(+paused/cancelled)；**与业务 status 严格分离**。
 - **原子认领**：copy `claimA2ATaskForProcessing` 模式（`UPDATE … WHERE exec_state='queued'` → 查 affected rows → 单独 `SELECT`，
   **不用 RETURNING**，portability 规则，§6.4/§13）；single-flight + 死 worker 重认领。
@@ -519,11 +533,13 @@ brain 动态编排（NL→template）+ runtime expansion + promote。并把 v1 �
 - **无跨任务 dependsOn / 无 task 级 topo**（§6.4）：flat priority queue，跨任务排序是 brain 的判断（读 queue-status 规划）。
 
 #### D. CRUD + links actions（DESIGN §10）
+
 - Projects：`create-project`/`list-projects`/`get-project`/`update-project`。
 - Work items：`create-work-item`/`list-work-items`/`get-work-item`/`update-work-item`（除业务状态字段外）/`delete-work-item`/`transition-work-item`。
 - Links：`link-work-items`/`unlink-work-items`（duplicate-of/blocks/blocked-by/relates-to）。
 
 #### E. Node Library（DESIGN §3.7）
+
 - `node_defs` 表 + `save-node-def`/`list-node-defs`/`delete-node-def`（删除被引用时阻断并列出引用处）。
 - **starter set**（§3.7/§12 phase3）：deterministic tool 节点 `run-tests`/`lint`/`git-commit`/`git-push`/`open-pr`/
   `apply-patch`/`finalize-status`；parameterized agent 节点 `code-review`/`security-review`/`secret-scan`/`pr-description`。
@@ -531,6 +547,7 @@ brain 动态编排（NL→template）+ runtime expansion + promote。并把 v1 �
 - bundled 模板 `code-change-with-review`（§1.9/§3.7）。
 
 #### F. 分解 + 动态编排 + promote（DESIGN §6.3/§6.5）
+
 - 分解三序（§6.3）：显式 `workflowId` → 项目 `defaultWorkflowId` → brain 动态 build（bug：复现→定位→修复→测试→
   commit/push；deck：大纲→草稿→评审→导出），尾部接 vetted library gate。
 - 动态编排（§6.5）：NL→`save-template` 生成 DAG（wiring library 节点）；runtime expansion 加 `dynamic:true` NodeRun；
@@ -538,12 +555,14 @@ brain 动态编排（NL→template）+ runtime expansion + promote。并把 v1 �
 - guardrail：authored graph 必须以项目要求的 gate 结尾（brain 只 wire vetted 库节点、不手搓 push/MR）。
 
 #### G. 技能/文档改写到 v2（DESIGN §12 phase3 明确要求，四区之一）
+
 - 改写 `orchestrating/SKILL.md`（`.agents` + `.claude` 两份同步）+ `CLAUDE.md`/`AGENTS.md` 到 v2 surface：
   从“手工走 step_runs”改为“分解 work item→图运行→在 §6.2a 判断点调 `transition-work-item`”（watchdog 的写半部分，
   否则每 run 都触发 watchdog）。
 - 落 **docs 型默认 scheme**（如需求文档：待写作·撰写中·评审中·定稿），使非代码项目不被迫走测试/发布阶段（§12 phase3）。
 
 #### H. 前端交付（PM 主面，FRONTEND §2/§3/§7/§10）
+
 - **shared composites 基座一次性建在此**（看板首次需要它们，FRONTEND §Conventions C2/C3）：`app/lib/status-colors.ts`（单一语义色映射，
   看板列/badge/run canvas 同读）+ `<WorkItemCard>`/`<StatusBadge>`/`<ExecBadge>`/`<SeverityChip>`/`<EnvTag>`/`<DataTable>`/`<EmptyState>`/`<ConfirmDialog>`。
   **P4 §A 不重建这些，只验证/扩展并补编辑器专属的 `<NodeCard>`/`<ModelPicker>`**（消除重复建，§0.2.10）。
@@ -557,6 +576,7 @@ brain 动态编排（NL→template）+ runtime expansion + promote。并把 v1 �
 ### 关键实现逻辑（仅补设计未细化处）
 
 - **transition 校验器**（DESIGN §6.2a“buildable validator spec”的算法化）：
+
   ```
   # helper 定义（消除歧义）
   stageIndex(s, scheme)  := s 在 scheme[type] pipeline 中的序号
@@ -585,6 +605,7 @@ brain 动态编排（NL→template）+ runtime expansion + promote。并把 v1 �
     write {status:to, status_category:cat, environment/blocked/severity per opts}
     append work_item_status_log(actor, from, to, runId, at)
   ```
+
 - **watchdog**（DESIGN §6.2b L2）：
   ```
   on run reach terminal execState(done|failed):
@@ -656,6 +677,7 @@ P3（node_defs / projects / work_items / dialogs 所需 action）。
 ### 工作内容（按 FRONTEND.md 逐项落地，引用其规格不重写）
 
 #### A. 共享基础（FRONTEND §Conventions C1–C5）
+
 - C1 i18n：`i18next`+`react-i18next`，`en`/`zh` 平行资源树；status/exec/env/severity 标签皆 i18n key（存稳定 stage key，
   显示 `t("status.${key}")`）；数字/日期/相对时间走 `Intl`。
 - C2 theme + **`app/lib/status-colors.ts` 单一语义色映射**（看板列/badge/run canvas 节点 tint 同读一处）。
@@ -667,6 +689,7 @@ P3（node_defs / projects / work_items / dialogs 所需 action）。
   dialog trap、⌘K、看板方向键、item 页 r/p 快捷键）。
 
 #### B. 全局 shell（FRONTEND §0）
+
 - topbar（Project ▾ / ⌘K / capacity `3/5 tasks · 7/12 VM` / theme / lang / account）；6 入口 sidebar；agent chat sidebar；
   每路由经 `navigate` 写 `navigation`（+ item 页写 `nodeRunId`），`view-screen` 回报。
 - **auth/account（审查补，FRONTEND §0 + CLAUDE.md）**：`account ▾`（读 `session` + profile + sign-out）；未登录路由保护复用框架 `authentication`
@@ -674,6 +697,7 @@ P3（node_defs / projects / work_items / dialogs 所需 action）。
 - **画布单一来源**：P1 §F 的 list/dagre 画布是**一次性占位**，在此被 `<WorkflowCanvas mode="run">` **替换**；P2 §K 的 inspector+xterm 在此**复用**进新组件、不重复实现。
 
 #### C. React Flow 编辑器（FRONTEND §6 + §6.3）⭐
+
 - 单 `<WorkflowCanvas mode="edit"|"run">`（编辑器与 run overlay 同组件两模，build once）。
 - 自定义节点类型（11 种 + dropped library 节点），全由 `<NodeCard>` 渲染；run 模式按 C2 色映射 tint。
 - 容器节点（parallel/loop/fanout）= React Flow group/parent 节点，children 设 `parentNode`；边带 `when` label（custom edge）。
@@ -687,6 +711,7 @@ P3（node_defs / projects / work_items / dialogs 所需 action）。
 - 按钮：Save（`save-template` 乐观 + 升 version）/Validate/Run once…（D1 预填模板 → run-start → 跳 item 页）/JSON view/Save as new。
 
 #### D. Item/Run console 完整（FRONTEND §4）⭐
+
 - (a) 左：live DAG canvas（`mode="run"`，`run-graph` + `run-events`/`useDbSync` 动画；节点按状态 tint；loop iteration 计数；
   dynamic fanout child 实时出现带 glyph；点节点写 `application_state.nodeRunId`）。
 - (b) 右：node inspector（`node-get` 全字段 + runtime 信息 + xterm 终端 + 节点按钮 Re-run/Edit&re-run(D5)/View diff/Open sub-run）。
@@ -695,10 +720,12 @@ P3（node_defs / projects / work_items / dialogs 所需 action）。
 - 状态：未挂 workflow → attach 提示；未起 run → 灰静态模板 + 大 Run；cancel mid-edit → cooperative abort banner。
 
 #### E. 其余页面
+
 - Board（P3 已建，确认达 FRONTEND §2 完整规格）；Projects/详情（§3）；Workflows 模板目录（§5，含 D9 promote）；
   Library（§7）；**Runs 全局活动页**（§8，`list-runs` 表 + filter）；Settings（§9，P5 扩展）。
 
 #### F. Dialog 全集（FRONTEND §10）
+
 - D1/D2/D3/D4/D5/D7/D8/D9（D6 已删）；统一 Esc/overlay 取消、primary 仅 in-flight 转圈、inline 校验、出错保持打开。
 
 ### 验收标准（全勾选才 Done）
@@ -802,72 +829,72 @@ orchestrator-runtime 路由消费的端到端验证，以及 Settings 的 Images
 
 证明“无遗漏”：每个设计章节都落到某阶段。
 
-| 设计章节 | 主题 | 落地阶段 |
-|---|---|---|
-| DESIGN §1.1–§1.10 | 动态工作流不变量（确定性/pipeline/预算/校验模式） | P1（引擎不变量）+ P3（§1.9 验证模式→library） |
-| DESIGN §2 / §2a | 模板vs运行实例 / brain+engine 双组件 | 模型 P1；brain MCP 通道 P2 |
-| DESIGN §3.1–§3.6 | 图 schema / 节点类型 / 边 / 条件 / 序列化 | P1 |
-| DESIGN §3.1 `human` 节点 | 审批闸（挂起+resolve+UI） | P1（引擎挂起+`resolve-human-gate`）/P3（审批 UI），复用 §11 dispatch 审批 |
-| DESIGN §3.1 `subworkflow` 节点 | 模板内联（一层嵌套+共享预算 §1.2） | P1（展开+配额共享）/P4（inspector 模板选择器） |
-| DESIGN §3.7 | Node Library（可复用 gate/分析节点） | P3（编辑器 palette 在 P4） |
-| DESIGN §4.1–§4.4 | 调度器 / item-correlation / 控制 API / 观测 API | P1 |
-| DESIGN §5 / FRONTEND §6 | DAG 编辑器 | P4（schema/validator 在 P1） |
-| DESIGN §6.1 | Project | P3 |
-| DESIGN §6.2 / §6.2a / §6.2b | Work Item / 六维度状态 / 单写入口+watchdog+gate | P3 |
-| DESIGN §6.3 | 分解三序 | P3 |
-| DESIGN §6.4 | 队列 + 跨任务并发 | P3 |
-| DESIGN §6.5 | 动态编排 + promote | P3 |
-| DESIGN §7.0 / §7.0a / §7.0b | 隔离决策 / 调研 / 不用框架 harness | P0 spike + P2 |
-| DESIGN §7.1 / §7.1a | in-VM git / 分支生命周期 | P2 |
-| DESIGN §7.2 / §7.3 | 非代码交付 / 交付记录 | P2 |
-| DESIGN §7.4.1–§7.4.9 | NodeRunner 七阶段 / NodeRuntime / 执行器 / 凭证 / image / 网络 | P2 |
-| DESIGN §8.1 | 已有 runtime（复用） | 基线（§0.1） |
-| DESIGN §8.3 / §8.5 | per-node 选型 / vLLM Test / 路由 / 三约束 | P5 |
-| DESIGN §9 | 数据模型（新表） | 表分 P1（templates/runs/node_runs/artifacts）+ P3（projects/work_items/links/status_log/node_defs） |
-| DESIGN §10 | Action surface | 见附录 B 分阶段 |
-| DESIGN §11 | 现状vs待建 gap 表 | 全程对照 |
-| DESIGN §12 | 设计自带分阶段 | 本规划细化/重排（microVM 前置、编辑器不缓） |
-| DESIGN §13 | 框架 API 锚点 | 全程引用（实现时按 file:line） |
-| DESIGN §14 | 开放风险 | §0.3 待确认决策 + 各阶段风险 |
-| DESIGN §16 | 可行性结论 | P0（spike 闸门 + 顺序依据） |
-| FRONTEND §Conventions / §0 | C1–C5 + shell + composites + auth/account | **composites 基座在 P3 §H**；shell/auth/account 在 P4 §B（复用框架 `authentication`）；C1–C5 在 P4 |
-| FRONTEND §1–§9 | 9 页 | 最小切片随 P1/P3/P5，完整规格 P4 |
-| FRONTEND §10 | Dialog D1–D9 | D1/D2/D3/D7/D9 随 P3；全集 P4 |
-| FRONTEND §11 | parity map | P4 硬验收 |
-| FRONTEND §12 | 跨切面交互模式 | P4 |
-| FRONTEND §13 | build order | 本规划按 microVM 前置 + 编辑器不缓重排 |
+| 设计章节                       | 主题                                                           | 落地阶段                                                                                            |
+| ------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| DESIGN §1.1–§1.10              | 动态工作流不变量（确定性/pipeline/预算/校验模式）              | P1（引擎不变量）+ P3（§1.9 验证模式→library）                                                       |
+| DESIGN §2 / §2a                | 模板vs运行实例 / brain+engine 双组件                           | 模型 P1；brain MCP 通道 P2                                                                          |
+| DESIGN §3.1–§3.6               | 图 schema / 节点类型 / 边 / 条件 / 序列化                      | P1                                                                                                  |
+| DESIGN §3.1 `human` 节点       | 审批闸（挂起+resolve+UI）                                      | P1（引擎挂起+`resolve-human-gate`）/P3（审批 UI），复用 §11 dispatch 审批                           |
+| DESIGN §3.1 `subworkflow` 节点 | 模板内联（一层嵌套+共享预算 §1.2）                             | P1（展开+配额共享）/P4（inspector 模板选择器）                                                      |
+| DESIGN §3.7                    | Node Library（可复用 gate/分析节点）                           | P3（编辑器 palette 在 P4）                                                                          |
+| DESIGN §4.1–§4.4               | 调度器 / item-correlation / 控制 API / 观测 API                | P1                                                                                                  |
+| DESIGN §5 / FRONTEND §6        | DAG 编辑器                                                     | P4（schema/validator 在 P1）                                                                        |
+| DESIGN §6.1                    | Project                                                        | P3                                                                                                  |
+| DESIGN §6.2 / §6.2a / §6.2b    | Work Item / 六维度状态 / 单写入口+watchdog+gate                | P3                                                                                                  |
+| DESIGN §6.3                    | 分解三序                                                       | P3                                                                                                  |
+| DESIGN §6.4                    | 队列 + 跨任务并发                                              | P3                                                                                                  |
+| DESIGN §6.5                    | 动态编排 + promote                                             | P3                                                                                                  |
+| DESIGN §7.0 / §7.0a / §7.0b    | 隔离决策 / 调研 / 不用框架 harness                             | P0 spike + P2                                                                                       |
+| DESIGN §7.1 / §7.1a            | in-VM git / 分支生命周期                                       | P2                                                                                                  |
+| DESIGN §7.2 / §7.3             | 非代码交付 / 交付记录                                          | P2                                                                                                  |
+| DESIGN §7.4.1–§7.4.9           | NodeRunner 七阶段 / NodeRuntime / 执行器 / 凭证 / image / 网络 | P2                                                                                                  |
+| DESIGN §8.1                    | 已有 runtime（复用）                                           | 基线（§0.1）                                                                                        |
+| DESIGN §8.3 / §8.5             | per-node 选型 / vLLM Test / 路由 / 三约束                      | P5                                                                                                  |
+| DESIGN §9                      | 数据模型（新表）                                               | 表分 P1（templates/runs/node_runs/artifacts）+ P3（projects/work_items/links/status_log/node_defs） |
+| DESIGN §10                     | Action surface                                                 | 见附录 B 分阶段                                                                                     |
+| DESIGN §11                     | 现状vs待建 gap 表                                              | 全程对照                                                                                            |
+| DESIGN §12                     | 设计自带分阶段                                                 | 本规划细化/重排（microVM 前置、编辑器不缓）                                                         |
+| DESIGN §13                     | 框架 API 锚点                                                  | 全程引用（实现时按 file:line）                                                                      |
+| DESIGN §14                     | 开放风险                                                       | §0.3 待确认决策 + 各阶段风险                                                                        |
+| DESIGN §16                     | 可行性结论                                                     | P0（spike 闸门 + 顺序依据）                                                                         |
+| FRONTEND §Conventions / §0     | C1–C5 + shell + composites + auth/account                      | **composites 基座在 P3 §H**；shell/auth/account 在 P4 §B（复用框架 `authentication`）；C1–C5 在 P4  |
+| FRONTEND §1–§9                 | 9 页                                                           | 最小切片随 P1/P3/P5，完整规格 P4                                                                    |
+| FRONTEND §10                   | Dialog D1–D9                                                   | D1/D2/D3/D7/D9 随 P3；全集 P4                                                                       |
+| FRONTEND §11                   | parity map                                                     | P4 硬验收                                                                                           |
+| FRONTEND §12                   | 跨切面交互模式                                                 | P4                                                                                                  |
+| FRONTEND §13                   | build order                                                    | 本规划按 microVM 前置 + 编辑器不缓重排                                                              |
 
 ## 附录 B：Action 全量清单与归属阶段
 
-| Action | 归属 | 说明 |
-|---|---|---|
-| 已有 21 个（task/workflow CRUD、run-orchestrator、upsert/list-step-run、stop-task、runtime 6、navigate、view-screen） | 基线 | 保留；v1 表迁移后部分被 v2 取代但不删（DESIGN §9） |
-| save/list/get/delete-template、promote-run-to-template | P1（promote 逻辑）/P3（真实数据） | DESIGN §6.5/§10 |
-| run-start/pause/resume/cancel、run-retry-node、node-override | P1 | DESIGN §4.3 |
-| resolve-human-gate | P1（引擎）/P3（UI） | DESIGN §3.1/§11；human 审批闸，复用 dispatch 审批 |
-| run-get/run-graph/node-get/run-events、list-runs、node-report | P1 | DESIGN §4.4/§10 |
-| save/list/delete-node-def | P3 | DESIGN §3.7 |
-| create/list/get/update-project | P3 | DESIGN §10 |
-| create/list/get/update/delete-work-item、transition-work-item | P3 | DESIGN §6.2b/§10 |
-| link-work-items/unlink-work-items | P3 | DESIGN §10 |
-| enqueue/dequeue-work-item、set-concurrency、queue-status、assign-work-item | P3 | DESIGN §6.4 |
-| test-runtime-config | P5 | DESIGN §8.3 |
+| Action                                                                                                                | 归属                              | 说明                                               |
+| --------------------------------------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------------------------- |
+| 已有 21 个（task/workflow CRUD、run-orchestrator、upsert/list-step-run、stop-task、runtime 6、navigate、view-screen） | 基线                              | 保留；v1 表迁移后部分被 v2 取代但不删（DESIGN §9） |
+| save/list/get/delete-template、promote-run-to-template                                                                | P1（promote 逻辑）/P3（真实数据） | DESIGN §6.5/§10                                    |
+| run-start/pause/resume/cancel、run-retry-node、node-override                                                          | P1                                | DESIGN §4.3                                        |
+| resolve-human-gate                                                                                                    | P1（引擎）/P3（UI）               | DESIGN §3.1/§11；human 审批闸，复用 dispatch 审批  |
+| run-get/run-graph/node-get/run-events、list-runs、node-report                                                         | P1                                | DESIGN §4.4/§10                                    |
+| save/list/delete-node-def                                                                                             | P3                                | DESIGN §3.7                                        |
+| create/list/get/update-project                                                                                        | P3                                | DESIGN §10                                         |
+| create/list/get/update/delete-work-item、transition-work-item                                                         | P3                                | DESIGN §6.2b/§10                                   |
+| link-work-items/unlink-work-items                                                                                     | P3                                | DESIGN §10                                         |
+| enqueue/dequeue-work-item、set-concurrency、queue-status、assign-work-item                                            | P3                                | DESIGN §6.4                                        |
+| test-runtime-config                                                                                                   | P5                                | DESIGN §8.3                                        |
 
 ## 附录 C：数据表新增清单与归属阶段
 
-| 表 | 阶段 | 列依据 |
-|---|---|---|
-| workflow_templates | P1 | DESIGN §9 |
-| workflow_runs | P1 | DESIGN §9 |
-| node_runs | P1（核心列）/P2（加 runtime 列） | DESIGN §9（journal 唯一键）；P2 加性补 `vm_id`/`runtime_info`（或 `kind:"runtime"` artifact）供 node-get 显示 executor/microVM id/branch/onFailure |
-| artifacts | P1 | DESIGN §9 |
-| projects | P3 | DESIGN §9/§6.1 |
-| work_items | P3 | DESIGN §9/§6.2 |
-| work_item_links | P3 | DESIGN §9 |
-| work_item_status_log | P3 | DESIGN §9/§6.2b |
-| node_defs | P3 | DESIGN §9/§3.7 |
-| （runtime_configs 加 model-list 列，可选） | P5 | DESIGN §8.3 item4 |
-| （v1 workflows/tasks/step_runs/runtime_configs/shares） | 不动 | DESIGN §9 加性约束 |
+| 表                                                      | 阶段                             | 列依据                                                                                                                                             |
+| ------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| workflow_templates                                      | P1                               | DESIGN §9                                                                                                                                          |
+| workflow_runs                                           | P1                               | DESIGN §9                                                                                                                                          |
+| node_runs                                               | P1（核心列）/P2（加 runtime 列） | DESIGN §9（journal 唯一键）；P2 加性补 `vm_id`/`runtime_info`（或 `kind:"runtime"` artifact）供 node-get 显示 executor/microVM id/branch/onFailure |
+| artifacts                                               | P1                               | DESIGN §9                                                                                                                                          |
+| projects                                                | P3                               | DESIGN §9/§6.1                                                                                                                                     |
+| work_items                                              | P3                               | DESIGN §9/§6.2                                                                                                                                     |
+| work_item_links                                         | P3                               | DESIGN §9                                                                                                                                          |
+| work_item_status_log                                    | P3                               | DESIGN §9/§6.2b                                                                                                                                    |
+| node_defs                                               | P3                               | DESIGN §9/§3.7                                                                                                                                     |
+| （runtime_configs 加 model-list 列，可选）              | P5                               | DESIGN §8.3 item4                                                                                                                                  |
+| （v1 workflows/tasks/step_runs/runtime_configs/shares） | 不动                             | DESIGN §9 加性约束                                                                                                                                 |
 
 ---
 

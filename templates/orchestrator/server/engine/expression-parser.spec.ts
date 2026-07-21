@@ -1,10 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { evaluateExpression, validateExpressionSyntax, type ExpressionContext } from "./expression-parser.js";
+
+import {
+  evaluateExpression,
+  validateExpressionSyntax,
+  type ExpressionContext,
+} from "./expression-parser.js";
 
 const ctx: ExpressionContext = {
-  inputs: { name: "Alice", count: 5, tags: ["a", "b", "c"], config: { mode: "test" } },
+  inputs: {
+    name: "Alice",
+    count: 5,
+    tags: ["a", "b", "c"],
+    config: { mode: "test" },
+  },
   deps: {
-    research: { output: { summary: "Research complete", score: 95 }, previous_iteration: { output: { summary: "Draft" } }, history: [{ review: { output: { score: 80 } } }] },
+    research: {
+      output: { summary: "Research complete", score: 95 },
+      previous_iteration: { output: { summary: "Draft" } },
+      history: [{ review: { output: { score: 80 } } }],
+    },
     writing: { output: { text: "The article text here" } },
   },
   item: { title: "Current item" },

@@ -178,6 +178,7 @@ P3 UI 需要的底层数据。P2 只建数据，不建 UI。
 ---
 
 **风险**：
+
 - Warm pool 内存开销：4 个 prebaked VM × 500MB = 2GB 常驻 → 需监控水位
 - Patch CAS 并发：多 CC 同时 patch 同一 run → 严格串行化 + 版本冲突回退
 - ACP adapter 依赖 framework：framework 未发布 acp-adapter → P2 可降级为 stub，不影响 microVM 路径

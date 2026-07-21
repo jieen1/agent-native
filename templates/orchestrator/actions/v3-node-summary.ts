@@ -9,6 +9,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export const nodeSummary = defineAction({
@@ -83,7 +84,9 @@ export const nodeSummary = defineAction({
         const art = artRows[0];
         output =
           art.textContent ??
-          (art.objectContent != null ? JSON.stringify(art.objectContent, null, 2) : null);
+          (art.objectContent != null
+            ? JSON.stringify(art.objectContent, null, 2)
+            : null);
         outputKind = art.kind;
         truncated = Boolean(art.truncated);
       }
@@ -156,7 +159,9 @@ export const nodeSummary = defineAction({
         const dag = runRows[0].dag as {
           nodes?: Array<{ id: string; output_schema?: unknown }>;
         } | null;
-        const dagNode = (dag?.nodes ?? []).find((n) => n.id === node.nodeIdInDag);
+        const dagNode = (dag?.nodes ?? []).find(
+          (n) => n.id === node.nodeIdInDag,
+        );
         outputSchema = dagNode?.output_schema ?? null;
       }
     }

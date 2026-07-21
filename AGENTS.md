@@ -113,21 +113,21 @@ The authoritative, version-matched framework docs live at
 `pnpm action source-search`. Consult them before framework-shaped work; prefer
 them over memory. Highest-leverage slugs for orchestrator/tracker-style work:
 
-| Slug | Read this when… |
-| --- | --- |
-| `actions` | defining or splitting an action; op-parameterized CRUD over many actions; hiding UI-only actions with `agentTool:false` to keep the agent tool list small |
-| `context-awareness` | exposing UI state to the agent via `application_state`, `view-screen`, `navigate` |
-| `database` | schema/migrations; keeping DDL additive and provider-agnostic (`ADD COLUMN IF NOT EXISTS`, no Postgres-only SQL) |
-| `security` | any action/route touching user data — fail-closed scoping, no hardcoded secrets/endpoints |
-| `audit-log` | recording who changed what — use the automatic action-seam audit + `list-audit-events`, not a parallel table |
-| `human-approval` | gating a high-consequence action with `needsApproval` |
-| `a2a-protocol` | calling another app's agent (`invoke` / `call-agent`); never raw-read another app's tables |
-| `multi-app-workspace` | orchestrator↔tracker boundaries — no internal imports, no copied tables, no cross-app SQL |
-| `harness-agents` | running a full coding runtime (Claude Code / Codex / Pi / ACP) as a worker |
-| `agent-teams` | in-process sub-agent delegation via `spawnTask` on run-manager |
-| `durable-background-runs`, `code-agents-ui` | long background runs, run-manager lifecycle, self-heal/reap |
-| `automations`, `recurring-jobs` | event-driven or scheduled state transitions instead of read-time writeback + polling |
-| `processors` | proof-of-done / coverage / fail-loud gates that abort before a run claims "done" |
+| Slug                                        | Read this when…                                                                                                                                           |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `actions`                                   | defining or splitting an action; op-parameterized CRUD over many actions; hiding UI-only actions with `agentTool:false` to keep the agent tool list small |
+| `context-awareness`                         | exposing UI state to the agent via `application_state`, `view-screen`, `navigate`                                                                         |
+| `database`                                  | schema/migrations; keeping DDL additive and provider-agnostic (`ADD COLUMN IF NOT EXISTS`, no Postgres-only SQL)                                          |
+| `security`                                  | any action/route touching user data — fail-closed scoping, no hardcoded secrets/endpoints                                                                 |
+| `audit-log`                                 | recording who changed what — use the automatic action-seam audit + `list-audit-events`, not a parallel table                                              |
+| `human-approval`                            | gating a high-consequence action with `needsApproval`                                                                                                     |
+| `a2a-protocol`                              | calling another app's agent (`invoke` / `call-agent`); never raw-read another app's tables                                                                |
+| `multi-app-workspace`                       | orchestrator↔tracker boundaries — no internal imports, no copied tables, no cross-app SQL                                                                 |
+| `harness-agents`                            | running a full coding runtime (Claude Code / Codex / Pi / ACP) as a worker                                                                                |
+| `agent-teams`                               | in-process sub-agent delegation via `spawnTask` on run-manager                                                                                            |
+| `durable-background-runs`, `code-agents-ui` | long background runs, run-manager lifecycle, self-heal/reap                                                                                               |
+| `automations`, `recurring-jobs`             | event-driven or scheduled state transitions instead of read-time writeback + polling                                                                      |
+| `processors`                                | proof-of-done / coverage / fail-loud gates that abort before a run claims "done"                                                                          |
 
 ### Known justified deviations (orchestrator/tracker)
 

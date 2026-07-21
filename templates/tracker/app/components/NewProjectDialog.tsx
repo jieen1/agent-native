@@ -1,5 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -12,9 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
 import { useCreateProject } from "@/hooks/use-tracker";
-import { toast } from "sonner";
 
 export function NewProjectDialog({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);

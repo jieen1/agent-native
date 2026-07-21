@@ -156,13 +156,17 @@ export function assembleChecklist(
   const schemaChanged = diffMeta.schemaChanged || nature.includes("数据");
 
   if (schemaChanged) {
-    const migrationMissing = [...diffMeta.missingTables, ...diffMeta.missingColumns];
+    const migrationMissing = [
+      ...diffMeta.missingTables,
+      ...diffMeta.missingColumns,
+    ];
     items.push({
       key: MIGRATION_AUDIT_KEY,
       label: "新表/新列 ↔ 迁移对账",
       source: "machine",
       state: migrationMissing.length === 0 ? "pass" : "fail",
-      detail: migrationMissing.length === 0 ? undefined : migrationMissing.join(", "),
+      detail:
+        migrationMissing.length === 0 ? undefined : migrationMissing.join(", "),
     });
     items.push({
       key: MIGRATION_SMOKE_KEY,
@@ -218,7 +222,9 @@ export function countDistinctTablesWritten(diffText: string): number {
  * via runtime introspection (a genuine, if coarser, health signal — see
  * `resolveRuntimeSchemaSource`/`resolveRuntimeMigrationsSource`).
  */
-export async function computeDiffMeta(diff?: string): Promise<ChecklistDiffMeta> {
+export async function computeDiffMeta(
+  diff?: string,
+): Promise<ChecklistDiffMeta> {
   if (diff) {
     const added = stripDiffMarkers(diff);
     const tableAudit = auditMigrations(added, added);
@@ -275,7 +281,11 @@ interface ChecklistWorkItem {
 }
 
 function syntheticAnchor(workItemId: string): ChecklistAnchor {
-  return { artifactId: `wi-review:${workItemId}`, version: 1, kind: "synthetic" };
+  return {
+    artifactId: `wi-review:${workItemId}`,
+    version: 1,
+    kind: "synthetic",
+  };
 }
 
 /**
@@ -294,7 +304,10 @@ export async function resolveChecklistAnchor(
   const docKey = `review:${workItem.id}`;
   const latest = (
     await db
-      .select({ id: schema.sprintArtifacts.id, version: schema.sprintArtifacts.version })
+      .select({
+        id: schema.sprintArtifacts.id,
+        version: schema.sprintArtifacts.version,
+      })
       .from(schema.sprintArtifacts)
       .where(
         and(
@@ -307,7 +320,11 @@ export async function resolveChecklistAnchor(
       .limit(1)
   )[0];
   return latest
-    ? { artifactId: latest.id, version: latest.version, kind: "sprint-artifact" }
+    ? {
+        artifactId: latest.id,
+        version: latest.version,
+        kind: "sprint-artifact",
+      }
     : null;
 }
 
@@ -509,13 +526,21 @@ export async function computeChecklistState(
 ): Promise<ChecklistState> {
   const diffMeta = await computeDiffMeta(diff);
   const items = assembleChecklist(workItem.nature, diffMeta);
-  const anchor = await resolveOrCreateChecklistAnchor(db, ownerEmail, orgId, workItem);
+  const anchor = await resolveOrCreateChecklistAnchor(
+    db,
+    ownerEmail,
+    orgId,
+    workItem,
+  );
 
   await syncMachineChecklistItems(db, ownerEmail, orgId, anchor, items);
   await syncHumanPlaceholders(db, ownerEmail, orgId, anchor, items);
 
   const persisted = await loadPersistedChecklistState(db, anchor);
-  const withState = items.map((i) => ({ ...i, checked: persisted.get(i.key) === true }));
+  const withState = items.map((i) => ({
+    ...i,
+    checked: persisted.get(i.key) === true,
+  }));
   const complete = withState.every((i) => i.checked);
   return { anchor, items: withState, complete };
 }

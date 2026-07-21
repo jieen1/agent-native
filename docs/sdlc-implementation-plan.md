@@ -23,13 +23,13 @@
 
 ### 0.2 环境基线(每轮验收前置检查)
 
-| 检查项 | 方法 | 预期 |
-|---|---|---|
-| tracker 可用 | 打开 `http://192.168.1.101/tracker/` | 登录页或看板正常渲染 |
-| orchestrator 可用 | 打开 `http://192.168.1.101/orchestrator/` | 首页正常渲染 |
-| vLLM 健康 | `GET http://192.168.1.250:9000/v1/models` | 200,模型列表含 qwen3.6/claude-sonnet-4-6 |
-| CC 登录 | orchestrator 设置页 Claude Code 状态 | 已连接 |
-| A2A 互通 | tracker 任一工作项页点「派发」(冒烟) | 不报连接类错误 |
+| 检查项            | 方法                                      | 预期                                     |
+| ----------------- | ----------------------------------------- | ---------------------------------------- |
+| tracker 可用      | 打开 `http://192.168.1.101/tracker/`      | 登录页或看板正常渲染                     |
+| orchestrator 可用 | 打开 `http://192.168.1.101/orchestrator/` | 首页正常渲染                             |
+| vLLM 健康         | `GET http://192.168.1.250:9000/v1/models` | 200,模型列表含 qwen3.6/claude-sonnet-4-6 |
+| CC 登录           | orchestrator 设置页 Claude Code 状态      | 已连接                                   |
+| A2A 互通          | tracker 任一工作项页点「派发」(冒烟)      | 不报连接类错误                           |
 
 ### 0.3 靶仓(playground,M3 起全部执行域验收的标的)
 
@@ -52,20 +52,20 @@
 
 ### M1.1 交付物清单
 
-| # | 类型 | 名称 | 说明 |
-|---|---|---|---|
-| 1 | 表 | `project_repos` | name/gitRemote/baseBranch/testCmdUnit/testCmdFull/e2eTestPath/integrationTestPath/buildTool/ciMode/gateMode/devModel |
-| 2 | 表 | `tracker_sprint_artifacts` | sprintId/docKey/kind/name/version/supersedes/producedByKind/content/contentRef |
-| 3 | 表 | `tracker_approvals` | sprintId/workItemId?/gateKey/gateRef?/status/requestedBy/decidedBy/reason/decidedAt |
-| 4 | 列 | work_items + repoName/targetBranch/escalatedAt/escalationReason;sprints + phase/executorThreadId | 可加性迁移 |
-| 5 | action | `manage-project-repos`(增删改查) | 项目设置页仓库管理接真 |
-| 6 | action | `create-sprint-artifact` / `list-sprint-artifacts` / `get-sprint-artifact` | 含 human 产物保护(3.7-5,M2 强化) |
-| 7 | action | `validate-dependency-graph(sprintId\|epicId)` | 三色 DFS 判环 + 深度>3 / 全线性≥3 / 孤儿 告警;返回 `{errors[],warnings[],topoOrder[]}` |
-| 8 | action | `advance-stage(scope:'item'\|'sprint', id, fromStage, expectedRunId?)` | 幂等 + 前置断言 + **项目级 gate 判据 JSON 配置** + plannedStages 类型子集 + 看板列联动 |
-| 9 | action | `request-approval` / `approve-gate` / `reject-gate` / `list-approvals` | 审批门落地(队列页 UI 空壳接真);approve 时若有 gateRef 则回调 orchestrator nodeResolveGate(M4 联通,M1 先留桩并记录) |
-| 10 | action | epic 支持:work_item `type=epic` + `decompose-epic`(接受人写子项清单:title/repoName/dependsOn,校验+批量建子项+建 child-of/blocked-by links) | **无 AI 自动拆解入口** |
-| 11 | 页面 | epic 详情:子项树 + 依赖关系 + 图校验按钮;项目设置:仓库管理;sprint 详情:产物区 + 审批区 + phase 展示 | |
-| 12 | 约束 | 单活跃 executing sprint 断言;rollback-stage 绑定非终态 run 时拒绝;priority 语义统一(1=P0..4=P3,建单/看板/文档三处一致) | |
+| #   | 类型   | 名称                                                                                                                                       | 说明                                                                                                                 |
+| --- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| 1   | 表     | `project_repos`                                                                                                                            | name/gitRemote/baseBranch/testCmdUnit/testCmdFull/e2eTestPath/integrationTestPath/buildTool/ciMode/gateMode/devModel |
+| 2   | 表     | `tracker_sprint_artifacts`                                                                                                                 | sprintId/docKey/kind/name/version/supersedes/producedByKind/content/contentRef                                       |
+| 3   | 表     | `tracker_approvals`                                                                                                                        | sprintId/workItemId?/gateKey/gateRef?/status/requestedBy/decidedBy/reason/decidedAt                                  |
+| 4   | 列     | work_items + repoName/targetBranch/escalatedAt/escalationReason;sprints + phase/executorThreadId                                           | 可加性迁移                                                                                                           |
+| 5   | action | `manage-project-repos`(增删改查)                                                                                                           | 项目设置页仓库管理接真                                                                                               |
+| 6   | action | `create-sprint-artifact` / `list-sprint-artifacts` / `get-sprint-artifact`                                                                 | 含 human 产物保护(3.7-5,M2 强化)                                                                                     |
+| 7   | action | `validate-dependency-graph(sprintId\|epicId)`                                                                                              | 三色 DFS 判环 + 深度>3 / 全线性≥3 / 孤儿 告警;返回 `{errors[],warnings[],topoOrder[]}`                               |
+| 8   | action | `advance-stage(scope:'item'\|'sprint', id, fromStage, expectedRunId?)`                                                                     | 幂等 + 前置断言 + **项目级 gate 判据 JSON 配置** + plannedStages 类型子集 + 看板列联动                               |
+| 9   | action | `request-approval` / `approve-gate` / `reject-gate` / `list-approvals`                                                                     | 审批门落地(队列页 UI 空壳接真);approve 时若有 gateRef 则回调 orchestrator nodeResolveGate(M4 联通,M1 先留桩并记录)   |
+| 10  | action | epic 支持:work_item `type=epic` + `decompose-epic`(接受人写子项清单:title/repoName/dependsOn,校验+批量建子项+建 child-of/blocked-by links) | **无 AI 自动拆解入口**                                                                                               |
+| 11  | 页面   | epic 详情:子项树 + 依赖关系 + 图校验按钮;项目设置:仓库管理;sprint 详情:产物区 + 审批区 + phase 展示                                        |                                                                                                                      |
+| 12  | 约束   | 单活跃 executing sprint 断言;rollback-stage 绑定非终态 run 时拒绝;priority 语义统一(1=P0..4=P3,建单/看板/文档三处一致)                     |                                                                                                                      |
 
 ### M1.2 验收场景
 
@@ -135,16 +135,16 @@ advance 成功,sprint phase → designing,**看板上该 sprint 内工作项列�
 
 ### M2.1 交付物清单
 
-| # | 类型 | 名称 | 说明 |
-|---|---|---|---|
-| 1 | 技能 | `/brainstorm` | 结构化笔记产物(docKey=brainstorm-notes) |
-| 2 | 技能 | `/sprint-plan` | 交互访谈 → sprint-doc 产物;保留 P0 删除测试、指标可证伪门槛 |
-| 3 | 技能 | `/sprint-test-plan` | test-plan 产物;无跨模块集成时产出"无集成场景"一段式文档 |
-| 4 | 技能 | `/sprint-design` | 深读仓库真实代码(经 orchestrator workspaceCreate 只读检出或 gitRemote 直读)→ tech-design 产物,§4 每工作项一节 + §7 文件变更矩阵 |
-| 5 | 技能 | `/sprint-review` | 多轮对抗评审:经 orchestrator spawnOnce 起 vllm/sonnet 交替轮,携带累计已发现清单;每轮把有效发现修订进 tech-design 新版本 |
-| 6 | action | `extract-briefs(sprintId)` | 确定性解析 tech-design(§4 标题 + §7 矩阵)→ brief:{itemKey} + shared-brief 产物;返回 `{briefs[], missingItems[], dependencies[]}` |
-| 7 | 约束 | human 产物保护 | producedByKind=human 的产物,agent 建新版必须 supersedes+审批,否则拒绝 |
-| 8 | 页面 | sprint 产物区:版本链、human/agent 徽标、diff 查看 | |
+| #   | 类型   | 名称                                              | 说明                                                                                                                             |
+| --- | ------ | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 技能   | `/brainstorm`                                     | 结构化笔记产物(docKey=brainstorm-notes)                                                                                          |
+| 2   | 技能   | `/sprint-plan`                                    | 交互访谈 → sprint-doc 产物;保留 P0 删除测试、指标可证伪门槛                                                                      |
+| 3   | 技能   | `/sprint-test-plan`                               | test-plan 产物;无跨模块集成时产出"无集成场景"一段式文档                                                                          |
+| 4   | 技能   | `/sprint-design`                                  | 深读仓库真实代码(经 orchestrator workspaceCreate 只读检出或 gitRemote 直读)→ tech-design 产物,§4 每工作项一节 + §7 文件变更矩阵  |
+| 5   | 技能   | `/sprint-review`                                  | 多轮对抗评审:经 orchestrator spawnOnce 起 vllm/sonnet 交替轮,携带累计已发现清单;每轮把有效发现修订进 tech-design 新版本          |
+| 6   | action | `extract-briefs(sprintId)`                        | 确定性解析 tech-design(§4 标题 + §7 矩阵)→ brief:{itemKey} + shared-brief 产物;返回 `{briefs[], missingItems[], dependencies[]}` |
+| 7   | 约束   | human 产物保护                                    | producedByKind=human 的产物,agent 建新版必须 supersedes+审批,否则拒绝                                                            |
+| 8   | 页面   | sprint 产物区:版本链、human/agent 徽标、diff 查看 |                                                                                                                                  |
 
 ### M2.2 验收场景
 
@@ -200,18 +200,18 @@ brief:{itemKey} 与 shared-brief。
 
 ### M3.1 交付物清单
 
-| # | 类型 | 名称 | 说明 |
-|---|---|---|---|
-| 1 | 交付 | playground 靶仓 + 剧本(0.3 节) | R1/R2/R3/RX 四个种子需求文本 |
-| 2 | action(orch) | `sprintBranchEnsure/Promote/Delete` | 幂等;Promote 用 merge-commit |
-| 3 | action(orch) | `ciWatch(prRef)` | **GitHub REST**(checks/status API)+ 临时 token;`ciMode=none` 立即返回 green(short-circuit) |
-| 4 | action(orch) | `mergePr(prRef, strategy)` | 目标分支 advisory lock 串行;前置断言:CI 绿(none 视为绿)+ merge-base==目标分支 tip;**无 force 参数** |
-| 5 | agents(orch) | `.claude/agents/`:dev-agent/qa-agent/reviewer/gatekeeper | vllm 与 sonnet 档;移植 TDD/双工件/越界即败/真实运行纪律 |
-| 6 | DAG 模板 | `sdlc-issue-pipeline` | dev→qa(loop)→review(loop≤3+human_gate)→gate(按 gateMode)→**diff-audit(确定性)**→commit+PR→ci-watch→merge-pr(断言失败→回 dev 重验回路) |
-| 7 | tracker | dispatch 升级 | 载荷=brief+sharedBrief 全文 + repo/baseBranch/targetBranch;tags=source/sprint_id/item_id/ownerEmail/orgId;**白名单禁 sprint-doc/tech-design** |
-| 8 | tracker | **依赖感知调度器** | exec_queue 升级:blocked-by 全部解除(实施完成)才派发;每次实施完成事件重评估解锁项 |
-| 9 | tracker | sprint-lead 线程迁移 | sprint 进 executing 时建 lead brain 线程(executorThreadId);get-activity 按 run tags 重组 |
-| 10 | 预留 | 靶仓实测 + prompt 调优 3–4 天 | 双模型档位实测 |
+| #   | 类型         | 名称                                                     | 说明                                                                                                                                          |
+| --- | ------------ | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 交付         | playground 靶仓 + 剧本(0.3 节)                           | R1/R2/R3/RX 四个种子需求文本                                                                                                                  |
+| 2   | action(orch) | `sprintBranchEnsure/Promote/Delete`                      | 幂等;Promote 用 merge-commit                                                                                                                  |
+| 3   | action(orch) | `ciWatch(prRef)`                                         | **GitHub REST**(checks/status API)+ 临时 token;`ciMode=none` 立即返回 green(short-circuit)                                                    |
+| 4   | action(orch) | `mergePr(prRef, strategy)`                               | 目标分支 advisory lock 串行;前置断言:CI 绿(none 视为绿)+ merge-base==目标分支 tip;**无 force 参数**                                           |
+| 5   | agents(orch) | `.claude/agents/`:dev-agent/qa-agent/reviewer/gatekeeper | vllm 与 sonnet 档;移植 TDD/双工件/越界即败/真实运行纪律                                                                                       |
+| 6   | DAG 模板     | `sdlc-issue-pipeline`                                    | dev→qa(loop)→review(loop≤3+human_gate)→gate(按 gateMode)→**diff-audit(确定性)**→commit+PR→ci-watch→merge-pr(断言失败→回 dev 重验回路)         |
+| 7   | tracker      | dispatch 升级                                            | 载荷=brief+sharedBrief 全文 + repo/baseBranch/targetBranch;tags=source/sprint_id/item_id/ownerEmail/orgId;**白名单禁 sprint-doc/tech-design** |
+| 8   | tracker      | **依赖感知调度器**                                       | exec_queue 升级:blocked-by 全部解除(实施完成)才派发;每次实施完成事件重评估解锁项                                                              |
+| 9   | tracker      | sprint-lead 线程迁移                                     | sprint 进 executing 时建 lead brain 线程(executorThreadId);get-activity 按 run tags 重组                                                      |
+| 10  | 预留         | 靶仓实测 + prompt 调优 3–4 天                            | 双模型档位实测                                                                                                                                |
 
 ### M3.2 验收场景
 
@@ -224,6 +224,7 @@ brief:{itemKey} 与 shared-brief。
 前置:R1(独立需求)brief 就绪。
 步骤:① 工作项 R1 页点「派发」;② 打开 orchestrator runs 页跟踪该 run;③ 等待终态。
 预期(逐节点):
+
 - run tags 含 `{source:'tracker', item_id:R1, sprint_id, ownerEmail, orgId}`;
 - dev 节点 done:spawn 详情可见模型=qwen3.6;workspace diff 含 `src/` 实现与 `test/` 新增测试;
   **git log 中测试提交早于实现提交**(TDD 红先行,验收 agent 核对 commit 顺序);
@@ -282,18 +283,18 @@ prompt 中无其他工作项的 brief 内容。
 
 ### M4.1 交付物清单
 
-| # | 类型 | 名称 | 说明 |
-|---|---|---|---|
-| 1 | 通道(orch) | `tracker-client` + reconciler 终态回调 | run 终态 → 调 tracker advance-stage / create-work-item;身份取 run tags 铸 JWT;幂等 |
-| 2 | tracker | get-activity 兜底轮询保留 | 与 #1 双通道,靠 advance 幂等去重 |
-| 3 | DAG 模板 | `sdlc-verify` | 各仓 test_cmd_full + 集成场景;FAIL→建 from-audit 单(targetBranch=sprint 分支) |
-| 4 | DAG 模板 | `sdlc-audit` | 输入=目标+diff+验证日志;**证据 output_schema**;轮次持久化 audit-report:{cycle} 产物;3 轮→escalation |
-| 5 | DAG 模板 | `sdlc-promote` | 拓扑序;COMMITS_AHEAD=0 跳过;merge-commit;删 sprint 分支 |
-| 6 | tracker | approve-gate 回调 nodeResolveGate(gateRef 联通) | escalation 批准 → DAG 解锁 |
-| 7 | tracker | run 失败路由 | failed run → 工作项页「重派/回退/升级」三操作;transient 由 brain runFork 自动重试一次 |
-| 8 | tracker | epic 自动闭合;sprint phase 全链推进(executing→…→done) | |
-| 9 | 双侧 | 健康前置门 | vllm/CC 不健康 → 派发拒绝 + sprint 页原因展示 |
-| 10 | 技能 | `/draft-fix-issue`(from-audit 单体生成) | verify FAIL 场景 → 单体(含 Trigger/What's broken/Suspected boundary/Brief) |
+| #   | 类型       | 名称                                                  | 说明                                                                                                |
+| --- | ---------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 1   | 通道(orch) | `tracker-client` + reconciler 终态回调                | run 终态 → 调 tracker advance-stage / create-work-item;身份取 run tags 铸 JWT;幂等                  |
+| 2   | tracker    | get-activity 兜底轮询保留                             | 与 #1 双通道,靠 advance 幂等去重                                                                    |
+| 3   | DAG 模板   | `sdlc-verify`                                         | 各仓 test_cmd_full + 集成场景;FAIL→建 from-audit 单(targetBranch=sprint 分支)                       |
+| 4   | DAG 模板   | `sdlc-audit`                                          | 输入=目标+diff+验证日志;**证据 output_schema**;轮次持久化 audit-report:{cycle} 产物;3 轮→escalation |
+| 5   | DAG 模板   | `sdlc-promote`                                        | 拓扑序;COMMITS_AHEAD=0 跳过;merge-commit;删 sprint 分支                                             |
+| 6   | tracker    | approve-gate 回调 nodeResolveGate(gateRef 联通)       | escalation 批准 → DAG 解锁                                                                          |
+| 7   | tracker    | run 失败路由                                          | failed run → 工作项页「重派/回退/升级」三操作;transient 由 brain runFork 自动重试一次               |
+| 8   | tracker    | epic 自动闭合;sprint phase 全链推进(executing→…→done) |                                                                                                     |
+| 9   | 双侧       | 健康前置门                                            | vllm/CC 不健康 → 派发拒绝 + sprint 页原因展示                                                       |
+| 10  | 技能       | `/draft-fix-issue`(from-audit 单体生成)               | verify FAIL 场景 → 单体(含 Trigger/What's broken/Suspected boundary/Brief)                          |
 
 ### M4.2 验收场景
 
@@ -317,6 +318,7 @@ tracker 出现 verify-report 产物(GREEN,含测试输出摘要)。
 test-plan 含集成场景「/report 返回含 pow 汇总的 200」。
 步骤:① 全部实施完成;② verify 自动执行;③ 观察 tracker;④ 等修复回环完成;⑤ verify 重跑。
 预期:
+
 - ② verify FAIL:report 集成场景 FAIL,证据含实际 HTTP 响应/错误输出;
 - ③ **自动出现 from-audit 工作项**:类型正确(阶段子集=实施→测试)、targetBranch=sprint-2 分支、
   单体含 Trigger(失败场景名)/What's broken(期望 vs 实际)/Suspected boundary(repo=demo-app + 置信标记);
@@ -375,13 +377,13 @@ escalation(或 audit-deferral)审批单;sprint 卡在 auditing 且页面可见�
 
 ### M5.1 交付物清单
 
-| # | 类型 | 名称 |
-|---|---|---|
-| 1 | 页面 | sprint-status:每工作项 dev/qa/review/gate 各环节耗时(自 v3 spawns/events 派生)+ 汇总(均值/最慢环节) |
-| 2 | 页面 | sprint 燃尽(按工作项到达终阶段时间) |
-| 3 | 技能 | `/sprint-story`(实走验证:每步 Do/Why/What you'll see + 验证日志)→ story 产物;交付判据启用 story |
-| 4 | 技能 | `/sprint-recap`(人工介入时间线:从审批/评论/手工操作记录派生) |
-| 5 | 功能 | sprint「发布」按钮落地(已完成→已发布 + changelog 联动) |
+| #   | 类型 | 名称                                                                                                |
+| --- | ---- | --------------------------------------------------------------------------------------------------- |
+| 1   | 页面 | sprint-status:每工作项 dev/qa/review/gate 各环节耗时(自 v3 spawns/events 派生)+ 汇总(均值/最慢环节) |
+| 2   | 页面 | sprint 燃尽(按工作项到达终阶段时间)                                                                 |
+| 3   | 技能 | `/sprint-story`(实走验证:每步 Do/Why/What you'll see + 验证日志)→ story 产物;交付判据启用 story     |
+| 4   | 技能 | `/sprint-recap`(人工介入时间线:从审批/评论/手工操作记录派生)                                        |
+| 5   | 功能 | sprint「发布」按钮落地(已完成→已发布 + changelog 联动)                                              |
 
 ### M5.2 验收场景
 
@@ -406,35 +408,35 @@ orchestrator runs 页对应 spawn 的时间戳手工核对。预期:误差 ≤ �
 ## E2E — 端到端验收(最终交付判定)
 
 > 三个剧本全部 PASS = 系统交付。执行者:验收 agent(Playwright + action 接口);
-> 环境:101 全新测试账号 + 重置后的靶仓(main 回到种子基线,删除全部 sprint-* 分支)。
+> 环境:101 全新测试账号 + 重置后的靶仓(main 回到种子基线,删除全部 sprint-\* 分支)。
 > 每步记录截图/响应体;任何一步与预期不符即 FAIL,修复后**整个剧本从头重跑**。
 
 ### E2E-A 主链路:一个真实 sprint 从想法到交付(预计 2–4 小时)
 
-| 步 | 操作 | 预期结果 |
-|---|---|---|
-| A1 | 注册新账号,登录 tracker | 进入空看板 |
-| A2 | 建项目「E2E演示」,注册 demo-app 仓(ciMode=none, gateMode=tests-only, testCmdFull=npm test) | 设置页仓库卡片完整,刷新后持久 |
-| A3 | 建 Sprint E1(目标:计算能力增强并保证报表一致) | sprint 详情 phase=planning,产物/审批区空态 |
-| A4 | chat:`/brainstorm` 讨论方向 → `/sprint-plan` 完成访谈 | 产物区 sprint-doc v1(human);含可证伪成功指标 |
-| A5 | `/sprint-test-plan` | test-plan 产物;含集成场景「GET /report 返回 200 且含 pow 汇总」 |
-| A6 | 发起并批准 plan-signoff;advance 分析→设计 | 拒绝→批准→成功;phase=designing;审批记录含决策人/时间 |
-| A7 | 建 epic「计算能力增强」,拆解录入 R2(calc pow)、R3(report 汇总,依赖 R2)、RX(calc.add 签名重构,独立) | 3 子项 + child-of + R3→blocked-by→R2;图校验:0 error(RX 孤儿 warning 可接受) |
-| A8 | `/sprint-design` | tech-design v1;§4 含 R2/R3/RX 三节;引用 src/calc.js 真实符号(抽查 3 处) |
-| A9 | `/sprint-review` | orchestrator 出现交替模型评审 spawns;tech-design v2(supersedes v1) |
-| A10 | `extract-briefs` | brief:R2 / brief:R3 / brief:RX / shared-brief 四产物;R3 brief 声明依赖 R2 |
-| A11 | 发起并批准 design-signoff;advance 设计→实施 | phase=executing;sprint 页出现 lead 线程标识;靶仓出现 sprint-E1 分支 |
-| A12 | 观察派发(不做任何人工触发) | R2 与 RX 先派发(无依赖),R3 排队显示"等待 R2";健康门检查通过记录可见 |
-| A13 | 跟踪 R2 的 run 至终态 | 节点序 dev→qa→review→gate→diff-audit→PR→merge 全绿;dev 模型=qwen3.6;git log:测试提交早于实现;sprint-E1 收到 R2 squash 合入 |
-| A14 | R2 合入后观察 | **R3 自动开始派发**;其 workspace 基于含 R2 变更的 sprint-E1(git log 含 R2 commit) |
-| A15 | R3、RX 全部实施完成 | 三项实施阶段均自动推进(无人点页面);run inputs 检查:只含各自 brief+shared,无 sprint-doc/tech-design(红线抽查) |
-| A16 | verify 自动执行 | **FAIL**:单测全绿但集成场景「/report」失败(RX 埋的签名断裂);verify-report 产物含真实 HTTP 错误证据 |
-| A17 | 观察 from-audit 回环(零人工) | 自动建 from-audit 单(targetBranch=sprint-E1;单体含 Trigger/What's broken/Suspected boundary=demo-app);自动派发;修复 run 合入 |
-| A18 | verify 自动重跑 | GREEN;phase→auditing |
-| A19 | audit 执行 | audit-report:1 产物;每条 metric 带合规 evidence(格式抽查);verdict=NO_GAPS;phase→promoting |
-| A20 | promote 执行 | main 收到 merge-commit(非 squash);sprint-E1 分支删除;phase→done(M5 后:story 判据生效再验) |
-| A21 | 收尾核对 | epic 自动闭合;看板全部工作项到终列;sprint 详情:产物 ≥8 件、审批 2 件、活动流完整可回溯 |
-| A22 | 复盘(M5 后)| status 页各环节耗时与 runs 页一致;`/sprint-story` 实走验证 /calc /report 真实响应 |
+| 步  | 操作                                                                                               | 预期结果                                                                                                                     |
+| --- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| A1  | 注册新账号,登录 tracker                                                                            | 进入空看板                                                                                                                   |
+| A2  | 建项目「E2E演示」,注册 demo-app 仓(ciMode=none, gateMode=tests-only, testCmdFull=npm test)         | 设置页仓库卡片完整,刷新后持久                                                                                                |
+| A3  | 建 Sprint E1(目标:计算能力增强并保证报表一致)                                                      | sprint 详情 phase=planning,产物/审批区空态                                                                                   |
+| A4  | chat:`/brainstorm` 讨论方向 → `/sprint-plan` 完成访谈                                              | 产物区 sprint-doc v1(human);含可证伪成功指标                                                                                 |
+| A5  | `/sprint-test-plan`                                                                                | test-plan 产物;含集成场景「GET /report 返回 200 且含 pow 汇总」                                                              |
+| A6  | 发起并批准 plan-signoff;advance 分析→设计                                                          | 拒绝→批准→成功;phase=designing;审批记录含决策人/时间                                                                         |
+| A7  | 建 epic「计算能力增强」,拆解录入 R2(calc pow)、R3(report 汇总,依赖 R2)、RX(calc.add 签名重构,独立) | 3 子项 + child-of + R3→blocked-by→R2;图校验:0 error(RX 孤儿 warning 可接受)                                                  |
+| A8  | `/sprint-design`                                                                                   | tech-design v1;§4 含 R2/R3/RX 三节;引用 src/calc.js 真实符号(抽查 3 处)                                                      |
+| A9  | `/sprint-review`                                                                                   | orchestrator 出现交替模型评审 spawns;tech-design v2(supersedes v1)                                                           |
+| A10 | `extract-briefs`                                                                                   | brief:R2 / brief:R3 / brief:RX / shared-brief 四产物;R3 brief 声明依赖 R2                                                    |
+| A11 | 发起并批准 design-signoff;advance 设计→实施                                                        | phase=executing;sprint 页出现 lead 线程标识;靶仓出现 sprint-E1 分支                                                          |
+| A12 | 观察派发(不做任何人工触发)                                                                         | R2 与 RX 先派发(无依赖),R3 排队显示"等待 R2";健康门检查通过记录可见                                                          |
+| A13 | 跟踪 R2 的 run 至终态                                                                              | 节点序 dev→qa→review→gate→diff-audit→PR→merge 全绿;dev 模型=qwen3.6;git log:测试提交早于实现;sprint-E1 收到 R2 squash 合入   |
+| A14 | R2 合入后观察                                                                                      | **R3 自动开始派发**;其 workspace 基于含 R2 变更的 sprint-E1(git log 含 R2 commit)                                            |
+| A15 | R3、RX 全部实施完成                                                                                | 三项实施阶段均自动推进(无人点页面);run inputs 检查:只含各自 brief+shared,无 sprint-doc/tech-design(红线抽查)                 |
+| A16 | verify 自动执行                                                                                    | **FAIL**:单测全绿但集成场景「/report」失败(RX 埋的签名断裂);verify-report 产物含真实 HTTP 错误证据                           |
+| A17 | 观察 from-audit 回环(零人工)                                                                       | 自动建 from-audit 单(targetBranch=sprint-E1;单体含 Trigger/What's broken/Suspected boundary=demo-app);自动派发;修复 run 合入 |
+| A18 | verify 自动重跑                                                                                    | GREEN;phase→auditing                                                                                                         |
+| A19 | audit 执行                                                                                         | audit-report:1 产物;每条 metric 带合规 evidence(格式抽查);verdict=NO_GAPS;phase→promoting                                    |
+| A20 | promote 执行                                                                                       | main 收到 merge-commit(非 squash);sprint-E1 分支删除;phase→done(M5 后:story 判据生效再验)                                    |
+| A21 | 收尾核对                                                                                           | epic 自动闭合;看板全部工作项到终列;sprint 详情:产物 ≥8 件、审批 2 件、活动流完整可回溯                                       |
+| A22 | 复盘(M5 后)                                                                                        | status 页各环节耗时与 runs 页一致;`/sprint-story` 实走验证 /calc /report 真实响应                                            |
 
 **A 剧本通过判据**:22 步全部符合预期;**人工操作仅出现在 A4/A5 访谈、A6/A11 两次签核**
 (其余全自动——与 M0 对齐的审批口径逐字核对);靶仓最终 main 上 `/calc?a=2&b=3`、`/report`
@@ -442,29 +444,29 @@ orchestrator runs 页对应 spawn 的时间戳手工核对。预期:误差 ≤ �
 
 ### E2E-B 异常路径:超限升级与失败恢复(预计 1–2 小时)
 
-| 步 | 操作 | 预期结果 |
-|---|---|---|
-| B1 | 新 sprint,派发"必然过不了评审"的剧本需求 | review loop 3 次 → human_gate 挂起 + tracker escalation 审批单自动出现 |
-| B2 | tracker 批准该审批 | ≤30s orchestrator gate 解锁,run 继续(或按剧本设计继续失败) |
-| B3 | 再造一次,tracker **拒绝** | run 终止;工作项进失败路由,页面出现「重派/回退/升级」 |
-| B4 | 把仓库 gitRemote 改错后派发 | run permanent 失败;工作项 failed;修复配置→点「重派」→ 成功 |
-| B5 | 停 vLLM,派发 | 立即拒绝 + sprint 页显示"vllm 不可达";恢复后同操作成功 |
-| B6 | run 进行中对该工作项 rollback-stage | 被拒(需先取消 run);runCancel 后回退成功 |
-| B7 | audit 持续 blocking 剧本跑 3 轮 | 3 份 audit-report 产物;第 3 轮自动 audit-deferral 审批单;批准延期→ promoting;活动流记录延期决策与理由 |
+| 步  | 操作                                     | 预期结果                                                                                              |
+| --- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| B1  | 新 sprint,派发"必然过不了评审"的剧本需求 | review loop 3 次 → human_gate 挂起 + tracker escalation 审批单自动出现                                |
+| B2  | tracker 批准该审批                       | ≤30s orchestrator gate 解锁,run 继续(或按剧本设计继续失败)                                            |
+| B3  | 再造一次,tracker **拒绝**                | run 终止;工作项进失败路由,页面出现「重派/回退/升级」                                                  |
+| B4  | 把仓库 gitRemote 改错后派发              | run permanent 失败;工作项 failed;修复配置→点「重派」→ 成功                                            |
+| B5  | 停 vLLM,派发                             | 立即拒绝 + sprint 页显示"vllm 不可达";恢复后同操作成功                                                |
+| B6  | run 进行中对该工作项 rollback-stage      | 被拒(需先取消 run);runCancel 后回退成功                                                               |
+| B7  | audit 持续 blocking 剧本跑 3 轮          | 3 份 audit-report 产物;第 3 轮自动 audit-deferral 审批单;批准延期→ promoting;活动流记录延期决策与理由 |
 
 ### E2E-C 红线逐条验证(预计 1 小时,可与 A/B 穿插取证)
 
-| # | 红线 | 验证方法 | 预期 |
-|---|---|---|---|
-| C1 | 人拆解 | 全面检查 chat/页面/action 面 | 不存在"AI 自动拆解 epic"入口;decompose-epic 仅接受人写清单 |
-| C2 | brief 隔离 | 抽查 ≥3 个 run 的 inputs 与 renderedPrompt | 无 sprint-doc/tech-design;无他项 brief |
-| C3 | CI 不可绕过 | 审查 mergePr 接口 schema + 尝试带多余参数调用 | 无 force;多余参数被拒;ciMode=none 必须来自 project_repos 显式配置 |
-| C4 | 顺序合并 | E2E-A13/A15 期间 git log 拓扑 | 同分支合入严格串行,无交叉 |
-| C5 | 人写产物保护 | chat 要求 agent 改 sprint-doc | 无审批被拒;有审批生成新版本且旧版本保留 |
-| C6 | 幂等 | 重放 advance-stage / promote / extract-briefs | 全部 no-op,无重复副作用 |
-| C7 | 证据 schema | 检查 audit spawn 事件 | 存在 schema 校验;不合规证据被拒并重询 |
-| C8 | 升级而非自旋 | B1/B7 | 3 次/3 轮硬上限,超限必出审批单,绝无第 4 轮 |
-| C9 | 越权隔离 | 第二账号访问第一账号的 sprint/产物/run 回写 | 全部不可见/被拒;回写落在正确 org |
+| #   | 红线         | 验证方法                                      | 预期                                                              |
+| --- | ------------ | --------------------------------------------- | ----------------------------------------------------------------- |
+| C1  | 人拆解       | 全面检查 chat/页面/action 面                  | 不存在"AI 自动拆解 epic"入口;decompose-epic 仅接受人写清单        |
+| C2  | brief 隔离   | 抽查 ≥3 个 run 的 inputs 与 renderedPrompt    | 无 sprint-doc/tech-design;无他项 brief                            |
+| C3  | CI 不可绕过  | 审查 mergePr 接口 schema + 尝试带多余参数调用 | 无 force;多余参数被拒;ciMode=none 必须来自 project_repos 显式配置 |
+| C4  | 顺序合并     | E2E-A13/A15 期间 git log 拓扑                 | 同分支合入严格串行,无交叉                                         |
+| C5  | 人写产物保护 | chat 要求 agent 改 sprint-doc                 | 无审批被拒;有审批生成新版本且旧版本保留                           |
+| C6  | 幂等         | 重放 advance-stage / promote / extract-briefs | 全部 no-op,无重复副作用                                           |
+| C7  | 证据 schema  | 检查 audit spawn 事件                         | 存在 schema 校验;不合规证据被拒并重询                             |
+| C8  | 升级而非自旋 | B1/B7                                         | 3 次/3 轮硬上限,超限必出审批单,绝无第 4 轮                        |
+| C9  | 越权隔离     | 第二账号访问第一账号的 sprint/产物/run 回写   | 全部不可见/被拒;回写落在正确 org                                  |
 
 ### E2E 证据归档
 
@@ -476,17 +478,17 @@ orchestrator runs 页对应 spawn 的时间戳手工核对。预期:误差 ≤ �
 
 ## 附:验收场景 ↔ 设计红线/评审 findings 覆盖矩阵(抽样)
 
-| 设计条目 | 覆盖场景 |
-|---|---|
-| 依赖感知派发(评审 A-1)| M3-S4, E2E-A12/A14 |
-| 确定性回写通道(评审 A-2)| M4-S1/S2, E2E-A15 |
-| from-audit 阶段子集(评审 B-1)| M1-S7, M4-S4, E2E-A17 |
-| gateMode(评审 B-2)| M1-S1, M3-S2(tests-only 实测)|
-| 重验回路 L9(评审 A-5)| M3-S6 |
-| diff-audit 防污染(评审 A-6)| M3-S9 |
-| 幂等 advance / 双通道竞态(评审 B-5/B-12)| M1-S8, M4-S2, E2E-C6 |
-| 审批解锁 gateRef(评审 B-8)| M4-S9, E2E-B2 |
-| 身份传递(评审 B-7)| M4 通过标准, E2E-C9 |
-| 健康前置门(评审 B-15)| M4-S11, E2E-B5 |
-| 单活跃 sprint(评审 B-3)| M1-S9 |
-| 人拆解/brief 隔离/CI/人写保护/证据 schema | E2E-C1–C8 |
+| 设计条目                                  | 覆盖场景                      |
+| ----------------------------------------- | ----------------------------- |
+| 依赖感知派发(评审 A-1)                    | M3-S4, E2E-A12/A14            |
+| 确定性回写通道(评审 A-2)                  | M4-S1/S2, E2E-A15             |
+| from-audit 阶段子集(评审 B-1)             | M1-S7, M4-S4, E2E-A17         |
+| gateMode(评审 B-2)                        | M1-S1, M3-S2(tests-only 实测) |
+| 重验回路 L9(评审 A-5)                     | M3-S6                         |
+| diff-audit 防污染(评审 A-6)               | M3-S9                         |
+| 幂等 advance / 双通道竞态(评审 B-5/B-12)  | M1-S8, M4-S2, E2E-C6          |
+| 审批解锁 gateRef(评审 B-8)                | M4-S9, E2E-B2                 |
+| 身份传递(评审 B-7)                        | M4 通过标准, E2E-C9           |
+| 健康前置门(评审 B-15)                     | M4-S11, E2E-B5                |
+| 单活跃 sprint(评审 B-3)                   | M1-S9                         |
+| 人拆解/brief 隔离/CI/人写保护/证据 schema | E2E-C1–C8                     |

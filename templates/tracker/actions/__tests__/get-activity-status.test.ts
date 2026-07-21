@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import {
   deriveItemStatus,
   deriveWritebackStage,
@@ -72,7 +73,14 @@ describe("deriveItemStatus", () => {
 // ============================================================================
 
 describe("T-F3-17: 轮询回写永不写 done、阶段封顶「验收」", () => {
-  const ALL_SLOT_STATES = ["running", "queued", "done", "failed", "cancelled", null];
+  const ALL_SLOT_STATES = [
+    "running",
+    "queued",
+    "done",
+    "failed",
+    "cancelled",
+    null,
+  ];
   const ALL_DELIVERY = [true, false];
 
   it("deriveItemStatus never returns 'done' for ANY slot × delivery × recovery combination", () => {
@@ -114,7 +122,17 @@ describe("T-F3-17: 轮询回写永不写 done、阶段封顶「验收」", () =>
   });
 
   it("deriveWritebackStage never emits 交付 or a done-like value for any input", () => {
-    const stages = ["待办", "分析", "设计", "实施", "测试", "验收", "交付", null, "怪值"];
+    const stages = [
+      "待办",
+      "分析",
+      "设计",
+      "实施",
+      "测试",
+      "验收",
+      "交付",
+      null,
+      "怪值",
+    ];
     for (const s of ["returned", "running", "failed", null]) {
       for (const cur of stages) {
         for (const strong of [true, false]) {

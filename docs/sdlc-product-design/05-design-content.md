@@ -83,14 +83,14 @@ ui-signoff 签核 → technical-design/test-plan/briefs 引用屏编号与深链
 
 不改 design 应用结构，按现有实体建立使用惯例：
 
-| 实体 | 惯例 |
-|---|---|
-| 设计系统 Foundry | 全局唯一、isDefault；tokens/customCSS/customInstructions 按 01 章 §6；由设计文档驱动更新（人审后 update-design-system） |
-| sprint 原型 design | 每 sprint 一个 design：`Sprint {N} · {sprint 名}`；描述里写 tracker 深链与 sprint id；designSystemId=Foundry |
-| 屏文件 | 每屏一个自包含 HTML（tokens 内联 :root，Tabler webfont，data-screen 互链）；命名 `s{序号}-{语义}.html`，入口屏 `index.html` |
-| 版本 | ui-signoff 时打 designVersions 快照（label=`ui-signoff v{spec 版本}`） |
-| 生成方式 | 一律 create-design + create-file / update-file（**不用 generate-design 的 AI 生成路径**，与既有运维红线一致）；sdlc-ui-build 的 publish 节点即走此路径 |
-| 交接 | **登记的 design 增量**：get-design-snapshot 新增 `summaryOnly` 参数（返回屏/区域/组件/token 引用的结构化摘要）——默认行为不变（design 自身精修回路依赖返回源码）；SDLC 工人调用侧强制 summaryOnly，源码档需显式参数且计入载荷审计（P11） |
+| 实体               | 惯例                                                                                                                                                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 设计系统 Foundry   | 全局唯一、isDefault；tokens/customCSS/customInstructions 按 01 章 §6；由设计文档驱动更新（人审后 update-design-system）                                                                                                                 |
+| sprint 原型 design | 每 sprint 一个 design：`Sprint {N} · {sprint 名}`；描述里写 tracker 深链与 sprint id；designSystemId=Foundry                                                                                                                            |
+| 屏文件             | 每屏一个自包含 HTML（tokens 内联 :root，Tabler webfont，data-screen 互链）；命名 `s{序号}-{语义}.html`，入口屏 `index.html`                                                                                                             |
+| 版本               | ui-signoff 时打 designVersions 快照（label=`ui-signoff v{spec 版本}`）                                                                                                                                                                  |
+| 生成方式           | 一律 create-design + create-file / update-file（**不用 generate-design 的 AI 生成路径**，与既有运维红线一致）；sdlc-ui-build 的 publish 节点即走此路径                                                                                  |
+| 交接               | **登记的 design 增量**：get-design-snapshot 新增 `summaryOnly` 参数（返回屏/区域/组件/token 引用的结构化摘要）——默认行为不变（design 自身精修回路依赖返回源码）；SDLC 工人调用侧强制 summaryOnly，源码档需显式参数且计入载荷审计（P11） |
 
 ## 5. content：项目文档库（文档的家）
 
@@ -153,28 +153,28 @@ SDLC 项目文档库/                       ← org 根文件夹
 
 ### 5.3 block 呈现映射（每类文档怎么"给人看"）
 
-| docKey | 富呈现（human 版用的 block） | 要点 |
-|---|---|---|
-| sprint-doc | Goal 置顶 blue callout + 指标表（Leading/Lagging 列）+ In/Out Scope 双栏 columns | Goal 是完成判据的锚，必须一眼看到 |
-| test-plan | **覆盖矩阵置顶**（Goal 指标 × 场景，未覆盖=红标）+ 用户旅程 Mermaid（场景标注在路径上）+ 场景按 P0/边缘分层（P0 展开、边缘折叠）+ 每场景**审查三问**（信号可证伪吗 / 前置真实非种子吗 / 工具真能执行吗，逐问勾选、异议入口）+ 步骤细节默认折叠 | 审查的本质是回答"盖住了吗、测在刀刃上吗、能证伪吗"——版面围绕这三问组织，勾选状态回流为 plan-signoff 的 test-plan 判据输入 |
-| ui-spec | 屏清单表 + 每屏 toggle（区域表 + 验收信号）+ design 原型深链 | 与原型对照走查 |
-| technical-design | 架构 Mermaid + DataModel block（数据模型）+ §7 文件矩阵表 + 关键变更 Diff block + §4 每项 toggle | 图优先于散文 |
-| briefs | **纯文本**（标题+要点+文件清单表最多） | 刻意不加富呈现——它是 agent 的输入，人只抽查 |
-| verify-report | 场景结果表（行色 green_bg/red_bg）+ 失败证据 callout + 真实输出代码块 | 证据即打开 |
-| audit-report | 指标×verdict 表（MET/PARTIAL/UNMET 行色）+ 证据引用 mono + blocking red callout | 反奉承可视化 |
-| story | Do/Why/What-you'll-see 三列表 + 截图 | 新手实走 |
-| recap | 人工介入时间线表 | 度量人花在哪 |
-| brainstorm-notes | 要点列表 + Parked Ideas 表 | 可选产物 |
-| spike-report | 结论 callout + 选项对比表 + 证据引用 | 调研即交付物 |
+| docKey           | 富呈现（human 版用的 block）                                                                                                                                                                                                                   | 要点                                                                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| sprint-doc       | Goal 置顶 blue callout + 指标表（Leading/Lagging 列）+ In/Out Scope 双栏 columns                                                                                                                                                               | Goal 是完成判据的锚，必须一眼看到                                                                                         |
+| test-plan        | **覆盖矩阵置顶**（Goal 指标 × 场景，未覆盖=红标）+ 用户旅程 Mermaid（场景标注在路径上）+ 场景按 P0/边缘分层（P0 展开、边缘折叠）+ 每场景**审查三问**（信号可证伪吗 / 前置真实非种子吗 / 工具真能执行吗，逐问勾选、异议入口）+ 步骤细节默认折叠 | 审查的本质是回答"盖住了吗、测在刀刃上吗、能证伪吗"——版面围绕这三问组织，勾选状态回流为 plan-signoff 的 test-plan 判据输入 |
+| ui-spec          | 屏清单表 + 每屏 toggle（区域表 + 验收信号）+ design 原型深链                                                                                                                                                                                   | 与原型对照走查                                                                                                            |
+| technical-design | 架构 Mermaid + DataModel block（数据模型）+ §7 文件矩阵表 + 关键变更 Diff block + §4 每项 toggle                                                                                                                                               | 图优先于散文                                                                                                              |
+| briefs           | **纯文本**（标题+要点+文件清单表最多）                                                                                                                                                                                                         | 刻意不加富呈现——它是 agent 的输入，人只抽查                                                                               |
+| verify-report    | 场景结果表（行色 green_bg/red_bg）+ 失败证据 callout + 真实输出代码块                                                                                                                                                                          | 证据即打开                                                                                                                |
+| audit-report     | 指标×verdict 表（MET/PARTIAL/UNMET 行色）+ 证据引用 mono + blocking red callout                                                                                                                                                                | 反奉承可视化                                                                                                              |
+| story            | Do/Why/What-you'll-see 三列表 + 截图                                                                                                                                                                                                           | 新手实走                                                                                                                  |
+| recap            | 人工介入时间线表                                                                                                                                                                                                                               | 度量人花在哪                                                                                                              |
+| brainstorm-notes | 要点列表 + Parked Ideas 表                                                                                                                                                                                                                     | 可选产物                                                                                                                  |
+| spike-report     | 结论 callout + 选项对比表 + 证据引用                                                                                                                                                                                                           | 调研即交付物                                                                                                              |
 
 ### 5.4 交付文档（原有职责，纳入同一结构）
 
-| 文档 | 来源 | 时机 |
-|---|---|---|
-| Sprint Story | `/sprint-story` 技能（实走验证 + 真实验证日志） | storytelling 相位；主打能力未实证→accept-defer 裁决卡 |
-| 发布说明 / Changelog | promote 完成后由 docs-task 工作流汇总 | done 相位 |
-| 验收报告归档 | verify-report / audit-report 的人类可读版 | verifying/auditing 终局 |
-| 产品知识 | 设计文档、复盘沉淀 | 随需 |
+| 文档                 | 来源                                            | 时机                                                  |
+| -------------------- | ----------------------------------------------- | ----------------------------------------------------- |
+| Sprint Story         | `/sprint-story` 技能（实走验证 + 真实验证日志） | storytelling 相位；主打能力未实证→accept-defer 裁决卡 |
+| 发布说明 / Changelog | promote 完成后由 docs-task 工作流汇总           | done 相位                                             |
+| 验收报告归档         | verify-report / audit-report 的人类可读版       | verifying/auditing 终局                               |
+| 产品知识             | 设计文档、复盘沉淀                              | 随需                                                  |
 
 写入一律走 create-document / edit-document（NFM 规范见《content 富文本
 写作指南》）。**登记的框架/content 增量：`resetCollabState` action**
@@ -225,19 +225,19 @@ tracker UI ──deep link──▶ orchestrator(/runs/:id) · design(/design/:i
 全部原型（11 屏）入 design 应用 `SDLC 产品设计 v2.2` design（Foundry 设计系统），
 同时在仓库 `docs/sdlc-product-design/prototypes/` 保留源文件。
 
-| # | 文件 | 屏 | 对应章节 |
-|---|---|---|---|
-| 0 | index.html | 总览导航（原型地图 + 设计原则速览） | 00 |
-| 1 | s1-tracker-board.html | 看板（含运行信号卡、拖拽门提示态） | 03 §3 |
-| 2 | s2-sprint-studio.html | Sprint 规划工作台（③ 测试计划步进行中态） | 03 §6 |
-| 3 | s3-ui-review.html | UI 评审模式（内嵌原型 + 批注） | 05 §3 |
-| 4 | s4-work-item.html | 工作项详情（执行记录 + 失败路由态） | 03 §4 |
-| 5 | s5-inbox.html | 收件箱（签核 GateBanner 详情态） | 03 §2 |
-| 6 | s6-sprint-cockpit.html | Sprint 驾驶舱（executing 相位面板） | 03 §5 |
-| 7 | s7-run-detail.html | 运行详情（DagCanvas + NodeInspector） | 04 §3 |
-| 8 | s8-workflow-library.html | 工作流库 + 模板详情版本链 | 04 §4 |
-| 9 | s9-brain-console.html | Brain 控制台（引擎徽标 + 纪律指标） | 04 §6 |
-| 10 | s10-health-insights.html | 健康页 + 洞察归因（双段滚动） | 04 §10/11 |
+| #   | 文件                     | 屏                                        | 对应章节  |
+| --- | ------------------------ | ----------------------------------------- | --------- |
+| 0   | index.html               | 总览导航（原型地图 + 设计原则速览）       | 00        |
+| 1   | s1-tracker-board.html    | 看板（含运行信号卡、拖拽门提示态）        | 03 §3     |
+| 2   | s2-sprint-studio.html    | Sprint 规划工作台（③ 测试计划步进行中态） | 03 §6     |
+| 3   | s3-ui-review.html        | UI 评审模式（内嵌原型 + 批注）            | 05 §3     |
+| 4   | s4-work-item.html        | 工作项详情（执行记录 + 失败路由态）       | 03 §4     |
+| 5   | s5-inbox.html            | 收件箱（签核 GateBanner 详情态）          | 03 §2     |
+| 6   | s6-sprint-cockpit.html   | Sprint 驾驶舱（executing 相位面板）       | 03 §5     |
+| 7   | s7-run-detail.html       | 运行详情（DagCanvas + NodeInspector）     | 04 §3     |
+| 8   | s8-workflow-library.html | 工作流库 + 模板详情版本链                 | 04 §4     |
+| 9   | s9-brain-console.html    | Brain 控制台（引擎徽标 + 纪律指标）       | 04 §6     |
+| 10  | s10-health-insights.html | 健康页 + 洞察归因（双段滚动）             | 04 §10/11 |
 
 content 侧的富呈现（test-plan 审查面、文档树、回链 tracker）不做原型屏：
 这是 content 应用的既有渲染能力，由 agent 按 §5 的文件夹规范与 block 映射

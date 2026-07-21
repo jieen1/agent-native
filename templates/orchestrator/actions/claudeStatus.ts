@@ -1,7 +1,8 @@
 import { defineAction } from "@agent-native/core";
 import { z } from "zod";
-import { getManagedClaudeStatus } from "../server/claude-managed-auth.js";
+
 import { hasManagedCredentials } from "../server/claude-login.js";
+import { getManagedClaudeStatus } from "../server/claude-managed-auth.js";
 
 // Report the container's OWN managed Claude Code subscription login status
 // (the isolated config dir — never the host's ~/.claude). Never exposes the

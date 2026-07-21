@@ -15,7 +15,8 @@ const enabled = process.env.RUN_CLAUDE_VM_E2E === "1";
 describe.skipIf(!enabled)("ClaudeCodeExecutor real claude-in-VM E2E", () => {
   it("real claude runs IN the microVM, reaches the API, spends tokens", async () => {
     const { msbAvailable } = await import("./wsl-msb.js");
-    const { runClaudeVmE2e, CLAUDE_MARKER } = await import("./claude-vm-e2e.js");
+    const { runClaudeVmE2e, CLAUDE_MARKER } =
+      await import("./claude-vm-e2e.js");
     if (!(await msbAvailable())) {
       throw new Error("RUN_CLAUDE_VM_E2E=1 set but wsl/msb is not available");
     }

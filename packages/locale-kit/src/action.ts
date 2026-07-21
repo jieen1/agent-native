@@ -17,15 +17,16 @@
  * the SSR cookie is written client-side by `useLocaleSync`).
  */
 
-import { z } from "zod";
 import { defineAction } from "@agent-native/core/action";
 import { writeAppState } from "@agent-native/core/application-state";
-import { putUserSetting } from "@agent-native/core/settings";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
-import { registerCatalog, setLocale, t, tx, type Locale } from "./runtime.js";
-import { setServerLocaleForEmail } from "./server-locale.js";
+import { putUserSetting } from "@agent-native/core/settings";
+import { z } from "zod";
+
 import enJson from "./catalogs/en.json";
 import zhJson from "./catalogs/zh.json";
+import { registerCatalog, setLocale, t, tx, type Locale } from "./runtime.js";
+import { setServerLocaleForEmail } from "./server-locale.js";
 
 const LOCALE_LABELS: Record<Locale, string> = {
   en: "English",

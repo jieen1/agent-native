@@ -1,8 +1,4 @@
-import { useMemo } from "react";
-import { Link } from "react-router";
-import { useProjects, useWorkItems } from "@/hooks/use-tracker";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import type { WorkItem } from "@shared/types";
 import {
   IconArrowRight,
   IconBrandGithub,
@@ -12,10 +8,15 @@ import {
   IconPlus,
   IconSettings,
 } from "@tabler/icons-react";
+import { useMemo } from "react";
+import { Link } from "react-router";
+
 import { NewProjectDialog } from "@/components/NewProjectDialog";
-import { cn } from "@/lib/utils";
 import { repoLabel } from "@/components/tracker-format";
-import type { WorkItem } from "@shared/types";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useProjects, useWorkItems } from "@/hooks/use-tracker";
+import { cn } from "@/lib/utils";
 
 interface Counts {
   total: number;

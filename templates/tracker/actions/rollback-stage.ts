@@ -1,7 +1,11 @@
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail, getRequestOrgId } from "@agent-native/core/server/request-context";
+import {
+  getRequestUserEmail,
+  getRequestOrgId,
+} from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -26,23 +30,41 @@ export default defineAction({
 
     const db = getDb();
     const now = new Date().toISOString();
-    const VALID_STAGES = ['待办','分析','设计','实施','测试','验收','交付'];
-    if (!VALID_STAGES.includes(args.targetStage)) throw new Error(`Invalid stage: ${args.targetStage}`);
-
+    const VALID_STAGES = [
+      "待办",
+      "分析",
+      "设计",
+      "实施",
+      "测试",
+      "验收",
+      "交付",
+    ];
+    if (!VALID_STAGES.includes(args.targetStage))
+      throw new Error(`Invalid stage: ${args.targetStage}`);
 
     // --- Confirm the work item is owned / visible ---
     const item = (
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found or not accessible");
 
     // Rollback protection: reject if item is bound to a running/dispatched run
-    if (item.orchestratorRunId && (item.status === "dispatched" || item.status === "running")) {
-      throw new Error("该工作项绑定的运行任务正在执行中，请先取消该运行后再进行回退操作");
+    if (
+      item.orchestratorRunId &&
+      (item.status === "dispatched" || item.status === "running")
+    ) {
+      throw new Error(
+        "该工作项绑定的运行任务正在执行中，请先取消该运行后再进行回退操作",
+      );
     }
 
     const fromStage = item.currentStageName;

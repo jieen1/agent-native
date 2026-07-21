@@ -95,9 +95,19 @@ afterEach(async () => {
   await exec.execute(`DELETE FROM tracker_comments`);
 });
 
-type Row = { id: string; itemKey: string; sprintId: string | null; createdAt: string };
+type Row = {
+  id: string;
+  itemKey: string;
+  sprintId: string | null;
+  createdAt: string;
+};
 
-function row(id: string, itemKey: string, createdAt: string, sprintId: string | null = null): Row {
+function row(
+  id: string,
+  itemKey: string,
+  createdAt: string,
+  sprintId: string | null = null,
+): Row {
   return { id, itemKey, sprintId, createdAt };
 }
 
@@ -191,7 +201,16 @@ describe("applyDedupePlan (real SQLite DB)", () => {
   ) {
     await exec.execute({
       sql: `INSERT INTO tracker_work_items (id, project_id, item_key, sprint_id, created_at, updated_at, owner_email, org_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [id, projectId, itemKey, null, createdAt, createdAt, ownerEmail, orgId],
+      args: [
+        id,
+        projectId,
+        itemKey,
+        null,
+        createdAt,
+        createdAt,
+        ownerEmail,
+        orgId,
+      ],
     });
   }
 
@@ -202,9 +221,33 @@ describe("applyDedupePlan (real SQLite DB)", () => {
     // 每个 work item 各自有不同的真实 owner_email / org_id,以验证新插入的
     // activities/comments 行继承的是"对应 work item 自己的"所有权,而非任意固定值
     // 或 DB 默认值。
-    await seedWorkItem(exec, "auth", "proj-1", "SDLC-033", "2024-01-01T00:00:00.000Z", "auth@corp.com", "org-auth");
-    await seedWorkItem(exec, "stale1", "proj-1", "SDLC-033", "2024-01-02T00:00:00.000Z", "user1@corp.com", "org-1");
-    await seedWorkItem(exec, "stale2", "proj-1", "SDLC-033", "2024-01-03T00:00:00.000Z", "user2@corp.com", null);
+    await seedWorkItem(
+      exec,
+      "auth",
+      "proj-1",
+      "SDLC-033",
+      "2024-01-01T00:00:00.000Z",
+      "auth@corp.com",
+      "org-auth",
+    );
+    await seedWorkItem(
+      exec,
+      "stale1",
+      "proj-1",
+      "SDLC-033",
+      "2024-01-02T00:00:00.000Z",
+      "user1@corp.com",
+      "org-1",
+    );
+    await seedWorkItem(
+      exec,
+      "stale2",
+      "proj-1",
+      "SDLC-033",
+      "2024-01-03T00:00:00.000Z",
+      "user2@corp.com",
+      null,
+    );
 
     const plan = [
       { staleId: "stale1", oldItemKey: "SDLC-033", authoritativeId: "auth" },
@@ -235,7 +278,9 @@ describe("applyDedupePlan (real SQLite DB)", () => {
         sql: `SELECT item_key FROM tracker_work_items WHERE id = ?`,
         args: [r.staleId],
       });
-      expect((rowRes.rows[0] as { item_key: string }).item_key).toBe(r.newItemKey);
+      expect((rowRes.rows[0] as { item_key: string }).item_key).toBe(
+        r.newItemKey,
+      );
     }
 
     // activities:每个 stale 行一条 item-key.reassigned,共 2 条,payload 含 old/new。
@@ -245,11 +290,20 @@ describe("applyDedupePlan (real SQLite DB)", () => {
       `SELECT work_item_id, event_type, payload, owner_email, org_id FROM tracker_activities`,
     );
     expect(acts.rows).toHaveLength(2);
-    const expectedActOwnership: Record<string, { owner_email: string; org_id: string | null }> = {
+    const expectedActOwnership: Record<
+      string,
+      { owner_email: string; org_id: string | null }
+    > = {
       stale1: { owner_email: "user1@corp.com", org_id: "org-1" },
       stale2: { owner_email: "user2@corp.com", org_id: null },
     };
-    for (const a of acts.rows as Array<{ work_item_id: string; event_type: string; payload: string; owner_email: string; org_id: string | null }>) {
+    for (const a of acts.rows as Array<{
+      work_item_id: string;
+      event_type: string;
+      payload: string;
+      owner_email: string;
+      org_id: string | null;
+    }>) {
       expect(a.event_type).toBe("item-key.reassigned");
       const payload = JSON.parse(a.payload);
       expect(payload.oldItemKey).toBe("SDLC-033");
@@ -267,54 +321,96 @@ describe("applyDedupePlan (real SQLite DB)", () => {
       `SELECT work_item_id, author_kind, body, owner_email, org_id FROM tracker_comments`,
     );
     expect(comments.rows).toHaveLength(4);
-    const expectedCommentOwnership: Record<string, { owner_email: string; org_id: string | null }> = {
+    const expectedCommentOwnership: Record<
+      string,
+      { owner_email: string; org_id: string | null }
+    > = {
       stale1: { owner_email: "user1@corp.com", org_id: "org-1" },
       stale2: { owner_email: "user2@corp.com", org_id: null },
       auth: { owner_email: "auth@corp.com", org_id: "org-auth" },
     };
-    for (const c of comments.rows as Array<{ work_item_id: string; author_kind: string; body: string; owner_email: string; org_id: string | null }>) {
+    for (const c of comments.rows as Array<{
+      work_item_id: string;
+      author_kind: string;
+      body: string;
+      owner_email: string;
+      org_id: string | null;
+    }>) {
       const expected = expectedCommentOwnership[c.work_item_id]!;
       expect(c.owner_email).toBe(expected.owner_email);
       expect(c.org_id).toBe(expected.org_id);
     }
-    const staleComments = (comments.rows as Array<{ work_item_id: string; author_kind: string; body: string }>).filter(
-      (c) => c.work_item_id === "stale1" || c.work_item_id === "stale2",
-    );
+    const staleComments = (
+      comments.rows as Array<{
+        work_item_id: string;
+        author_kind: string;
+        body: string;
+      }>
+    ).filter((c) => c.work_item_id === "stale1" || c.work_item_id === "stale2");
     expect(staleComments).toHaveLength(2);
     for (const c of staleComments) {
       expect(c.author_kind).toBe("agent");
       expect(c.body).toContain("SDLC-033"); // oldItemKey
     }
     // 至少有一条 comment 提到新 key
-    const allBodies = (comments.rows as Array<{ body: string }>).map((c) => c.body).join("\n");
+    const allBodies = (comments.rows as Array<{ body: string }>)
+      .map((c) => c.body)
+      .join("\n");
     for (const k of newKeys) expect(allBodies).toContain(k);
-    const authComments = (comments.rows as Array<{ work_item_id: string }>).filter(
-      (c) => c.work_item_id === "auth",
-    );
+    const authComments = (
+      comments.rows as Array<{ work_item_id: string }>
+    ).filter((c) => c.work_item_id === "auth");
     expect(authComments).toHaveLength(2);
   });
 
   it("重复执行 applyDedupePlan 两次不会产生新的撞号(幂等)", async () => {
     const exec = await setup();
-    const { applyDedupePlan, computeDedupePlan } = await import("../item-key-dedupe.js");
+    const { applyDedupePlan, computeDedupePlan } =
+      await import("../item-key-dedupe.js");
 
-    await seedWorkItem(exec, "auth", "proj-2", "SDLC-040", "2024-01-01T00:00:00.000Z");
-    await seedWorkItem(exec, "stale", "proj-2", "SDLC-040", "2024-01-02T00:00:00.000Z");
+    await seedWorkItem(
+      exec,
+      "auth",
+      "proj-2",
+      "SDLC-040",
+      "2024-01-01T00:00:00.000Z",
+    );
+    await seedWorkItem(
+      exec,
+      "stale",
+      "proj-2",
+      "SDLC-040",
+      "2024-01-02T00:00:00.000Z",
+    );
 
     async function loadRows() {
       const res = await exec.execute({
         sql: `SELECT id, item_key, sprint_id, created_at FROM tracker_work_items WHERE project_id = ?`,
         args: ["proj-2"],
       });
-      return (res.rows as Array<{ id: string; item_key: string; sprint_id: string | null; created_at: string }>).map(
-        (r) => ({ id: r.id, itemKey: r.item_key, sprintId: r.sprint_id, createdAt: r.created_at }),
-      );
+      return (
+        res.rows as Array<{
+          id: string;
+          item_key: string;
+          sprint_id: string | null;
+          created_at: string;
+        }>
+      ).map((r) => ({
+        id: r.id,
+        itemKey: r.item_key,
+        sprintId: r.sprint_id,
+        createdAt: r.created_at,
+      }));
     }
 
     // 第一次:有 1 条计划,执行后撞号消失
     const plan1 = computeDedupePlan(await loadRows());
     expect(plan1).toHaveLength(1);
-    await applyDedupePlan(exec, undefined, { projectId: "proj-2", projectKey: "SDLC", plan: plan1 });
+    await applyDedupePlan(exec, undefined, {
+      projectId: "proj-2",
+      projectKey: "SDLC",
+      plan: plan1,
+    });
 
     const rowsAfter = await loadRows();
     const keysAfter = rowsAfter.map((r) => r.itemKey);
@@ -323,9 +419,17 @@ describe("applyDedupePlan (real SQLite DB)", () => {
     // 第二次:基于新分配的 itemKey 已不再重复 -> plan 为空,不再写任何变更
     const plan2 = computeDedupePlan(rowsAfter);
     expect(plan2).toEqual([]);
-    const actsBefore = await exec.execute(`SELECT count(*) as n FROM tracker_activities`);
-    await applyDedupePlan(exec, undefined, { projectId: "proj-2", projectKey: "SDLC", plan: plan2 });
-    const actsAfter = await exec.execute(`SELECT count(*) as n FROM tracker_activities`);
+    const actsBefore = await exec.execute(
+      `SELECT count(*) as n FROM tracker_activities`,
+    );
+    await applyDedupePlan(exec, undefined, {
+      projectId: "proj-2",
+      projectKey: "SDLC",
+      plan: plan2,
+    });
+    const actsAfter = await exec.execute(
+      `SELECT count(*) as n FROM tracker_activities`,
+    );
     expect((actsAfter.rows[0] as { n: number }).n).toBe(
       (actsBefore.rows[0] as { n: number }).n,
     );

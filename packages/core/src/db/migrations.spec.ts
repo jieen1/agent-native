@@ -279,9 +279,9 @@ CREATE TABLE IF NOT EXISTS v3_runs (id TEXT PRIMARY KEY)`,
       typeof c[0] === "string" ? c[0] : (c[0] as { sql: string }).sql,
     );
     // The later statement in the SAME migration still ran after the swallow.
-    expect(calls.some((s) => /CREATE TABLE IF NOT EXISTS v3_runs/i.test(s))).toBe(
-      true,
-    );
+    expect(
+      calls.some((s) => /CREATE TABLE IF NOT EXISTS v3_runs/i.test(s)),
+    ).toBe(true);
   });
 
   it("closes the direct exec even when a migration throws", async () => {

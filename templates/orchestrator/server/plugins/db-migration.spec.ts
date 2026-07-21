@@ -17,8 +17,9 @@
 // assertion (the task's own instruction: no textual lock posing as a smoke
 // test).
 
-import { describe, it, expect } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
+
+import { describe, it, expect } from "vitest";
 
 const enabled = process.env.RUN_DB_MIGRATION_E2E === "1";
 
@@ -27,10 +28,10 @@ function dockerAvailable(): boolean {
   return res.status === 0;
 }
 
-describe.skipIf(!enabled)("f7-telemetry migration smoke (real postgres:16)", () => {
-  it(
-    "creates v3_model_registry + v3_spawns.model_real_name/usage_suspect + brain_threads.closing_anomaly on an empty DB",
-    async () => {
+describe.skipIf(!enabled)(
+  "f7-telemetry migration smoke (real postgres:16)",
+  () => {
+    it("creates v3_model_registry + v3_spawns.model_real_name/usage_suspect + brain_threads.closing_anomaly on an empty DB", async () => {
       if (!dockerAvailable()) {
         throw new Error(
           "RUN_DB_MIGRATION_E2E=1 set but `docker` is not available/usable in this environment",
@@ -59,15 +60,25 @@ describe.skipIf(!enabled)("f7-telemetry migration smoke (real postgres:16)", () 
           .toString()
           .trim()
           .split("\n")[0];
-        const port = Number(portMapping.slice(portMapping.lastIndexOf(":") + 1));
+        const port = Number(
+          portMapping.slice(portMapping.lastIndexOf(":") + 1),
+        );
         if (!Number.isInteger(port) || port <= 0) {
-          throw new Error(`could not resolve mapped port from "${portMapping}"`);
+          throw new Error(
+            `could not resolve mapped port from "${portMapping}"`,
+          );
         }
         // Wait for readiness (pg_isready inside the container).
         const deadline = Date.now() + 30_000;
         let ready = false;
         while (Date.now() < deadline) {
-          const res = spawnSync("docker", ["exec", cid, "pg_isready", "-U", "postgres"]);
+          const res = spawnSync("docker", [
+            "exec",
+            cid,
+            "pg_isready",
+            "-U",
+            "postgres",
+          ]);
           if (res.status === 0) {
             ready = true;
             break;
@@ -93,7 +104,8 @@ describe.skipIf(!enabled)("f7-telemetry migration smoke (real postgres:16)", () 
         const postgres = (await import("postgres")).default;
         const sql = postgres(databaseUrl);
         try {
-          const tableRows = await sql`SELECT to_regclass('public.v3_model_registry') AS reg`;
+          const tableRows =
+            await sql`SELECT to_regclass('public.v3_model_registry') AS reg`;
           expect(tableRows[0]?.reg).not.toBeNull();
 
           // Name-based tracking landed: the companion table exists and holds a
@@ -137,7 +149,6 @@ describe.skipIf(!enabled)("f7-telemetry migration smoke (real postgres:16)", () 
       } finally {
         spawnSync("docker", ["stop", cid], { stdio: "ignore" });
       }
-    },
-    120_000,
-  );
-});
+    }, 120_000);
+  },
+);

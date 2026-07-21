@@ -1,613 +1,2020 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Foundry · Sprint 3 驾驶舱</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
-<style>
-/* ============ Foundry tokens ============ */
-:root{
-  --background:oklch(1 0 0); --foreground:oklch(.141 .005 285.82);
-  --card:oklch(1 0 0); --muted:oklch(.967 .001 286.38);
-  --muted-foreground:oklch(.552 .016 285.94);
-  --border:oklch(.945 .003 286.32); --input:oklch(.92 .004 286.32);
-  --ring:oklch(.705 .015 286.07);
-  --primary:oklch(.21 .006 285.89); --primary-foreground:oklch(.985 0 0);
-  --brand:oklch(.55 .16 255); --brand-foreground:oklch(.985 0 0);
-  --success:oklch(.55 .16 145); --warning:oklch(.68 .15 85);
-  --info:oklch(.55 .18 250); --destructive:oklch(.577 .245 27.33);
-  --agent:oklch(.55 .14 300); --evidence:oklch(.48 .10 180);
-  --chart-1:oklch(.55 .16 255); --chart-2:oklch(.65 .13 255);
-  --chart-3:oklch(.75 .10 255); --chart-4:oklch(.84 .07 255); --chart-5:oklch(.92 .04 255);
-  --sidebar:oklch(.985 .001 286.38);
-  --radius:10px; --radius-sm:6px; --radius-md:8px; --radius-xl:14px;
-  --panel:oklch(.972 .002 286.35);
-  --font-sans:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
-  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
-}
-.dark{
-  --background:oklch(.18 .005 285.82); --foreground:oklch(.985 0 0);
-  --card:oklch(.21 .006 285.89); --muted:oklch(.274 .006 286.03);
-  --muted-foreground:oklch(.705 .015 286.07);
-  --border:oklch(1 0 0/.08); --input:oklch(1 0 0/.15);
-  --primary:oklch(.92 .004 286.32); --primary-foreground:oklch(.21 .006 285.89);
-  --brand:oklch(.65 .16 255); --success:oklch(.65 .14 145);
-  --warning:oklch(.8 .14 85); --info:oklch(.65 .16 250); --destructive:oklch(.66 .2 27);
-  --agent:oklch(.68 .13 300); --evidence:oklch(.62 .09 180);
-  --chart-1:oklch(.72 .14 255); --chart-2:oklch(.62 .13 255);
-  --chart-3:oklch(.52 .11 255); --chart-4:oklch(.42 .09 255); --chart-5:oklch(.32 .06 255);
-  --sidebar:oklch(.16 .005 285.82);
-  --panel:oklch(.215 .006 285.9);/*--panel-dark-done*/
-}
-/* ============ base ============ */
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{font-family:var(--font-sans);font-size:13px;line-height:1.55;color:var(--foreground);
-  background:var(--background);-webkit-font-smoothing:antialiased;text-autospace:ideograph-alpha ideograph-numeric}
-a{color:inherit;text-decoration:none}
-button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
-.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-thumb{background:oklch(0 0 0/.12);border-radius:3px}
-.dark ::-webkit-scrollbar-thumb{background:oklch(1 0 0/.14)}
-i.ti{font-size:16px;line-height:1;vertical-align:-2px}
-.proto-bar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:2px;
-  padding:4px 10px;background:oklch(.18 .01 260);color:oklch(.8 .01 260);
-  font-size:11px;overflow-x:auto;white-space:nowrap}
-.proto-bar .pb-title{font-weight:600;color:oklch(.98 0 0);margin-right:8px;display:flex;gap:6px;align-items:center}
-.proto-bar a{padding:3px 8px;border-radius:6px;cursor:pointer}
-.proto-bar a:hover{background:oklch(1 0 0/.1)}
-.proto-bar a.active{background:var(--brand);color:var(--brand-foreground)}
-.proto-bar .pb-theme{margin-left:auto;padding:3px 8px;border-radius:6px;display:flex;gap:4px;align-items:center}
-.proto-bar .pb-theme:hover{background:oklch(1 0 0/.1)}
-.app{display:flex;height:calc(100vh - 27px)}
-.sidebar{width:232px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;padding:10px;gap:2px;overflow-y:auto}
-.sb-head{display:flex;align-items:center;gap:8px;padding:6px 8px 10px;font-weight:600;font-size:13px}
-.sb-head .logo{width:22px;height:22px;border-radius:6px;background:var(--brand);color:var(--brand-foreground);
-  display:flex;align-items:center;justify-content:center}
-.sb-search{display:flex;align-items:center;gap:6px;margin:0 4px 8px;padding:5px 8px;border:1px solid var(--border);
-  border-radius:var(--radius-md);color:var(--muted-foreground);font-size:12px;background:var(--card)}
-.sb-search kbd{margin-left:auto}
-.sb-group{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);
-  padding:12px 8px 4px;font-weight:600}
-.sb-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--radius-md);
-  color:var(--foreground);font-size:13px;cursor:pointer}
-.sb-item i{font-size:17px;color:var(--muted-foreground)}
-.sb-item:hover{background:oklch(0 0 0/.045)}
-.dark .sb-item:hover{background:oklch(1 0 0/.06)}
-.sb-item.active{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand);font-weight:500}
-.sb-item.active i{color:var(--brand)}
-.sb-item .count{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
-.sb-item .dot-badge{margin-left:auto;min-width:16px;height:16px;padding:0 5px;border-radius:8px;
-  background:var(--brand);color:var(--brand-foreground);font-size:10px;font-weight:600;
-  display:flex;align-items:center;justify-content:center;font-family:var(--font-mono)}
-.inset{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--background)}
-.page-header{display:flex;align-items:center;gap:10px;padding:14px 24px 10px}
-.page-header h1{font-size:16px;font-weight:600}
-.content{flex:1;overflow:auto}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-md);
-  font-size:12.5px;font-weight:500;border:1px solid transparent;cursor:pointer;white-space:nowrap}
-.btn-primary{background:var(--primary);color:var(--primary-foreground)}
-.btn-primary:hover{opacity:.9}
-.btn-outline{border-color:var(--border);background:var(--card)}
-.btn-outline:hover{background:var(--muted)}
-.btn-ghost:hover{background:var(--muted)}
-.btn:disabled{opacity:.45;cursor:not-allowed}
-.btn-sm{padding:3px 8px;font-size:12px}
-.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
-  font-size:11.5px;font-weight:500;border:1px solid var(--border);background:var(--card)}
-.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:500}
-.badge.b-success{background:color-mix(in oklch,var(--success) 14%,transparent);color:var(--success)}
-.badge.b-warning{background:color-mix(in oklch,var(--warning) 16%,transparent);color:oklch(.55 .13 85)}
-.dark .badge.b-warning{color:var(--warning)}
-.badge.b-info{background:color-mix(in oklch,var(--info) 14%,transparent);color:var(--info)}
-.badge.b-destructive{background:color-mix(in oklch,var(--destructive) 12%,transparent);color:var(--destructive)}
-.badge.b-agent{background:color-mix(in oklch,var(--agent) 12%,transparent);color:var(--agent)}
-.badge.b-brand{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand)}
-.badge.b-muted{background:var(--muted);color:var(--muted-foreground)}
-.badge.b-evidence{background:color-mix(in oklch,var(--evidence) 12%,transparent);color:var(--evidence)}
-kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid var(--border);
-  border-bottom-width:2px;border-radius:4px;background:var(--muted);color:var(--muted-foreground)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}
-.card-pad{padding:14px 16px}
-.section-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
-.group-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);font-weight:600}
-.divider{height:1px;background:var(--border)}
-.ring{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-block;position:relative}
-.st-icon{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;vertical-align:-2px;color:#fff}
-.st-icon i{font-size:10px;line-height:1;display:block}
-.st-icon.sm{width:12px;height:12px}.st-icon.sm i{font-size:8.5px}
-.st-icon.lg{width:18px;height:18px}.st-icon.lg i{font-size:12.5px}
-.st-icon.ok{background:var(--success)}.st-icon.err{background:var(--destructive)}.st-icon.warn{background:var(--warning)}.st-icon.inf{background:var(--info)}.st-icon.mut{background:var(--muted-foreground)}
-.runbadge .st-icon{width:11px;height:11px}.runbadge .st-icon i{font-size:8px}
-.ring.r-pending{border:1.6px dashed var(--muted-foreground)}
-.ring.r-queued{border:1.6px solid var(--warning)}
-.ring.r-queued::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--warning)}
-.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%)}
-.ring.r-review{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 75%,transparent 75% 100%)}
-.ring.r-gate{border:1.6px solid var(--warning)}
-.ring.r-gate::after{content:'';position:absolute;left:5.5px;top:3px;width:1.8px;height:7px;background:var(--warning)}
-.ring.r-skipped{border:1.6px solid var(--muted-foreground);background:linear-gradient(135deg,transparent 45%,var(--muted-foreground) 45%,var(--muted-foreground) 55%,transparent 55%)}
-.pbars{display:inline-flex;gap:1.5px;align-items:flex-end;height:12px}
-.pbars span{width:3px;border-radius:1px;background:var(--border)}
-.pbars span:nth-child(1){height:4px}.pbars span:nth-child(2){height:6.5px}
-.pbars span:nth-child(3){height:9px}.pbars span:nth-child(4){height:12px}
-.pbars.p0 span{background:var(--destructive)}
-.pbars.p1 span:nth-child(-n+3){background:oklch(.55 .13 85)}
-.pbars.p2 span:nth-child(-n+2){background:var(--info)}
-.pbars.p3 span:nth-child(1){background:var(--muted-foreground)}
-.avatar{width:20px;height:20px;border-radius:50%;background:var(--brand);color:#fff;
-  display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0}
-.avatar.a-agent{border-radius:6px;background:color-mix(in oklch,var(--agent) 15%,transparent);
-  color:var(--agent);border:1px solid color-mix(in oklch,var(--agent) 40%,transparent)}
-.avatar.a-brain{border-radius:6px;background:color-mix(in oklch,var(--brand) 15%,transparent);
-  color:var(--brand);border:1px solid color-mix(in oklch,var(--brand) 40%,transparent)}
-table.fd{width:100%;border-collapse:collapse;font-size:12.5px}
-table.fd th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
-  color:var(--muted-foreground);font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border)}
-table.fd td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
-table.fd tr:hover td{background:oklch(0 0 0/.02)}
-.dark table.fd tr:hover td{background:oklch(1 0 0/.03)}
-.empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px;color:var(--muted-foreground)}
-.empty .e-icon{width:40px;height:40px;border-radius:50%;background:var(--muted);
-  display:flex;align-items:center;justify-content:center;font-size:20px}
-/* ============ 本屏 ============ */
-.phase-bar{display:flex;align-items:center;gap:6px;padding:2px 24px 12px;overflow-x:auto}
-.phase{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted-foreground);white-space:nowrap}
-.phase.done{color:var(--foreground)}
-.phase.active{color:var(--info);font-weight:600}
-.phase-link{width:26px;height:2px;border-radius:1px;background:var(--border);flex-shrink:0}
-.phase-link.done{background:var(--success)}
-.cockpit{display:flex;gap:20px;padding:4px 24px 32px;align-items:flex-start}
-.ck-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:20px}
-.inspector{width:320px;flex-shrink:0;position:sticky;top:8px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-xl);padding:2px 16px 6px}
-/* 侧栏扁平分组：单层容器，节间用 border-top 分隔，不再嵌套完整卡片 */
-.insp-sec{padding:18px 0 14px;border-top:1px solid var(--border)}
-.insp-sec .group-label{display:block;margin-bottom:9px}
-.insp-sec:first-child{border-top:none;padding-top:14px;padding-bottom:18px}
-.proprow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;font-size:12.5px}
-.proprow .pl{color:var(--muted-foreground);font-size:12px;flex-shrink:0}
-.proprow .pv{display:flex;align-items:center;gap:6px;text-align:right;min-width:0;font-variant-numeric:tabular-nums}
-.miniboard{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-.mb-col{display:flex;flex-direction:column;gap:8px;min-width:0}
-.mb-head{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted-foreground);font-weight:600}
-.mb-card{border:1px solid var(--border);border-radius:var(--radius-md);padding:8px 10px;background:var(--background);
-  display:flex;flex-direction:column;gap:5px;font-size:12px}
-.mb-card .mc-top{display:flex;align-items:center;gap:6px}
-.gitline{display:flex;flex-direction:column}
-.git-row{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px}
-.git-row:last-child{border-bottom:none}
-.git-row i{color:var(--muted-foreground);font-size:14px}
-.git-row .sha{font-family:var(--font-mono);font-size:11px;color:var(--brand)}
-.git-row .t{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
-.art-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px}
-.art-row:last-child{border-bottom:none}
-.art-row i{color:var(--muted-foreground);font-size:15px}
-.gate-row{display:flex;align-items:center;gap:8px;min-height:27px;padding:3px 0;font-size:12.5px}
-.hdot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
-.hdot.ok{background:var(--success)}
-.hdot.warn{background:var(--warning)}
-.hdot.down{background:var(--destructive)}
-</style>
-<style id="foundry-motion">
-  /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
-  :root {
-    /* 一次性动效时长梯度 */
-    --fm-dur-1: 120ms;   /* 微反馈:hover、图标切换 */
-    --fm-dur-2: 240ms;   /* 小型:按钮/开关状态、Toast、菜单 */
-    --fm-dur-3: 400ms;   /* 中型:对话框 enter、完成打勾、区块 reveal */
-    --fm-dur-4: 700ms;   /* 大型:庆祝时刻、欢迎/空状态插画 */
-    /* 氛围循环档(持续存在感,允许慢) */
-    --fm-ambient-1: 1600ms;  /* 活跃脉动 */
-    --fm-ambient-2: 2500ms;  /* thinking 扫光 */
-    --fm-ambient-3: 3200ms;  /* 描边光束(仅单一 CTA 级场景) */
-    /* 曲线 */
-    --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);   /* 一切常规过渡 */
-    --fm-ease-enter:    cubic-bezier(0.16, 1, 0.3, 1);   /* 进场从容 */
-    --fm-ease-exit:     cubic-bezier(0.7, 0, 0.84, 0);   /* 离场干脆 */
-    --fm-ease-bounce:   cubic-bezier(0.5, 1.5, 0.4, 1);  /* 仅庆祝时刻 */
-    /* 位移与缩放(工具产品克制档) */
-    --fm-shift-1: 4px;
-    --fm-shift-2: 8px;
-    --fm-scale-hover: 1.02;
-    --fm-scale-active: 0.98;
-  }
-
-  /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
-  @keyframes fm-text-shimmer {
-    0%   { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-  .fm-thinking {
-    background-image: linear-gradient(90deg,
-      var(--muted-foreground) 0%, var(--muted-foreground) 35%,
-      var(--foreground) 50%,
-      var(--muted-foreground) 65%, var(--muted-foreground) 100%);
-    background-size: 200% 100%;
-    -webkit-background-clip: text; background-clip: text;
-    color: transparent;
-    animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
-  }
-
-  /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
-  @keyframes fm-impulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent); }
-    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent); }
-  }
-  .fm-live { animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite; }
-
-  /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
-  @keyframes fm-complete-badge {
-    0% { transform: scale(0); } 60% { transform: scale(1.12); } 100% { transform: scale(1); }
-  }
-  @keyframes fm-complete-check { to { stroke-dashoffset: 0; } }
-  .fm-complete { animation: fm-complete-badge 500ms var(--fm-ease-bounce) both; }
-  .fm-complete svg path, .fm-complete svg polyline {
-    stroke-dasharray: 48; stroke-dashoffset: 48;
-    animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
-  }
-
-  /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
-  @keyframes fm-nav-sweep {
-    0% { transform: translateX(-100%); } 100% { transform: translateX(400%); }
-  }
-  .fm-nav-progress {
-    position: fixed; top: 0; left: 0; right: 0; height: 2px;
-    overflow: hidden; pointer-events: none; z-index: 9999; display: none;
-  }
-  .fm-nav-progress[data-active="true"] { display: block; }
-  .fm-nav-progress::before {
-    content: ""; display: block; height: 100%; width: 25%;
-    background: var(--primary);
-    animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
-  }
-
-  /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
-  [data-fm-reveal] {
-    opacity: 0; transform: translateY(var(--fm-shift-1));
-    transition: opacity var(--fm-dur-3) var(--fm-ease-enter),
-                transform var(--fm-dur-3) var(--fm-ease-enter);
-  }
-  [data-fm-reveal].fm-in { opacity: 1; transform: none; }
-  /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
-  .fm-scroll [data-fm-reveal] { transform: none; }
-
-  /* ===== 通用交互态统一 ===== */
-  .fm-hover-lift { transition: transform var(--fm-dur-2) var(--fm-ease-standard),
-                               box-shadow var(--fm-dur-2) var(--fm-ease-standard); }
-  .fm-hover-lift:hover  { transform: translateY(calc(var(--fm-shift-1) * -1)); }
-  .fm-hover-lift:active { transform: scale(var(--fm-scale-active)); }
-  .fm-underline {
-    background-image: linear-gradient(currentColor, currentColor);
-    background-size: 0% 1px; background-position: 0 100%; background-repeat: no-repeat;
-    transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
-  }
-  .fm-underline:hover { background-size: 100% 1px; }
-  /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
-  .fm-overlay-enter { animation-duration: var(--fm-dur-3); animation-timing-function: var(--fm-ease-enter); }
-  .fm-overlay-exit  { animation-duration: var(--fm-dur-2); animation-timing-function: var(--fm-ease-exit); }
-  /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
-  [data-fm-gesturing="true"], [data-fm-gesturing="true"] * { transition: none !important; }
-
-  /* ===== 全量降级 ===== */
-  @media (prefers-reduced-motion: reduce) {
-    .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
-    .fm-nav-progress::before { animation: none !important; }
-    /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
-    .fm-complete svg path, .fm-complete svg polyline { stroke-dashoffset: 0; }
-    .fm-thinking { color: var(--muted-foreground); background: none; }
-    [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
-    .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }
-  }
-</style>
-</head>
-<body>
-<nav class="proto-bar">
-  <span class="pb-title"><i class="ti ti-flame"></i>Foundry · SDLC 原型</span>
-  <a data-screen="index.html">总览</a>
-  <a data-screen="s1-tracker-board.html">看板</a>
-  <a data-screen="s2-sprint-studio.html">规划工作台</a>
-  <a data-screen="s3-ui-review.html">UI 评审</a>
-  <a data-screen="s4-work-item.html">工作项</a>
-  <a data-screen="s5-inbox.html">收件箱</a>
-  <a data-screen="s6-sprint-cockpit.html" class="active">Sprint 驾驶舱</a>
-  <a data-screen="s7-run-detail.html">运行详情</a>
-  <a data-screen="s8-workflow-library.html">工作流库</a>
-  <a data-screen="s9-brain-console.html">Brain</a>
-  <a data-screen="s10-health-insights.html">健康与洞察</a>
-  <button class="pb-theme" onclick="document.documentElement.classList.toggle('dark')">
-    <i class="ti ti-moon"></i>主题</button>
-</nav>
-<div class="app">
-  <aside class="sidebar">
-    <div class="sb-head"><span class="logo"><i class="ti ti-clipboard-list" style="font-size:13px"></i></span>Tracker</div>
-    <div class="sb-search"><i class="ti ti-search"></i>搜索<kbd>⌘K</kbd></div>
-    <a class="sb-item"><i class="ti ti-message-circle"></i>问 Tracker</a>
-    <a class="sb-item" data-screen="s5-inbox.html"><i class="ti ti-inbox"></i>收件箱<span class="dot-badge">3</span></a>
-    <div class="sb-group">工作</div>
-    <a class="sb-item" data-screen="s1-tracker-board.html"><i class="ti ti-layout-kanban"></i>看板</a>
-    <a class="sb-item active" data-screen="s6-sprint-cockpit.html"><i class="ti ti-run"></i>Sprint</a>
-    <a class="sb-item"><i class="ti ti-list-numbers"></i>队列<span class="count">4</span></a>
-    <a class="sb-item"><i class="ti ti-chart-dots"></i>度量</a>
-    <div class="sb-group">项目</div>
-    <a class="sb-item"><i class="ti ti-folder"></i>支付中心<span class="count">PAY</span></a>
-    <div style="margin-top:auto"></div>
-    <div class="divider" style="margin:8px 4px"></div>
-    <a class="sb-item"><i class="ti ti-users"></i>Team</a>
-    <a class="sb-item"><i class="ti ti-settings"></i>设置</a>
-  </aside>
-  <main class="inset">
-    <div class="page-header">
-      <span class="mono" style="color:var(--muted-foreground);font-size:12px">Sprint 3</span>
-      <h1>计费对账与账单导出</h1>
-      <span class="badge b-info">executing</span>
-      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-        <a class="btn btn-outline" data-screen="s2-sprint-studio.html"><i class="ti ti-layout-2"></i>进入规划工作台</a>
-        <span style="display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px">
-          <button class="btn btn-primary" disabled title="缺项：全部工作项合入（4/6）；verify GREEN（当前 S2 RED）；其余 3 条判据已满足——点击查看完整 GateBanner"><i class="ti ti-player-track-next"></i>推进到 verifying · 判据 2/5</button>
-        </span>
-      </div>
-    </div>
-    <!-- 八相位时间线 -->
-    <div class="phase-bar">
-      <span class="phase done"><span class="st-icon ok"><i class="ti ti-check"></i></span>planning</span>
-      <span class="phase-link done"></span>
-      <span class="phase done"><span class="st-icon ok"><i class="ti ti-check"></i></span>designing</span>
-      <span class="phase-link done"></span>
-      <span class="phase active"><span class="ring r-running fm-live"></span>executing</span>
-      <span class="phase-link"></span>
-      <span class="phase"><span class="ring r-pending"></span>verifying</span>
-      <span class="phase-link"></span>
-      <span class="phase" title="= gap-analysis（Phase H）：按 Goal 判 NO_GAPS 才可晋升合入 base"><span class="ring r-pending"></span>目标审计</span>
-      <span class="phase-link"></span>
-      <span class="phase"><span class="ring r-pending"></span>promoting</span>
-      <span class="phase-link"></span>
-      <span class="phase"><span class="ring r-pending"></span>storytelling</span>
-      <span class="phase-link"></span>
-      <span class="phase"><span class="ring r-pending"></span>done</span>
-      
-    </div>
-    <div class="content">
-      <div class="cockpit">
-        <div class="ck-main">
-
-          <!-- ① executing 相位面板 -->
-          <div class="card card-pad" style="display:flex;flex-direction:column;gap:14px">
-            <div class="section-title"><i class="ti ti-player-play" style="color:var(--info)"></i>实施进行中
-              <span class="chip" style="margin-left:auto"><i class="ti ti-heart-rate-monitor" style="font-size:13px"></i>健康门通过 · 10:42</span>
-            </div>
-            <div class="miniboard">
-              <div class="mb-col">
-                <div class="mb-head"><span class="ring r-queued" style="width:10px;height:10px"></span>排队<span class="mono" data-fm-count="1">0</span></div>
-                <div class="mb-card">
-                  <div class="mc-top"><span class="mono" style="color:var(--muted-foreground);font-size:11px">PAY-202</span><span class="pbars p1"><span></span><span></span><span></span><span></span></span></div>
-                  <div style="font-weight:500">对账报表汇总页</div>
-                  <span class="badge b-warning" style="align-self:flex-start"><i class="ti ti-hourglass" style="font-size:12px"></i>等待 PAY-201</span>
-                </div>
-              </div>
-              <div class="mb-col">
-                <div class="mb-head"><span class="ring r-running fm-live" style="width:10px;height:10px"></span>运行中<span class="mono" data-fm-count="1">0</span></div>
-                <div class="mb-card" style="border-color:color-mix(in oklch,var(--info) 40%,var(--border))">
-                  <div class="mc-top"><span class="mono" style="color:var(--muted-foreground);font-size:11px">PAY-201</span><span class="pbars p0"><span></span><span></span><span></span><span></span></span></div>
-                  <div style="font-weight:500">账单导出 CSV 接口</div>
-                  <span style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--info)"><span class="ring r-running fm-live" style="width:10px;height:10px"></span><span class="fm-thinking">dev 运行中</span><span class="mono" style="color:var(--muted-foreground)">3m42s</span></span>
-                </div>
-              </div>
-              <div class="mb-col">
-                <div class="mb-head"><span class="st-icon ok sm"><i class="ti ti-check"></i></span>已合入<span class="mono" data-fm-count="2">0</span></div>
-                <div class="mb-card">
-                  <div class="mc-top"><span class="mono" style="color:var(--muted-foreground);font-size:11px">PAY-204</span></div>
-                  <div style="font-weight:500">账单导出页 UI</div>
-                  <span class="badge b-success" style="align-self:flex-start"><i class="ti ti-git-pull-request" style="font-size:12px"></i>PR #86 已合入</span>
-                </div>
-                <div class="mb-card">
-                  <div class="mc-top"><span class="mono" style="color:var(--muted-foreground);font-size:11px">PAY-198</span><span class="badge b-evidence" style="font-size:10px">from-audit</span></div>
-                  <div style="font-weight:500">report 汇总缺 pow 字段</div>
-                  <span class="badge b-success" style="align-self:flex-start"><i class="ti ti-git-pull-request" style="font-size:12px"></i>PR #87 已合入</span>
-                </div>
-              </div>
-            </div>
-            <div>
-              <div class="group-label" style="margin-bottom:2px">sprint-3 实时合入流</div>
-              <div class="gitline">
-                <div class="git-row"><i class="ti ti-git-commit"></i><span class="sha">a41f9c2</span><span>merge PAY-204: 账单导出页 UI（squash）</span><span class="t">11:20</span></div>
-                <div class="git-row"><i class="ti ti-git-commit"></i><span class="sha">9d02e71</span><span>merge PAY-198: report 汇总补 pow 字段（squash）</span><span class="t">10:05</span></div>
-                <div class="git-row"><i class="ti ti-git-branch"></i><span class="sha">52b7aa0</span><span>创建 sprint-3 分支（基于 main）</span><span class="t">7-09</span></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ② 工作项表 -->
-          <section>
-            <div class="section-title" style="margin-bottom:8px"><i class="ti ti-clipboard-list" style="color:var(--muted-foreground)"></i>工作项<span class="mono" style="color:var(--muted-foreground);font-weight:400" data-fm-count="6">0</span></div>
-            <div class="card" style="overflow:hidden">
-              <table class="fd">
-                <thead><tr><th>Key</th><th>标题</th><th>阶段</th><th>运行信号</th><th>PR</th></tr></thead>
-                <tbody>
-                  <tr>
-                    <td class="mono" style="font-size:11.5px">PAY-201</td>
-                    <td style="font-weight:500"><a data-screen="s4-work-item.html">账单导出 CSV 接口</a></td>
-                    <td><span style="display:inline-flex;gap:5px;align-items:center"><span class="ring r-running fm-live"></span>实施</span></td>
-                    <td><span style="font-size:11.5px;color:var(--info)">dev · <span class="mono">3m42s</span></span></td>
-                    <td style="color:var(--muted-foreground)">—</td>
-                  </tr>
-                  <tr>
-                    <td class="mono" style="font-size:11.5px">PAY-202</td>
-                    <td style="font-weight:500"><a data-screen="s4-work-item.html">对账报表汇总页</a></td>
-                    <td><span style="display:inline-flex;gap:5px;align-items:center"><span class="ring r-queued"></span>实施</span></td>
-                    <td><span class="badge b-warning">等待 PAY-201</span></td>
-                    <td style="color:var(--muted-foreground)">—</td>
-                  </tr>
-                  <tr>
-                    <td class="mono" style="font-size:11.5px">PAY-203</td>
-                    <td style="font-weight:500"><a data-screen="s4-work-item.html" style="color:var(--brand)">金额四舍五入精度错误</a></td>
-                    <td><span style="display:inline-flex;gap:5px;align-items:center"><span class="st-icon err"><i class="ti ti-x"></i></span>实施</span></td>
-                    <td><span class="badge b-destructive">失败 · 待重派</span></td>
-                    <td style="color:var(--muted-foreground)">—</td>
-                  </tr>
-                  <tr>
-                    <td class="mono" style="font-size:11.5px">PAY-204</td>
-                    <td style="font-weight:500"><a data-screen="s4-work-item.html">账单导出页 UI</a></td>
-                    <td><span style="display:inline-flex;gap:5px;align-items:center"><span class="st-icon ok"><i class="ti ti-check"></i></span>测试</span></td>
-                    <td><span class="badge b-success">已合入</span></td>
-                    <td><a class="mono" data-screen="s7-run-detail.html" style="color:var(--brand);font-size:11.5px">#86</a></td>
-                  </tr>
-                  <tr>
-                    <td class="mono" style="font-size:11.5px">PAY-198</td>
-                    <td style="font-weight:500"><a data-screen="s4-work-item.html">report 汇总缺 pow 字段</a></td>
-                    <td><span style="display:inline-flex;gap:5px;align-items:center"><span class="ring r-review"></span>测试</span></td>
-                    <td><span class="badge b-info">verify 重跑中 · <span class="mono">1m08s</span></span></td>
-                    <td><a class="mono" data-screen="s7-run-detail.html" style="color:var(--brand);font-size:11.5px">#87</a></td>
-                  </tr>
-                  <tr>
-                    <td class="mono" style="font-size:11.5px">PAY-190</td>
-                    <td style="font-weight:500"><a data-screen="s4-work-item.html">导出格式调研 CSV vs XLSX</a></td>
-                    <td><span style="display:inline-flex;gap:5px;align-items:center"><span class="st-icon ok"><i class="ti ti-check"></i></span>交付</span></td>
-                    <td><span class="chip" style="font-size:11px">spike-report v1</span></td>
-                    <td style="color:var(--muted-foreground)">—</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <!-- ③ 产物库 -->
-          <section>
-            <div class="section-title" style="margin-bottom:8px"><i class="ti ti-file-text" style="color:var(--muted-foreground)"></i>产物库<span class="mono" style="color:var(--muted-foreground);font-weight:400" data-fm-count="9">0</span></div>
-            <div class="card card-pad" style="display:flex;flex-direction:column;gap:10px">
-              <div>
-                <div class="group-label">规划</div>
-                <div class="art-row"><i class="ti ti-file-text"></i><span style="font-weight:500">sprint-doc</span><span class="badge b-muted mono">v2</span><span class="badge b-brand"><i class="ti ti-user" style="font-size:12px"></i>human</span><span class="chip" title="human 富呈现（content 项目文档库）" style="font-size:10.5px"><i class="ti ti-book-2" style="font-size:12px"></i>content</span><button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--muted-foreground)"><i class="ti ti-git-compare" style="font-size:13px"></i>diff</button></div>
-                <div class="art-row"><i class="ti ti-file-text"></i><span style="font-weight:500">test-plan</span><span class="badge b-muted mono">v1</span><span class="badge b-brand"><i class="ti ti-user" style="font-size:12px"></i>human</span><span class="chip" title="human 富呈现（content 项目文档库）" style="font-size:10.5px"><i class="ti ti-book-2" style="font-size:12px"></i>content</span></div>
-              </div>
-              <div>
-                <div class="group-label">设计</div>
-                <div class="art-row"><i class="ti ti-layout-2"></i><span style="font-weight:500">ui-spec</span><span class="badge b-muted mono">v3</span><span class="badge b-brand"><i class="ti ti-user" style="font-size:12px"></i>human</span><a class="chip" style="margin-left:auto" data-screen="s3-ui-review.html"><i class="ti ti-external-link" style="font-size:12px"></i>design:dsg_42</a></div>
-                <div class="art-row"><i class="ti ti-file-text"></i><span style="font-weight:500">technical-design</span><span class="badge b-muted mono">v2</span><span class="badge b-agent"><i class="ti ti-robot" style="font-size:12px"></i>agent</span><span style="font-size:11.5px;color:var(--muted-foreground)">supersedes v1 · 评审修订</span></div>
-                <div class="art-row"><i class="ti ti-files"></i><span style="font-weight:500">briefs</span><span class="badge b-muted mono">5 份</span><span class="badge b-agent"><i class="ti ti-robot" style="font-size:12px"></i>agent</span><span style="font-size:11.5px;color:var(--muted-foreground)">Wave 1: 201/203/204 · Wave 2: 202</span></div>
-              </div>
-              <div>
-                <div class="group-label">验证</div>
-                <div class="art-row"><i class="ti ti-certificate" style="color:var(--evidence)"></i><span style="font-weight:500">verify-report</span><span class="badge b-muted mono">v1</span><span class="badge b-destructive">RED</span><span style="font-size:11.5px;color:var(--muted-foreground)">集成场景「/report 汇总」失败 · 已建 PAY-198</span></div>
-              </div>
-            </div>
-          </section>
-
-          <!-- ④ 审批记录 -->
-          <section>
-            <div class="section-title" style="margin-bottom:8px"><i class="ti ti-rubber-stamp" style="color:var(--muted-foreground)"></i>审批记录</div>
-            <div class="card card-pad">
-              <div class="gate-row"><span class="st-icon ok"><i class="ti ti-check"></i></span><span style="font-weight:500">plan-signoff</span><span class="badge b-success">已批准</span><span style="margin-left:auto;font-size:11.5px;color:var(--muted-foreground)">Steve · 7-08 14:02</span></div>
-              <div class="gate-row"><span class="st-icon ok"><i class="ti ti-check"></i></span><span style="font-weight:500">ui-signoff</span><span class="badge b-success">已批准</span><span style="margin-left:auto;font-size:11.5px;color:var(--muted-foreground)">Steve · 7-09 10:31</span></div>
-              <div class="gate-row"><span class="st-icon ok"><i class="ti ti-check"></i></span><span style="font-weight:500">design-signoff</span><span class="badge b-success">已批准</span><span style="margin-left:auto;font-size:11.5px;color:var(--muted-foreground)">Steve · 7-09 17:45</span></div>
-            </div>
-          </section>
-
-        </div>
-
-        <!-- 右栏 -->
-        <aside class="inspector">
-          <div class="insp-sec">
-            <div class="group-label" style="color:var(--brand)">Goal · 完成判据的锚</div>
-            <div style="font-size:12.5px;font-weight:500;line-height:1.5;margin-bottom:8px">商户可自助导出账单并与对账单一致</div>
-            <div style="display:flex;flex-direction:column;gap:5px;font-size:11.5px">
-              <span style="display:inline-flex;gap:6px;align-items:center"><span class="st-icon err sm"><i class="ti ti-x"></i></span><span class="mono">M1</span>导出与对账单逐行一致<span style="margin-left:auto;color:var(--destructive)">中间证据：S2 RED</span></span>
-              <span style="display:inline-flex;gap:6px;align-items:center"><span class="st-icon ok sm"><i class="ti ti-check"></i></span><span class="mono">M2</span>结算单 p95 低于 30s<span style="margin-left:auto;color:var(--success)">实测 22s</span></span>
-              <span style="display:inline-flex;gap:6px;align-items:center"><span class="ring r-pending" style="width:11px;height:11px"></span><span class="mono">M3</span>自助零人工介入<span style="margin-left:auto;color:var(--muted-foreground)">待 gap-analysis</span></span>
-            </div>
-            <div style="margin-top:8px;font-size:10.5px;color:var(--muted-foreground)">中间证据仅供观察；判定以 gap-analysis 回填的 MET/PARTIAL/UNMET 为准——sprint 完成由 Goal 判定，不由单子关完判定</div>
-          </div>
-          <div class="insp-sec">
-            <div class="group-label">Sprint</div>
-            <div class="proprow"><span class="pl">分支</span><span class="pv mono" style="font-size:11.5px">sprint-3</span></div>
-            <div class="proprow"><span class="pl">起止</span><span class="pv mono" style="font-size:11.5px">07-08 ~ 07-19</span></div>
-          </div>
-          <div class="insp-sec">
-            <div class="group-label">签核</div>
-            <div class="gate-row"><span class="st-icon ok"><i class="ti ti-check"></i></span>plan-signoff<span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)" class="mono">7-08</span></div>
-            <div class="gate-row"><span class="st-icon ok"><i class="ti ti-check"></i></span>ui-signoff<span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)" class="mono">7-09</span></div>
-            <div class="gate-row"><span class="st-icon ok"><i class="ti ti-check"></i></span>design-signoff<span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)" class="mono">7-09</span></div>
-          </div>
-          <div class="insp-sec">
-            <div class="group-label">健康门</div>
-            <div class="gate-row"><span class="hdot ok"></span>vLLM<span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)" class="mono">正常 · 42ms</span></div>
-            <div class="gate-row"><span class="hdot ok"></span>Claude Code<span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)">已登录</span></div>
-            <div class="gate-row"><span class="hdot warn"></span>Brain 槽<span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)" class="mono">1 / 2</span></div>
-          </div>
-          <div class="insp-sec">
-            <div class="group-label">执行负责</div>
-            <div style="display:flex;align-items:center;gap:9px">
-              <span class="avatar a-brain" style="width:26px;height:26px"><i class="ti ti-brain" style="font-size:14px"></i></span>
-              <div style="min-width:0">
-                <div style="font-weight:500;font-size:12.5px">Sprint 3 lead</div>
-                <div style="font-size:11px;color:var(--muted-foreground)">claude-code · sonnet-4-6</div>
-              </div>
-              <span class="badge b-info" style="margin-left:auto">running</span>
-              <a class="btn btn-ghost btn-sm" data-screen="s9-brain-console.html"><i class="ti ti-external-link"></i></a>
-            </div>
-          </div>
-          <div class="insp-sec">
-            <div class="group-label">度量摘要</div>
-            <svg viewBox="0 0 280 64" style="width:100%;height:64px">
-              <polyline points="0,6 40,10 80,18 120,22 160,34 200,40 240,50 280,56" fill="none" stroke="var(--border)" stroke-width="1.5" stroke-dasharray="4 3"/>
-              <polyline points="0,6 40,8 80,14 120,26 160,30 200,44 240,46" fill="none" stroke="var(--chart-1)" stroke-width="2"/>
-              <circle cx="240" cy="46" r="3" fill="var(--chart-1)"/>
-            </svg>
-            <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted-foreground)" class="mono"><span>燃尽 · 剩 2/6</span><span>7-08 至今</span></div>
-            <div class="divider" style="margin:8px 0"></div>
-            <div style="font-size:11.5px;color:var(--muted-foreground)">中位环节耗时</div>
-            <div class="mono" style="font-size:11.5px;margin-top:2px">dev 14m · qa 6m · review 9m · gate 4m</div>
-          </div>
-        </aside>
-      </div>
-    </div>
-  </main>
-</div>
-<style>[x-cloak]{display:none!important}</style>
-<script id="foundry-motion-js">
-  /* Foundry v3 motion runtime(零依赖) */
-  (function () {
-    var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    /* 低频页入场:一次性触发 */
-    if (!reduced && 'IntersectionObserver' in window) {
-      var io = new IntersectionObserver(function (es) {
-        es.forEach(function (e) {
-          if (e.isIntersecting) { e.target.classList.add('fm-in'); io.unobserve(e.target); }
-        });
-      }, { threshold: 0.15 });
-      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { io.observe(el); });
-    } else {
-      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { el.classList.add('fm-in'); });
-    }
-
-    /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
-    window.fmCountTo = function (el, target, opts) {
-      var dur = (opts && opts.duration) || 400;
-      var from = parseFloat((el.textContent || '0').replace(/[^0-9.-]/g, '')) || 0;
-      var fmt = (opts && opts.format) || function (v) { return Math.round(v).toLocaleString(); };
-      if (reduced || dur <= 0) { el.textContent = fmt(target); return; }
-      var t0 = performance.now();
-      function ease(t) { return 1 - Math.pow(1 - t, 3); } /* ≈ standard 曲线的收尾感 */
-      function tick(now) {
-        var p = Math.min(1, (now - t0) / dur);
-        el.textContent = fmt(from + (target - from) * ease(p));
-        if (p < 1) requestAnimationFrame(tick);
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Foundry · Sprint 3 驾驶舱</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css"
+    />
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"
+    ></script>
+    <style>
+      /* ============ Foundry tokens ============ */
+      :root {
+        --background: oklch(1 0 0);
+        --foreground: oklch(0.141 0.005 285.82);
+        --card: oklch(1 0 0);
+        --muted: oklch(0.967 0.001 286.38);
+        --muted-foreground: oklch(0.552 0.016 285.94);
+        --border: oklch(0.945 0.003 286.32);
+        --input: oklch(0.92 0.004 286.32);
+        --ring: oklch(0.705 0.015 286.07);
+        --primary: oklch(0.21 0.006 285.89);
+        --primary-foreground: oklch(0.985 0 0);
+        --brand: oklch(0.55 0.16 255);
+        --brand-foreground: oklch(0.985 0 0);
+        --success: oklch(0.55 0.16 145);
+        --warning: oklch(0.68 0.15 85);
+        --info: oklch(0.55 0.18 250);
+        --destructive: oklch(0.577 0.245 27.33);
+        --agent: oklch(0.55 0.14 300);
+        --evidence: oklch(0.48 0.1 180);
+        --chart-1: oklch(0.55 0.16 255);
+        --chart-2: oklch(0.65 0.13 255);
+        --chart-3: oklch(0.75 0.1 255);
+        --chart-4: oklch(0.84 0.07 255);
+        --chart-5: oklch(0.92 0.04 255);
+        --sidebar: oklch(0.985 0.001 286.38);
+        --radius: 10px;
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --radius-xl: 14px;
+        --panel: oklch(0.972 0.002 286.35);
+        --font-sans:
+          "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
       }
-      requestAnimationFrame(tick);
-    };
+      .dark {
+        --background: oklch(0.18 0.005 285.82);
+        --foreground: oklch(0.985 0 0);
+        --card: oklch(0.21 0.006 285.89);
+        --muted: oklch(0.274 0.006 286.03);
+        --muted-foreground: oklch(0.705 0.015 286.07);
+        --border: oklch(1 0 0/0.08);
+        --input: oklch(1 0 0/0.15);
+        --primary: oklch(0.92 0.004 286.32);
+        --primary-foreground: oklch(0.21 0.006 285.89);
+        --brand: oklch(0.65 0.16 255);
+        --success: oklch(0.65 0.14 145);
+        --warning: oklch(0.8 0.14 85);
+        --info: oklch(0.65 0.16 250);
+        --destructive: oklch(0.66 0.2 27);
+        --agent: oklch(0.68 0.13 300);
+        --evidence: oklch(0.62 0.09 180);
+        --chart-1: oklch(0.72 0.14 255);
+        --chart-2: oklch(0.62 0.13 255);
+        --chart-3: oklch(0.52 0.11 255);
+        --chart-4: oklch(0.42 0.09 255);
+        --chart-5: oklch(0.32 0.06 255);
+        --sidebar: oklch(0.16 0.005 285.82);
+        --panel: oklch(0.215 0.006 285.9); /*--panel-dark-done*/
+      }
+      /* ============ base ============ */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        font-family: var(--font-sans);
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--foreground);
+        background: var(--background);
+        -webkit-font-smoothing: antialiased;
+        text-autospace: ideograph-alpha ideograph-numeric;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+        background: none;
+        border: none;
+        cursor: pointer;
+      }
+      .mono {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: oklch(0 0 0/0.12);
+        border-radius: 3px;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: oklch(1 0 0/0.14);
+      }
+      i.ti {
+        font-size: 16px;
+        line-height: 1;
+        vertical-align: -2px;
+      }
+      .proto-bar {
+        position: sticky;
+        top: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 4px 10px;
+        background: oklch(0.18 0.01 260);
+        color: oklch(0.8 0.01 260);
+        font-size: 11px;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .proto-bar .pb-title {
+        font-weight: 600;
+        color: oklch(0.98 0 0);
+        margin-right: 8px;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .proto-bar a {
+        padding: 3px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .proto-bar a:hover {
+        background: oklch(1 0 0/0.1);
+      }
+      .proto-bar a.active {
+        background: var(--brand);
+        color: var(--brand-foreground);
+      }
+      .proto-bar .pb-theme {
+        margin-left: auto;
+        padding: 3px 8px;
+        border-radius: 6px;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+      .proto-bar .pb-theme:hover {
+        background: oklch(1 0 0/0.1);
+      }
+      .app {
+        display: flex;
+        height: calc(100vh - 27px);
+      }
+      .sidebar {
+        width: 232px;
+        flex-shrink: 0;
+        background: var(--sidebar);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        padding: 10px;
+        gap: 2px;
+        overflow-y: auto;
+      }
+      .sb-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px 10px;
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .sb-head .logo {
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        background: var(--brand);
+        color: var(--brand-foreground);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .sb-search {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 4px 8px;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        color: var(--muted-foreground);
+        font-size: 12px;
+        background: var(--card);
+      }
+      .sb-search kbd {
+        margin-left: auto;
+      }
+      .sb-group {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted-foreground);
+        padding: 12px 8px 4px;
+        font-weight: 600;
+      }
+      .sb-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 8px;
+        border-radius: var(--radius-md);
+        color: var(--foreground);
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .sb-item i {
+        font-size: 17px;
+        color: var(--muted-foreground);
+      }
+      .sb-item:hover {
+        background: oklch(0 0 0/0.045);
+      }
+      .dark .sb-item:hover {
+        background: oklch(1 0 0/0.06);
+      }
+      .sb-item.active {
+        background: color-mix(in oklch, var(--brand) 12%, transparent);
+        color: var(--brand);
+        font-weight: 500;
+      }
+      .sb-item.active i {
+        color: var(--brand);
+      }
+      .sb-item .count {
+        margin-left: auto;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted-foreground);
+      }
+      .sb-item .dot-badge {
+        margin-left: auto;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 5px;
+        border-radius: 8px;
+        background: var(--brand);
+        color: var(--brand-foreground);
+        font-size: 10px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+      }
+      .inset {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--background);
+      }
+      .page-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 24px 10px;
+      }
+      .page-header h1 {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .content {
+        flex: 1;
+        overflow: auto;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 12px;
+        border-radius: var(--radius-md);
+        font-size: 12.5px;
+        font-weight: 500;
+        border: 1px solid transparent;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+      .btn-primary:hover {
+        opacity: 0.9;
+      }
+      .btn-outline {
+        border-color: var(--border);
+        background: var(--card);
+      }
+      .btn-outline:hover {
+        background: var(--muted);
+      }
+      .btn-ghost:hover {
+        background: var(--muted);
+      }
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .btn-sm {
+        padding: 3px 8px;
+        font-size: 12px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11.5px;
+        font-weight: 500;
+        border: 1px solid var(--border);
+        background: var(--card);
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 7px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .badge.b-success {
+        background: color-mix(in oklch, var(--success) 14%, transparent);
+        color: var(--success);
+      }
+      .badge.b-warning {
+        background: color-mix(in oklch, var(--warning) 16%, transparent);
+        color: oklch(0.55 0.13 85);
+      }
+      .dark .badge.b-warning {
+        color: var(--warning);
+      }
+      .badge.b-info {
+        background: color-mix(in oklch, var(--info) 14%, transparent);
+        color: var(--info);
+      }
+      .badge.b-destructive {
+        background: color-mix(in oklch, var(--destructive) 12%, transparent);
+        color: var(--destructive);
+      }
+      .badge.b-agent {
+        background: color-mix(in oklch, var(--agent) 12%, transparent);
+        color: var(--agent);
+      }
+      .badge.b-brand {
+        background: color-mix(in oklch, var(--brand) 12%, transparent);
+        color: var(--brand);
+      }
+      .badge.b-muted {
+        background: var(--muted);
+        color: var(--muted-foreground);
+      }
+      .badge.b-evidence {
+        background: color-mix(in oklch, var(--evidence) 12%, transparent);
+        color: var(--evidence);
+      }
+      kbd {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        padding: 1px 5px;
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        background: var(--muted);
+        color: var(--muted-foreground);
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+      .card-pad {
+        padding: 14px 16px;
+      }
+      .section-title {
+        font-size: 13px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .group-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted-foreground);
+        font-weight: 600;
+      }
+      .divider {
+        height: 1px;
+        background: var(--border);
+      }
+      .ring {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        display: inline-block;
+        position: relative;
+      }
+      .st-icon {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        vertical-align: -2px;
+        color: #fff;
+      }
+      .st-icon i {
+        font-size: 10px;
+        line-height: 1;
+        display: block;
+      }
+      .st-icon.sm {
+        width: 12px;
+        height: 12px;
+      }
+      .st-icon.sm i {
+        font-size: 8.5px;
+      }
+      .st-icon.lg {
+        width: 18px;
+        height: 18px;
+      }
+      .st-icon.lg i {
+        font-size: 12.5px;
+      }
+      .st-icon.ok {
+        background: var(--success);
+      }
+      .st-icon.err {
+        background: var(--destructive);
+      }
+      .st-icon.warn {
+        background: var(--warning);
+      }
+      .st-icon.inf {
+        background: var(--info);
+      }
+      .st-icon.mut {
+        background: var(--muted-foreground);
+      }
+      .runbadge .st-icon {
+        width: 11px;
+        height: 11px;
+      }
+      .runbadge .st-icon i {
+        font-size: 8px;
+      }
+      .ring.r-pending {
+        border: 1.6px dashed var(--muted-foreground);
+      }
+      .ring.r-queued {
+        border: 1.6px solid var(--warning);
+      }
+      .ring.r-queued::after {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border-radius: 50%;
+        background: var(--warning);
+      }
+      .ring.r-running {
+        border: 1.6px solid var(--info);
+        background: conic-gradient(var(--info) 0 50%, transparent 50% 100%);
+      }
+      .ring.r-review {
+        border: 1.6px solid var(--info);
+        background: conic-gradient(var(--info) 0 75%, transparent 75% 100%);
+      }
+      .ring.r-gate {
+        border: 1.6px solid var(--warning);
+      }
+      .ring.r-gate::after {
+        content: "";
+        position: absolute;
+        left: 5.5px;
+        top: 3px;
+        width: 1.8px;
+        height: 7px;
+        background: var(--warning);
+      }
+      .ring.r-skipped {
+        border: 1.6px solid var(--muted-foreground);
+        background: linear-gradient(
+          135deg,
+          transparent 45%,
+          var(--muted-foreground) 45%,
+          var(--muted-foreground) 55%,
+          transparent 55%
+        );
+      }
+      .pbars {
+        display: inline-flex;
+        gap: 1.5px;
+        align-items: flex-end;
+        height: 12px;
+      }
+      .pbars span {
+        width: 3px;
+        border-radius: 1px;
+        background: var(--border);
+      }
+      .pbars span:nth-child(1) {
+        height: 4px;
+      }
+      .pbars span:nth-child(2) {
+        height: 6.5px;
+      }
+      .pbars span:nth-child(3) {
+        height: 9px;
+      }
+      .pbars span:nth-child(4) {
+        height: 12px;
+      }
+      .pbars.p0 span {
+        background: var(--destructive);
+      }
+      .pbars.p1 span:nth-child(-n + 3) {
+        background: oklch(0.55 0.13 85);
+      }
+      .pbars.p2 span:nth-child(-n + 2) {
+        background: var(--info);
+      }
+      .pbars.p3 span:nth-child(1) {
+        background: var(--muted-foreground);
+      }
+      .avatar {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--brand);
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .avatar.a-agent {
+        border-radius: 6px;
+        background: color-mix(in oklch, var(--agent) 15%, transparent);
+        color: var(--agent);
+        border: 1px solid color-mix(in oklch, var(--agent) 40%, transparent);
+      }
+      .avatar.a-brain {
+        border-radius: 6px;
+        background: color-mix(in oklch, var(--brand) 15%, transparent);
+        color: var(--brand);
+        border: 1px solid color-mix(in oklch, var(--brand) 40%, transparent);
+      }
+      table.fd {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12.5px;
+      }
+      table.fd th {
+        text-align: left;
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted-foreground);
+        font-weight: 600;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      table.fd td {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+      table.fd tr:hover td {
+        background: oklch(0 0 0/0.02);
+      }
+      .dark table.fd tr:hover td {
+        background: oklch(1 0 0/0.03);
+      }
+      .empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 40px;
+        color: var(--muted-foreground);
+      }
+      .empty .e-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+      }
+      /* ============ 本屏 ============ */
+      .phase-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 24px 12px;
+        overflow-x: auto;
+      }
+      .phase {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted-foreground);
+        white-space: nowrap;
+      }
+      .phase.done {
+        color: var(--foreground);
+      }
+      .phase.active {
+        color: var(--info);
+        font-weight: 600;
+      }
+      .phase-link {
+        width: 26px;
+        height: 2px;
+        border-radius: 1px;
+        background: var(--border);
+        flex-shrink: 0;
+      }
+      .phase-link.done {
+        background: var(--success);
+      }
+      .cockpit {
+        display: flex;
+        gap: 20px;
+        padding: 4px 24px 32px;
+        align-items: flex-start;
+      }
+      .ck-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .inspector {
+        width: 320px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 8px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-xl);
+        padding: 2px 16px 6px;
+      }
+      /* 侧栏扁平分组：单层容器，节间用 border-top 分隔，不再嵌套完整卡片 */
+      .insp-sec {
+        padding: 18px 0 14px;
+        border-top: 1px solid var(--border);
+      }
+      .insp-sec .group-label {
+        display: block;
+        margin-bottom: 9px;
+      }
+      .insp-sec:first-child {
+        border-top: none;
+        padding-top: 14px;
+        padding-bottom: 18px;
+      }
+      .proprow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 6px 0;
+        font-size: 12.5px;
+      }
+      .proprow .pl {
+        color: var(--muted-foreground);
+        font-size: 12px;
+        flex-shrink: 0;
+      }
+      .proprow .pv {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        text-align: right;
+        min-width: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .miniboard {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 12px;
+      }
+      .mb-col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .mb-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--muted-foreground);
+        font-weight: 600;
+      }
+      .mb-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 8px 10px;
+        background: var(--background);
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        font-size: 12px;
+      }
+      .mb-card .mc-top {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .gitline {
+        display: flex;
+        flex-direction: column;
+      }
+      .git-row {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+      }
+      .git-row:last-child {
+        border-bottom: none;
+      }
+      .git-row i {
+        color: var(--muted-foreground);
+        font-size: 14px;
+      }
+      .git-row .sha {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--brand);
+      }
+      .git-row .t {
+        margin-left: auto;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted-foreground);
+      }
+      .art-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 12.5px;
+      }
+      .art-row:last-child {
+        border-bottom: none;
+      }
+      .art-row i {
+        color: var(--muted-foreground);
+        font-size: 15px;
+      }
+      .gate-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 27px;
+        padding: 3px 0;
+        font-size: 12.5px;
+      }
+      .hdot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+      }
+      .hdot.ok {
+        background: var(--success);
+      }
+      .hdot.warn {
+        background: var(--warning);
+      }
+      .hdot.down {
+        background: var(--destructive);
+      }
+    </style>
+    <style id="foundry-motion">
+      /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
+      :root {
+        /* 一次性动效时长梯度 */
+        --fm-dur-1: 120ms; /* 微反馈:hover、图标切换 */
+        --fm-dur-2: 240ms; /* 小型:按钮/开关状态、Toast、菜单 */
+        --fm-dur-3: 400ms; /* 中型:对话框 enter、完成打勾、区块 reveal */
+        --fm-dur-4: 700ms; /* 大型:庆祝时刻、欢迎/空状态插画 */
+        /* 氛围循环档(持续存在感,允许慢) */
+        --fm-ambient-1: 1600ms; /* 活跃脉动 */
+        --fm-ambient-2: 2500ms; /* thinking 扫光 */
+        --fm-ambient-3: 3200ms; /* 描边光束(仅单一 CTA 级场景) */
+        /* 曲线 */
+        --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1); /* 一切常规过渡 */
+        --fm-ease-enter: cubic-bezier(0.16, 1, 0.3, 1); /* 进场从容 */
+        --fm-ease-exit: cubic-bezier(0.7, 0, 0.84, 0); /* 离场干脆 */
+        --fm-ease-bounce: cubic-bezier(0.5, 1.5, 0.4, 1); /* 仅庆祝时刻 */
+        /* 位移与缩放(工具产品克制档) */
+        --fm-shift-1: 4px;
+        --fm-shift-2: 8px;
+        --fm-scale-hover: 1.02;
+        --fm-scale-active: 0.98;
+      }
 
-    /* 原型演示辅助:data-fm-count 声明式初始化 */
-    document.querySelectorAll('[data-fm-count]').forEach(function (el) {
-      var v = parseFloat(el.getAttribute('data-fm-count'));
-      if (!isNaN(v)) window.fmCountTo(el, v);
-    });
-  })();
-</script>
-</body>
+      /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
+      @keyframes fm-text-shimmer {
+        0% {
+          background-position: 200% 0;
+        }
+        100% {
+          background-position: -200% 0;
+        }
+      }
+      .fm-thinking {
+        background-image: linear-gradient(
+          90deg,
+          var(--muted-foreground) 0%,
+          var(--muted-foreground) 35%,
+          var(--foreground) 50%,
+          var(--muted-foreground) 65%,
+          var(--muted-foreground) 100%
+        );
+        background-size: 200% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
+      }
+
+      /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
+      @keyframes fm-impulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0
+            color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent);
+        }
+        50% {
+          box-shadow: 0 0 0 4px
+            color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent);
+        }
+      }
+      .fm-live {
+        animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite;
+      }
+
+      /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
+      @keyframes fm-complete-badge {
+        0% {
+          transform: scale(0);
+        }
+        60% {
+          transform: scale(1.12);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+      @keyframes fm-complete-check {
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+      .fm-complete {
+        animation: fm-complete-badge 500ms var(--fm-ease-bounce) both;
+      }
+      .fm-complete svg path,
+      .fm-complete svg polyline {
+        stroke-dasharray: 48;
+        stroke-dashoffset: 48;
+        animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
+      }
+
+      /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
+      @keyframes fm-nav-sweep {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(400%);
+        }
+      }
+      .fm-nav-progress {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 9999;
+        display: none;
+      }
+      .fm-nav-progress[data-active="true"] {
+        display: block;
+      }
+      .fm-nav-progress::before {
+        content: "";
+        display: block;
+        height: 100%;
+        width: 25%;
+        background: var(--primary);
+        animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
+      }
+
+      /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
+      [data-fm-reveal] {
+        opacity: 0;
+        transform: translateY(var(--fm-shift-1));
+        transition:
+          opacity var(--fm-dur-3) var(--fm-ease-enter),
+          transform var(--fm-dur-3) var(--fm-ease-enter);
+      }
+      [data-fm-reveal].fm-in {
+        opacity: 1;
+        transform: none;
+      }
+      /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
+      .fm-scroll [data-fm-reveal] {
+        transform: none;
+      }
+
+      /* ===== 通用交互态统一 ===== */
+      .fm-hover-lift {
+        transition:
+          transform var(--fm-dur-2) var(--fm-ease-standard),
+          box-shadow var(--fm-dur-2) var(--fm-ease-standard);
+      }
+      .fm-hover-lift:hover {
+        transform: translateY(calc(var(--fm-shift-1) * -1));
+      }
+      .fm-hover-lift:active {
+        transform: scale(var(--fm-scale-active));
+      }
+      .fm-underline {
+        background-image: linear-gradient(currentColor, currentColor);
+        background-size: 0% 1px;
+        background-position: 0 100%;
+        background-repeat: no-repeat;
+        transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
+      }
+      .fm-underline:hover {
+        background-size: 100% 1px;
+      }
+      /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
+      .fm-overlay-enter {
+        animation-duration: var(--fm-dur-3);
+        animation-timing-function: var(--fm-ease-enter);
+      }
+      .fm-overlay-exit {
+        animation-duration: var(--fm-dur-2);
+        animation-timing-function: var(--fm-ease-exit);
+      }
+      /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
+      [data-fm-gesturing="true"],
+      [data-fm-gesturing="true"] * {
+        transition: none !important;
+      }
+
+      /* ===== 全量降级 ===== */
+      @media (prefers-reduced-motion: reduce) {
+        .fm-thinking,
+        .fm-live,
+        .fm-complete,
+        .fm-complete svg path,
+        .fm-complete svg polyline,
+        .fm-nav-progress::before {
+          animation: none !important;
+        }
+        /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
+        .fm-complete svg path,
+        .fm-complete svg polyline {
+          stroke-dashoffset: 0;
+        }
+        .fm-thinking {
+          color: var(--muted-foreground);
+          background: none;
+        }
+        [data-fm-reveal] {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+        .fm-hover-lift,
+        .fm-underline,
+        .fm-overlay-enter,
+        .fm-overlay-exit {
+          transition: none !important;
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="proto-bar">
+      <span class="pb-title"
+        ><i class="ti ti-flame"></i>Foundry · SDLC 原型</span
+      >
+      <a data-screen="index.html">总览</a>
+      <a data-screen="s1-tracker-board.html">看板</a>
+      <a data-screen="s2-sprint-studio.html">规划工作台</a>
+      <a data-screen="s3-ui-review.html">UI 评审</a>
+      <a data-screen="s4-work-item.html">工作项</a>
+      <a data-screen="s5-inbox.html">收件箱</a>
+      <a data-screen="s6-sprint-cockpit.html" class="active">Sprint 驾驶舱</a>
+      <a data-screen="s7-run-detail.html">运行详情</a>
+      <a data-screen="s8-workflow-library.html">工作流库</a>
+      <a data-screen="s9-brain-console.html">Brain</a>
+      <a data-screen="s10-health-insights.html">健康与洞察</a>
+      <button
+        class="pb-theme"
+        onclick="document.documentElement.classList.toggle('dark')"
+      >
+        <i class="ti ti-moon"></i>主题
+      </button>
+    </nav>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sb-head">
+          <span class="logo"
+            ><i class="ti ti-clipboard-list" style="font-size: 13px"></i></span
+          >Tracker
+        </div>
+        <div class="sb-search">
+          <i class="ti ti-search"></i>搜索<kbd>⌘K</kbd>
+        </div>
+        <a class="sb-item"><i class="ti ti-message-circle"></i>问 Tracker</a>
+        <a class="sb-item" data-screen="s5-inbox.html"
+          ><i class="ti ti-inbox"></i>收件箱<span class="dot-badge">3</span></a
+        >
+        <div class="sb-group">工作</div>
+        <a class="sb-item" data-screen="s1-tracker-board.html"
+          ><i class="ti ti-layout-kanban"></i>看板</a
+        >
+        <a class="sb-item active" data-screen="s6-sprint-cockpit.html"
+          ><i class="ti ti-run"></i>Sprint</a
+        >
+        <a class="sb-item"
+          ><i class="ti ti-list-numbers"></i>队列<span class="count">4</span></a
+        >
+        <a class="sb-item"><i class="ti ti-chart-dots"></i>度量</a>
+        <div class="sb-group">项目</div>
+        <a class="sb-item"
+          ><i class="ti ti-folder"></i>支付中心<span class="count">PAY</span></a
+        >
+        <div style="margin-top: auto"></div>
+        <div class="divider" style="margin: 8px 4px"></div>
+        <a class="sb-item"><i class="ti ti-users"></i>Team</a>
+        <a class="sb-item"><i class="ti ti-settings"></i>设置</a>
+      </aside>
+      <main class="inset">
+        <div class="page-header">
+          <span
+            class="mono"
+            style="color: var(--muted-foreground); font-size: 12px"
+            >Sprint 3</span
+          >
+          <h1>计费对账与账单导出</h1>
+          <span class="badge b-info">executing</span>
+          <div
+            style="
+              margin-left: auto;
+              display: flex;
+              gap: 8px;
+              align-items: center;
+            "
+          >
+            <a class="btn btn-outline" data-screen="s2-sprint-studio.html"
+              ><i class="ti ti-layout-2"></i>进入规划工作台</a
+            >
+            <span
+              style="
+                display: inline-flex;
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 2px;
+              "
+            >
+              <button
+                class="btn btn-primary"
+                disabled
+                title="缺项：全部工作项合入（4/6）；verify GREEN（当前 S2 RED）；其余 3 条判据已满足——点击查看完整 GateBanner"
+              >
+                <i class="ti ti-player-track-next"></i>推进到 verifying · 判据
+                2/5
+              </button>
+            </span>
+          </div>
+        </div>
+        <!-- 八相位时间线 -->
+        <div class="phase-bar">
+          <span class="phase done"
+            ><span class="st-icon ok"><i class="ti ti-check"></i></span
+            >planning</span
+          >
+          <span class="phase-link done"></span>
+          <span class="phase done"
+            ><span class="st-icon ok"><i class="ti ti-check"></i></span
+            >designing</span
+          >
+          <span class="phase-link done"></span>
+          <span class="phase active"
+            ><span class="ring r-running fm-live"></span>executing</span
+          >
+          <span class="phase-link"></span>
+          <span class="phase"
+            ><span class="ring r-pending"></span>verifying</span
+          >
+          <span class="phase-link"></span>
+          <span
+            class="phase"
+            title="= gap-analysis（Phase H）：按 Goal 判 NO_GAPS 才可晋升合入 base"
+            ><span class="ring r-pending"></span>目标审计</span
+          >
+          <span class="phase-link"></span>
+          <span class="phase"
+            ><span class="ring r-pending"></span>promoting</span
+          >
+          <span class="phase-link"></span>
+          <span class="phase"
+            ><span class="ring r-pending"></span>storytelling</span
+          >
+          <span class="phase-link"></span>
+          <span class="phase"><span class="ring r-pending"></span>done</span>
+        </div>
+        <div class="content">
+          <div class="cockpit">
+            <div class="ck-main">
+              <!-- ① executing 相位面板 -->
+              <div
+                class="card card-pad"
+                style="display: flex; flex-direction: column; gap: 14px"
+              >
+                <div class="section-title">
+                  <i class="ti ti-player-play" style="color: var(--info)"></i
+                  >实施进行中
+                  <span class="chip" style="margin-left: auto"
+                    ><i
+                      class="ti ti-heart-rate-monitor"
+                      style="font-size: 13px"
+                    ></i
+                    >健康门通过 · 10:42</span
+                  >
+                </div>
+                <div class="miniboard">
+                  <div class="mb-col">
+                    <div class="mb-head">
+                      <span
+                        class="ring r-queued"
+                        style="width: 10px; height: 10px"
+                      ></span
+                      >排队<span class="mono" data-fm-count="1">0</span>
+                    </div>
+                    <div class="mb-card">
+                      <div class="mc-top">
+                        <span
+                          class="mono"
+                          style="
+                            color: var(--muted-foreground);
+                            font-size: 11px;
+                          "
+                          >PAY-202</span
+                        ><span class="pbars p1"
+                          ><span></span><span></span><span></span><span></span
+                        ></span>
+                      </div>
+                      <div style="font-weight: 500">对账报表汇总页</div>
+                      <span
+                        class="badge b-warning"
+                        style="align-self: flex-start"
+                        ><i class="ti ti-hourglass" style="font-size: 12px"></i
+                        >等待 PAY-201</span
+                      >
+                    </div>
+                  </div>
+                  <div class="mb-col">
+                    <div class="mb-head">
+                      <span
+                        class="ring r-running fm-live"
+                        style="width: 10px; height: 10px"
+                      ></span
+                      >运行中<span class="mono" data-fm-count="1">0</span>
+                    </div>
+                    <div
+                      class="mb-card"
+                      style="
+                        border-color: color-mix(
+                          in oklch,
+                          var(--info) 40%,
+                          var(--border)
+                        );
+                      "
+                    >
+                      <div class="mc-top">
+                        <span
+                          class="mono"
+                          style="
+                            color: var(--muted-foreground);
+                            font-size: 11px;
+                          "
+                          >PAY-201</span
+                        ><span class="pbars p0"
+                          ><span></span><span></span><span></span><span></span
+                        ></span>
+                      </div>
+                      <div style="font-weight: 500">账单导出 CSV 接口</div>
+                      <span
+                        style="
+                          display: flex;
+                          align-items: center;
+                          gap: 5px;
+                          font-size: 11.5px;
+                          color: var(--info);
+                        "
+                        ><span
+                          class="ring r-running fm-live"
+                          style="width: 10px; height: 10px"
+                        ></span
+                        ><span class="fm-thinking">dev 运行中</span
+                        ><span
+                          class="mono"
+                          style="color: var(--muted-foreground)"
+                          >3m42s</span
+                        ></span
+                      >
+                    </div>
+                  </div>
+                  <div class="mb-col">
+                    <div class="mb-head">
+                      <span class="st-icon ok sm"
+                        ><i class="ti ti-check"></i></span
+                      >已合入<span class="mono" data-fm-count="2">0</span>
+                    </div>
+                    <div class="mb-card">
+                      <div class="mc-top">
+                        <span
+                          class="mono"
+                          style="
+                            color: var(--muted-foreground);
+                            font-size: 11px;
+                          "
+                          >PAY-204</span
+                        >
+                      </div>
+                      <div style="font-weight: 500">账单导出页 UI</div>
+                      <span
+                        class="badge b-success"
+                        style="align-self: flex-start"
+                        ><i
+                          class="ti ti-git-pull-request"
+                          style="font-size: 12px"
+                        ></i
+                        >PR #86 已合入</span
+                      >
+                    </div>
+                    <div class="mb-card">
+                      <div class="mc-top">
+                        <span
+                          class="mono"
+                          style="
+                            color: var(--muted-foreground);
+                            font-size: 11px;
+                          "
+                          >PAY-198</span
+                        ><span class="badge b-evidence" style="font-size: 10px"
+                          >from-audit</span
+                        >
+                      </div>
+                      <div style="font-weight: 500">report 汇总缺 pow 字段</div>
+                      <span
+                        class="badge b-success"
+                        style="align-self: flex-start"
+                        ><i
+                          class="ti ti-git-pull-request"
+                          style="font-size: 12px"
+                        ></i
+                        >PR #87 已合入</span
+                      >
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div class="group-label" style="margin-bottom: 2px">
+                    sprint-3 实时合入流
+                  </div>
+                  <div class="gitline">
+                    <div class="git-row">
+                      <i class="ti ti-git-commit"></i
+                      ><span class="sha">a41f9c2</span
+                      ><span>merge PAY-204: 账单导出页 UI（squash）</span
+                      ><span class="t">11:20</span>
+                    </div>
+                    <div class="git-row">
+                      <i class="ti ti-git-commit"></i
+                      ><span class="sha">9d02e71</span
+                      ><span
+                        >merge PAY-198: report 汇总补 pow 字段（squash）</span
+                      ><span class="t">10:05</span>
+                    </div>
+                    <div class="git-row">
+                      <i class="ti ti-git-branch"></i
+                      ><span class="sha">52b7aa0</span
+                      ><span>创建 sprint-3 分支（基于 main）</span
+                      ><span class="t">7-09</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ② 工作项表 -->
+              <section>
+                <div class="section-title" style="margin-bottom: 8px">
+                  <i
+                    class="ti ti-clipboard-list"
+                    style="color: var(--muted-foreground)"
+                  ></i
+                  >工作项<span
+                    class="mono"
+                    style="color: var(--muted-foreground); font-weight: 400"
+                    data-fm-count="6"
+                    >0</span
+                  >
+                </div>
+                <div class="card" style="overflow: hidden">
+                  <table class="fd">
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>标题</th>
+                        <th>阶段</th>
+                        <th>运行信号</th>
+                        <th>PR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="mono" style="font-size: 11.5px">PAY-201</td>
+                        <td style="font-weight: 500">
+                          <a data-screen="s4-work-item.html"
+                            >账单导出 CSV 接口</a
+                          >
+                        </td>
+                        <td>
+                          <span
+                            style="
+                              display: inline-flex;
+                              gap: 5px;
+                              align-items: center;
+                            "
+                            ><span class="ring r-running fm-live"></span
+                            >实施</span
+                          >
+                        </td>
+                        <td>
+                          <span style="font-size: 11.5px; color: var(--info)"
+                            >dev · <span class="mono">3m42s</span></span
+                          >
+                        </td>
+                        <td style="color: var(--muted-foreground)">—</td>
+                      </tr>
+                      <tr>
+                        <td class="mono" style="font-size: 11.5px">PAY-202</td>
+                        <td style="font-weight: 500">
+                          <a data-screen="s4-work-item.html">对账报表汇总页</a>
+                        </td>
+                        <td>
+                          <span
+                            style="
+                              display: inline-flex;
+                              gap: 5px;
+                              align-items: center;
+                            "
+                            ><span class="ring r-queued"></span>实施</span
+                          >
+                        </td>
+                        <td>
+                          <span class="badge b-warning">等待 PAY-201</span>
+                        </td>
+                        <td style="color: var(--muted-foreground)">—</td>
+                      </tr>
+                      <tr>
+                        <td class="mono" style="font-size: 11.5px">PAY-203</td>
+                        <td style="font-weight: 500">
+                          <a
+                            data-screen="s4-work-item.html"
+                            style="color: var(--brand)"
+                            >金额四舍五入精度错误</a
+                          >
+                        </td>
+                        <td>
+                          <span
+                            style="
+                              display: inline-flex;
+                              gap: 5px;
+                              align-items: center;
+                            "
+                            ><span class="st-icon err"
+                              ><i class="ti ti-x"></i></span
+                            >实施</span
+                          >
+                        </td>
+                        <td>
+                          <span class="badge b-destructive">失败 · 待重派</span>
+                        </td>
+                        <td style="color: var(--muted-foreground)">—</td>
+                      </tr>
+                      <tr>
+                        <td class="mono" style="font-size: 11.5px">PAY-204</td>
+                        <td style="font-weight: 500">
+                          <a data-screen="s4-work-item.html">账单导出页 UI</a>
+                        </td>
+                        <td>
+                          <span
+                            style="
+                              display: inline-flex;
+                              gap: 5px;
+                              align-items: center;
+                            "
+                            ><span class="st-icon ok"
+                              ><i class="ti ti-check"></i></span
+                            >测试</span
+                          >
+                        </td>
+                        <td><span class="badge b-success">已合入</span></td>
+                        <td>
+                          <a
+                            class="mono"
+                            data-screen="s7-run-detail.html"
+                            style="color: var(--brand); font-size: 11.5px"
+                            >#86</a
+                          >
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="mono" style="font-size: 11.5px">PAY-198</td>
+                        <td style="font-weight: 500">
+                          <a data-screen="s4-work-item.html"
+                            >report 汇总缺 pow 字段</a
+                          >
+                        </td>
+                        <td>
+                          <span
+                            style="
+                              display: inline-flex;
+                              gap: 5px;
+                              align-items: center;
+                            "
+                            ><span class="ring r-review"></span>测试</span
+                          >
+                        </td>
+                        <td>
+                          <span class="badge b-info"
+                            >verify 重跑中 ·
+                            <span class="mono">1m08s</span></span
+                          >
+                        </td>
+                        <td>
+                          <a
+                            class="mono"
+                            data-screen="s7-run-detail.html"
+                            style="color: var(--brand); font-size: 11.5px"
+                            >#87</a
+                          >
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="mono" style="font-size: 11.5px">PAY-190</td>
+                        <td style="font-weight: 500">
+                          <a data-screen="s4-work-item.html"
+                            >导出格式调研 CSV vs XLSX</a
+                          >
+                        </td>
+                        <td>
+                          <span
+                            style="
+                              display: inline-flex;
+                              gap: 5px;
+                              align-items: center;
+                            "
+                            ><span class="st-icon ok"
+                              ><i class="ti ti-check"></i></span
+                            >交付</span
+                          >
+                        </td>
+                        <td>
+                          <span class="chip" style="font-size: 11px"
+                            >spike-report v1</span
+                          >
+                        </td>
+                        <td style="color: var(--muted-foreground)">—</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <!-- ③ 产物库 -->
+              <section>
+                <div class="section-title" style="margin-bottom: 8px">
+                  <i
+                    class="ti ti-file-text"
+                    style="color: var(--muted-foreground)"
+                  ></i
+                  >产物库<span
+                    class="mono"
+                    style="color: var(--muted-foreground); font-weight: 400"
+                    data-fm-count="9"
+                    >0</span
+                  >
+                </div>
+                <div
+                  class="card card-pad"
+                  style="display: flex; flex-direction: column; gap: 10px"
+                >
+                  <div>
+                    <div class="group-label">规划</div>
+                    <div class="art-row">
+                      <i class="ti ti-file-text"></i
+                      ><span style="font-weight: 500">sprint-doc</span
+                      ><span class="badge b-muted mono">v2</span
+                      ><span class="badge b-brand"
+                        ><i class="ti ti-user" style="font-size: 12px"></i
+                        >human</span
+                      ><span
+                        class="chip"
+                        title="human 富呈现（content 项目文档库）"
+                        style="font-size: 10.5px"
+                        ><i class="ti ti-book-2" style="font-size: 12px"></i
+                        >content</span
+                      ><button
+                        class="btn btn-ghost btn-sm"
+                        style="
+                          margin-left: auto;
+                          color: var(--muted-foreground);
+                        "
+                      >
+                        <i class="ti ti-git-compare" style="font-size: 13px"></i
+                        >diff
+                      </button>
+                    </div>
+                    <div class="art-row">
+                      <i class="ti ti-file-text"></i
+                      ><span style="font-weight: 500">test-plan</span
+                      ><span class="badge b-muted mono">v1</span
+                      ><span class="badge b-brand"
+                        ><i class="ti ti-user" style="font-size: 12px"></i
+                        >human</span
+                      ><span
+                        class="chip"
+                        title="human 富呈现（content 项目文档库）"
+                        style="font-size: 10.5px"
+                        ><i class="ti ti-book-2" style="font-size: 12px"></i
+                        >content</span
+                      >
+                    </div>
+                  </div>
+                  <div>
+                    <div class="group-label">设计</div>
+                    <div class="art-row">
+                      <i class="ti ti-layout-2"></i
+                      ><span style="font-weight: 500">ui-spec</span
+                      ><span class="badge b-muted mono">v3</span
+                      ><span class="badge b-brand"
+                        ><i class="ti ti-user" style="font-size: 12px"></i
+                        >human</span
+                      ><a
+                        class="chip"
+                        style="margin-left: auto"
+                        data-screen="s3-ui-review.html"
+                        ><i
+                          class="ti ti-external-link"
+                          style="font-size: 12px"
+                        ></i
+                        >design:dsg_42</a
+                      >
+                    </div>
+                    <div class="art-row">
+                      <i class="ti ti-file-text"></i
+                      ><span style="font-weight: 500">technical-design</span
+                      ><span class="badge b-muted mono">v2</span
+                      ><span class="badge b-agent"
+                        ><i class="ti ti-robot" style="font-size: 12px"></i
+                        >agent</span
+                      ><span
+                        style="
+                          font-size: 11.5px;
+                          color: var(--muted-foreground);
+                        "
+                        >supersedes v1 · 评审修订</span
+                      >
+                    </div>
+                    <div class="art-row">
+                      <i class="ti ti-files"></i
+                      ><span style="font-weight: 500">briefs</span
+                      ><span class="badge b-muted mono">5 份</span
+                      ><span class="badge b-agent"
+                        ><i class="ti ti-robot" style="font-size: 12px"></i
+                        >agent</span
+                      ><span
+                        style="
+                          font-size: 11.5px;
+                          color: var(--muted-foreground);
+                        "
+                        >Wave 1: 201/203/204 · Wave 2: 202</span
+                      >
+                    </div>
+                  </div>
+                  <div>
+                    <div class="group-label">验证</div>
+                    <div class="art-row">
+                      <i
+                        class="ti ti-certificate"
+                        style="color: var(--evidence)"
+                      ></i
+                      ><span style="font-weight: 500">verify-report</span
+                      ><span class="badge b-muted mono">v1</span
+                      ><span class="badge b-destructive">RED</span
+                      ><span
+                        style="
+                          font-size: 11.5px;
+                          color: var(--muted-foreground);
+                        "
+                        >集成场景「/report 汇总」失败 · 已建 PAY-198</span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ④ 审批记录 -->
+              <section>
+                <div class="section-title" style="margin-bottom: 8px">
+                  <i
+                    class="ti ti-rubber-stamp"
+                    style="color: var(--muted-foreground)"
+                  ></i
+                  >审批记录
+                </div>
+                <div class="card card-pad">
+                  <div class="gate-row">
+                    <span class="st-icon ok"><i class="ti ti-check"></i></span
+                    ><span style="font-weight: 500">plan-signoff</span
+                    ><span class="badge b-success">已批准</span
+                    ><span
+                      style="
+                        margin-left: auto;
+                        font-size: 11.5px;
+                        color: var(--muted-foreground);
+                      "
+                      >Steve · 7-08 14:02</span
+                    >
+                  </div>
+                  <div class="gate-row">
+                    <span class="st-icon ok"><i class="ti ti-check"></i></span
+                    ><span style="font-weight: 500">ui-signoff</span
+                    ><span class="badge b-success">已批准</span
+                    ><span
+                      style="
+                        margin-left: auto;
+                        font-size: 11.5px;
+                        color: var(--muted-foreground);
+                      "
+                      >Steve · 7-09 10:31</span
+                    >
+                  </div>
+                  <div class="gate-row">
+                    <span class="st-icon ok"><i class="ti ti-check"></i></span
+                    ><span style="font-weight: 500">design-signoff</span
+                    ><span class="badge b-success">已批准</span
+                    ><span
+                      style="
+                        margin-left: auto;
+                        font-size: 11.5px;
+                        color: var(--muted-foreground);
+                      "
+                      >Steve · 7-09 17:45</span
+                    >
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <!-- 右栏 -->
+            <aside class="inspector">
+              <div class="insp-sec">
+                <div class="group-label" style="color: var(--brand)">
+                  Goal · 完成判据的锚
+                </div>
+                <div
+                  style="
+                    font-size: 12.5px;
+                    font-weight: 500;
+                    line-height: 1.5;
+                    margin-bottom: 8px;
+                  "
+                >
+                  商户可自助导出账单并与对账单一致
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    flex-direction: column;
+                    gap: 5px;
+                    font-size: 11.5px;
+                  "
+                >
+                  <span
+                    style="display: inline-flex; gap: 6px; align-items: center"
+                    ><span class="st-icon err sm"><i class="ti ti-x"></i></span
+                    ><span class="mono">M1</span>导出与对账单逐行一致<span
+                      style="margin-left: auto; color: var(--destructive)"
+                      >中间证据：S2 RED</span
+                    ></span
+                  >
+                  <span
+                    style="display: inline-flex; gap: 6px; align-items: center"
+                    ><span class="st-icon ok sm"
+                      ><i class="ti ti-check"></i></span
+                    ><span class="mono">M2</span>结算单 p95 低于 30s<span
+                      style="margin-left: auto; color: var(--success)"
+                      >实测 22s</span
+                    ></span
+                  >
+                  <span
+                    style="display: inline-flex; gap: 6px; align-items: center"
+                    ><span
+                      class="ring r-pending"
+                      style="width: 11px; height: 11px"
+                    ></span
+                    ><span class="mono">M3</span>自助零人工介入<span
+                      style="margin-left: auto; color: var(--muted-foreground)"
+                      >待 gap-analysis</span
+                    ></span
+                  >
+                </div>
+                <div
+                  style="
+                    margin-top: 8px;
+                    font-size: 10.5px;
+                    color: var(--muted-foreground);
+                  "
+                >
+                  中间证据仅供观察；判定以 gap-analysis 回填的 MET/PARTIAL/UNMET
+                  为准——sprint 完成由 Goal 判定，不由单子关完判定
+                </div>
+              </div>
+              <div class="insp-sec">
+                <div class="group-label">Sprint</div>
+                <div class="proprow">
+                  <span class="pl">分支</span
+                  ><span class="pv mono" style="font-size: 11.5px"
+                    >sprint-3</span
+                  >
+                </div>
+                <div class="proprow">
+                  <span class="pl">起止</span
+                  ><span class="pv mono" style="font-size: 11.5px"
+                    >07-08 ~ 07-19</span
+                  >
+                </div>
+              </div>
+              <div class="insp-sec">
+                <div class="group-label">签核</div>
+                <div class="gate-row">
+                  <span class="st-icon ok"><i class="ti ti-check"></i></span
+                  >plan-signoff<span
+                    style="
+                      margin-left: auto;
+                      font-size: 11px;
+                      color: var(--muted-foreground);
+                    "
+                    class="mono"
+                    >7-08</span
+                  >
+                </div>
+                <div class="gate-row">
+                  <span class="st-icon ok"><i class="ti ti-check"></i></span
+                  >ui-signoff<span
+                    style="
+                      margin-left: auto;
+                      font-size: 11px;
+                      color: var(--muted-foreground);
+                    "
+                    class="mono"
+                    >7-09</span
+                  >
+                </div>
+                <div class="gate-row">
+                  <span class="st-icon ok"><i class="ti ti-check"></i></span
+                  >design-signoff<span
+                    style="
+                      margin-left: auto;
+                      font-size: 11px;
+                      color: var(--muted-foreground);
+                    "
+                    class="mono"
+                    >7-09</span
+                  >
+                </div>
+              </div>
+              <div class="insp-sec">
+                <div class="group-label">健康门</div>
+                <div class="gate-row">
+                  <span class="hdot ok"></span>vLLM<span
+                    style="
+                      margin-left: auto;
+                      font-size: 11px;
+                      color: var(--muted-foreground);
+                    "
+                    class="mono"
+                    >正常 · 42ms</span
+                  >
+                </div>
+                <div class="gate-row">
+                  <span class="hdot ok"></span>Claude Code<span
+                    style="
+                      margin-left: auto;
+                      font-size: 11px;
+                      color: var(--muted-foreground);
+                    "
+                    >已登录</span
+                  >
+                </div>
+                <div class="gate-row">
+                  <span class="hdot warn"></span>Brain 槽<span
+                    style="
+                      margin-left: auto;
+                      font-size: 11px;
+                      color: var(--muted-foreground);
+                    "
+                    class="mono"
+                    >1 / 2</span
+                  >
+                </div>
+              </div>
+              <div class="insp-sec">
+                <div class="group-label">执行负责</div>
+                <div style="display: flex; align-items: center; gap: 9px">
+                  <span class="avatar a-brain" style="width: 26px; height: 26px"
+                    ><i class="ti ti-brain" style="font-size: 14px"></i
+                  ></span>
+                  <div style="min-width: 0">
+                    <div style="font-weight: 500; font-size: 12.5px">
+                      Sprint 3 lead
+                    </div>
+                    <div
+                      style="font-size: 11px; color: var(--muted-foreground)"
+                    >
+                      claude-code · sonnet-4-6
+                    </div>
+                  </div>
+                  <span class="badge b-info" style="margin-left: auto"
+                    >running</span
+                  >
+                  <a
+                    class="btn btn-ghost btn-sm"
+                    data-screen="s9-brain-console.html"
+                    ><i class="ti ti-external-link"></i
+                  ></a>
+                </div>
+              </div>
+              <div class="insp-sec">
+                <div class="group-label">度量摘要</div>
+                <svg viewBox="0 0 280 64" style="width: 100%; height: 64px">
+                  <polyline
+                    points="0,6 40,10 80,18 120,22 160,34 200,40 240,50 280,56"
+                    fill="none"
+                    stroke="var(--border)"
+                    stroke-width="1.5"
+                    stroke-dasharray="4 3"
+                  />
+                  <polyline
+                    points="0,6 40,8 80,14 120,26 160,30 200,44 240,46"
+                    fill="none"
+                    stroke="var(--chart-1)"
+                    stroke-width="2"
+                  />
+                  <circle cx="240" cy="46" r="3" fill="var(--chart-1)" />
+                </svg>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 10.5px;
+                    color: var(--muted-foreground);
+                  "
+                  class="mono"
+                >
+                  <span>燃尽 · 剩 2/6</span><span>7-08 至今</span>
+                </div>
+                <div class="divider" style="margin: 8px 0"></div>
+                <div style="font-size: 11.5px; color: var(--muted-foreground)">
+                  中位环节耗时
+                </div>
+                <div class="mono" style="font-size: 11.5px; margin-top: 2px">
+                  dev 14m · qa 6m · review 9m · gate 4m
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </main>
+    </div>
+    <style>
+      [x-cloak] {
+        display: none !important;
+      }
+    </style>
+    <script id="foundry-motion-js">
+      /* Foundry v3 motion runtime(零依赖) */
+      (function () {
+        var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        /* 低频页入场:一次性触发 */
+        if (!reduced && "IntersectionObserver" in window) {
+          var io = new IntersectionObserver(
+            function (es) {
+              es.forEach(function (e) {
+                if (e.isIntersecting) {
+                  e.target.classList.add("fm-in");
+                  io.unobserve(e.target);
+                }
+              });
+            },
+            { threshold: 0.15 },
+          );
+          document.querySelectorAll("[data-fm-reveal]").forEach(function (el) {
+            io.observe(el);
+          });
+        } else {
+          document.querySelectorAll("[data-fm-reveal]").forEach(function (el) {
+            el.classList.add("fm-in");
+          });
+        }
+
+        /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
+        window.fmCountTo = function (el, target, opts) {
+          var dur = (opts && opts.duration) || 400;
+          var from =
+            parseFloat((el.textContent || "0").replace(/[^0-9.-]/g, "")) || 0;
+          var fmt =
+            (opts && opts.format) ||
+            function (v) {
+              return Math.round(v).toLocaleString();
+            };
+          if (reduced || dur <= 0) {
+            el.textContent = fmt(target);
+            return;
+          }
+          var t0 = performance.now();
+          function ease(t) {
+            return 1 - Math.pow(1 - t, 3);
+          } /* ≈ standard 曲线的收尾感 */
+          function tick(now) {
+            var p = Math.min(1, (now - t0) / dur);
+            el.textContent = fmt(from + (target - from) * ease(p));
+            if (p < 1) requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        };
+
+        /* 原型演示辅助:data-fm-count 声明式初始化 */
+        document.querySelectorAll("[data-fm-count]").forEach(function (el) {
+          var v = parseFloat(el.getAttribute("data-fm-count"));
+          if (!isNaN(v)) window.fmCountTo(el, v);
+        });
+      })();
+    </script>
+  </body>
 </html>

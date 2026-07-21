@@ -21,26 +21,26 @@ sprint 分支缓冲 master。一条命令启动团队,一条命令回滚整个 s
 
 **阶段 I — 规划与建单(人 + 技能,产出全部文档产物)**
 
-| # | 环节 | 输入 | 输出 | 执行者 | 推进门槛 |
-|---|------|------|------|--------|----------|
-| 0 | 一次性项目配置 | 空工作区 | `project.yaml`(仓库/命令/基础设施钩子)+ 预建标签 | 人 + project-setup agent | 克隆检查通过、占位符清零 |
-| 1.1 | Sprint 计划 | 头脑风暴笔记 | `sprint-N.md`(目标/范围/成功指标/分仓工作项/风险) | 人 via `/sprint-plan` | **此文档只给人和设计技能看,永不给执行 agent** |
-| 1.2 | 集成测试计划 | sprint-N.md | `sprint-N-test-plan.md`(黑盒用户流场景,每场景有可证伪信号) | `/sprint-test-plan` | 跨仓特性才需要;测试先于设计锚定 |
-| 1.3 | 技术设计 | 上两者 | `technical-design.md`(§4 每 issue 一节 + §7 文件变更矩阵) | `/sprint-design`(深读真实代码) | 设计必须覆盖每个测试场景 |
-| 1.4 | 对抗评审+briefs | 设计文档 | 评审修订版 + `briefs/{shared.md, issue-NNN.md, index.md}` | `/sprint-review`(多模型多轮)+ `extract_briefs.py` | 每场景有实现路径 |
-| 2.x | 建单 | briefs + 人写拆解散文 | 独立 issue / umbrella + 子 issue(带依赖标签) | 人 + `/umbrella-yaml`(校验)+ `/sprint-decompose`(落地) | **人拆解、工具格式化校验**;图 lint 通过 |
+| #   | 环节            | 输入                  | 输出                                                       | 执行者                                                 | 推进门槛                                      |
+| --- | --------------- | --------------------- | ---------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------- |
+| 0   | 一次性项目配置  | 空工作区              | `project.yaml`(仓库/命令/基础设施钩子)+ 预建标签           | 人 + project-setup agent                               | 克隆检查通过、占位符清零                      |
+| 1.1 | Sprint 计划     | 头脑风暴笔记          | `sprint-N.md`(目标/范围/成功指标/分仓工作项/风险)          | 人 via `/sprint-plan`                                  | **此文档只给人和设计技能看,永不给执行 agent** |
+| 1.2 | 集成测试计划    | sprint-N.md           | `sprint-N-test-plan.md`(黑盒用户流场景,每场景有可证伪信号) | `/sprint-test-plan`                                    | 跨仓特性才需要;测试先于设计锚定               |
+| 1.3 | 技术设计        | 上两者                | `technical-design.md`(§4 每 issue 一节 + §7 文件变更矩阵)  | `/sprint-design`(深读真实代码)                         | 设计必须覆盖每个测试场景                      |
+| 1.4 | 对抗评审+briefs | 设计文档              | 评审修订版 + `briefs/{shared.md, issue-NNN.md, index.md}`  | `/sprint-review`(多模型多轮)+ `extract_briefs.py`      | 每场景有实现路径                              |
+| 2.x | 建单            | briefs + 人写拆解散文 | 独立 issue / umbrella + 子 issue(带依赖标签)               | 人 + `/umbrella-yaml`(校验)+ `/sprint-decompose`(落地) | **人拆解、工具格式化校验**;图 lint 通过       |
 
 **阶段 II — 自动执行(sprint-executor lead 按 runbook 跑)**
 
-| 相位 | 内容 | 门槛 |
-|------|------|------|
-| §1/A0 | 预检(克隆/图 lint/循环检测)→ 每仓建 `sprint-N` 分支(幂等) | lint 通过 |
-| A–F | **逐 issue 流水线**(见 1.3) | 全部 issue 合入 sprint-N |
-| §5 | Sprint 验证:每仓 `test_cmd_full` 在 sprint-N 顶点全量绿 | 任一红 → 不得进入 H |
-| gatekeeper | 集成场景验证(按测试计划逐场景,不因首败中断)| RED → `/draft-fix-issue` 建修复单重进派发 |
+| 相位       | 内容                                                                              | 门槛                                        |
+| ---------- | --------------------------------------------------------------------------------- | ------------------------------------------- |
+| §1/A0      | 预检(克隆/图 lint/循环检测)→ 每仓建 `sprint-N` 分支(幂等)                         | lint 通过                                   |
+| A–F        | **逐 issue 流水线**(见 1.3)                                                       | 全部 issue 合入 sprint-N                    |
+| §5         | Sprint 验证:每仓 `test_cmd_full` 在 sprint-N 顶点全量绿                           | 任一红 → 不得进入 H                         |
+| gatekeeper | 集成场景验证(按测试计划逐场景,不因首败中断)                                       | RED → `/draft-fix-issue` 建修复单重进派发   |
 | §6 Phase H | **目标审计循环**:审计者只看 goal+diff+验证日志(不看 issue 清单),输出结构化 report | 必须 `verdict=NO_GAPS`;上限 3 轮 → 升级人类 |
-| §7 Phase G | **晋升**:按依赖序将各仓 sprint-N 以 **merge-commit** 合入 master,删分支 | 每仓 CI 绿 + 可合并 |
-| §8 | Sprint Story:新手视角实走验证("能用"≠"合了") | 主打能力必须真实路径实测 |
+| §7 Phase G | **晋升**:按依赖序将各仓 sprint-N 以 **merge-commit** 合入 master,删分支           | 每仓 CI 绿 + 可合并                         |
+| §8         | Sprint Story:新手视角实走验证("能用"≠"合了")                                      | 主打能力必须真实路径实测                    |
 
 **逐 issue 流水线(A–F,含全部失败路由)**:
 
@@ -77,6 +77,7 @@ dev(TDD 红-绿-重构,先提交红测试)
 6. **人拆解、工具格式化校验、lead 编排、agent 执行**(LLM 自动拆解被明令禁止)。
 
 **验证纪律(整套流程的灵魂,全部要编码进系统)**:
+
 - **引用即打开**:不打开引用的文件/日志/查询结果,不许宣称 DONE/PASS/APPROVED/NO_GAPS。
 - **反奉承 schema**(Phase H):证据必须是 `repo:file[:line]` / `PR#n` / sha / `absence-of:<pattern>`;
   "implemented/complete/done/✓" 一律拒收;`NO_GAPS` 不能与任何 P0 未达/阻塞项并存。
@@ -146,23 +147,23 @@ tracker → orchestrator:MCP 单向派发 + get-activity 拉取重组(写回 sta
 
 ### 3.2 概念映射表(旧世界 → 新系统)
 
-| agentic-engineering | 系统实现 | 现成度 |
-|---|---|---|
-| issue 仓(GitLab meta 仓)| tracker 项目 + 工作项 | ✅ |
-| issue / umbrella(epic 标签)| work_item / `type=epic` + child-of links | 🔧 |
-| `blocked-by:` 标签 + lead 派发循环 | links + **tracker 依赖感知调度器**(exec_queue 升级,实施完成事件触发重评估)| 🆕 **M3** |
-| `sprint-N` 标签 | work_item.sprintId | ✅ |
-| 生命周期标签 8 个 | "实施"阶段内子状态(stage 行 deliveryItems/verdict)| 🔧 |
-| `project.yaml` | 项目设置 + project_repos 表 | 🆕 |
-| sprint 文档/设计/briefs | **tracker_sprint_artifacts 新表**(content 列+Resources 溢出)| 🆕 |
-| umbrella_lint / extract_briefs | tracker actions(确定性移植)| 🆕 |
-| sprint-executor lead | brain(每 sprint 一线程;派发/回写走确定性系统,brain 只编排叙述)| 🔧 |
-| dev→qa→reviewer→gatekeeper | V3 DAG 模板 `sdlc-issue-pipeline`(含 diff-audit/merge-base 断言/重验回路)| 🆕 |
-| worktree / MR | workspace / workspaceCommitPush | ✅ |
-| CI watch + 顺序合并 | ciWatch(REST)+ mergePr(advisory 锁)| 🆕 |
-| sprint 分支 + Phase G | sprintBranch* actions + `sdlc-promote` DAG | 🆕 |
-| Sprint Verify / Phase H | `sdlc-verify` / `sdlc-audit` DAG(证据 schema)| 🆕 |
-| 审批/升级 | human_gate + tracker approvals(**批准回调 nodeResolveGate 解锁**)| 🔧 |
+| agentic-engineering                | 系统实现                                                                   | 现成度    |
+| ---------------------------------- | -------------------------------------------------------------------------- | --------- |
+| issue 仓(GitLab meta 仓)           | tracker 项目 + 工作项                                                      | ✅        |
+| issue / umbrella(epic 标签)        | work_item / `type=epic` + child-of links                                   | 🔧        |
+| `blocked-by:` 标签 + lead 派发循环 | links + **tracker 依赖感知调度器**(exec_queue 升级,实施完成事件触发重评估) | 🆕 **M3** |
+| `sprint-N` 标签                    | work_item.sprintId                                                         | ✅        |
+| 生命周期标签 8 个                  | "实施"阶段内子状态(stage 行 deliveryItems/verdict)                         | 🔧        |
+| `project.yaml`                     | 项目设置 + project_repos 表                                                | 🆕        |
+| sprint 文档/设计/briefs            | **tracker_sprint_artifacts 新表**(content 列+Resources 溢出)               | 🆕        |
+| umbrella_lint / extract_briefs     | tracker actions(确定性移植)                                                | 🆕        |
+| sprint-executor lead               | brain(每 sprint 一线程;派发/回写走确定性系统,brain 只编排叙述)             | 🔧        |
+| dev→qa→reviewer→gatekeeper         | V3 DAG 模板 `sdlc-issue-pipeline`(含 diff-audit/merge-base 断言/重验回路)  | 🆕        |
+| worktree / MR                      | workspace / workspaceCommitPush                                            | ✅        |
+| CI watch + 顺序合并                | ciWatch(REST)+ mergePr(advisory 锁)                                        | 🆕        |
+| sprint 分支 + Phase G              | sprintBranch\* actions + `sdlc-promote` DAG                                | 🆕        |
+| Sprint Verify / Phase H            | `sdlc-verify` / `sdlc-audit` DAG(证据 schema)                              | 🆕        |
+| 审批/升级                          | human_gate + tracker approvals(**批准回调 nodeResolveGate 解锁**)          | 🔧        |
 
 ### 3.3 数据模型增量(全部可加性)
 
@@ -208,17 +209,18 @@ tracker_sprints(加列)
 实施/测试为工作项级,由回写通道推进。**同一项目同时最多一个 sprint 处于 executing~promoting 相位**
 (advance 进 executing 时断言,防两个 sprint 抢分支基线)。
 
-| 阶段 | 承载 | 完成判据(gate,项目级 JSON 配置) |
-|---|---|---|
-| 待办 | backlog | 人拉入 sprint |
-| 分析 | brainstorm+sprint-plan(+test-plan)| 产物存在 + **plan-signoff** |
-| 设计 | sprint-design+review+briefs | 产物齐 + 依赖图校验通过 + **design-signoff** |
-| 实施 | 依赖感知派发 → issue-pipeline DAG | run done 且 PR 合入 sprint 分支(全自动;3 次超限→escalation)|
-| 测试 | sdlc-verify DAG | GREEN(**无集成场景时=各仓 test_cmd_full 全绿即 GREEN**;RED→自动建 from-audit 单)|
-| 验收 | sdlc-audit DAG | `NO_GAPS` 自动过(3 轮上限→escalation;不可修→audit-deferral 问人)|
-| 交付 | sdlc-promote DAG(+M5 story)| 晋升合入 base(story 判据 M5 生效)|
+| 阶段 | 承载                               | 完成判据(gate,项目级 JSON 配置)                                                  |
+| ---- | ---------------------------------- | -------------------------------------------------------------------------------- |
+| 待办 | backlog                            | 人拉入 sprint                                                                    |
+| 分析 | brainstorm+sprint-plan(+test-plan) | 产物存在 + **plan-signoff**                                                      |
+| 设计 | sprint-design+review+briefs        | 产物齐 + 依赖图校验通过 + **design-signoff**                                     |
+| 实施 | 依赖感知派发 → issue-pipeline DAG  | run done 且 PR 合入 sprint 分支(全自动;3 次超限→escalation)                      |
+| 测试 | sdlc-verify DAG                    | GREEN(**无集成场景时=各仓 test_cmd_full 全绿即 GREEN**;RED→自动建 from-audit 单) |
+| 验收 | sdlc-audit DAG                     | `NO_GAPS` 自动过(3 轮上限→escalation;不可修→audit-deferral 问人)                 |
+| 交付 | sdlc-promote DAG(+M5 story)        | 晋升合入 base(story 判据 M5 生效)                                                |
 
 **关键语义**(评审修订):
+
 - `advance-stage(itemId|sprintId, fromStage, expectedRunId?)` — **幂等 + 前置断言**:
   fromStage 不匹配当前阶段、或 expectedRunId 不匹配绑定 run → no-op。杜绝双通道(回写+轮询)重复推进
   与"旧 run 终态推进已回退工作项"。
@@ -252,6 +254,7 @@ workspace(worktree @ sprint-N)
 → merge-pr [顺序锁;前置断言 merge-base==sprint-tip,不满足→回 dev rebase→重入 qa/review/gate(重验回路,L9)]
 → 终态 → reconciler 回写 tracker
 ```
+
 **声明的偏离**(评审 A-7):单 workspace 贯穿 dev→gate(原流程 dev+qa 双 worktree)。
 理由:单仓 + 节点串行,无并发写冲突;TDD 红测试先行 + diff-audit 兜底交叉污染。多仓阶段重估。
 
@@ -269,6 +272,7 @@ ci-watch → merge-pr(**merge-commit** 保留 sprint 边界)→ 全部晋升后�
 ### 3.6 回写通道(评审 P0-2 的裁决)
 
 **不依赖 brain 主动调 tracker**(LLM 主动性不可靠且通路本不存在)。三层:
+
 1. **确定性回写(主)**:orchestrator 侧新建 `tracker-client`(镜像 tracker 侧 orchestrator-client:
    A2A/HTTP + `A2A_SECRET` JWT,已验证两容器密钥一致),reconciler 在 run 终态回调
    tracker `advance-stage`/`create-work-item(from-audit)`,身份取自 run tags。
@@ -295,11 +299,11 @@ ci-watch → merge-pr(**merge-commit** 保留 sprint 边界)→ 全部晋升后�
 
 **流程逻辑不进代码,进代码的只有能力原语。** 三层结构:
 
-| 层 | 载体 | 改动方式 |
-|---|---|---|
-| ① 提示词/文档层 | brain runbook(markdown)、worker agent 定义(`.claude/agents/*.md`)、tracker 技能(SKILL.md) | 改 markdown 即生效,零代码 |
-| ② 流程编排层 | 4 个 DAG 模板 = 库中 JSON,**带版本**,页面/agent 可改(workflowSave);gate 判据 = **项目级 JSON 配置** | 页面/对话改配置,零代码 |
-| ③ 系统代码层 | 确定性 actions(ciWatch/mergePr/图校验/brief 提取/调度器)、数据表、七阶段枚举 | 改代码(对应原 Python 脚本层,等价) |
+| 层              | 载体                                                                                                | 改动方式                          |
+| --------------- | --------------------------------------------------------------------------------------------------- | --------------------------------- |
+| ① 提示词/文档层 | brain runbook(markdown)、worker agent 定义(`.claude/agents/*.md`)、tracker 技能(SKILL.md)           | 改 markdown 即生效,零代码         |
+| ② 流程编排层    | 4 个 DAG 模板 = 库中 JSON,**带版本**,页面/agent 可改(workflowSave);gate 判据 = **项目级 JSON 配置** | 页面/对话改配置,零代码            |
+| ③ 系统代码层    | 确定性 actions(ciWatch/mergePr/图校验/brief 提取/调度器)、数据表、七阶段枚举                        | 改代码(对应原 Python 脚本层,等价) |
 
 例:改评审轮数/换模型 → ②;加流水线环节 → ②+①;改 TDD 纪律/文档模板 → ①;加新技能 → ① 扔 SKILL.md;
 改证据 schema → ②;接新 VCS/CI → ③;增删七阶段本身 → ③(罕见)。
@@ -333,13 +337,13 @@ reviewer=sonnet/vllm 交替 · gatekeeper/audit=sonnet。外部模型(GPT/Gemini
 
 ### 里程碑总览
 
-| 里程碑 | 主题 | 核心交付 | 工期 |
-|---|---|---|---|
-| M1 | Tracker 流程地基 | project_repos/sprint_artifacts/approvals 表 · epic 层级 · 依赖图校验 · advance-stage(配置化 gate+幂等)· 审批门落地 · 单活跃 sprint 断言 | ~1 周 |
-| M2 | 规划技能链 | 5 技能 + extract-briefs · 产物入库+human 保护 · 签核流 | ~1.5 周 |
-| M3 | 执行管道 | sprintBranch*/ciWatch(REST)/mergePr(锁) · issue-pipeline 模板(含 diff-audit/重验回路)· worker agents · **依赖感知调度器** · **sprint-lead 线程迁移** · **playground 靶仓** · prompt 调优预留 | ~2.5 周 |
-| M4 | Sprint 闭环 | **回写通道(tracker-client)** · verify/audit/promote 模板 · from-audit 自动建单(targetBranch)· 审批解锁回调 · 失败路由 · epic 闭合 · 健康门 | ~2 周 |
-| M5 | 度量复盘 | sprint-status 耗时页 · burndown · story/recap 技能 · 发布落地 | ~1 周 |
+| 里程碑 | 主题             | 核心交付                                                                                                                                                                                      | 工期    |
+| ------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| M1     | Tracker 流程地基 | project_repos/sprint_artifacts/approvals 表 · epic 层级 · 依赖图校验 · advance-stage(配置化 gate+幂等)· 审批门落地 · 单活跃 sprint 断言                                                       | ~1 周   |
+| M2     | 规划技能链       | 5 技能 + extract-briefs · 产物入库+human 保护 · 签核流                                                                                                                                        | ~1.5 周 |
+| M3     | 执行管道         | sprintBranch\*/ciWatch(REST)/mergePr(锁) · issue-pipeline 模板(含 diff-audit/重验回路)· worker agents · **依赖感知调度器** · **sprint-lead 线程迁移** · **playground 靶仓** · prompt 调优预留 | ~2.5 周 |
+| M4     | Sprint 闭环      | **回写通道(tracker-client)** · verify/audit/promote 模板 · from-audit 自动建单(targetBranch)· 审批解锁回调 · 失败路由 · epic 闭合 · 健康门                                                    | ~2 周   |
+| M5     | 度量复盘         | sprint-status 耗时页 · burndown · story/recap 技能 · 发布落地                                                                                                                                 | ~1 周   |
 
 ### Backlog(里程碑外)
 
@@ -348,33 +352,33 @@ chrome-test 浏览器实测 · CI flake 隔离(连续 2 次+owner issue)· 外�
 
 ### 主要风险
 
-| 风险 | 缓解 |
-|---|---|
+| 风险                  | 缓解                                                                                           |
+| --------------------- | ---------------------------------------------------------------------------------------------- |
 | qwen3.6 做 dev 的质量 | devModel 按仓可配;TDD+review+gate 多闸;M3 预留 3-4 天靶仓实测与 prompt 调优,验收覆盖双模型配置 |
-| 本地仓库无 CI | ciMode=none 一等公民;gateMode=tests-only 作替代质量闸 |
-| gatekeeper 起栈环境 | gateMode 显式三档,M3 默认 tests-only,stack 档在靶仓验证后开放 |
-| 回写链路断 | 三层通道(reconciler 确定性 + 轮询兜底 + 幂等 advance) |
-| vllm/CC 单点 | 健康前置门,不健康拒绝派发并显式呈现 |
+| 本地仓库无 CI         | ciMode=none 一等公民;gateMode=tests-only 作替代质量闸                                          |
+| gatekeeper 起栈环境   | gateMode 显式三档,M3 默认 tests-only,stack 档在靶仓验证后开放                                  |
+| 回写链路断            | 三层通道(reconciler 确定性 + 轮询兜底 + 幂等 advance)                                          |
+| vllm/CC 单点          | 健康前置门,不健康拒绝派发并显式呈现                                                            |
 
 ---
 
 ## 附:与原工具箱的对照清单(迁移完备性检查用)
 
-| 原资产 | 去向 |
-|---|---|
-| project.yaml / merge / resolver | project_repos 表 + 项目设置 |
-| create-issue-labels.sh | 不再需要(标签→字段/links)|
-| umbrella_lint.py | validate-dependency-graph action |
-| extract_briefs.py | extract-briefs action |
-| 规划技能五件套 | tracker skills(M2)|
-| umbrella-yaml + sprint-decompose | epic 拆解技能 + 校验 action(M1/M2)|
-| sprint-executor.md 派发循环 | tracker 依赖感知调度器(M3)|
-| sprint-executor.md 流水线结构 | issue-pipeline DAG 模板(M3)|
-| sprint-executor.md 编排策略散文 | brain runbook(markdown)|
-| dev/qa/reviewer/gatekeeper agent 定义 | orchestrator .claude/agents/*(M3)|
-| sprint-gatekeeper + draft-fix-issue | sdlc-verify DAG + from-audit 建单(M4)|
-| gap-analysis(Phase H)| sdlc-audit DAG + 证据 schema + audit-report:{cycle} 产物(M4)|
-| Phase G | sdlc-promote DAG(M4)|
-| sprint-story / status / recap | M5 |
-| lessons L1–L15 | 编码进模板/action(顺序合并 L9、重验回路、幂等、升级阶梯 L5、污染防护)|
-| rules/* | worker agent 系统提示 |
+| 原资产                                | 去向                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| project.yaml / merge / resolver       | project_repos 表 + 项目设置                                           |
+| create-issue-labels.sh                | 不再需要(标签→字段/links)                                             |
+| umbrella_lint.py                      | validate-dependency-graph action                                      |
+| extract_briefs.py                     | extract-briefs action                                                 |
+| 规划技能五件套                        | tracker skills(M2)                                                    |
+| umbrella-yaml + sprint-decompose      | epic 拆解技能 + 校验 action(M1/M2)                                    |
+| sprint-executor.md 派发循环           | tracker 依赖感知调度器(M3)                                            |
+| sprint-executor.md 流水线结构         | issue-pipeline DAG 模板(M3)                                           |
+| sprint-executor.md 编排策略散文       | brain runbook(markdown)                                               |
+| dev/qa/reviewer/gatekeeper agent 定义 | orchestrator .claude/agents/\*(M3)                                    |
+| sprint-gatekeeper + draft-fix-issue   | sdlc-verify DAG + from-audit 建单(M4)                                 |
+| gap-analysis(Phase H)                 | sdlc-audit DAG + 证据 schema + audit-report:{cycle} 产物(M4)          |
+| Phase G                               | sdlc-promote DAG(M4)                                                  |
+| sprint-story / status / recap         | M5                                                                    |
+| lessons L1–L15                        | 编码进模板/action(顺序合并 L9、重验回路、幂等、升级阶梯 L5、污染防护) |
+| rules/\*                              | worker agent 系统提示                                                 |

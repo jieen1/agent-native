@@ -5,10 +5,11 @@
 // the reconciler re-executes them.
 
 import { eq, inArray } from "drizzle-orm";
+import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { customAlphabet } from "nanoid";
+
 import { v3Runs, v3Nodes, v3Artifacts, v3Spawns } from "../db/v3-schema.js";
-import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -363,10 +364,10 @@ export async function forkRun(
 
       // Remap the node's outputArtifactId and currentSpawnId
       const newOutputArtId = srcNode.outputArtifactId
-        ? artifactIdMap.get(srcNode.outputArtifactId) ?? null
+        ? (artifactIdMap.get(srcNode.outputArtifactId) ?? null)
         : null;
       const newSpawnRef = srcNode.currentSpawnId
-        ? spawnIdMap.get(srcNode.currentSpawnId) ?? null
+        ? (spawnIdMap.get(srcNode.currentSpawnId) ?? null)
         : null;
 
       nodeInserts.push({

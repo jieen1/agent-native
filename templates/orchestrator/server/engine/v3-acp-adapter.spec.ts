@@ -3,6 +3,7 @@
 // Tests isAcpRuntime, classifyAcpError, resolveAcpHarness, and P3 stubs.
 
 import { describe, it, expect } from "vitest";
+
 import {
   isAcpRuntime,
   classifyAcpError,
@@ -103,9 +104,9 @@ describe("classifyAcpError", () => {
 
     it("session timeout -> transient", () => {
       expect(classifyAcpError(new Error("session timeout"))).toBe("transient");
-      expect(classifyAcpError(new Error("timed out waiting for response"))).toBe(
-        "transient",
-      );
+      expect(
+        classifyAcpError(new Error("timed out waiting for response")),
+      ).toBe("transient");
       expect(classifyAcpError(new Error("context deadline exceeded"))).toBe(
         "transient",
       );
@@ -174,7 +175,9 @@ describe("session lifecycle (G23)", () => {
 
   it("cancelAcpSession resolves idempotently for an unknown session", async () => {
     // cancelAcpSession is idempotent: unknown session → no error.
-    await expect(cancelAcpSession("nonexistent-session-id")).resolves.toBeUndefined();
+    await expect(
+      cancelAcpSession("nonexistent-session-id"),
+    ).resolves.toBeUndefined();
   });
 
   it("getAcpSession rejects for an unknown session", async () => {

@@ -82,12 +82,17 @@ async function shoot(url, theme, outName, kind) {
   });
   const page = await ctx.newPage();
   try {
-    const resp = await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
+    const resp = await page.goto(url, {
+      waitUntil: "networkidle",
+      timeout: 30000,
+    });
     // 与页面自带机制等效的主题挂载
     if (theme === "dark") {
       await page.evaluate(() => document.documentElement.classList.add("dark"));
     } else {
-      await page.evaluate(() => document.documentElement.classList.remove("dark"));
+      await page.evaluate(() =>
+        document.documentElement.classList.remove("dark"),
+      );
     }
     await page.waitForTimeout(600); // 等字体/动效稳定
     const out = resolve(OUT, outName);
@@ -102,7 +107,14 @@ async function shoot(url, theme, outName, kind) {
       httpStatus: resp?.status?.() ?? null,
     });
   } catch (err) {
-    record({ ok: false, kind, name: outName, theme, url, note: String(err).split("\n")[0] });
+    record({
+      ok: false,
+      kind,
+      name: outName,
+      theme,
+      url,
+      note: String(err).split("\n")[0],
+    });
   } finally {
     await ctx.close();
   }
@@ -112,7 +124,12 @@ async function shoot(url, theme, outName, kind) {
 for (const p of PROTOTYPES) {
   const abs = resolve(REPO, "docs/sdlc-product-design/prototypes", p.file);
   if (!existsSync(abs)) {
-    record({ ok: false, kind: "prototype", name: p.name, note: "file missing" });
+    record({
+      ok: false,
+      kind: "prototype",
+      name: p.name,
+      note: "file missing",
+    });
     continue;
   }
   const url = pathToFileURL(abs).href;

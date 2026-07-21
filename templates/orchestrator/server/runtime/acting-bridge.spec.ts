@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 
+import type { NodeRuntimeSpec } from "../../shared/types.js";
 import { createVmActingBridge } from "./acting-bridge.js";
 import type {
   ExecOptions,
@@ -10,7 +11,6 @@ import type {
   TeardownPolicy,
   VmHandle,
 } from "./node-runtime.js";
-import type { NodeRuntimeSpec } from "../../shared/types.js";
 
 // A pure in-memory fake NodeRuntime: `fs` is a Map, `exec` handles the few
 // shell forms the bridge issues (mkdir -p, uname). This proves the acting

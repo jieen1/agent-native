@@ -259,7 +259,9 @@ describe("<RunBadgeCompact> — Inspector「执行」组的紧凑关联运行徽
     render(
       <RunBadgeCompact
         run={currentRun}
-        activity={activityWith([{ id: currentRun.runId!, status: "failed", nodes: [] }])}
+        activity={activityWith([
+          { id: currentRun.runId!, status: "failed", nodes: [] },
+        ])}
       />,
     );
     const link = screen.getByText(/run_6c8p17/).closest("a");

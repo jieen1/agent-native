@@ -12,14 +12,15 @@
 // This spike tests the adapter layer that maps V3 4-inputs → NodeRunnerInput.
 
 import { describe, it, expect } from "vitest";
-import { NodeRunner } from "./node-runner.js";
-import type {
-  NodeRuntime,
-  VmHandle,
-  TeardownPolicy,
-} from "./node-runtime.js";
-import type { RuntimeExecutor, RuntimeExecCtx, RuntimeExecResult } from "./executors/types.js";
+
 import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
+import type {
+  RuntimeExecutor,
+  RuntimeExecCtx,
+  RuntimeExecResult,
+} from "./executors/types.js";
+import { NodeRunner } from "./node-runner.js";
+import type { NodeRuntime, VmHandle, TeardownPolicy } from "./node-runtime.js";
 
 // ============================================================================
 // Fake infrastructure (no real VM, no real model)
@@ -126,11 +127,7 @@ function classifyOutput(
       value: typeof output === "string" ? output : JSON.stringify(output),
     };
   }
-  if (
-    output !== null &&
-    typeof output === "object" &&
-    !Array.isArray(output)
-  ) {
+  if (output !== null && typeof output === "object" && !Array.isArray(output)) {
     return {
       path: "object",
       schema: JSON.stringify(outputSchema),
@@ -150,7 +147,8 @@ describe("D0: V3 Channel Contract Spike", () => {
     it("maps V3 4 inputs to NodeRunnerInput — all 4 present", () => {
       const v3Input: V3SpawnInput = {
         system_prompt: "You are an implementer agent",
-        rendered_prompt: "Implement the feature described in {{deps.spec.output}}",
+        rendered_prompt:
+          "Implement the feature described in {{deps.spec.output}}",
         tools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
         workspace: "/work",
       };
@@ -198,7 +196,6 @@ describe("D0: V3 Channel Contract Spike", () => {
   });
 
   describe("Output paths: NodeRunnerResult → V3 3-output paths", () => {
-
     it("output path 1: string (no schema)", () => {
       const result = classifyOutput("The implementation is complete.");
       expect(result.path).toBe("string");
@@ -226,9 +223,9 @@ describe("D0: V3 Channel Contract Spike", () => {
         schema,
       );
       expect(result.path).toBe("object");
-      expect(
-        (result as V3SpawnOutput & { path: "object" }).value.verdict,
-      ).toBe("pass");
+      expect((result as V3SpawnOutput & { path: "object" }).value.verdict).toBe(
+        "pass",
+      );
     });
 
     it("output path 3: schema violation — string when object expected", () => {
@@ -239,9 +236,9 @@ describe("D0: V3 Channel Contract Spike", () => {
       };
       const result = classifyOutput("just a string", schema);
       expect(result.path).toBe("schema-violation");
-      expect((result as V3SpawnOutput & { path: "schema-violation" }).error).toContain(
-        "schema",
-      );
+      expect(
+        (result as V3SpawnOutput & { path: "schema-violation" }).error,
+      ).toContain("schema");
     });
   });
 

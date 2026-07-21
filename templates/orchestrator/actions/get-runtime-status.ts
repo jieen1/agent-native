@@ -1,6 +1,7 @@
 import { defineAction } from "@agent-native/core";
 import { getSetting } from "@agent-native/core/settings";
 import { z } from "zod";
+
 import { getClaudeCodeAuthStatus } from "../server/claude-code-status.js";
 
 const dynamicImport = new Function("s", "return import(s)") as (
@@ -25,9 +26,11 @@ export default defineAction({
   http: { method: "GET" },
   readOnly: true,
   run: async () => {
-    const engine = (await getSetting("agent-engine").catch(() => null)) as
-      | { engine?: string; model?: string; config?: { baseUrl?: string } }
-      | null;
+    const engine = (await getSetting("agent-engine").catch(() => null)) as {
+      engine?: string;
+      model?: string;
+      config?: { baseUrl?: string };
+    } | null;
     const execRuntime = (await getSetting("orchestrator-runtime").catch(
       () => null,
     )) as { runtime?: string } | null;

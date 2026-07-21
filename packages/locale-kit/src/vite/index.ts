@@ -19,9 +19,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import type { Plugin } from "vite";
-import { transformModule, type TransformOutput } from "./transform.js";
+
 import { CatalogWriter } from "./catalog.js";
+import { transformModule, type TransformOutput } from "./transform.js";
 
 /**
  * Resolve the locale-kit package root from this module's location. Works
