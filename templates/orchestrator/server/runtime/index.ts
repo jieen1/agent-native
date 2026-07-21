@@ -115,7 +115,7 @@ const none = new NoneRuntime();
  * `MicrosandboxRuntime` (the legacy WSL/`msb` CLI transport) — so this change is
  * fully gated and host-native still works unchanged.
  */
-function useSdkBridge(): boolean {
+function isSdkBridgeConfigured(): boolean {
   const u = process.env.ORCH_MSB_BRIDGE_URL;
   return typeof u === "string" && u.trim() !== "";
 }
@@ -123,5 +123,5 @@ function useSdkBridge(): boolean {
 /** Pick the runtime backend for a node's runtime spec (DESIGN §7.4.2). */
 export function runtimeForSpec(spec: NodeRuntimeSpec): NodeRuntime {
   if (spec.kind === "none") return none;
-  return useSdkBridge() ? msb : microsandbox;
+  return isSdkBridgeConfigured() ? msb : microsandbox;
 }

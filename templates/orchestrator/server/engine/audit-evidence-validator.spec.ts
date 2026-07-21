@@ -364,8 +364,14 @@ describe("Rule 6 — userFacing metrics require real runtime evidence", () => {
   // Finding 3 — explicit validateAuditReport rejection for each L15 lesson phrase
   // as the SOLE evidence for a userFacing metric (not just the helper function).
   it.each([
-    ["tests pass", "L15: 'tests pass' is not proof a real user can use the feature"],
-    ["ran the demo", "L15: 'ran the demo' is not proof of real user capability"],
+    [
+      "tests pass",
+      "L15: 'tests pass' is not proof a real user can use the feature",
+    ],
+    [
+      "ran the demo",
+      "L15: 'ran the demo' is not proof of real user capability",
+    ],
     ["seed data", "L15: 'seed data' is not proof of real user capability"],
   ])(
     "validateAuditReport rejects '%s' as sole evidence for userFacing metric (L15 regression)",

@@ -342,9 +342,7 @@ export function validateAuditReport(report: unknown): AuditValidationResult {
 
   // Rule 4 — count consistency / no silent shrink.
   const audited =
-    typeof r.audited_metrics_count === "number"
-      ? r.audited_metrics_count
-      : NaN;
+    typeof r.audited_metrics_count === "number" ? r.audited_metrics_count : NaN;
   const predicted =
     typeof r.predicted_metrics_count === "number"
       ? r.predicted_metrics_count
