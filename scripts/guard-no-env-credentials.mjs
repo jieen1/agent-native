@@ -111,6 +111,11 @@ const ALLOWLIST_EXACT = new Set([
   // encrypt user secrets at rest. Rotating it invalidates the entire
   // vault, so it lives at deployment scope.
   "SECRETS_ENCRYPTION_KEY",
+  // Deploy-level OpenAI-provider base-URL override (points the AI SDK's
+  // OpenAI provider at a self-hosted OpenAI-compatible gateway, e.g. vLLM).
+  // Not a user credential — it carries no secret value, just an endpoint,
+  // and the AI SDK provider itself reads it directly.
+  "OPENAI_BASE_URL",
 ]);
 
 const ALLOWLIST_PREFIX = [

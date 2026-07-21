@@ -93,8 +93,13 @@ const SKIP_DIRS = new Set([
  * Each predicate takes a repo-relative posix path.
  */
 const ALLOWED_PATH_PREDICATES = [
-  // Build / dev / CI scripts.
-  (rel) => /^scripts\//.test(rel),
+  // Build / dev / CI scripts — root-level `scripts/` and any per-template
+  // `.../scripts/` directory (e.g. `templates/<tpl>/scripts/`, the corpus
+  // scaffold mirror under `packages/core/corpus/templates/<tpl>/scripts/`).
+  // These are standalone CLI verification scripts that boot their own
+  // short-lived process outside the request path, same class of exemption
+  // as root `scripts/**` — never imported into a server request handler.
+  (rel) => /(^|\/)scripts\//.test(rel),
   // Tests.
   (rel) => /\.spec\.[tj]sx?$/.test(rel),
   (rel) => /\.test\.[tj]sx?$/.test(rel),

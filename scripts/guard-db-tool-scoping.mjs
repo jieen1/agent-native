@@ -112,6 +112,19 @@ const INTENTIONAL_RAW_DB_DENYLIST = {
   "mail:email_link_tracking": "tracking rows scoped through owning draft/job",
   "slides:deck_share_links": "public share-token rows scoped through decks",
   "slides:slide_comments": "child rows scoped through decks",
+  "orchestrator:step_runs": "v1 legacy child rows scoped through owning task",
+  "orchestrator:node_runs": "child rows scoped through owning run",
+  "orchestrator:artifacts": "child rows scoped through owning run/node run",
+  "orchestrator:work_item_links":
+    "child rows scoped through the linked work items",
+  "orchestrator:work_item_status_log":
+    "append-only transition trail scoped through work_item_id -> work_items",
+  "orchestrator:orchestrator_skill_overrides":
+    "shared operator state for the one deployed orchestrator+tracker pair, not a personal per-user resource",
+  "orchestrator:orchestrator_deploy_runs":
+    "shared operator state for the one deployed orchestrator+tracker pair, not a personal per-user resource",
+  "tracker:tracker_project_seq":
+    "internal per-project counter; the owning project is already ownable",
 };
 
 async function* walk(dir) {

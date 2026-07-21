@@ -77,6 +77,11 @@ const ACCESS_CONTROL_HELPERS = [
   /\bassertAccess\s*\(/,
   /\bgetShareableResource\s*\(/,
   /\baccessFilterForShares\s*\(/,
+  // Tracker's own lean owner-scoping helper (templates/tracker/server/lib/
+  // access.ts) — documented deviation (AGENTS.md "Known justified
+  // deviations"): functionally equivalent to accessFilter, fail-closed to a
+  // never-true clause when unauthenticated.
+  /\bownerScope\s*\(/,
 ];
 
 // Explicit filtering by ownership in Drizzle / raw SQL within the block.
