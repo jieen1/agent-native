@@ -122,6 +122,14 @@ export function buildReviewWakeMessage(opts: ReviewWakeMessageOpts): string {
     `id and the PR url. If ` +
     `CHANGES_REQUESTED, the ONLY remediation is a NEW ` +
     `mcp__orchestrator__workflowRun (fix mode) carrying your findings — do ` +
-    `not attempt to fix anything yourself. Do not start unrelated new runs.`
+    `not attempt to fix anything yourself. If this same work item has now ` +
+    `failed review across MULTIPLE consecutive CHANGES_REQUESTED rounds (a ` +
+    `repeat failure, not the first), break the loop: dispatch the new ` +
+    `fix-mode workflowRun with a DIFFERENT development engine by passing a ` +
+    `different \`devEngine\` input (the sdlc-dev \`develop\` node runs on ` +
+    `\`agent: inputs.devEngine\`, default \`vllm\`, and also honors ` +
+    `\`engine_override\`), e.g. switch \`vllm\` -> \`claude-code\` or vice ` +
+    `versa, so a different agent/model attempts the fix instead of re-running ` +
+    `the identical path that already failed. Do not start unrelated new runs.`
   );
 }
