@@ -33,5 +33,24 @@ export default defineConfig({
     // headroom without masking a genuinely slow/hanging test (20s is still
     // well short of the CI job's own timeout).
     testTimeout: 20000,
+    // 关键隔离配置 / critical isolation config (work item 2twmcsp7qo):
+    // (1) packages/core 的 getDb()/getDbExec() 是 process-level 单例,
+    //     只在第一次调用时读取一次 process.env.DATABASE_URL 并缓存连接。
+    // (2) 多个 tracker 测试文件 (item-key-dedupe / item-key-sequencer /
+    //     db-migration 等) 在 beforeAll 里把 DATABASE_URL 指向 mkdtempSync
+    //     生成的临时 SQLite 文件 —— 这个约定只有在"每个测试文件独占一个
+    //     vitest worker 进程"时才安全。
+    // (3) 若不关闭文件级并行,vitest 4.x 会把多个测试文件塞进同一个 worker:
+    //     后加载文件的 beforeAll 改 DATABASE_URL 对已初始化的单例无效,
+    //     多个文件静默共享同一个物理 SQLite 文件;某个文件 afterEach 里
+    //     无 scope 的 `DELETE FROM` (如 item-key-dedupe 清空 tracker_work_items)
+    //     会把同 worker 里另一个文件正在使用的数据 wipe 掉
+    //     (SDLC-038 / PR#19 CI regression: decompose-epic & create-work-item
+    //     超时 + 读到空字符串的断言失败)。
+    // (4) fileParallelism: false 强制所有测试文件在单个 worker 里串行执行,
+    //     每个文件独占进程;每个文件已有的 afterAll closeDbExec() 会重置单例,
+    //     下一个文件首次 getDbExec() 时重新读取自己的 DATABASE_URL,
+    //     拿到自己的临时 SQLite 文件,从而确定性地消除跨文件数据 wipe。
+    fileParallelism: false,
   },
 });
