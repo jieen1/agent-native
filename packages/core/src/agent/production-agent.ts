@@ -3437,6 +3437,22 @@ export async function runAgentLoop(opts: {
         const activeToolInputs = new Map<string, ActiveToolInputPreparation>();
         let zeroByteToolInputRestart: ZeroByteToolInputRestart | undefined;
         let endedForNoProgress = false;
+        // Streaming `usage` is CUMULATIVE: every chunk that carries a usage
+        // object reports the running total so far (this is how Anthropic's
+        // message_delta, the AI SDK's finish.totalUsage, and OpenAI-compatible
+        // `stream_options.include_usage` all behave). Summing those per-chunk
+        // values quadratically inflates output tokens — a 4-minute spawn was
+        // recording ~1.3M output tokens (~5200 tok/s) on a local 27B model.
+        // Capture ONLY the last usage event seen on this stream (the final
+        // total) and fold it into the loop accumulator exactly once below.
+        // `inputTokens` (prompt tokens) rides along on that same final usage
+        // object, so this also populates tokens_input instead of leaving it 0.
+        let streamUsage: {
+          inputTokens: number;
+          outputTokens: number;
+          cacheReadTokens: number;
+          cacheWriteTokens: number;
+        } | null = null;
         let lastModelStreamProgressAt = Date.now();
         // FIX 2: true once ANY engine-stream event (including a heartbeat)
         // has been retrieved for THIS model call — gates
@@ -3758,10 +3774,13 @@ export async function runAgentLoop(opts: {
             } else if (event.type === "assistant-content") {
               assistantContent = event.parts;
             } else if (event.type === "usage") {
-              usage.inputTokens += event.inputTokens;
-              usage.outputTokens += event.outputTokens;
-              usage.cacheReadTokens += event.cacheReadTokens ?? 0;
-              usage.cacheWriteTokens += event.cacheWriteTokens ?? 0;
+              // Cumulative usage: keep the LAST (final) total, never a sum.
+              streamUsage = {
+                inputTokens: event.inputTokens,
+                outputTokens: event.outputTokens,
+                cacheReadTokens: event.cacheReadTokens ?? 0,
+                cacheWriteTokens: event.cacheWriteTokens ?? 0,
+              };
             } else if (event.type === "stop") {
               terminalStopReason = event.reason;
               if (event.reason === "error") {
@@ -3785,6 +3804,19 @@ export async function runAgentLoop(opts: {
               !eventIteratorReturnRequested,
             );
           }
+        }
+
+        // Fold this stream's FINAL (cumulative) usage into the loop total
+        // exactly once. Each model call in the tool loop is a fresh request
+        // whose prompt grows (prior turns are re-sent), so summing the final
+        // per-call totals across calls is correct — what must never happen is
+        // summing the cumulative per-chunk usage WITHIN a single stream (that
+        // was the quadratic-inflation bug).
+        if (streamUsage) {
+          usage.inputTokens += streamUsage.inputTokens;
+          usage.outputTokens += streamUsage.outputTokens;
+          usage.cacheReadTokens += streamUsage.cacheReadTokens;
+          usage.cacheWriteTokens += streamUsage.cacheWriteTokens;
         }
 
         if (endedForNoProgress) {

@@ -116,6 +116,13 @@ export class ClaudeCodeExecutor implements RuntimeExecutor {
         resultSubtype: parsed.resultSubtype,
       },
       tokensSpent: parsed.tokensSpent,
+      // F7 telemetry split (04 §7/§13, SDLC-051): forward the FINAL cumulative
+      // input/output values from the stream-json usage so the dispatcher persists
+      // a real `v3_spawns.tokens_input`/`tokens_output` instead of defaulting
+      // input to 0. Single final values, never a per-chunk sum (see
+      // parseClaudeStreamJson).
+      tokensInput: parsed.tokensInput,
+      tokensOutput: parsed.tokensOutput,
       toolCallCount: parsed.toolCallCount,
       model: parsed.model ?? ctx.node.model ?? "claude",
       steps: parsed.steps,
