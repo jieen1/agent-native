@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -22,7 +23,12 @@ export default defineAction({
     const rows = await db
       .select()
       .from(schema.activities)
-      .where(and(eq(schema.activities.workItemId, args.workItemId), ownerScope(schema.activities)))
+      .where(
+        and(
+          eq(schema.activities.workItemId, args.workItemId),
+          ownerScope(schema.activities),
+        ),
+      )
       .orderBy(desc(schema.activities.createdAt))
       .limit(limit);
 
@@ -33,7 +39,11 @@ export default defineAction({
       actorName: r.actorName,
       eventType: r.eventType,
       payload: (() => {
-        try { return JSON.parse(r.payload ?? "{}"); } catch { return {}; }
+        try {
+          return JSON.parse(r.payload ?? "{}");
+        } catch {
+          return {};
+        }
       })(),
       createdAt: r.createdAt,
     }));

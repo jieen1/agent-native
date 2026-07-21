@@ -1,3 +1,4 @@
+import type { getDbExec } from "@agent-native/core/db";
 // SDLC-038 回溯去重迁移 (工单 cy9upfianv) — itemKey 跨 sprint 撞号的真正落地去重.
 //
 // 本模块推翻了 item-key-display.ts 顶部注释里"历史撞号永不改写,只加不改"的旧
@@ -18,7 +19,7 @@
 //     方言都支持;不引入任何新的 dialect-specific SQL。新 itemKey 的分配复用
 //     item-key-sequencer.ts 的 allocateItemKey()(其内部按 isPostgres() 分支)。
 import { customAlphabet } from "nanoid";
-import type { getDbExec } from "@agent-native/core/db";
+
 import { allocateItemKey } from "./item-key-sequencer.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);

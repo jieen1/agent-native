@@ -11,11 +11,11 @@
 // when an event is missed. The loop is `unref`-ed so it never blocks shutdown,
 // and re-entrancy is guarded so a slow tick never overlaps itself.
 
+import { pruneOrphanedWorktrees } from "../v3-workspace-local.js";
 import { admitBrainTasks } from "./brain-admit.js";
 import { reapBrainTasksOnce, BRAIN_REAP_TICK_MS } from "./brain-reap.js";
 import { reconcileBrainThreadsOnce } from "./brain-thread-reconcile.js";
 import { reconcileV3SpawnsOnce } from "./v3-spawn-reconcile.js";
-import { pruneOrphanedWorktrees } from "../v3-workspace-local.js";
 
 /** Liveness + activity the brain driver tick exposes (read by brain-queue-status). */
 export interface BrainDriverHealth {

@@ -7,6 +7,7 @@
 // 节点 agent 字段,不会以 brain 身份起 spawn)。
 
 import { describe, it, expect } from "vitest";
+
 import {
   dispatchWorkerConfig,
   minimalAgentConfig,

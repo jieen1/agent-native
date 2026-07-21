@@ -1,6 +1,17 @@
 import { defineAction } from "@agent-native/core";
-import { eq, and, desc, ilike, isNotNull, isNull, sql, gte, inArray } from "drizzle-orm";
+import {
+  eq,
+  and,
+  desc,
+  ilike,
+  isNotNull,
+  isNull,
+  sql,
+  gte,
+  inArray,
+} from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export interface V3SpawnRow {
@@ -76,9 +87,7 @@ export const spawnList = defineAction({
     }
 
     if (args.status) {
-      conditions.push(
-        eq(v3Schema.v3Spawns.status, args.status as any),
-      );
+      conditions.push(eq(v3Schema.v3Spawns.status, args.status as any));
     }
     if (args.agentName) {
       conditions.push(
@@ -141,9 +150,7 @@ export const spawnList = defineAction({
         })
         .from(v3Schema.v3Nodes)
         .where(inArray(v3Schema.v3Nodes.id, nodeIds));
-      nodeIdToRunId = new Map(
-        nodeRows.map((n) => [n.id, n.runId]),
-      );
+      nodeIdToRunId = new Map(nodeRows.map((n) => [n.id, n.runId]));
     }
 
     return rows.map((r) => ({
@@ -178,7 +185,8 @@ export const spawnList = defineAction({
 
 /** Get full detail for a single V3 spawn. */
 export const spawnGet = defineAction({
-  description: "Get full detail for a single V3 spawn including prompt and output.",
+  description:
+    "Get full detail for a single V3 spawn including prompt and output.",
   schema: z.object({
     spawnId: z.string(),
   }),
@@ -234,7 +242,11 @@ export const spawnGet = defineAction({
 
       if (artRows.length) {
         const art = artRows[0];
-        output = art.textContent ?? (art.objectContent != null ? JSON.stringify(art.objectContent, null, 2) : null);
+        output =
+          art.textContent ??
+          (art.objectContent != null
+            ? JSON.stringify(art.objectContent, null, 2)
+            : null);
       }
     }
 
@@ -279,6 +291,10 @@ export const spawnGet = defineAction({
       // Detail-only fields
       output,
       log,
-    } as V3SpawnRow & { runId: string | null; output?: string | null; log?: string | null };
+    } as V3SpawnRow & {
+      runId: string | null;
+      output?: string | null;
+      log?: string | null;
+    };
   },
 });

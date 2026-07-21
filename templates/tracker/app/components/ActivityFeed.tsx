@@ -1,4 +1,9 @@
-import { useMemo, useState } from "react";
+import type {
+  ActivityResponse,
+  BrainEvent,
+  OrchestratorRun,
+  OrchestratorRunNode,
+} from "@shared/types";
 import {
   IconAlertTriangle,
   IconChevronRight,
@@ -13,26 +18,22 @@ import {
   IconTool,
   IconUser,
 } from "@tabler/icons-react";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils";
+import { useMemo, useState } from "react";
+
 import {
   classifyEvent,
   fmtTime,
   nodeStatusPresentation,
   type EventKind,
 } from "@/components/tracker-format";
-import type {
-  ActivityResponse,
-  BrainEvent,
-  OrchestratorRun,
-  OrchestratorRunNode,
-} from "@shared/types";
+import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 // ── Run / DAG node chips ─────────────────────────────────────────────────────
 
@@ -255,7 +256,9 @@ export function ActivityFeed({
         <div className="rounded-full bg-muted/60 p-3">
           <IconRobot className="size-6 text-muted-foreground" />
         </div>
-        <p className="text-sm font-medium text-foreground">Not dispatched yet</p>
+        <p className="text-sm font-medium text-foreground">
+          Not dispatched yet
+        </p>
         <p className="max-w-sm text-sm text-muted-foreground">
           Dispatch this requirement to the orchestrator's Claude Code brain. It
           provisions a workspace, authors a run, works the task, and opens a PR.

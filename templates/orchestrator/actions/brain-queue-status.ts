@@ -6,11 +6,12 @@
 // rather than a silently-wedged queue. Read-only.
 
 import { defineAction } from "@agent-native/core";
+import { isPostgres } from "@agent-native/core/db";
 import { z } from "zod";
+
+import { getDbExec } from "../server/db/index.js";
 import { getBrainConcurrency } from "../server/queue/brain-concurrency.js";
 import { getBrainDriverHealth } from "../server/queue/brain-driver.js";
-import { getDbExec } from "../server/db/index.js";
-import { isPostgres } from "@agent-native/core/db";
 
 export default defineAction({
   description:

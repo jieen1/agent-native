@@ -9,8 +9,8 @@
 // Requires WSL2 + microsandbox (`msb`) AND a running vLLM at localhost:8000.
 // Skips (exit 0) with a clear message if msb is not present.
 
-import { msbAvailable } from "./wsl-msb.js";
 import { runVllmE2e } from "./vllm-e2e.js";
+import { msbAvailable } from "./wsl-msb.js";
 
 async function main(): Promise<void> {
   if (!(await msbAvailable())) {

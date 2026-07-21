@@ -5,7 +5,15 @@ import path from "node:path";
 import { runWithRequestContext } from "@agent-native/core/server/request-context";
 import { createClient, type Client } from "@libsql/client";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 
@@ -46,7 +54,11 @@ vi.mock("../../server/db/index.js", () => ({
 type AnyAction = {
   run: (args: any, ctx?: any) => Promise<any>;
   audit?: {
-    target?: (args: any, result: unknown, meta: unknown) => { type?: string; id?: string } | null;
+    target?: (
+      args: any,
+      result: unknown,
+      meta: unknown,
+    ) => { type?: string; id?: string } | null;
   };
 };
 let transitionWorkItem: AnyAction;
@@ -185,7 +197,8 @@ describe("T-F3-13b: audit 落库(real pipeline, isolated DB)", () => {
       ),
     );
 
-    const { queryAuditEvents, getAuditEventById } = await import("@agent-native/core/audit");
+    const { queryAuditEvents, getAuditEventById } =
+      await import("@agent-native/core/audit");
     const events = await queryAuditEvents(
       { userEmail: OWNER, orgId: ORG_ID },
       { action: "transition-work-item", targetId: id },
@@ -204,7 +217,10 @@ describe("T-F3-13b: audit 落库(real pipeline, isolated DB)", () => {
     // packages/core/src/audit/store.ts's LIST_COLUMNS comment — a timeline
     // query must never stream every event's redacted body in bulk). Fetch the
     // full row by id to check input contains the reason.
-    const full = await getAuditEventById(event.id, { userEmail: OWNER, orgId: ORG_ID });
+    const full = await getAuditEventById(event.id, {
+      userEmail: OWNER,
+      orgId: ORG_ID,
+    });
     expect(full).toBeTruthy();
     expect(full!.input).toBeTruthy();
     expect(String(full!.input)).toContain("关闭:审计落库验证");

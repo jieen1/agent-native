@@ -6,7 +6,15 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { createClient, type Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 import { writebackActorEmail } from "../../server/lib/writeback-actor.js";
@@ -31,7 +39,10 @@ function asUser(fn: () => Promise<any> | any) {
   return runWithRequestContext({ userEmail: OWNER, orgId: ORG_ID }, fn);
 }
 function asWriteback(fn: () => Promise<any> | any) {
-  return runWithRequestContext({ userEmail: WRITEBACK_EMAIL, orgId: ORG_ID }, fn);
+  return runWithRequestContext(
+    { userEmail: WRITEBACK_EMAIL, orgId: ORG_ID },
+    fn,
+  );
 }
 // 回写哨兵身份 + 自选 org_id —— 用于 SDLC-072 跨org攻击面测试:
 // 身份门(caller==='mcp' && userEmail===哨兵)通过, 但 org_id 由攻击者指定。
@@ -117,7 +128,8 @@ beforeEach(async () => {
 
 async function insertItem(overrides: Record<string, unknown> = {}) {
   const now = new Date().toISOString();
-  const id = (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
+  const id =
+    (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
   await db.insert(trackerSchema.workItems).values({
     id,
     projectId: "proj-1",
@@ -140,7 +152,10 @@ async function insertItem(overrides: Record<string, unknown> = {}) {
 
 async function fetchItem(id: string) {
   return (
-    await db.select().from(trackerSchema.workItems).where(eq(trackerSchema.workItems.id, id))
+    await db
+      .select()
+      .from(trackerSchema.workItems)
+      .where(eq(trackerSchema.workItems.id, id))
   )[0];
 }
 
@@ -157,11 +172,18 @@ async function fetchActivities(id: string) {
 // ============================================================================
 describe("T-F9-03: zero-delivery 失败路径 (writeback-exec-state → queued)", () => {
   it("dispatched → queued: writes execState + a dispatch.failed activity; currentStageName/status untouched", async () => {
-    const id = await insertItem({ currentStageName: "实施", execState: "dispatched" });
+    const id = await insertItem({
+      currentStageName: "实施",
+      execState: "dispatched",
+    });
 
     const result = await asWriteback(() =>
       writebackExecState.run(
-        { workItemId: id, target: "queued", reason: "brain-thread-error-zero-delivery" },
+        {
+          workItemId: id,
+          target: "queued",
+          reason: "brain-thread-error-zero-delivery",
+        },
         mcpCtx(),
       ),
     );
@@ -232,7 +254,9 @@ describe("T-F9-05: 非回写身份调 writeback-exec-state", () => {
   it("normal agent tool-loop call (caller='tool') → rejected even with a resolved email", async () => {
     const id = await insertItem();
     await expect(
-      asUser(() => writebackExecState.run({ workItemId: id, target: "queued" }, toolCtx())),
+      asUser(() =>
+        writebackExecState.run({ workItemId: id, target: "queued" }, toolCtx()),
+      ),
     ).rejects.toMatchObject({ code: "actor-denied" });
     expect(await fetchActivities(id)).toHaveLength(0);
   });
@@ -240,7 +264,9 @@ describe("T-F9-05: 非回写身份调 writeback-exec-state", () => {
   it("caller='mcp' but NOT the writeback sentinel email → rejected (no free ride via the mcp surface alone)", async () => {
     const id = await insertItem();
     await expect(
-      asUser(() => writebackExecState.run({ workItemId: id, target: "queued" }, mcpCtx())),
+      asUser(() =>
+        writebackExecState.run({ workItemId: id, target: "queued" }, mcpCtx()),
+      ),
     ).rejects.toMatchObject({ code: "actor-denied" });
     expect(await fetchActivities(id)).toHaveLength(0);
   });

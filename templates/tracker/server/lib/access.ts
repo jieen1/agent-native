@@ -3,11 +3,11 @@
 // an org is active — to the same org. Mirrors the orchestrator's direct
 // owner-scoping rather than pulling in the full sharing substrate.
 
-import { and, eq, or, type SQL } from "drizzle-orm";
 import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
+import { and, eq, or, type SQL } from "drizzle-orm";
 
 interface OwnableTable {
   ownerEmail: any;

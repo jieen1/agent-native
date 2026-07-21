@@ -1,19 +1,4 @@
 import {
-  Links,
-  Meta,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
-  useLocation,
-  useNavigate,
-} from "react-router";
-import { useCallback, useEffect, useState } from "react";
-import { useNavigationState } from "@/hooks/use-navigation-state";
-import { trackerRoutePath } from "@shared/navigation";
-import { useQueryClient } from "@tanstack/react-query";
-import { useTheme } from "next-themes";
-import { IconSun, IconMoon } from "@tabler/icons-react";
-import {
   useDbSync,
   AppProviders,
   CommandMenu,
@@ -26,11 +11,29 @@ import {
   navigateWithAgentChatViewTransition,
   setClientAppState,
 } from "@agent-native/core/client";
+import { trackerRoutePath } from "@shared/navigation";
+import { IconSun, IconMoon } from "@tabler/icons-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { I18nProvider } from "locale-kit";
+import { useTheme } from "next-themes";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+  useLocation,
+  useNavigate,
+} from "react-router";
 import type { LinksFunction } from "react-router";
-import changelog from "../CHANGELOG.md?raw";
-import stylesheet from "./global.css?url";
+
+import { useNavigationState } from "@/hooks/use-navigation-state";
 import { TAB_ID } from "@/lib/tab-id";
+
+import changelog from "../CHANGELOG.md?raw";
+
+import stylesheet from "./global.css?url";
 
 configureTracking({
   getDefaultProps: (_name, properties) => ({
@@ -145,8 +148,7 @@ function trackerOpenPath(url: URL): string | null {
   if (explicitPath) return explicitPath;
 
   const view = url.searchParams.get("view");
-  const itemId =
-    url.searchParams.get("itemId") ?? url.searchParams.get("id");
+  const itemId = url.searchParams.get("itemId") ?? url.searchParams.get("id");
   return trackerRoutePath({
     view,
     itemId,

@@ -76,7 +76,7 @@ ListGrid，行 = StatusRing + 模板名与版本 + run id（mono）+ **DagMiniMa
 
 **干预语义**（"Patch 未来、Fork 过去"）：
 
-<Mermaid id="run-intervene" source={"flowchart LR\n  DC[DagCanvas] -- 点击节点 --> NI[NodeInspector]\n  NI -- 重试 · 检查点续跑 --> SP[新 spawn attempt+1]\n  PT[Patch 面板] -- 只改未执行节点 --> DC\n  FK[Fork] -- 从历史节点分叉 --> NR[新 run 带父链引用]\n  TL[时间线 tab] -. 记录谁改了什么 .-> PT\n  TL -. fork 树 .-> FK"} />
+<Mermaid id="run-intervene" source={"flowchart LR\n DC[DagCanvas] -- 点击节点 --> NI[NodeInspector]\n NI -- 重试 · 检查点续跑 --> SP[新 spawn attempt+1]\n PT[Patch 面板] -- 只改未执行节点 --> DC\n FK[Fork] -- 从历史节点分叉 --> NR[新 run 带父链引用]\n TL[时间线 tab] -. 记录谁改了什么 .-> PT\n TL -. fork 树 .-> FK"} />
 
 - Patch 面板只允许 frontier 之前未执行的节点（pending 与 ready）；DagCanvas 上可编辑区亮色、已执行区锁定灰显；提交走乐观并发（expectedDagVersion），冲突时提示刷新。
 - Fork 从任一历史节点分叉新 run，保留父链引用，运行列表显示 fork 树标记。时间线 tab 展示 patch 与 fork 的完整历史：谁、何时、改了什么、dagVersion 前后 diff。
@@ -121,7 +121,7 @@ ListGrid，行 = StatusRing + 模板名与版本 + run id（mono）+ **DagMiniMa
 - 默认模型与 tier 限制（行内改）；`设为默认` 与 `健康检查` 操作。
 - CC 引擎卡内嵌登录状态与 connect、disconnect（迁移自设置页，设置页保留入口）。
 - 底部说明卡：当前生效的选择与降级规则——默认引擎不健康时新任务落到兜底引擎并明示，附最近降级事件时间线。
-- **模型注册表区（v2.2，SDLC-054）**：登记每个可用模型的**真名**（权重身份）、别名映射表、档位与服务端点；spawn 与线程遥测一律按别名反查真名归因。注册校验拒绝假名（非 Claude 权重禁止登记 claude-* 名）；同端点别名增减产生变更事件——别名漂移曾致应用内 chat 404。
+- **模型注册表区（v2.2，SDLC-054）**：登记每个可用模型的**真名**（权重身份）、别名映射表、档位与服务端点；spawn 与线程遥测一律按别名反查真名归因。注册校验拒绝假名（非 Claude 权重禁止登记 claude-\* 名）；同端点别名增减产生变更事件——别名漂移曾致应用内 chat 404。
 - **降级显式化不变量（v2.2，SDLC-049）**：任何"声明开启的能力初始化失败"（如 harness 包缺失）必须表现为本页与健康页红卡、受影响线程 transcript 顶部 CapabilityBanner、线程行 degraded 徽标。**静默降级本身定性为缺陷**。
 
 ## 8. 智能体（`/agents`、`/agents/:name`）— 接真

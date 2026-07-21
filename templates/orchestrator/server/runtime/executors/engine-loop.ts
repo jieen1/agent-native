@@ -35,12 +35,6 @@
 // The 64k context clamp is a SEPARATE ticket and is intentionally untouched.
 // checkpoint 消费端在 F2b(dispatcher 重试注入)——本切片 checkpoint 只写。
 
-import {
-  actionsToEngineTools,
-  runAgentLoopDirectWithSoftTimeout,
-  type ActionEntry,
-  type AgentChatEvent,
-} from "@agent-native/core/server";
 import type {
   AgentEngine,
   EngineContentPart,
@@ -51,6 +45,12 @@ import {
   buildObservationalContext,
   hasObservationalMemory,
 } from "@agent-native/core/agent/observational-memory";
+import {
+  actionsToEngineTools,
+  runAgentLoopDirectWithSoftTimeout,
+  type ActionEntry,
+  type AgentChatEvent,
+} from "@agent-native/core/server";
 
 import { createVmActingBridge } from "../acting-bridge.js";
 import {
@@ -321,7 +321,10 @@ export async function runEngineLoopInVm(args: {
         ownerEmail: ctx.ownerEmail,
         orgId: ctx.orgId ?? null,
         messages: [
-          { role: "user", content: [{ type: "text", text: initialPromptText }] },
+          {
+            role: "user",
+            content: [{ type: "text", text: initialPromptText }],
+          },
         ],
       });
       if (hasObservationalMemory(omContext)) {

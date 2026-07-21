@@ -16,7 +16,10 @@ import type {
 /** A scriptable fake runtime: each exec is answered by a matcher → result. */
 function fakeRuntime(
   handlers: { match: RegExp; result: Partial<ExecResult> }[],
-): { runtime: NodeRuntime; calls: { cmd: string; env?: Record<string, string> }[] } {
+): {
+  runtime: NodeRuntime;
+  calls: { cmd: string; env?: Record<string, string> }[];
+} {
   const calls: { cmd: string; env?: Record<string, string> }[] = [];
   const exec = async (
     _vm: VmHandle,
@@ -51,12 +54,17 @@ function fakeRuntime(
   return { runtime, calls };
 }
 
-const VM = { name: "vm", spec: { kind: "microvm", onFailure: "recreate" } } as VmHandle;
+const VM = {
+  name: "vm",
+  spec: { kind: "microvm", onFailure: "recreate" },
+} as VmHandle;
 
 describe("parseGateway", () => {
   it("extracts the default-route gateway IP", () => {
     expect(
-      parseGateway("default via 172.16.0.173 dev eth0\n172.16.0.172/30 dev eth0"),
+      parseGateway(
+        "default via 172.16.0.173 dev eth0\n172.16.0.172/30 dev eth0",
+      ),
     ).toBe("172.16.0.173");
   });
   it("returns null when there is no default route", () => {
@@ -77,7 +85,10 @@ describe("buildNoProxy", () => {
 describe("resolveEgress", () => {
   it("uses DIRECT egress and sets NO proxy env when direct works", async () => {
     const { runtime } = fakeRuntime([
-      { match: /ip route/, result: { stdout: "default via 172.16.0.173 dev eth0" } },
+      {
+        match: /ip route/,
+        result: { stdout: "default via 172.16.0.173 dev eth0" },
+      },
       { match: /resolv\.conf/, result: { code: 0 } },
       // direct egress probe succeeds:
       { match: /api\.github\.com\/zen/, result: { code: 0 } },
@@ -91,12 +102,13 @@ describe("resolveEgress", () => {
 
   it("falls back to the proxy ONLY when direct egress fails AND proxy works", async () => {
     let directCall = 0;
-    const exec = async (
-      _vm: VmHandle,
-      cmd: string,
-    ): Promise<ExecResult> => {
+    const exec = async (_vm: VmHandle, cmd: string): Promise<ExecResult> => {
       if (/ip route/.test(cmd))
-        return { code: 0, stdout: "default via 172.16.0.5 dev eth0", stderr: "" };
+        return {
+          code: 0,
+          stdout: "default via 172.16.0.5 dev eth0",
+          stderr: "",
+        };
       if (/resolv\.conf/.test(cmd)) return { code: 0, stdout: "", stderr: "" };
       // The proxy probe is the command that uses `-x <proxy>`; it succeeds.
       if (/-x 'http:\/\//.test(cmd)) return { code: 0, stdout: "", stderr: "" };
@@ -108,7 +120,9 @@ describe("resolveEgress", () => {
       return { code: 1, stdout: "", stderr: "" };
     };
     const runtime = { kind: "fake", exec } as unknown as NodeRuntime;
-    const egress = await resolveEgress(runtime, VM, { noProxyHosts: ["vllm.host"] });
+    const egress = await resolveEgress(runtime, VM, {
+      noProxyHosts: ["vllm.host"],
+    });
     expect(directCall).toBeGreaterThan(0);
     expect(egress.directEgress).toBe(false);
     expect(egress.proxyUrl).toBe(`http://172.16.0.5:${HOST_PROXY_PORT}`);
@@ -119,7 +133,10 @@ describe("resolveEgress", () => {
 
   it("sets no proxy env when BOTH direct and proxy fail (clean degrade)", async () => {
     const { runtime } = fakeRuntime([
-      { match: /ip route/, result: { stdout: "default via 172.16.0.9 dev eth0" } },
+      {
+        match: /ip route/,
+        result: { stdout: "default via 172.16.0.9 dev eth0" },
+      },
       { match: /resolv\.conf/, result: { code: 0 } },
       // everything network-ish fails:
       { match: /api\.github\.com\/zen/, result: { code: 1 } },

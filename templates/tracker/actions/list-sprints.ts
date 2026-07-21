@@ -1,6 +1,7 @@
 import { defineAction } from "@agent-native/core";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -8,7 +9,10 @@ export default defineAction({
   description: "List sprints, optionally filtered to one project or status.",
   schema: z.object({
     projectId: z.string().optional().describe("Filter to a single project"),
-    status: z.string().optional().describe("Filter by status (规划|进行中|已完成)"),
+    status: z
+      .string()
+      .optional()
+      .describe("Filter by status (规划|进行中|已完成)"),
   }),
   http: { method: "GET" },
   run: async (args) => {
@@ -50,7 +54,10 @@ export default defineAction({
       .from(schema.workItems)
       .where(
         and(
-          sql`${schema.workItems.sprintId} = any(array[${sql.join(sprintIds.map((id) => sql`${id}`), sql`, `)}])`,
+          sql`${schema.workItems.sprintId} = any(array[${sql.join(
+            sprintIds.map((id) => sql`${id}`),
+            sql`, `,
+          )}])`,
         ),
       )
       .groupBy(schema.workItems.sprintId);

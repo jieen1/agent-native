@@ -31,9 +31,7 @@ export async function getBrainConcurrency(): Promise<number> {
     return DEFAULT_BRAIN_CONCURRENCY;
   }
   const value =
-    raw && typeof raw === "object"
-      ? (raw as { degree?: unknown }).degree
-      : raw;
+    raw && typeof raw === "object" ? (raw as { degree?: unknown }).degree : raw;
   const n = Number(value);
   if (!Number.isInteger(n) || n < MIN_BRAIN_CONCURRENCY) {
     return DEFAULT_BRAIN_CONCURRENCY;

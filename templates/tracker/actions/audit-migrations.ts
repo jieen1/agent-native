@@ -34,7 +34,9 @@ export interface AuditMigrationsResult {
  * audits the diff's own added lines — the code under review is an unmerged
  * branch this running instance does not reflect.
  */
-export async function runMigrationAudit(diff?: string): Promise<AuditMigrationsResult> {
+export async function runMigrationAudit(
+  diff?: string,
+): Promise<AuditMigrationsResult> {
   if (diff) {
     const added = stripDiffMarkers(diff);
     const tableAudit = auditMigrations(added, added);

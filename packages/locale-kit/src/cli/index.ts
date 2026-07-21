@@ -27,17 +27,18 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { transformModule } from "../vite/transform.js";
+
 import { CatalogWriter } from "../vite/catalog.js";
+import { transformModule } from "../vite/transform.js";
+import { loadAllowlist } from "./allowlist.js";
+import { findMissingTranslations } from "./missing.js";
 import {
   allInScopeFiles,
   collectSourceFiles,
   findRepoRoot,
   inScopeRoots,
 } from "./scope.js";
-import { findMissingTranslations } from "./missing.js";
 import { scanFileForUnwrapped, type UnwrappedCandidate } from "./unwrapped.js";
-import { loadAllowlist } from "./allowlist.js";
 
 interface ExtractResult {
   filesScanned: number;

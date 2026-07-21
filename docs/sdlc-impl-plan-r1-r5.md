@@ -212,8 +212,8 @@ merge-base --is-ancestor` 核实,凡本文引用的文件路径与行号均为�
     `app/components/tracker-format.ts:253`),点击可达 orchestrator run 详情页,且
     支持多条 run 历史(重派追加、旧 run 标灰划线,F8 交付内容)。**但** 03§4 第 3 点
     描述的完整"执行记录 ExecutionLog"区(active 置顶 + DagMiniMap + 当前节点 + 计时器
-    + 每行 hover 出"重试节点/打开运行/查看转录")在页面中**零命中**,未建——本 WP
-    的 (a) 部分范围是把现有的"简单深链行"升级为这个完整形态,不是从零建深链。
+    - 每行 hover 出"重试节点/打开运行/查看转录")在页面中**零命中**,未建——本 WP
+      的 (a) 部分范围是把现有的"简单深链行"升级为这个完整形态,不是从零建深链。
   - **(b) diff/测试证据**:确认在 tracker 侧缺失,只在 orchestrator
     `WorkspaceView`(DiffViewer)/`RunView` 存在——需要深链或摘要卡嵌入。
   - **(c) 真实审批记录**:见 WP-R3.2(收件箱)与 WP-R3.4(队列去桩),三者共享同一条
@@ -302,7 +302,7 @@ merge-base --is-ancestor` 核实,凡本文引用的文件路径与行号均为�
 - **涉及文件**:
   - `templates/tracker/app/routes/agent.tsx`(新,参照
     `templates/brain/app/routes/agent.tsx` 写法:`import { AgentTabsPage } from
-    "@agent-native/core/client"`,约 10 行)。
+"@agent-native/core/client"`,约 10 行)。
   - `templates/orchestrator/app/routes/agent.tsx`(新,同上;若需要外壳包裹参照
     `templates/dispatch/app/routes/agent.tsx` 的 `DispatchShell` 模式)。
   - `templates/tracker/app/components/layout/Sidebar.tsx`、
@@ -361,7 +361,7 @@ merge-base --is-ancestor` 核实,凡本文引用的文件路径与行号均为�
   不是从零新建。
 - **本次核实**:`templates/orchestrator/server/db/v3-schema.ts` 里 `v3_workflow_templates`
   表结构已存在(`server/plugins/db.ts:763` 起的 `CREATE TABLE IF NOT EXISTS
-  "v3_workflow_templates"`),但没有任何九模板的种子 upsert 代码——确认"表在、种子不在"。
+"v3_workflow_templates"`),但没有任何九模板的种子 upsert 代码——确认"表在、种子不在"。
 - **涉及文件**:
   - `templates/orchestrator/server/plugins/db.ts`(首启段补种子 upsert 逻辑,参照现有
     `sdlc-run-limits` 迁移的 name-based 幂等写法)。
@@ -405,8 +405,8 @@ merge-base --is-ancestor` 核实,凡本文引用的文件路径与行号均为�
   gap-analysis 相关 action。
 - **涉及文件**:
   - 新建 `templates/tracker/.agents/skills/{brainstorm,sprint-plan,sprint-test-plan,
-    ui-spec,sprint-design,sprint-review,draft-fix-issue,sprint-story,
-    sprint-recap}/SKILL.md`(九个)。
+ui-spec,sprint-design,sprint-review,draft-fix-issue,sprint-story,
+sprint-recap}/SKILL.md`(九个)。
   - 删除 `templates/tracker/.agents/skills/form-building/`、`form-publishing/`、
     `form-responses/`。
   - `templates/tracker/AGENTS.md`(按 03§12 重写导航与类型枚举)。
@@ -616,6 +616,6 @@ merge-base --is-ancestor` 核实,凡本文引用的文件路径与行号均为�
 
 ---
 
-*本文取代《SDLC 实施路线图(落地版)》§2–§4 的旧排期;地基判据见该文档 §1/§1.12;
+_本文取代《SDLC 实施路线图(落地版)》§2–§4 的旧排期;地基判据见该文档 §1/§1.12;
 现状与骨架见《SDLC 现状对齐审查(2026-07-16)》;架构约束见
-`docs/agent-native-alignment-audit.md`(其 §5 裁决的合理偏离不再作为问题重提)。*
+`docs/agent-native-alignment-audit.md`(其 §5 裁决的合理偏离不再作为问题重提)。_

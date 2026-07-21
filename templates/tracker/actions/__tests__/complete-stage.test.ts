@@ -6,7 +6,15 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { createClient, type Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 
@@ -140,7 +148,10 @@ beforeEach(async () => {
   `);
 });
 
-async function insertItemAndStage(stageName: string, itemOverrides: Record<string, unknown> = {}) {
+async function insertItemAndStage(
+  stageName: string,
+  itemOverrides: Record<string, unknown> = {},
+) {
   const now = new Date().toISOString();
   const id = `wi_${Math.random().toString(36).slice(2, 8)}`;
   await db.insert(trackerSchema.workItems).values({
@@ -179,7 +190,10 @@ async function insertItemAndStage(stageName: string, itemOverrides: Record<strin
 
 async function fetchItem(id: string) {
   return (
-    await db.select().from(trackerSchema.workItems).where(eq(trackerSchema.workItems.id, id))
+    await db
+      .select()
+      .from(trackerSchema.workItems)
+      .where(eq(trackerSchema.workItems.id, id))
   )[0];
 }
 

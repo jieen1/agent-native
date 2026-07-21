@@ -10,6 +10,8 @@
 // async no-op, so the cap + error types are proven without a KVM host.
 
 import { describe, it, expect } from "vitest";
+
+import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
 import {
   VmSemaphore,
   VMCapacityExhaustedError,
@@ -17,10 +19,9 @@ import {
   isVMCapacityExhausted,
   isTokenBudgetExceeded,
 } from "./backpressure.js";
+import type { RuntimeExecutor, RuntimeExecCtx } from "./executors/types.js";
 import { NodeRunner } from "./node-runner.js";
 import type { NodeRuntime, VmHandle, TeardownPolicy } from "./node-runtime.js";
-import type { RuntimeExecutor, RuntimeExecCtx } from "./executors/types.js";
-import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
 
 // ── the two error types are genuinely distinct ───────────────────────────────
 
@@ -56,7 +57,9 @@ describe("VmSemaphore (DESIGN §4.1 — the second ceiling)", () => {
     expect(sem.inUse).toBe(2);
 
     // A third acquire with a finite timeout fails FAST with the distinct type.
-    await expect(sem.acquire(0)).rejects.toBeInstanceOf(VMCapacityExhaustedError);
+    await expect(sem.acquire(0)).rejects.toBeInstanceOf(
+      VMCapacityExhaustedError,
+    );
 
     // Releasing frees a slot for a new acquirer.
     sem.release();
@@ -148,7 +151,12 @@ function makeFakeExecutor(execMs: number): RuntimeExecutor {
       model: string;
     }> {
       await new Promise((r) => setTimeout(r, execMs));
-      return { output: { ok: true }, tokensSpent: 0, toolCallCount: 0, model: "fake" };
+      return {
+        output: { ok: true },
+        tokensSpent: 0,
+        toolCallCount: 0,
+        model: "fake",
+      };
     },
   };
 }
@@ -230,13 +238,23 @@ describe("NodeRunner provision backpressure (DESIGN §4.1 — M=2×cap load shap
     const sig = new AbortController().signal;
     // First node grabs the only slot and holds it through its 50ms exec.
     const first = runner.run(
-      { node: microvmNode("a"), deps: {}, ownerEmail: "local@localhost", orgId: null },
+      {
+        node: microvmNode("a"),
+        deps: {},
+        ownerEmail: "local@localhost",
+        orgId: null,
+      },
       sig,
     );
     // Second node, started immediately, finds the cap full → VMCapacityExhausted.
     const second = runner
       .run(
-        { node: microvmNode("b"), deps: {}, ownerEmail: "local@localhost", orgId: null },
+        {
+          node: microvmNode("b"),
+          deps: {},
+          ownerEmail: "local@localhost",
+          orgId: null,
+        },
         sig,
       )
       .catch((e) => e);

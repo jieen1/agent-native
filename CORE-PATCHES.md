@@ -29,7 +29,7 @@ When merging upstream, search each patch's anchor and re-confirm it survived.
   one allow-line lets that engine appear and become the default so the composer
   is usable and runs hit vLLM.
 - **History:** this logic used to be duplicated inline — once in
-  `use-chat-models.ts` as `allowedEngines = new Set([...])`, and *separately*
+  `use-chat-models.ts` as `allowedEngines = new Set([...])`, and _separately_
   in `MultiTabAssistantChat.tsx` (the file the chat/orchestrator sidebar
   composer's dropdown actually renders) with its own copy of the same Set.
   First pass at this patch only touched `use-chat-models.ts`, which is why the
@@ -48,7 +48,7 @@ When merging upstream, search each patch's anchor and re-confirm it survived.
   `packages/core/src/client/use-chat-models.ts` (`findDefaultGroup` helper and
   the `selectedGroup` lookup inside `refreshEngines`). Unlike patch #1, this
   logic is **not** unified by `chat-model-groups.ts` — each file independently
-  decides whether a *persisted* selection is still valid, so the fix still
+  decides whether a _persisted_ selection is still valid, so the fix still
   needs to live in both places.
 - **Bug (upstream, not vllm-specific):** the picker persists the user's
   engine/model choice to `localStorage` (`agent-native:chat-models:selection`,
@@ -84,7 +84,7 @@ When merging upstream, search each patch's anchor and re-confirm it survived.
   `oneOf: [{ required: ["sql"] }, { required: ["statements"] }]` line.
 - **Why:** the Anthropic Messages API rejects any tool whose `input_schema`
   carries a top-level combinator: `tools.N.custom.input_schema: input_schema
-  does not support oneOf, allOf, or anyOf at the top level`. Because the
+does not support oneOf, allOf, or anyOf at the top level`. Because the
   orchestrator brain (a Claude Code session) receives the FULL action registry
   as MCP tools, this single schema 400-failed **every** brain turn on dispatch
   (first hit 2026-07-04 during the tracker→brain smoke test). OpenAI-compatible

@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 
 // list-audit (DESIGN §7.4.7): read the append-only audit trail — run control,
@@ -15,9 +16,14 @@ export default defineAction({
     targetType: z
       .string()
       .optional()
-      .describe("Filter by target kind, e.g. workflow_run | work_item | credential"),
+      .describe(
+        "Filter by target kind, e.g. workflow_run | work_item | credential",
+      ),
     targetId: z.string().optional().describe("Filter by a specific target id"),
-    action: z.string().optional().describe("Filter by an action key, e.g. run.cancel"),
+    action: z
+      .string()
+      .optional()
+      .describe("Filter by an action key, e.g. run.cancel"),
     limit: z.coerce.number().int().positive().max(500).optional(),
   }),
   http: { method: "GET" },

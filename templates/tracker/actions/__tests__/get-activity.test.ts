@@ -7,7 +7,16 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { createClient, type Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 
@@ -22,7 +31,8 @@ vi.mock("../../server/db/index.js", () => ({
 
 const mockCallOrchestratorTool = vi.fn();
 vi.mock("../../server/lib/orchestrator-client.js", () => ({
-  callOrchestratorTool: (...args: unknown[]) => mockCallOrchestratorTool(...args),
+  callOrchestratorTool: (...args: unknown[]) =>
+    mockCallOrchestratorTool(...args),
 }));
 
 type AnyAction = { run: (args: any) => Promise<any> };
@@ -137,7 +147,8 @@ afterEach(() => {
 
 async function insertItem(overrides: Record<string, unknown> = {}) {
   const now = new Date().toISOString();
-  const id = (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
+  const id =
+    (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
   await db.insert(trackerSchema.workItems).values({
     id,
     projectId: "proj-1",
@@ -158,7 +169,10 @@ async function insertItem(overrides: Record<string, unknown> = {}) {
 
 async function fetchItem(id: string) {
   return (
-    await db.select().from(trackerSchema.workItems).where(eq(trackerSchema.workItems.id, id))
+    await db
+      .select()
+      .from(trackerSchema.workItems)
+      .where(eq(trackerSchema.workItems.id, id))
   )[0];
 }
 
@@ -168,7 +182,10 @@ async function fetchItem(id: string) {
 describe("T-F9-07a: 代码级断言 — get-activity.ts 源码不再含 brain_tasks 裸 SQL", () => {
   it("grep: no literal 'brain_tasks' table reference remains as an executable SQL string", () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = fs.readFileSync(path.join(here, "..", "get-activity.ts"), "utf8");
+    const src = fs.readFileSync(
+      path.join(here, "..", "get-activity.ts"),
+      "utf8",
+    );
     // Only the doc-comment describing the OLD approach may mention it in prose
     // (as a code-comment, never as part of a live `sql:`/template literal).
     // Assert there's no `FROM brain_tasks` / `brain_tasks WHERE` SQL fragment.
@@ -180,14 +197,18 @@ describe("T-F9-07a: 代码级断言 — get-activity.ts 源码不再含 brain_ta
 describe("T-F9-07b: 功能 — orchestrator 的 brain-task-slot 调用失败时降级为 null, 渲染不破", () => {
   it("brain-task-slot rejects (orchestrator down / tool missing) → slot=null, action still returns a full payload without throwing", async () => {
     const id = await insertItem();
-    mockCallOrchestratorTool.mockImplementation(async (_owner: string, tool: string) => {
-      if (tool === "brain-task-slot") throw new Error("tool not found (older orchestrator build)");
-      if (tool === "brain-thread") return { data: { thread: {}, events: [] } };
-      if (tool === "runsList") return { data: [] };
-      if (tool === "spawnList") return { data: [] };
-      if (tool === "brain-queue-status") return { data: {} };
-      return { data: null };
-    });
+    mockCallOrchestratorTool.mockImplementation(
+      async (_owner: string, tool: string) => {
+        if (tool === "brain-task-slot")
+          throw new Error("tool not found (older orchestrator build)");
+        if (tool === "brain-thread")
+          return { data: { thread: {}, events: [] } };
+        if (tool === "runsList") return { data: [] };
+        if (tool === "spawnList") return { data: [] };
+        if (tool === "brain-queue-status") return { data: {} };
+        return { data: null };
+      },
+    );
 
     const result = await asUser(() => getActivity.run({ workItemId: id }));
     expect(result.dispatched).toBe(true);
@@ -199,14 +220,17 @@ describe("T-F9-07b: 功能 — orchestrator 的 brain-task-slot 调用失败时�
 
   it("brain-task-slot returns a non-object / malformed payload → also degrades to null (not a throw)", async () => {
     const id = await insertItem();
-    mockCallOrchestratorTool.mockImplementation(async (_owner: string, tool: string) => {
-      if (tool === "brain-task-slot") return { data: "not-an-object" };
-      if (tool === "brain-thread") return { data: { thread: {}, events: [] } };
-      if (tool === "runsList") return { data: [] };
-      if (tool === "spawnList") return { data: [] };
-      if (tool === "brain-queue-status") return { data: {} };
-      return { data: null };
-    });
+    mockCallOrchestratorTool.mockImplementation(
+      async (_owner: string, tool: string) => {
+        if (tool === "brain-task-slot") return { data: "not-an-object" };
+        if (tool === "brain-thread")
+          return { data: { thread: {}, events: [] } };
+        if (tool === "runsList") return { data: [] };
+        if (tool === "spawnList") return { data: [] };
+        if (tool === "brain-queue-status") return { data: {} };
+        return { data: null };
+      },
+    );
 
     const result = await asUser(() => getActivity.run({ workItemId: id }));
     expect(result.slot).toBeNull();
@@ -228,18 +252,27 @@ describe("T-F9-07b: 功能 — orchestrator 的 brain-task-slot 调用失败时�
 describe("T-F9-08: 新旧查询路径的行为等价(tracker 侧范围)", () => {
   it("slot.status='done' (等价于旧 brain_tasks 行 status='done') → itemStatus='returned', runId 透传一致", async () => {
     const id = await insertItem({ currentStageName: "实施" });
-    mockCallOrchestratorTool.mockImplementation(async (_owner: string, tool: string) => {
-      if (tool === "brain-task-slot") {
-        // Shape-equivalent to what the OLD raw SQL row {status, run_id,
-        // updated_at} used to produce after readBrainTaskSlot's own mapping.
-        return { data: { status: "done", runId: "run_equiv", updatedAt: "2026-07-10T00:00:00Z" } };
-      }
-      if (tool === "brain-thread") return { data: { thread: {}, events: [] } };
-      if (tool === "runsList") return { data: [] };
-      if (tool === "spawnList") return { data: [] };
-      if (tool === "brain-queue-status") return { data: {} };
-      return { data: null };
-    });
+    mockCallOrchestratorTool.mockImplementation(
+      async (_owner: string, tool: string) => {
+        if (tool === "brain-task-slot") {
+          // Shape-equivalent to what the OLD raw SQL row {status, run_id,
+          // updated_at} used to produce after readBrainTaskSlot's own mapping.
+          return {
+            data: {
+              status: "done",
+              runId: "run_equiv",
+              updatedAt: "2026-07-10T00:00:00Z",
+            },
+          };
+        }
+        if (tool === "brain-thread")
+          return { data: { thread: {}, events: [] } };
+        if (tool === "runsList") return { data: [] };
+        if (tool === "spawnList") return { data: [] };
+        if (tool === "brain-queue-status") return { data: {} };
+        return { data: null };
+      },
+    );
 
     const result = await asUser(() => getActivity.run({ workItemId: id }));
     expect(result.itemStatus).toBe("returned"); // deriveItemStatus('done', ...) === 'returned', unchanged
@@ -253,16 +286,21 @@ describe("T-F9-08: 新旧查询路径的行为等价(tracker 侧范围)", () => 
 
   it("slot.status='running' → itemStatus='running' regardless of any parsed delivery text (unchanged semantics)", async () => {
     const id = await insertItem({ currentStageName: "实施" });
-    mockCallOrchestratorTool.mockImplementation(async (_owner: string, tool: string) => {
-      if (tool === "brain-task-slot") {
-        return { data: { status: "running", runId: "run_live", updatedAt: null } };
-      }
-      if (tool === "brain-thread") return { data: { thread: {}, events: [] } };
-      if (tool === "runsList") return { data: [] };
-      if (tool === "spawnList") return { data: [] };
-      if (tool === "brain-queue-status") return { data: {} };
-      return { data: null };
-    });
+    mockCallOrchestratorTool.mockImplementation(
+      async (_owner: string, tool: string) => {
+        if (tool === "brain-task-slot") {
+          return {
+            data: { status: "running", runId: "run_live", updatedAt: null },
+          };
+        }
+        if (tool === "brain-thread")
+          return { data: { thread: {}, events: [] } };
+        if (tool === "runsList") return { data: [] };
+        if (tool === "spawnList") return { data: [] };
+        if (tool === "brain-queue-status") return { data: {} };
+        return { data: null };
+      },
+    );
 
     const result = await asUser(() => getActivity.run({ workItemId: id }));
     expect(result.itemStatus).toBe("running");

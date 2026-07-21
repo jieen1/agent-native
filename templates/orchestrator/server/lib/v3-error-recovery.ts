@@ -136,7 +136,9 @@ export function checkMsbHealth(): HealthCheck {
     const output = execFileSync(msbPath, ["--version"], {
       timeout: 5_000,
       stdio: ["ignore", "pipe", "pipe"],
-    }).toString().trim();
+    })
+      .toString()
+      .trim();
 
     return {
       healthy: true,

@@ -6,7 +6,15 @@ import { runWithRequestContext } from "@agent-native/core/server/request-context
 import { createClient, type Client } from "@libsql/client";
 import { desc, eq } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as trackerSchema from "../../server/db/schema.js";
 import { writebackActorEmail } from "../../server/lib/writeback-actor.js";
@@ -22,7 +30,8 @@ vi.mock("../../server/db/index.js", () => ({
 
 const mockCallOrchestratorTool = vi.fn();
 vi.mock("../../server/lib/orchestrator-client.js", () => ({
-  callOrchestratorTool: (...args: unknown[]) => mockCallOrchestratorTool(...args),
+  callOrchestratorTool: (...args: unknown[]) =>
+    mockCallOrchestratorTool(...args),
 }));
 
 type AnyAction = { run: (args: any, ctx?: any) => Promise<any> };
@@ -43,7 +52,10 @@ function asWriteback(fn: () => Promise<any> | any) {
   // enrichment + writeback-actor.ts's module doc) — org_id alone is enough
   // for ownerScope()'s OR-clause to admit the row without needing `sub` to
   // equal the real owner.
-  return runWithRequestContext({ userEmail: WRITEBACK_EMAIL, orgId: ORG_ID }, fn);
+  return runWithRequestContext(
+    { userEmail: WRITEBACK_EMAIL, orgId: ORG_ID },
+    fn,
+  );
 }
 function mcpCtx() {
   return { caller: "mcp" as const };
@@ -185,7 +197,8 @@ beforeEach(async () => {
 
 async function insertItem(overrides: Record<string, unknown> = {}) {
   const now = new Date().toISOString();
-  const id = (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
+  const id =
+    (overrides.id as string) ?? `wi_${Math.random().toString(36).slice(2, 8)}`;
   await db.insert(trackerSchema.workItems).values({
     id,
     projectId: "proj-1",
@@ -207,7 +220,10 @@ async function insertItem(overrides: Record<string, unknown> = {}) {
 
 async function fetchItem(id: string) {
   return (
-    await db.select().from(trackerSchema.workItems).where(eq(trackerSchema.workItems.id, id))
+    await db
+      .select()
+      .from(trackerSchema.workItems)
+      .where(eq(trackerSchema.workItems.id, id))
   )[0];
 }
 
@@ -244,7 +260,10 @@ async function fetchRuns(id: string) {
 // ============================================================================
 describe("T-F9-01: 成功终态回写全链(tracker 侧: writeback-run-meta → advance-stage ×2)", () => {
   it("run done + branch 已知 → runs 行回填 branch, 阶段 实施→测试→验收, 证据齐全, 全程零 brain 参与", async () => {
-    const id = await insertItem({ currentStageName: "实施", orchestratorRunId: "run_success" });
+    const id = await insertItem({
+      currentStageName: "实施",
+      orchestratorRunId: "run_success",
+    });
     await db.insert(trackerSchema.workItemRuns).values({
       id: "wir_1",
       workItemId: id,
@@ -262,7 +281,11 @@ describe("T-F9-01: 成功终态回写全链(tracker 侧: writeback-run-meta → 
     // Step 1: runs 行回填 (F8 backfill, F9 窄 action).
     const backfill = await asWriteback(() =>
       writebackRunMeta.run(
-        { workItemId: id, runId: "run_success", branch: "orchestrator/f9-1-fix" },
+        {
+          workItemId: id,
+          runId: "run_success",
+          branch: "orchestrator/f9-1-fix",
+        },
         mcpCtx(),
       ),
     );
@@ -309,7 +332,10 @@ describe("T-F9-01: 成功终态回写全链(tracker 侧: writeback-run-meta → 
 // ============================================================================
 describe("T-F9-04: 回写身份的权限边界", () => {
   it("回写身份(sub=哨兵值, caller='mcp')调 transition-work-item target=done — 即便带全套证据也被拒绝(actor-denied)", async () => {
-    const id = await insertItem({ currentStageName: "验收", status: "running" });
+    const id = await insertItem({
+      currentStageName: "验收",
+      status: "running",
+    });
     await expect(
       asWriteback(() =>
         transitionWorkItem.run(
@@ -329,25 +355,41 @@ describe("T-F9-04: 回写身份的权限边界", () => {
   });
 
   it("回写身份调 transition-work-item target=closed — 拒绝", async () => {
-    const id = await insertItem({ currentStageName: "待办", execState: null, status: "open" });
+    const id = await insertItem({
+      currentStageName: "待办",
+      execState: null,
+      status: "open",
+    });
     await expect(
       asWriteback(() =>
-        transitionWorkItem.run({ id, target: "closed", reason: "writeback 越权" }, mcpCtx()),
+        transitionWorkItem.run(
+          { id, target: "closed", reason: "writeback 越权" },
+          mcpCtx(),
+        ),
       ),
     ).rejects.toMatchObject({ code: "actor-denied" });
   });
 
   it("回写身份调 transition-work-item 回退(ladder 反向, manual-override)— 拒绝", async () => {
-    const id = await insertItem({ currentStageName: "测试", status: "running" });
+    const id = await insertItem({
+      currentStageName: "测试",
+      status: "running",
+    });
     await expect(
       asWriteback(() =>
-        transitionWorkItem.run({ id, target: "实施", reason: "writeback 越权回退" }, mcpCtx()),
+        transitionWorkItem.run(
+          { id, target: "实施", reason: "writeback 越权回退" },
+          mcpCtx(),
+        ),
       ),
     ).rejects.toMatchObject({ code: "actor-denied" });
   });
 
   it("白名单内: 回写身份调 writeback-run-meta / advance-stage 成功", async () => {
-    const id = await insertItem({ currentStageName: "实施", orchestratorRunId: "run_ok" });
+    const id = await insertItem({
+      currentStageName: "实施",
+      orchestratorRunId: "run_ok",
+    });
     await db.insert(trackerSchema.workItemRuns).values({
       id: "wir_ok",
       workItemId: id,
@@ -399,27 +441,34 @@ describe("T-F9-09: 回写(advance-stage)与人工回退(transition-work-item)并
 
     const realExecute = client.execute.bind(client);
     let injected = false;
-    const spy = vi.spyOn(client, "execute").mockImplementation(async (stmt: any) => {
-      const result = await realExecute(stmt);
-      const sqlText = typeof stmt === "string" ? stmt : (stmt?.sql ?? "");
-      if (
-        !injected &&
-        /select/i.test(sqlText) &&
-        /tracker_work_items/i.test(sqlText) &&
-        /where/i.test(sqlText)
-      ) {
-        injected = true;
-        // Land the writeback advance for real, BETWEEN transition-work-item's
-        // read (which just resolved above) and its subsequent CAS write.
-        await asUser(() =>
-          advanceStage.run(
-            { scope: "item", id, fromStage: "实施", expectedRunId: "run_race" },
-            mcpCtx(),
-          ),
-        );
-      }
-      return result;
-    });
+    const spy = vi
+      .spyOn(client, "execute")
+      .mockImplementation(async (stmt: any) => {
+        const result = await realExecute(stmt);
+        const sqlText = typeof stmt === "string" ? stmt : (stmt?.sql ?? "");
+        if (
+          !injected &&
+          /select/i.test(sqlText) &&
+          /tracker_work_items/i.test(sqlText) &&
+          /where/i.test(sqlText)
+        ) {
+          injected = true;
+          // Land the writeback advance for real, BETWEEN transition-work-item's
+          // read (which just resolved above) and its subsequent CAS write.
+          await asUser(() =>
+            advanceStage.run(
+              {
+                scope: "item",
+                id,
+                fromStage: "实施",
+                expectedRunId: "run_race",
+              },
+              mcpCtx(),
+            ),
+          );
+        }
+        return result;
+      });
 
     // The human's request reads the STALE snapshot (current="实施") and asks
     // to roll back one step further to "待办" — a legitimate backward

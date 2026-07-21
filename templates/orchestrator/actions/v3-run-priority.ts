@@ -11,6 +11,7 @@
 import { defineAction } from "@agent-native/core";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
+
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
 
 export const runPriority = defineAction({
@@ -32,7 +33,11 @@ export const runPriority = defineAction({
       eq(v3Schema.v3Runs.ownerEmail, resolveOwnerEmail()),
     );
     const rows = await db
-      .select({ id: v3Schema.v3Runs.id, status: v3Schema.v3Runs.status, priority: v3Schema.v3Runs.priority })
+      .select({
+        id: v3Schema.v3Runs.id,
+        status: v3Schema.v3Runs.status,
+        priority: v3Schema.v3Runs.priority,
+      })
       .from(v3Schema.v3Runs)
       .where(runFilter)
       .limit(1);
@@ -42,7 +47,9 @@ export const runPriority = defineAction({
     const run = rows[0];
     const terminalStatuses = ["done", "failed", "cancelled"];
     if (terminalStatuses.includes(run.status)) {
-      throw new Error(`Run is already ${run.status}; priority changes have no effect on terminal runs`);
+      throw new Error(
+        `Run is already ${run.status}; priority changes have no effect on terminal runs`,
+      );
     }
 
     await db

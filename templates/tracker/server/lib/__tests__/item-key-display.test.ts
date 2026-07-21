@@ -149,7 +149,13 @@ describe("computeItemKeyDisplays", () => {
     // Same project+itemKey, but a different tenant entirely.
     await client.execute({
       sql: `INSERT INTO tracker_work_items (id, project_id, item_key, owner_email, org_id) VALUES (?, ?, ?, ?, ?)`,
-      args: ["wi-other-tenant", "proj-1", "SDLC-033", "someone-else@example.com", "org-other"],
+      args: [
+        "wi-other-tenant",
+        "proj-1",
+        "SDLC-033",
+        "someone-else@example.com",
+        "org-other",
+      ],
     });
 
     const displays = await asUser(() =>

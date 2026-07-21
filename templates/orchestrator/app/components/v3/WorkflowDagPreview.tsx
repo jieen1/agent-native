@@ -1,13 +1,15 @@
-import { useMemo } from "react";
 import { IconAlertCircle } from "@tabler/icons-react";
+import { useMemo } from "react";
+
 import { cn } from "@/lib/utils";
-import { NodeTypeDot } from "./WorkflowNodeTypeIcon";
+
 import {
   nodeDepths,
   NODE_TYPE_LABEL,
   type WorkflowNode,
   type WorkflowNodeType,
 } from "./workflow-dag-types";
+import { NodeTypeDot } from "./WorkflowNodeTypeIcon";
 
 const BOX_W = 172;
 const BOX_H = 68;

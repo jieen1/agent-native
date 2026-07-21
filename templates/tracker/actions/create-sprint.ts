@@ -6,13 +6,15 @@ import {
 import { and, eq } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
 export default defineAction({
-  description: "Create a sprint under a project. A sprint groups work items into a time-boxed delivery cycle.",
+  description:
+    "Create a sprint under a project. A sprint groups work items into a time-boxed delivery cycle.",
   schema: z.object({
     projectId: z.string().min(1).describe("Owning project id"),
     name: z.string().min(1).describe("Sprint name"),
@@ -33,7 +35,12 @@ export default defineAction({
       await db
         .select({ id: schema.projects.id })
         .from(schema.projects)
-        .where(and(eq(schema.projects.id, args.projectId), ownerScope(schema.projects)))
+        .where(
+          and(
+            eq(schema.projects.id, args.projectId),
+            ownerScope(schema.projects),
+          ),
+        )
         .limit(1)
     )[0];
     if (!project) throw new Error("Project not found or not accessible");

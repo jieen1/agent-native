@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
 import { useActionQuery } from "@agent-native/core/client";
 import { IconBook } from "@tabler/icons-react";
-import { APP_TITLE } from "@/lib/app-config";
-import { SkillsNav, type SkillListEntry } from "@/components/skills/SkillsNav";
+import { useEffect, useState } from "react";
+
 import { SkillEditorPane } from "@/components/skills/SkillEditorPane";
+import { SkillsNav, type SkillListEntry } from "@/components/skills/SkillsNav";
+import { APP_TITLE } from "@/lib/app-config";
 
 export function meta() {
   return [{ title: `${APP_TITLE} — 技能` }];

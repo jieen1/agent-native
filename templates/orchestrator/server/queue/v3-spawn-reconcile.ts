@@ -375,8 +375,7 @@ export async function reconcileV3SpawnsOnce(
       anyLiveSignal &&
       hasHeartbeat &&
       Date.now() - lastEventAt <= effectiveStallMs;
-    const hardStale =
-      !recentHeartbeat && startedAt < Date.now() - staleGraceMs;
+    const hardStale = !recentHeartbeat && startedAt < Date.now() - staleGraceMs;
     // The unconditional final backstop — ignores heartbeat entirely (exactly
     // like the old hardStale did), so a spawn that heartbeats forever but never
     // finishes is still reaped for cost control.

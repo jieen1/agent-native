@@ -16,8 +16,9 @@ import {
   getRequestUserEmail,
   getRequestOrgId,
 } from "@agent-native/core/server/request-context";
-import { getDb, schema } from "../db/index.js";
+
 import { newId, nowIso } from "../../actions/_util.js";
+import { getDb, schema } from "../db/index.js";
 
 /** The audited action keys (a closed-ish set kept stable for querying). */
 export type AuditAction =
@@ -67,8 +68,7 @@ export async function writeAudit(args: WriteAuditArgs): Promise<string | null> {
   try {
     const db = getDb();
     const id = newId("audit");
-    const actor =
-      args.actor ?? getRequestUserEmail() ?? "local@localhost";
+    const actor = args.actor ?? getRequestUserEmail() ?? "local@localhost";
     const ownerEmail =
       args.ownerEmail ?? getRequestUserEmail() ?? "local@localhost";
     const orgId = args.orgId ?? getRequestOrgId() ?? null;

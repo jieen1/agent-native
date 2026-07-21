@@ -5,8 +5,10 @@ import {
 } from "@agent-native/core/server/request-context";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { isChecklistComplete } from "../server/lib/review-checklist.js";
 import {
   actorFromCaller,
   assertTransition,
@@ -15,7 +17,6 @@ import {
   TransitionGuardError,
   type GuardState,
 } from "../server/lib/transition-guard.js";
-import { isChecklistComplete } from "../server/lib/review-checklist.js";
 
 // The 7 guard-facing target states. See server/lib/transition-guard.ts for the
 // full vocabulary-reconciliation note (target enum ≠ currentStageName enum).
@@ -54,7 +55,9 @@ export default defineAction({
     verdict: z
       .enum(["PASSED", "CHANGES_REQUESTED"])
       .optional()
-      .describe("Required PASSED for target=done; CHANGES_REQUESTED redirects to a 实施 rollback"),
+      .describe(
+        "Required PASSED for target=done; CHANGES_REQUESTED redirects to a 实施 rollback",
+      ),
     evidence: z
       .object({
         runId: z.string().optional(),
@@ -73,7 +76,8 @@ export default defineAction({
     // Precondition called out by T-F3-13: without this, targetId falls back
     // to null and the audit-lookup-by-targetId assertion is permanently red.
     target: (args) => ({ type: "work-item", id: args.id }),
-    summary: (args) => `transition → ${args.target}: ${args.reason}`.slice(0, 200),
+    summary: (args) =>
+      `transition → ${args.target}: ${args.reason}`.slice(0, 200),
   },
   run: async (args, ctx) => {
     const ownerEmail = getRequestUserEmail();
@@ -87,7 +91,9 @@ export default defineAction({
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.id), ownerScope(schema.workItems)))
+        .where(
+          and(eq(schema.workItems.id, args.id), ownerScope(schema.workItems)),
+        )
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found or not accessible");
@@ -110,7 +116,9 @@ export default defineAction({
       args.target === "done" &&
       args.verdict === "CHANGES_REQUESTED" &&
       currentGuardState(snapshot) === "待人工评审";
-    const effectiveTarget: GuardState = isChangesRequestedRedirect ? "实施" : args.target;
+    const effectiveTarget: GuardState = isChangesRequestedRedirect
+      ? "实施"
+      : args.target;
 
     const evidence = {
       verdict: args.verdict,
@@ -123,7 +131,12 @@ export default defineAction({
 
     let guardResult: { noop: boolean };
     try {
-      guardResult = assertTransition(snapshot, effectiveTarget, actor, evidence);
+      guardResult = assertTransition(
+        snapshot,
+        effectiveTarget,
+        actor,
+        evidence,
+      );
     } catch (err) {
       if (err instanceof TransitionGuardError) {
         const wrapped = new Error(`状态迁移被拒绝: ${err.message}`);
@@ -169,8 +182,11 @@ export default defineAction({
         const wrapped = new Error(
           "状态迁移被拒绝: 评审核对清单未全部确认(F6 核对清单门,03 §2)",
         );
-        (wrapped as Error & { code?: string; need?: string[] }).code = "evidence-missing";
-        (wrapped as Error & { code?: string; need?: string[] }).need = ["checklist"];
+        (wrapped as Error & { code?: string; need?: string[] }).code =
+          "evidence-missing";
+        (wrapped as Error & { code?: string; need?: string[] }).need = [
+          "checklist",
+        ];
         throw wrapped;
       }
     }
@@ -250,9 +266,16 @@ export default defineAction({
       target: args.target,
       effectiveTarget,
       noop: false,
-      status: effectiveTarget === "done" ? "done" : effectiveTarget === "closed" ? "closed" : item.status,
+      status:
+        effectiveTarget === "done"
+          ? "done"
+          : effectiveTarget === "closed"
+            ? "closed"
+            : item.status,
       currentStageName:
-        typeof patch.currentStageName === "string" ? patch.currentStageName : item.currentStageName,
+        typeof patch.currentStageName === "string"
+          ? patch.currentStageName
+          : item.currentStageName,
     };
   },
 });

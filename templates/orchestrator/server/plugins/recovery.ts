@@ -1,5 +1,6 @@
-import { reconcileV3OnStartup } from "../recovery/v3-reconcile.js";
 import { isPostgres } from "@agent-native/core/db";
+
+import { reconcileV3OnStartup } from "../recovery/v3-reconcile.js";
 
 // Crash-recovery on boot (DESIGN §14 / §1.7). Runs after the DB plugin
 // (migrations) so the tables and the v18 audit_log exist. Best-effort: a

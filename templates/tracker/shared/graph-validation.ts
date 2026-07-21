@@ -178,8 +178,8 @@ export function validateDependencyGraph(
 
     while (queue.length > 0) {
       // Pop the itemKey-smallest available id to keep ordering deterministic.
-      queue.sort(
-        (a, b) => (keyOf.get(a) ?? a).localeCompare(keyOf.get(b) ?? b),
+      queue.sort((a, b) =>
+        (keyOf.get(a) ?? a).localeCompare(keyOf.get(b) ?? b),
       );
       const u = queue.shift()!;
       order.push(u);
@@ -241,7 +241,8 @@ export function validateDependencyGraph(
     // the whole graph is one single linear chain with no branching.
     if (nodes.length >= 3) {
       const allDegreeAtMostOne = nodes.every(
-        (n) => (indegree.get(n.id) ?? 0) <= 1 && (outdegree.get(n.id) ?? 0) <= 1,
+        (n) =>
+          (indegree.get(n.id) ?? 0) <= 1 && (outdegree.get(n.id) ?? 0) <= 1,
       );
       const sources = nodes.filter((n) => (indegree.get(n.id) ?? 0) === 0);
       const sinks = nodes.filter((n) => (outdegree.get(n.id) ?? 0) === 0);

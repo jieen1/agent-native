@@ -383,8 +383,7 @@ export async function uploadContentImage(
     error?: string;
   };
 
-  let rawUrl =
-    typeof data.url === "string" && data.url ? data.url : undefined;
+  let rawUrl = typeof data.url === "string" && data.url ? data.url : undefined;
   let id = typeof data.id === "string" && data.id ? data.id : undefined;
 
   // upload-image is a "pure" core action (no mcpApp.resource / readOnly), so

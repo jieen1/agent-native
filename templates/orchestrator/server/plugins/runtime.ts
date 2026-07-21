@@ -1,4 +1,5 @@
 import { ensureAgentHarnessSessionTables } from "@agent-native/core/agent/harness";
+
 import { registerOrchestratorRuntime } from "../register-runtime.js";
 
 // Belt-and-suspenders: also register at server startup and ensure the harness

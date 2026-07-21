@@ -16,9 +16,10 @@ import type {
 } from "./node-runtime.js";
 
 /** A scriptable fake runtime for the git wrapper (exec-only). */
-function fakeRuntime(
-  responder: (cmd: string) => Partial<ExecResult>,
-): { runtime: NodeRuntime; calls: string[] } {
+function fakeRuntime(responder: (cmd: string) => Partial<ExecResult>): {
+  runtime: NodeRuntime;
+  calls: string[];
+} {
   const calls: string[] = [];
   const exec = async (
     _vm: VmHandle,
@@ -32,7 +33,10 @@ function fakeRuntime(
   return { runtime, calls };
 }
 
-const VM = { name: "vm", spec: { kind: "microvm", onFailure: "recreate" } } as VmHandle;
+const VM = {
+  name: "vm",
+  spec: { kind: "microvm", onFailure: "recreate" },
+} as VmHandle;
 
 function ctxFor(
   runtime: NodeRuntime,
@@ -74,7 +78,9 @@ describe("checkoutRunBranch", () => {
       branch: "an/run-y",
       baseRef: "main",
     });
-    expect(calls.some((c) => /checkout -B 'an\/run-y' 'main'/.test(c))).toBe(true);
+    expect(calls.some((c) => /checkout -B 'an\/run-y' 'main'/.test(c))).toBe(
+      true,
+    );
   });
 });
 
@@ -91,7 +97,8 @@ describe("commit", () => {
 
   it("commits and returns the sha when the tree is dirty", async () => {
     const { runtime } = fakeRuntime((cmd) => {
-      if (/status --porcelain/.test(cmd)) return { code: 0, stdout: " M a.txt" };
+      if (/status --porcelain/.test(cmd))
+        return { code: 0, stdout: " M a.txt" };
       if (/rev-parse HEAD/.test(cmd)) return { code: 0, stdout: "deadbeef\n" };
       return { code: 0 };
     });

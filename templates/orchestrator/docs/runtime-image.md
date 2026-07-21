@@ -57,7 +57,7 @@ bake. `ensureToolchain` only installs the missing tools, so a prebaked image
     `172.16.0.0/12` NAT-masquerade rule OR a running `tinyproxy`. Neither survives
     a `wsl --shutdown` by default (WSL does not persist iptables), so on a fresh
     WSL boot the host must re-establish one (e.g. `iptables -t nat -A POSTROUTING
-    -s 172.16.0.0/12 ! -d 172.16.0.0/12 -j MASQUERADE`, or start tinyproxy). The
+-s 172.16.0.0/12 ! -d 172.16.0.0/12 -j MASQUERADE`, or start tinyproxy). The
     runtime never mutates host firewall state; it probes both paths per boot and,
     if BOTH are down, a claude/git/install step fails with a clear egress error
     rather than hanging. Treat this as a host setup step alongside `msb` and the

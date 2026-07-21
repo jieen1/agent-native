@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 
-import { parseClaudeStreamJson } from "./claude-stream.js";
-import { buildClaudeCommand } from "./claude-code-executor.js";
-import type { RuntimeExecCtx } from "./types.js";
 import type { Node } from "../../../shared/types.js";
+import { buildClaudeCommand } from "./claude-code-executor.js";
+import { parseClaudeStreamJson } from "./claude-stream.js";
+import type { RuntimeExecCtx } from "./types.js";
 
 // A representative `claude --output-format stream-json` transcript: a system
 // init, an assistant turn that emits a tool_use (write) + text, a user

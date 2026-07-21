@@ -41,9 +41,10 @@
 // host sandboxes. Bind 0.0.0.0 by default so the container reaches it via
 // host.docker.internal (host-gateway); restrict with ORCH_MSB_BRIDGE_HOST.
 
-import http from "node:http";
-import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import http from "node:http";
+
 import { Sandbox, NetworkPolicy } from "microsandbox";
 
 const PORT = Number(process.env.ORCH_MSB_BRIDGE_PORT || 8730);
@@ -616,7 +617,9 @@ server.listen(PORT, HOST, async () => {
 });
 
 function shutdown(sig) {
-  log(`${sig} — shutting down (detached VMs survive; orphans reconciled on next start)`);
+  log(
+    `${sig} — shutting down (detached VMs survive; orphans reconciled on next start)`,
+  );
   clearInterval(reconcileTimer);
   server.close(() => process.exit(0));
   // Don't hang forever if a socket is wedged.

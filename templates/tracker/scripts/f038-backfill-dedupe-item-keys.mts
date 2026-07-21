@@ -64,7 +64,9 @@ async function main() {
   if (!projectKey) {
     throw new Error(`project not found for id: ${projectId}`);
   }
-  log(`project=${projectId} key=${projectKey} mode=${execute ? "EXECUTE" : "DRY-RUN"}`);
+  log(
+    `project=${projectId} key=${projectKey} mode=${execute ? "EXECUTE" : "DRY-RUN"}`,
+  );
 
   // 只取未挂 sprint 的历史工单(已挂 sprint 的不在本次范围内)。
   const rowsRes = await exec.execute({
@@ -72,12 +74,14 @@ async function main() {
           WHERE project_id = ? AND (sprint_id IS NULL OR sprint_id = '')`,
     args: [projectId],
   });
-  const rows = (rowsRes.rows as Array<{
-    id: string;
-    item_key: string | null;
-    sprint_id: string | null;
-    created_at: string;
-  }>).map((r) => ({
+  const rows = (
+    rowsRes.rows as Array<{
+      id: string;
+      item_key: string | null;
+      sprint_id: string | null;
+      created_at: string;
+    }>
+  ).map((r) => ({
     id: r.id,
     itemKey: r.item_key ?? "",
     sprintId: r.sprint_id ?? null,
@@ -85,14 +89,15 @@ async function main() {
   }));
   log(`scanned ${rows.length} un-sprinted work item(s)`);
 
-  const { computeDedupePlan, applyDedupePlan } = await import(
-    "../server/lib/item-key-dedupe.js"
-  );
+  const { computeDedupePlan, applyDedupePlan } =
+    await import("../server/lib/item-key-dedupe.js");
   const plan = computeDedupePlan(rows);
 
   const collidingKeys = new Set(plan.map((p) => p.oldItemKey));
   if (plan.length === 0) {
-    log("no duplicate itemKey among un-sprinted work items — nothing to do (idempotent).");
+    log(
+      "no duplicate itemKey among un-sprinted work items — nothing to do (idempotent).",
+    );
     process.exit(0);
   }
   log(
@@ -101,15 +106,16 @@ async function main() {
 
   if (!execute) {
     // dry-run:预览将分配的新序号(从当前序列器的下一个号开始,不写库)。
-    const { maxNumericSuffix } = await import(
-      "../server/lib/item-key-sequencer.js"
-    );
+    const { maxNumericSuffix } =
+      await import("../server/lib/item-key-sequencer.js");
     const allKeys = await exec.execute({
       sql: `SELECT item_key FROM tracker_work_items WHERE project_id = ?`,
       args: [projectId],
     });
     let previewSeq = maxNumericSuffix(
-      (allKeys.rows as Array<{ item_key?: string | null }>).map((r) => r.item_key),
+      (allKeys.rows as Array<{ item_key?: string | null }>).map(
+        (r) => r.item_key,
+      ),
     );
     log("DRY-RUN plan (no writes performed):");
     for (const p of plan) {

@@ -148,10 +148,7 @@ export async function assertSystemDefaultValid(
     );
   }
 
-  const accepted = new Set<string>([
-    ...BUILTIN_ENGINES,
-    ...runtimeConfigKeys,
-  ]);
+  const accepted = new Set<string>([...BUILTIN_ENGINES, ...runtimeConfigKeys]);
 
   if (!accepted.has(value)) {
     throw new ConfigError(`SYSTEM_DEFAULT is not a real runtime key: ${value}`);

@@ -29,14 +29,6 @@ import {
 } from "@agent-native/core/server/request-context";
 
 import type { Node, NodeRuntimeSpec } from "../../shared/types.js";
-import type { NodeRuntime, TeardownPolicy, VmHandle } from "./node-runtime.js";
-import {
-  addAll,
-  commit,
-  pushBranch,
-  type GitContext,
-} from "./git-wrapper.js";
-import { DEFAULT_WORKDIR } from "./executors/workdir.js";
 import { getVmSemaphore, type VmSemaphore } from "./backpressure.js";
 import type {
   RuntimeExecCtx,
@@ -44,6 +36,9 @@ import type {
   RuntimeExecStep,
   RuntimeExecutor,
 } from "./executors/types.js";
+import { DEFAULT_WORKDIR } from "./executors/workdir.js";
+import { addAll, commit, pushBranch, type GitContext } from "./git-wrapper.js";
+import type { NodeRuntime, TeardownPolicy, VmHandle } from "./node-runtime.js";
 
 /** The worktree dir created inside every microVM node (DESIGN §7.1a). */
 const WORKDIR = DEFAULT_WORKDIR;
@@ -315,7 +310,9 @@ export class NodeRunner {
       if (deliverGate) {
         delivery = await this.deliver(runtime, vm, spec, input);
         // eslint-disable-next-line no-console
-        console.log(`[extract] node=${input.node.id} delivery=${JSON.stringify(delivery)}`);
+        console.log(
+          `[extract] node=${input.node.id} delivery=${JSON.stringify(delivery)}`,
+        );
       }
 
       succeeded = true;

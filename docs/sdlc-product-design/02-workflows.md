@@ -35,13 +35,14 @@ auditing ──NO_GAPS──▶ promoting ──晋升完成──▶ storytelli
 
 v1.1 把设计相位当单一 track；v2.0 拆为三条各自签核的 track。三者并非无依赖并发：测试计划可与 UI 设计并行，**技术设计依赖已签核的 ui-spec、必须在 UI 之后**：
 
-| track | 产物链 | 门 | 适用 |
-|---|---|---|---|
-| UI 设计 | ui-spec → sprint 原型（design 应用）→ 批注修订 | **ui-signoff** | sprint 含用户可见界面时激活（sprint-doc 的 In Scope 标注 `ui` 面） |
-| 技术设计 | technical-design v1 → 对抗评审 → v2 → briefs | **design-signoff** | always |
-| 测试计划 | test-plan（在 planning 相位产出，此处允许按 UI/设计结论修订版本） | 并入 plan-signoff，修订版需重确认 | always |
+| track    | 产物链                                                            | 门                                | 适用                                                               |
+| -------- | ----------------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------ |
+| UI 设计  | ui-spec → sprint 原型（design 应用）→ 批注修订                    | **ui-signoff**                    | sprint 含用户可见界面时激活（sprint-doc 的 In Scope 标注 `ui` 面） |
+| 技术设计 | technical-design v1 → 对抗评审 → v2 → briefs                      | **design-signoff**                | always                                                             |
+| 测试计划 | test-plan（在 planning 相位产出，此处允许按 UI/设计结论修订版本） | 并入 plan-signoff，修订版需重确认 | always                                                             |
 
 规则：
+
 - technical-design 的 §4 各节与 §8 测试场景**必须引用**已签核的 ui-spec 屏编号
   与原型深链（含 UI 的 sprint）；extract-briefs 把对应屏的规格摘要
   （非 HTML）打进各工作项 brief。
@@ -88,15 +89,15 @@ agent 永远只读 tracker 版纯文本。低摩擦保底（P12）：每一步�
 技能是 markdown（`.agents/skills/*`），改措辞即生效——判断性=技能、
 确定性=action。
 
-| 技能/action | 产物 docKey | 交互形态（UI 由 03 章 Sprint 工作台承载） | 关键质量门 |
-|---|---|---|---|
-| `/brainstorm`（**可选**） | brainstorm-notes | InterviewCard 决策树：一次一问、**每问先给推荐答案**；四种开场（问题/半成形想法/开放问题/约束）。可整步跳过直接 `/sprint-plan`，或导入现成笔记为产物 | 可证伪门（说不出检验=想法淘汰）；锚定单一方案时强制再出两个 |
-| `/sprint-plan` | sprint-doc | 完整访谈或 `--from-brainstorm` 综合模式（先给草稿只问缺口）；结束 HolisticReveal 整块揭示 | P0 删除测试；Leading+Lagging 可证伪指标，**每条带稳定编号 M1/M2…**（Goal 链全程以编号对齐：覆盖矩阵行、audit metrics[].id、Goal 卡）；**文档不含文件路径/代码** |
-| `/sprint-test-plan` | test-plan | 场景卡片流：每场景 Why/Repos/Steps/Expected/**Pass-fail 信号**/执行工具/**关联指标（M 编号）**；可选 journey 节（场景在用户路径上的顺序）；无跨模块时一段式"无集成场景" | 按用户目标一场景；黑盒；信号可证伪；覆盖矩阵由关联指标字段**确定性生成**（发布管道不做判断） |
-| `/ui-spec`（新增） | ui-spec | 屏清单访谈 + 逐屏规格卡；详见 05 章 §2 | 每屏有目标/主操作/数据状态；每条 In-Scope outcome 至少映射到一屏或显式声明"无界面" |
-| `/sprint-design` | technical-design | 四阶段：读产物 → 深读真实代码（经 orchestrator 只读检出）→ 写设计 → 自审；产出 §1–§9 结构化文档 | 每工作项一个 §4 节；文件路径必须真实存在；§7 五列文件变更矩阵机器可解析；每个测试场景与 ui-spec 屏有实现路径 |
-| `/sprint-review` | technical-design vN+1 | 多轮对抗评审：orchestrator spawnOnce 起 vLLM/sonnet 交替轮（每轮新 agent + 累计已发现清单防重复）；报告表 轮次/模型/发现/修订 | 只收高置信新发现；有效发现逐条修订进新版本（supersedes 链） |
-| `extract-briefs`（action） | brief:{itemKey} / shared-brief / **briefs-index** | 一键执行 + 结果摘要（N briefs / 缺失项 / 依赖清单 / Wave 顺序） | **移植 extract_briefs.py 全算法**（§2/§4/§5 数据模型/§6 API 表/§8 Testing Strategy/Env Vars + CREATE 文件引用与 API 生产-消费双通道依赖推导）；幂等；对拍验收；ui-spec 屏摘要注入对应 brief |
+| 技能/action                | 产物 docKey                                       | 交互形态（UI 由 03 章 Sprint 工作台承载）                                                                                                                               | 关键质量门                                                                                                                                                                                  |
+| -------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/brainstorm`（**可选**）  | brainstorm-notes                                  | InterviewCard 决策树：一次一问、**每问先给推荐答案**；四种开场（问题/半成形想法/开放问题/约束）。可整步跳过直接 `/sprint-plan`，或导入现成笔记为产物                    | 可证伪门（说不出检验=想法淘汰）；锚定单一方案时强制再出两个                                                                                                                                 |
+| `/sprint-plan`             | sprint-doc                                        | 完整访谈或 `--from-brainstorm` 综合模式（先给草稿只问缺口）；结束 HolisticReveal 整块揭示                                                                               | P0 删除测试；Leading+Lagging 可证伪指标，**每条带稳定编号 M1/M2…**（Goal 链全程以编号对齐：覆盖矩阵行、audit metrics[].id、Goal 卡）；**文档不含文件路径/代码**                             |
+| `/sprint-test-plan`        | test-plan                                         | 场景卡片流：每场景 Why/Repos/Steps/Expected/**Pass-fail 信号**/执行工具/**关联指标（M 编号）**；可选 journey 节（场景在用户路径上的顺序）；无跨模块时一段式"无集成场景" | 按用户目标一场景；黑盒；信号可证伪；覆盖矩阵由关联指标字段**确定性生成**（发布管道不做判断）                                                                                                |
+| `/ui-spec`（新增）         | ui-spec                                           | 屏清单访谈 + 逐屏规格卡；详见 05 章 §2                                                                                                                                  | 每屏有目标/主操作/数据状态；每条 In-Scope outcome 至少映射到一屏或显式声明"无界面"                                                                                                          |
+| `/sprint-design`           | technical-design                                  | 四阶段：读产物 → 深读真实代码（经 orchestrator 只读检出）→ 写设计 → 自审；产出 §1–§9 结构化文档                                                                         | 每工作项一个 §4 节；文件路径必须真实存在；§7 五列文件变更矩阵机器可解析；每个测试场景与 ui-spec 屏有实现路径                                                                                |
+| `/sprint-review`           | technical-design vN+1                             | 多轮对抗评审：orchestrator spawnOnce 起 vLLM/sonnet 交替轮（每轮新 agent + 累计已发现清单防重复）；报告表 轮次/模型/发现/修订                                           | 只收高置信新发现；有效发现逐条修订进新版本（supersedes 链）                                                                                                                                 |
+| `extract-briefs`（action） | brief:{itemKey} / shared-brief / **briefs-index** | 一键执行 + 结果摘要（N briefs / 缺失项 / 依赖清单 / Wave 顺序）                                                                                                         | **移植 extract_briefs.py 全算法**（§2/§4/§5 数据模型/§6 API 表/§8 Testing Strategy/Env Vars + CREATE 文件引用与 API 生产-消费双通道依赖推导）；幂等；对拍验收；ui-spec 屏摘要注入对应 brief |
 
 Epic 拆解不是技能：`decompose-epic` action 只接受**人写好的子项清单**
 （title/repo/dependsOn/touches），系统做格式校验 + 依赖图校验
@@ -126,12 +127,12 @@ Epic 拆解不是技能：`decompose-epic` action 只接受**人写好的子项�
 - run tags 全链路携带 `{source, sprint_id, item_id, ownerEmail, orgId}`。
 - **载荷契约表**（P3 的精确化，取代笼统"白名单"）：
 
-| 工作流 | 允许注入的载荷 | 永远禁止 |
-|---|---|---|
-| issue-pipeline / quick-task / hotfix | brief:{item} + shared-brief + ui-spec 屏摘要 | technical-design 全文、sprint-doc 全文、他项 brief |
-| sdlc-verify | 上行 + **test-plan 场景节**（结构化提取） | 同上 |
-| sdlc-gap-analysis | **goal-metrics 节**（sprint-doc 的 Goal 与编号指标，确定性提取）+ 跨仓 diff + 验证日志 | technical-design、issue 清单 |
-| sdlc-ui-build | ui-spec 全文 + designSystemId | 其余产物 |
+| 工作流                               | 允许注入的载荷                                                                         | 永远禁止                                           |
+| ------------------------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| issue-pipeline / quick-task / hotfix | brief:{item} + shared-brief + ui-spec 屏摘要                                           | technical-design 全文、sprint-doc 全文、他项 brief |
+| sdlc-verify                          | 上行 + **test-plan 场景节**（结构化提取）                                              | 同上                                               |
+| sdlc-gap-analysis                    | **goal-metrics 节**（sprint-doc 的 Goal 与编号指标，确定性提取）+ 跨仓 diff + 验证日志 | technical-design、issue 清单                       |
+| sdlc-ui-build                        | ui-spec 全文 + designSystemId                                                          | 其余产物                                           |
 
 ### 3.1 `sdlc-issue-pipeline` — 单工作项实施流水线（核心）
 
@@ -203,7 +204,7 @@ spec-parse   [确定性] ui-spec → 屏清单 + 每屏规格
 → ds-lint    [确定性] tokens 存在性/禁 emoji 图标/data-screen 链接完整性检查
 → consistency-review [sonnet, output_schema] 跨屏一致性（导航、状态、术语）
 → publish    [确定性] create-design + create-file 入库 design 应用，回写
-             tracker 产物 ui-prototype(contentRef=design:<id>) 
+             tracker 产物 ui-prototype(contentRef=design:<id>)
 ```
 
 失败路由：ds-lint 违规项回 screen-gen 定点重生成（loop ≤2）；
@@ -246,12 +247,13 @@ explore [sonnet/vLLM，只读 workspace] → report [output_schema：
 ### 3.10 工作流选择器
 
 **拆分契约（决策序之前的前置检查，v2.2 自举簇九）**：spec/brief 涉及
->6 个文件、或跨生命周期协同（schema+action+页面+调度器联动）→ 拒绝
-单节点派发，强制拆为多个 dev 子任务（issue-pipeline 多节点或多工作项，
-规划工作台给规模告警与一键拆分，03 §6）；执行期 vLLM 单节点输出预算
-耗尽 ≥2 次自动定性"规模超标"回规划拆分，不换更大模型硬扛。依据：
-1–6 文件级 spec 下 vLLM 一次交付扎实，12 文件级（655/846 行 spec）
-连续预算耗尽且 brain 被迫代写（作者身份转移的成因链之一）。
+
+> 6 个文件、或跨生命周期协同（schema+action+页面+调度器联动）→ 拒绝
+> 单节点派发，强制拆为多个 dev 子任务（issue-pipeline 多节点或多工作项，
+> 规划工作台给规模告警与一键拆分，03 §6）；执行期 vLLM 单节点输出预算
+> 耗尽 ≥2 次自动定性"规模超标"回规划拆分，不换更大模型硬扛。依据：
+> 1–6 文件级 spec 下 vLLM 一次交付扎实，12 文件级（655/846 行 spec）
+> 连续预算耗尽且 brain 被迫代写（作者身份转移的成因链之一）。
 
 规则按**决策序**匹配，命中即停：① 人工覆盖 → ② from-audit 单
 （一律 issue-pipeline 的命名预设 `mode=fix`——模板库中显示为 issue-pipeline
@@ -260,14 +262,14 @@ targetBranch=sprint 分支，不走独立 hotfix 模板）→ ③ 类型专用�
 （缺陷 sprint 内以 sprint 分支为基）→ ④ 派发窗口内 sprint 的开发项
 → issue-pipeline（窗口外等待相位）→ ⑤ 无 sprint + auto → quick-task。
 
-| 输入 | 规则 |
-|---|---|
-| 工作项类型 | 缺陷/生产问题→hotfix；文档→docs-task；调研→spike-research；from-audit→issue-pipeline 的 fix 子集（复用 hotfix 形） |
-| 所属 sprint | 在 executing sprint 内的开发项→sdlc-issue-pipeline（继承 sprint 分支） |
-| 无 sprint + auto | quick-task |
-| 项目配置 | 项目设置里可改"类型→工作流"映射与各模板默认参数（模型档、评审轮数、gateMode） |
-| 人工覆盖 | 派发面板可显式选任一模板 + 覆盖 inputs |
-| brain 建议 | brain 在派发前可建议换模板（如 quick-task 项发现涉及三个模块→建议升级 issue-pipeline），建议以待确认卡片呈现，不自动改 |
+| 输入             | 规则                                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 工作项类型       | 缺陷/生产问题→hotfix；文档→docs-task；调研→spike-research；from-audit→issue-pipeline 的 fix 子集（复用 hotfix 形）     |
+| 所属 sprint      | 在 executing sprint 内的开发项→sdlc-issue-pipeline（继承 sprint 分支）                                                 |
+| 无 sprint + auto | quick-task                                                                                                             |
+| 项目配置         | 项目设置里可改"类型→工作流"映射与各模板默认参数（模型档、评审轮数、gateMode）                                          |
+| 人工覆盖         | 派发面板可显式选任一模板 + 覆盖 inputs                                                                                 |
+| brain 建议       | brain 在派发前可建议换模板（如 quick-task 项发现涉及三个模块→建议升级 issue-pipeline），建议以待确认卡片呈现，不自动改 |
 
 ## 4. 可恢复与重试语义（homerail 移植到 V3）
 
@@ -275,17 +277,17 @@ V3 已有：advisory-lock tick、错误分类(transient/schema/permanent/cancell
 schema 一次纠偏、patch(未来)/fork(过去)、幂等事件、spawn_events 溯源。
 v2.0 增强（全部为设计承诺，UI 均有呈现点）：
 
-| # | 语义 | 现状 | 设计 | UI 呈现 |
-|---|---|---|---|---|
-| R1 | 孤儿运行降级 | **新增**（需 v3_spawns 加心跳列，见 04 §13） | 进程重启时仍 running 且 spawn 无心跳的节点 → failed("node lost: restart")，走失败路由而非悬挂 | 运行详情节点卡显示"进程重启降级"事件 |
-| R2 | 事件溯源恢复 | 部分已有（reconcile-on-startup 存在） | reconcile-on-startup 以 v3_events + 节点终态重建调度状态；DB 权威、日志尽力 | 健康页显示"上次恢复：N run 复原" |
-| R3 | 有界纠偏 | 部分已有（schema 纠偏 1 次与 loop maxIterations 已在引擎强制） | 评审 loop ≤3、审计 ≤3 轮、run 级 max spawn 上限；耗尽→escalation 而非静默 | 节点卡显示 attempt 计数；超限自动出审批单 |
-| R4 | 检查点重试 | 新增 | nodeRetry 支持"从上次成功产物续跑"（fork spawn transcript，新 spawnId，attempt+1，父链保留） | NodeInspector 的 attempt 时间线，可从任一 attempt 重试 |
-| R5 | 过期栅栏 | 部分已有（currentSpawnId 列已存在，栅栏语义新增） | node.currentSpawnId 不匹配的 spawn 事件一律丢弃（fork/重试后防竞态） | — |
-| R6 | 失控上限 | 部分已有（节点级 maxIterations 已强制；run 级为新增） | run 级 max_dispatches 显式配置于模板，超限 abort + 事件 | 模板编辑器暴露上限字段 |
-| R7 | 首目标就绪门 | 新增 | 恢复后的 ready 节点等 vLLM/CC 健康检查通过再派发 | 健康页 + run 事件"等待运行时恢复" |
-| R8 | scorecard 归因 | 新增 | run 终态自动评分（pass/needs-attention），失败按 prompt/tool/engine/template/harness 五层归因 + next_steps | 洞察页归因面板（04 章 §11） |
-| R9 | spawn 终态传导不变量 | **新增**（自举 SDLC-050：reconcile 判死 spawn 后节点悬挂 running、不可 retry 不再入队） | **不存在 spawn 已终态而其 node 仍 running 超过一个 tick**——spawn 的任何终态来源（正常结束/心跳超时/reconcile 重置/人工取消）都必须在同一事务内驱动 node 状态迁移（failed→按失败路由重试或重新入队）；违反由 reconciler 断言修正并发 `node.reconciled` 告警事件。runCancel 幂等且成功必须返回成功（SDLC-050 附带缺陷） | 运行详情节点卡显示"传导修正"事件；健康页计数 |
+| #   | 语义                 | 现状                                                                                    | 设计                                                                                                                                                                                                                                                                                                                  | UI 呈现                                                |
+| --- | -------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| R1  | 孤儿运行降级         | **新增**（需 v3_spawns 加心跳列，见 04 §13）                                            | 进程重启时仍 running 且 spawn 无心跳的节点 → failed("node lost: restart")，走失败路由而非悬挂                                                                                                                                                                                                                         | 运行详情节点卡显示"进程重启降级"事件                   |
+| R2  | 事件溯源恢复         | 部分已有（reconcile-on-startup 存在）                                                   | reconcile-on-startup 以 v3_events + 节点终态重建调度状态；DB 权威、日志尽力                                                                                                                                                                                                                                           | 健康页显示"上次恢复：N run 复原"                       |
+| R3  | 有界纠偏             | 部分已有（schema 纠偏 1 次与 loop maxIterations 已在引擎强制）                          | 评审 loop ≤3、审计 ≤3 轮、run 级 max spawn 上限；耗尽→escalation 而非静默                                                                                                                                                                                                                                             | 节点卡显示 attempt 计数；超限自动出审批单              |
+| R4  | 检查点重试           | 新增                                                                                    | nodeRetry 支持"从上次成功产物续跑"（fork spawn transcript，新 spawnId，attempt+1，父链保留）                                                                                                                                                                                                                          | NodeInspector 的 attempt 时间线，可从任一 attempt 重试 |
+| R5  | 过期栅栏             | 部分已有（currentSpawnId 列已存在，栅栏语义新增）                                       | node.currentSpawnId 不匹配的 spawn 事件一律丢弃（fork/重试后防竞态）                                                                                                                                                                                                                                                  | —                                                      |
+| R6  | 失控上限             | 部分已有（节点级 maxIterations 已强制；run 级为新增）                                   | run 级 max_dispatches 显式配置于模板，超限 abort + 事件                                                                                                                                                                                                                                                               | 模板编辑器暴露上限字段                                 |
+| R7  | 首目标就绪门         | 新增                                                                                    | 恢复后的 ready 节点等 vLLM/CC 健康检查通过再派发                                                                                                                                                                                                                                                                      | 健康页 + run 事件"等待运行时恢复"                      |
+| R8  | scorecard 归因       | 新增                                                                                    | run 终态自动评分（pass/needs-attention），失败按 prompt/tool/engine/template/harness 五层归因 + next_steps                                                                                                                                                                                                            | 洞察页归因面板（04 章 §11）                            |
+| R9  | spawn 终态传导不变量 | **新增**（自举 SDLC-050：reconcile 判死 spawn 后节点悬挂 running、不可 retry 不再入队） | **不存在 spawn 已终态而其 node 仍 running 超过一个 tick**——spawn 的任何终态来源（正常结束/心跳超时/reconcile 重置/人工取消）都必须在同一事务内驱动 node 状态迁移（failed→按失败路由重试或重新入队）；违反由 reconciler 断言修正并发 `node.reconciled` 告警事件。runCancel 幂等且成功必须返回成功（SDLC-050 附带缺陷） | 运行详情节点卡显示"传导修正"事件；健康页计数           |
 
 ### 4.1 执行器上下文契约（v2.2 新增，自举簇十）
 
@@ -295,12 +297,12 @@ attempt 重试从零重跑同一任务→确定性再溢出。brain（CC）有�
 compaction，worker 没有——上下文是 worker 最稀缺的资源，必须有生命
 周期管理，与 brain 能力对等：
 
-| # | 契约 | 说明 |
-|---|---|---|
-| C1 | 工具结果窗口化 | Read 按需截取（行区间/符号级），大结果只保留头尾+摘要；同文件重复读取返回增量 |
-| C2 | 超阈自动折叠 | 窗口占用超阈值（如 70%）时，把已完成步骤的工具往返折叠为结构化摘要（保留决策与产物清单），继续执行而非等死 |
-| C3 | 截断续写 | 截断/溢出失败的重试 = **携带已完成产物续写**（R4 检查点重试延伸到上下文场景：已写文件清单+剩余任务作为新起点），禁止从零重跑 |
-| C4 | 与拆分契约互补 | §3.10 拆分契约在规划期降低上下文需求；本契约在执行期保底——两者缺一不可（拆分防线漏网的任务靠 C1–C3 存活） |
+| #   | 契约           | 说明                                                                                                                         |
+| --- | -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| C1  | 工具结果窗口化 | Read 按需截取（行区间/符号级），大结果只保留头尾+摘要；同文件重复读取返回增量                                                |
+| C2  | 超阈自动折叠   | 窗口占用超阈值（如 70%）时，把已完成步骤的工具往返折叠为结构化摘要（保留决策与产物清单），继续执行而非等死                   |
+| C3  | 截断续写       | 截断/溢出失败的重试 = **携带已完成产物续写**（R4 检查点重试延伸到上下文场景：已写文件清单+剩余任务作为新起点），禁止从零重跑 |
+| C4  | 与拆分契约互补 | §3.10 拆分契约在规划期降低上下文需求；本契约在执行期保底——两者缺一不可（拆分防线漏网的任务靠 C1–C3 存活）                    |
 
 ## 5. Brain 可替换架构
 
@@ -308,13 +310,13 @@ compaction，worker 没有——上下文是 worker 最稀缺的资源，必须�
 
 Brain 引擎是配置数据（表 `brain_engines` 或等价配置），不是硬编码分支：
 
-| 字段 | 说明 |
-|---|---|
-| id / name | `claude-code` / `sdk-vllm` / `acp:<agent>` … |
-| kind | `cli-resume`（CC 式子进程会话）/ `sdk`（AI-SDK 循环）/ `acp`（ACP 协议 agent） |
-| modelRef / tier | 引擎默认模型与允许档位 |
-| health | 登录态/端点可达性探测方式 |
-| capabilities | 是否支持 resume / 上下文窗口上报 / usage 上报 |
+| 字段            | 说明                                                                           |
+| --------------- | ------------------------------------------------------------------------------ |
+| id / name       | `claude-code` / `sdk-vllm` / `acp:<agent>` …                                   |
+| kind            | `cli-resume`（CC 式子进程会话）/ `sdk`（AI-SDK 循环）/ `acp`（ACP 协议 agent） |
+| modelRef / tier | 引擎默认模型与允许档位                                                         |
+| health          | 登录态/端点可达性探测方式                                                      |
+| capabilities    | 是否支持 resume / 上下文窗口上报 / usage 上报                                  |
 
 契约（任何引擎必须实现）：`startTurn(threadId, message, cwd, mcpConfig)`
 非阻塞开启一轮；轮内事件持久化到 brain_events；会话可恢复
@@ -347,14 +349,14 @@ Brain 控制台的 workflowRun 计数与直改告警数只是可观察证据，�
 不是提示词承诺。越界操作机制上不可为；配置漏洞导致的越界由审计告警
 兜底（发生即可见）。
 
-| 角色 | 相位/节点 | workspace 权限 | 工具面 | 说明 |
-|---|---|---|---|---|
-| brain | 分析/派发 | 只读 | MCP 全目录 + Read/Grep 类；**无 Write/Edit，Bash 白名单只读命令** | 深读代码写 spec 允许；写文件不可为 |
-| brain | 评审（run 终态唤醒） | **只读挂载** | 同上 + workspaceDiff/nodeSummary | 发现问题→重派 dev 节点 fix 模式（携带评审发现清单），不亲手修 |
-| dev/qa (vLLM) | develop/qa 节点 | 读写（本 workspace） | Read/Edit/Write/Bash（含测试执行；依赖工作区契约 §8 供给） | 唯一合法代码作者 |
-| reviewer/gatekeeper | 评审/守门节点 | 只读 | 只读 + 测试执行 | 产出结构化 verdict，不改代码 |
-| action 节点 | 确定性步骤 | 按 action 声明 | 无 LLM | diff-audit/ci-watch/merge-pr 等 |
-| 人 | 任意 | 完全 | 页面 + 受守卫 action（§9） | 人工完成逃生口带证据（P12） |
+| 角色                | 相位/节点            | workspace 权限       | 工具面                                                            | 说明                                                          |
+| ------------------- | -------------------- | -------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------- |
+| brain               | 分析/派发            | 只读                 | MCP 全目录 + Read/Grep 类；**无 Write/Edit，Bash 白名单只读命令** | 深读代码写 spec 允许；写文件不可为                            |
+| brain               | 评审（run 终态唤醒） | **只读挂载**         | 同上 + workspaceDiff/nodeSummary                                  | 发现问题→重派 dev 节点 fix 模式（携带评审发现清单），不亲手修 |
+| dev/qa (vLLM)       | develop/qa 节点      | 读写（本 workspace） | Read/Edit/Write/Bash（含测试执行；依赖工作区契约 §8 供给）        | 唯一合法代码作者                                              |
+| reviewer/gatekeeper | 评审/守门节点        | 只读                 | 只读 + 测试执行                                                   | 产出结构化 verdict，不改代码                                  |
+| action 节点         | 确定性步骤           | 按 action 声明       | 无 LLM                                                            | diff-audit/ci-watch/merge-pr 等                               |
+| 人                  | 任意                 | 完全                 | 页面 + 受守卫 action（§9）                                        | 人工完成逃生口带证据（P12）                                   |
 
 ## 6. 回写通道与健康门（继承 v1.1，UI 呈现点）
 
@@ -376,11 +378,11 @@ Brain 控制台的 workflowRun 计数与直改告警数只是可观察证据，�
 **就绪不变量**（三条全过才算 ready，任何一条不满足 = infra 故障，
 run 不得开始；违反不记为 agent 失败）：
 
-| # | 不变量 | 断言方式 | 对应自举问题 |
-|---|---|---|---|
-| W1 | 基线新鲜：workspace.base == 镜像目标分支 @ 派发时刻（merge-base 距离 0） | workspaceCreate 后即断言；克隆缓存/池化工作区必须先 fetch+reset | SDLC-056(1f2igmbdch)：3 天旧基线造成本可避免冲突 |
-| W2 | 依赖已预热：node_modules 可用（共享 pnpm store 硬链，秒级），无需也不允许节点内 pnpm install | 供给管道完成安装；develop 提示词维持"禁止装依赖"（职责归供给，不归 agent） | B1 brain 替 dev 装依赖 48 次 Bash；SDLC-057 |
-| W3 | 测试可执行：`test_cmd_smoke`（如 vitest --version + 空跑）通过 | 就绪探测的一部分 | SDLC-057：dev 自述"环境无 vitest"，TDD 纸上谈兵 |
+| #   | 不变量                                                                                       | 断言方式                                                                   | 对应自举问题                                     |
+| --- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------ |
+| W1  | 基线新鲜：workspace.base == 镜像目标分支 @ 派发时刻（merge-base 距离 0）                     | workspaceCreate 后即断言；克隆缓存/池化工作区必须先 fetch+reset            | SDLC-056(1f2igmbdch)：3 天旧基线造成本可避免冲突 |
+| W2  | 依赖已预热：node_modules 可用（共享 pnpm store 硬链，秒级），无需也不允许节点内 pnpm install | 供给管道完成安装；develop 提示词维持"禁止装依赖"（职责归供给，不归 agent） | B1 brain 替 dev 装依赖 48 次 Bash；SDLC-057      |
+| W3  | 测试可执行：`test_cmd_smoke`（如 vitest --version + 空跑）通过                               | 就绪探测的一部分                                                           | SDLC-057：dev 自述"环境无 vitest"，TDD 纸上谈兵  |
 
 **存续期规则**：
 
@@ -407,15 +409,15 @@ run 不得开始；违反不记为 agent 失败）：
 证据**。守卫在 action 层强制（写入方身份来自 JWT/run tags），页面与
 agent 走同一守卫。
 
-| 迁移 | 合法写入方 | 必需证据载荷 | 失败行为 |
-|---|---|---|---|
-| 派发（待办→实施） | 仅记 execState=dispatched；**业务阶段不因派发而推进**（v2.2.1，SDLC-063） | threadId（+runId 到位后补） | brain 首轮零交付失败 → execState 回 queued + 审计事件；业务阶段无需回退（因为从未推进）——阶段推进统一由交付证据驱动 |
-| 实施→测试 | 回写通道（reconciler/轮询，expectedRunId 断言） | runId + branch + 测试执行证据引用 | 断言不符 no-op（幂等） |
-| →待人工评审 | 回写通道（run 终态且交付分支存在） | runId + branch + diff 统计 + 测试证据 | 缺证据→失败路由，不得静默 done |
-| 待人工评审→done | **仅人**（收件箱"评审请求"卡/工作项页），或带 PASSED verdict 的 gap-analysis 记录 | 评审 verdict（PASSED/CHANGES_REQUESTED）+ 合并 commit | agent 写 done 一律拒绝（SDLC-056/5rmlahjmxg 的机制性回答） |
-| 人工完成（任意→交付） | 仅人 | PR/commit 链接（EvidenceCard 存在性校验） | 无证据拒绝（P12 逃生口仍有底线） |
-| 关闭（未派发项） | 仅人（受守卫 close action，强制 reason） | reason 文本 | 写审计；agent 不可关闭 |
-| 回链更新 | 与状态迁移同事务 | orchestrator_run_id / branch 为迁移必填载荷；**重派=新迁移=同步更新回链** | 缺载荷拒绝（SDLC-053） |
+| 迁移                  | 合法写入方                                                                        | 必需证据载荷                                                              | 失败行为                                                                                                            |
+| --------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 派发（待办→实施）     | 仅记 execState=dispatched；**业务阶段不因派发而推进**（v2.2.1，SDLC-063）         | threadId（+runId 到位后补）                                               | brain 首轮零交付失败 → execState 回 queued + 审计事件；业务阶段无需回退（因为从未推进）——阶段推进统一由交付证据驱动 |
+| 实施→测试             | 回写通道（reconciler/轮询，expectedRunId 断言）                                   | runId + branch + 测试执行证据引用                                         | 断言不符 no-op（幂等）                                                                                              |
+| →待人工评审           | 回写通道（run 终态且交付分支存在）                                                | runId + branch + diff 统计 + 测试证据                                     | 缺证据→失败路由，不得静默 done                                                                                      |
+| 待人工评审→done       | **仅人**（收件箱"评审请求"卡/工作项页），或带 PASSED verdict 的 gap-analysis 记录 | 评审 verdict（PASSED/CHANGES_REQUESTED）+ 合并 commit                     | agent 写 done 一律拒绝（SDLC-056/5rmlahjmxg 的机制性回答）                                                          |
+| 人工完成（任意→交付） | 仅人                                                                              | PR/commit 链接（EvidenceCard 存在性校验）                                 | 无证据拒绝（P12 逃生口仍有底线）                                                                                    |
+| 关闭（未派发项）      | 仅人（受守卫 close action，强制 reason）                                          | reason 文本                                                               | 写审计；agent 不可关闭                                                                                              |
+| 回链更新              | 与状态迁移同事务                                                                  | orchestrator_run_id / branch 为迁移必填载荷；**重派=新迁移=同步更新回链** | 缺载荷拒绝（SDLC-053）                                                                                              |
 
 **标识分配权威**（簇七）：一切全局单调标识（itemKey、迁移版本号）必须
 单点分配——itemKey 由 tracker 项目级序列器在 create 时分配（DB 序列/

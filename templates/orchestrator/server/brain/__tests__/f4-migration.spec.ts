@@ -5,10 +5,11 @@
 // fs 源码断言而非导入执行:runMigrations 的迁移数组是模块私有,导入插件
 // 不暴露它;直接读源文件把 DDL 文本锁死,防止并行分支重排/误删。
 
-import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { describe, it, expect } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const orchestratorRoot = join(__dirname, "..", "..", "..");

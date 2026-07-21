@@ -56,8 +56,7 @@ describe("callOrchestratorTool — structuredContent array unwrapping", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        text: async () =>
-          JSON.stringify(mcpEnvelope({ items: nodes }, nodes)),
+        text: async () => JSON.stringify(mcpEnvelope({ items: nodes }, nodes)),
       }),
     );
 
@@ -111,9 +110,7 @@ describe("callOrchestratorTool — structuredContent array unwrapping", () => {
             jsonrpc: "2.0",
             id: 1,
             result: {
-              content: [
-                { type: "text", text: JSON.stringify(threadPayload) },
-              ],
+              content: [{ type: "text", text: JSON.stringify(threadPayload) }],
               structuredContent: threadPayload,
             },
           }),

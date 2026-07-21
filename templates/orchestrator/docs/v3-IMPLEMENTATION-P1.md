@@ -47,9 +47,9 @@ ad-hoc spawn、workspace CRUD。无 run 级队列、无 patch、无 ACP。纯单
 - **事件触发**（设计 §9）：`run_started`, `node_completed`, `node_resolved`, `patch_applied`（P2 接入）, `timer`, `cancellation_requested`, `pause_requested`, `resume_requested`
 - **决策循环**（设计 §9 伪代码，完整实现）：
   1. 加载 run + DAG + nodes 状态（单事务）
-  1a. 应用已接受的 patch（P2 接入，P1 留事件钩子）
+     1a. 应用已接受的 patch（P2 接入，P1 留事件钩子）
   2. 检查 run.status（paused/cancelled/done/failed → return）
-  2a. 若 status=pending → 设为 running，更新 started_at
+     2a. 若 status=pending → 设为 running，更新 started_at
   3. 计算 ready 集：遍历 dag.nodes，deps done + guard 为 true → ready
   4. guard 为 false → skip + cascade（仅依赖 skipped 节点的下游也 skip）
   5. 按 (run.priority desc, node.queued_at asc) 调度 ready 节点
@@ -194,12 +194,12 @@ V3 的服务器启动入口。解决 V2 scheduler 共存问题。
 #### Dispatcher
 
 - [ ] **完整 spawn 链路跑通**：固定 fixture agent + 固定 prompt → 成功返回 output。断言：
-  - `v3_spawns` 行写入，status=done, output_kind=string/object, tokens_*>0, latency_ms>0
+  - `v3_spawns` 行写入，status=done, output*kind=string/object, tokens*\*>0, latency_ms>0
   - `v3_artifacts` 行写入，text_content 或 object_content 非空
   - `spawns.rendered_prompt` 存储完整渲染后 prompt
 - [ ] **三输出路径**：string / object(schema 验证通过) / schema-violation（self-correction 一次后仍失败）
 - [ ] **工具执行**：agent 使用 Read/Write/Bash 工具在 workspace 内操作文件；
-  VM 内 `cat /work/test.txt` 可见、host 对应路径不存在（隔离可证）
+      VM 内 `cat /work/test.txt` 可见、host 对应路径不存在（隔离可证）
 - [ ] **max_summary_tokens 截断**：设 50 tokens → artifact `truncated=true`，byte_size < 150
 - [ ] **stderr 清洗**：spawn log 中无 API key 明文（grep 验证）
 - [ ] **workspace 多 spawn 串行化**：同 workspace 并发 2 spawn → 顺序执行（日志时间戳可证无重叠）
@@ -207,17 +207,17 @@ V3 的服务器启动入口。解决 V2 scheduler 共存问题。
 #### Reconciler
 
 - [ ] **sequential DAG 跑通**：3 节点线性 DAG（A→B→C），journal 时间戳可证严格按序
-  （A completed_at < B started_at < C started_at）
+      （A completed_at < B started_at < C started_at）
 - [ ] **implicit parallel**：2 节点同 deps 无依赖 → 重叠 running（时间戳证并发）
 - [ ] **guard 分支**：guard 为 false 的节点 → skipped；仅依赖该节点的下游 → cascade skipped
 - [ ] **parallel_over fanout**：`items_from` 返回 3 元素数组 → 3 个 body spawn，
-  `v3_nodes` 有 3 行 fanout_index=0,1,2
+      `v3_nodes` 有 3 行 fanout_index=0,1,2
 - [ ] **loop 迭代**：`until` 第 2 轮为 true → 恰好 2 次迭代（`v3_nodes.iteration` 可证）
 - [ ] **human_gate**：节点到 awaiting-approval → `resolve_gate(approve)` 放行下游 / `resolve_gate(reject)` 分支 skip
 - [ ] **run 终止**：全节点 terminal → run status=done/failed；
-  有 failed 无 `on_failure: continue` → run failed
+      有 failed 无 `on_failure: continue` → run failed
 - [ ] **retry 机制**：transient error + retry.max=2 → 实际 3 次 spawn（attempt=1,2,3）；
-  permanent error → 立即 fail，无 retry
+      permanent error → 立即 fail，无 retry
 - [ ] **timeout**：设 `timeout_seconds=5` → spawn 超时 → node failed, error_class=permanent（非 transient，不触发 retry）
 - [ ] **pause/resume**：pause → 不再调度新节点；resume → 继续调度 pending 节点
 
@@ -237,7 +237,7 @@ V3 的服务器启动入口。解决 V2 scheduler 共存问题。
 #### Run 控制
 
 - [ ] **workflow.run 完整流程**：template → run → reconciler 驱动 → done。
-  `v3_runs` 行 completed_at 写入
+      `v3_runs` 行 completed_at 写入
 - [ ] **input_schema 校验**：workflow.run 传入无效 inputs → 拒绝，不创建 run 行
 - [ ] **cancel run**：`run.cancel` → run cancelled，不再调度新节点
 - [ ] **run.summary on-demand**：调用返回汇总，不调用则无合成（无 auto-compute，设计 §11）
@@ -252,18 +252,18 @@ V3 的服务器启动入口。解决 V2 scheduler 共存问题。
 #### Restart Safety
 
 - [ ] **重启恢复**：杀进程时一 run 含 done+running 混合 → 重启后 done 节点不重跑、
-  running 节点 VM 已死 → spawn cancelled → 按 retry 策略处理
+      running 节点 VM 已死 → spawn cancelled → 按 retry 策略处理
 - [ ] **paused run 恢复**：重启后 paused run 恢复调度
 
 #### 不变量（设计 §18, §0）
 
 - [ ] **I2: spawn 上下文隔离** — spawn 只看到 4 项输入（system_prompt, rendered_prompt, tools, workspace），
-  看不到 DAG、其他节点输出、run 状态（grep 验证 dispatcher 代码不传入多余参数）
+      看不到 DAG、其他节点输出、run 状态（grep 验证 dispatcher 代码不传入多余参数）
 - [ ] **I7: 无隐式跨节点注入** — 后端不 auto-dump deps 进 prompt。下游只看到作者显式写的 `{{deps.X.output.Y}}`
-  （断言：节点 B 的 `deps` 不包含 A 的 output，除非 B 的 prompt 有 `{{deps.A.output}}`）
+      （断言：节点 B 的 `deps` 不包含 A 的 output，除非 B 的 prompt 有 `{{deps.A.output}}`）
 - [ ] **I5: 完成节点不可变** — running/done 节点的 artifact 不可修改（artifacts 表 append-only）
 - [ ] **I6: 后端不推理 task** — 无 task 状态机、无 "task done" 信号、无 run 边界 auto-summary
-  （grep 验证 reconciler 代码无 auto-summary 逻辑）
+      （grep 验证 reconciler 代码无 auto-summary 逻辑）
 
 #### Template CRUD（新增）
 
@@ -298,6 +298,7 @@ V3 的服务器启动入口。解决 V2 scheduler 共存问题。
 ---
 
 **风险**：
+
 - Reconciler 并发竞态：同一 run 的多 tick 可能重复调度 → 以 `nodes.status` 原子 UPDATE 防双重分发（设计 §18）
 - Worker shim 复杂度：完整 agent loop + 6 工具 ≈ 300-500 LOC → 以 P0 spike 为基础逐步添加
 - `parallel_over` fanout 宽度不确定：items_from 数组长度动态决定 → fanout 子树管理（P2 resume 需处理）

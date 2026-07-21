@@ -35,9 +35,9 @@
 
 - 原审计 O10(`docs/agent-native-alignment-audit.md:110`,🔴 P0)明确指出 reconciler 用 `.replace(/'/g,"''")`/模板串拼 SQL 是注入面 + 移植锁定问题,§5 "已拉回"表格(`:270`)声称"reconciler 裸 SQL 参数化"已完成,§3.4 P0 修复项也把"裸 SQL"列为必须参数化的安全修复。
 - 复审发现:`templates/orchestrator/server/lib/v3-lifecycle.ts`(标注为 "P4-A",原审计执行记录 §5 从未提及这个文件,应是审计之后新增的数据生命周期清理模块)在 `listExpiredRuns` 函数里三次把一个 id 数组直接字符串拼接进原生 SQL,完全没有走 drizzle 的参数化查询构造器(该文件顶部第 9 行已经 `import { sql, eq, and, or } from "drizzle-orm"`,`eq`/`and`/`or` 却在这三处一次都没被用上):
-  - `templates/orchestrator/server/lib/v3-lifecycle.ts:105`:`` WHERE run_id = ANY('{${ids.join(",")}}'::text[]) ``
-  - `templates/orchestrator/server/lib/v3-lifecycle.ts:111`:同样的 `` ANY('{${ids.join(",")}}'::text[]) `` 拼接
-  - `templates/orchestrator/server/lib/v3-lifecycle.ts:120`:同样的 `` ANY('{${ids.join(",")}}'::text[]) `` 拼接
+  - `templates/orchestrator/server/lib/v3-lifecycle.ts:105`:`WHERE run_id = ANY('{${ids.join(",")}}'::text[])`
+  - `templates/orchestrator/server/lib/v3-lifecycle.ts:111`:同样的 `ANY('{${ids.join(",")}}'::text[])` 拼接
+  - `templates/orchestrator/server/lib/v3-lifecycle.ts:120`:同样的 `ANY('{${ids.join(",")}}'::text[])` 拼接
   - 另外第 34-47 行、第 66-69 行、第 89-96 行也都用 `sql.raw` 模板串拼 `ttlDays`/`archiveAfterDays`(这两个数值经过 `Number()` 转换,注入面较小,但同样是同一种"裸拼 SQL 而非参数化"的写法惯性)。
 - 这些 `ids` 目前来自内部生成的 `v3_runs.id`(`newId()` 生成),不是直接的外部用户输入,实际可利用性有限;但这正是原审计点名要求"reconciler/queue 全部参数化"(§3.4)之后新写的代码,却完整复刻了同一种被判定为 🔴 P0 的写法,且没有任何评审记录或 changenote 提及这是对已有安全整改结论的重新评估——属于"既定整改结论之外,静默引入同类架构问题"。
 

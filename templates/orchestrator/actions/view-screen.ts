@@ -3,6 +3,7 @@ import { readAppState } from "@agent-native/core/application-state";
 import { resolveAccess } from "@agent-native/core/sharing";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 
 // First tool to call: tells the agent what the user is looking at, and if a
@@ -15,9 +16,10 @@ export default defineAction({
   http: false,
   readOnly: true,
   run: async () => {
-    const navigation = (await readAppState("navigation")) as
-      | { view?: string; id?: string }
-      | null;
+    const navigation = (await readAppState("navigation")) as {
+      view?: string;
+      id?: string;
+    } | null;
     const screen: Record<string, unknown> = {};
     if (navigation) screen.navigation = navigation;
 

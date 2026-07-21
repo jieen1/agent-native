@@ -6,6 +6,7 @@ import {
 import { eq, and } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { actorFromCaller } from "../server/lib/transition-guard.js";
@@ -15,7 +16,7 @@ const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 export default defineAction({
   description:
     "Add a comment to a work item. authorKind is derived from the real caller " +
-    "surface (agent/tool-loop and A2A/MCP callers are marked \"agent\"); agent " +
+    'surface (agent/tool-loop and A2A/MCP callers are marked "agent"); agent ' +
     "callers cannot use authorName to impersonate a human name.",
   schema: z.object({
     workItemId: z.string().min(1),
@@ -51,7 +52,12 @@ export default defineAction({
       await db
         .select({ id: schema.workItems.id })
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found");

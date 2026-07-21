@@ -3,14 +3,15 @@
 // evaluates the gate using the shared evaluateDispatchGate function.
 
 import { and, eq, inArray } from "drizzle-orm";
-import { getDb, schema } from "../db/index.js";
-import { ownerScope } from "./access.js";
-import { computeItemKeyDisplays } from "./item-key-display.js";
+
 import {
   evaluateDispatchGate,
   type DependencyStatusInput,
   type DispatchGateResult,
 } from "../../shared/dispatch-gate.js";
+import { getDb, schema } from "../db/index.js";
+import { ownerScope } from "./access.js";
+import { computeItemKeyDisplays } from "./item-key-display.js";
 
 // Resolve the dispatch gate for a single work item: look up all blocked-by
 // links, join with the upstream work items and their 实施 stage status,
@@ -75,7 +76,11 @@ export async function resolveDispatchGate(
   // consumers get it automatically without each reimplementing the lookup.
   const displays = await computeItemKeyDisplays(
     db,
-    upstreamItems.map((it) => ({ id: it.id, projectId: it.projectId, itemKey: it.itemKey })),
+    upstreamItems.map((it) => ({
+      id: it.id,
+      projectId: it.projectId,
+      itemKey: it.itemKey,
+    })),
   );
 
   const deps: DependencyStatusInput[] = links.map((link) => {

@@ -1,7 +1,8 @@
 import { createAuthPlugin } from "@agent-native/core/server";
 
 const rawAppTitle = "{{APP_TITLE}}";
-const appTitle = rawAppTitle === "{" + "{APP_TITLE}}" ? "Orchestrator" : rawAppTitle;
+const appTitle =
+  rawAppTitle === "{" + "{APP_TITLE}}" ? "Orchestrator" : rawAppTitle;
 
 export default createAuthPlugin({
   marketing: {

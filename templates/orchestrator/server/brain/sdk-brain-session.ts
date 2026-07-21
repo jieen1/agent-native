@@ -15,10 +15,10 @@ import { randomUUID } from "node:crypto";
 
 import { eq, sql } from "drizzle-orm";
 
+import { deriveContextWindow } from "../../actions/brain-usage.js";
 import { getV3Db, v3Schema } from "../db/index.js";
 import { mintBrainToken } from "./brain-mcp-config.js";
 import { BRAIN_PROMPT } from "./brain-prompt.js";
-import { deriveContextWindow } from "../../actions/brain-usage.js";
 
 const MCP_URL = "http://localhost:3002/_agent-native/mcp";
 const MAX_STEPS = 50;

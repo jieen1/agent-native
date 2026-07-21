@@ -9,27 +9,33 @@ Status moves only by explicit human or agent action. No automatic inference.
 ## Action Surface
 
 **Projects & Work Items:**
+
 - `create-project`, `list-projects` — project management
 - `create-work-item`, `get-work-item`, `list-work-items`, `update-work-item`, `delete-work-item` — CRUD
 - `view-screen`, `navigate`, `refresh-list` — understand what the user is looking at
 
 **7-Stage Pipeline:**
+
 - `trigger-stage` — advance to the next stage (creates a stage run)
 - `complete-stage` — mark current stage complete and advance status
 - `rollback-stage` — revert to prior stage
 - `list-stages` — read stage history for a work item
 
 **Comments & Links:**
+
 - `add-comment`, `list-comments` — discussion threads per work item
 - `add-link`, `list-links` — typed relationships (blocks/blocked-by/duplicate-of/relates-to/bug-of/test-of)
 
 **Artifacts:**
+
 - `create-artifact`, `list-artifacts` — attach files/designs/playbooks to items
 
 **Sprints:**
+
 - `create-sprint`, `update-sprint`, `get-sprint`, `list-sprints` — sprint management
 
 **Orchestrator Dispatch:**
+
 - `dispatch-to-orchestrator` — send a work item to orchestrator brain for AI execution.
   Rejects with a `scheduler-paused` error when the queue scheduler is paused
   (`pause-scheduler`) — checked BEFORE any orchestrator call.
@@ -54,6 +60,7 @@ Status moves only by explicit human or agent action. No automatic inference.
 ## Stage Pipeline Rules
 
 When working on a task, move it through the 7 stages:
+
 1. `trigger-stage` to start each stage (creates a stage run record)
 2. `complete-stage` to finish a stage and advance `currentStageName`
 3. Dispatch to orchestrator for AI execution after 分析/设计

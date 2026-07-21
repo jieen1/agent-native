@@ -1,6 +1,7 @@
-import { useLocation } from "react-router";
-import { useHeaderTitle, useHeaderActions } from "./HeaderActions";
 import { AgentToggleButton } from "@agent-native/core/client";
+import { useLocation } from "react-router";
+
+import { useHeaderTitle, useHeaderActions } from "./HeaderActions";
 
 const pageTitles: Record<string, string> = {
   "/": "Tracker",

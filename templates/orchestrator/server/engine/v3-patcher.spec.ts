@@ -8,13 +8,16 @@
 // G15: Mock now supports reads inside the transaction (tx.select) and
 //      .returning() on update to simulate the CAS row-count assertion.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mock dependencies ───────────────────────────────────────────────────────
 
 const hoisted = vi.hoisted(() => ({
-  validateDagResult: { ok: true, errors: [] } as { ok: boolean; errors: string[] },
+  validateDagResult: { ok: true, errors: [] } as {
+    ok: boolean;
+    errors: string[];
+  },
   detectCycleResult: null as string | null,
   insertedPatches: [] as Array<Record<string, unknown>>,
   updatedRuns: [] as Array<Record<string, unknown>>,
@@ -213,7 +216,13 @@ function makeRun(overrides: Partial<MockRunRow> = {}): MockRunRow {
     dag: {
       nodes: [
         { id: "a", type: "agent", agent: "impl", prompt: "Do it", deps: [] },
-        { id: "b", type: "agent", agent: "review", prompt: "Review it", deps: ["a"] },
+        {
+          id: "b",
+          type: "agent",
+          agent: "review",
+          prompt: "Review it",
+          deps: ["a"],
+        },
       ],
     },
     dagVersion: 1,
@@ -296,9 +305,7 @@ describe("V3Patcher", () => {
 
     it("CAS conflict: mismatched dag_version rejected", async () => {
       const V3Patcher = await getPatcher();
-      const { db } = createMockDb(makeRun({ dagVersion: 3 }), [
-        makeNode(),
-      ]);
+      const { db } = createMockDb(makeRun({ dagVersion: 3 }), [makeNode()]);
 
       const patcher = new V3Patcher(db);
       const result = await patcher.applyPatch({
@@ -317,7 +324,9 @@ describe("V3Patcher", () => {
 
     it("run not found returns error", async () => {
       const V3Patcher = await getPatcher();
-      const { db } = createMockDb(makeRun(), [], { notFoundForRunId: "nonexistent" });
+      const { db } = createMockDb(makeRun(), [], {
+        notFoundForRunId: "nonexistent",
+      });
 
       const patcher = new V3Patcher(db);
       const result = await patcher.applyPatch({
@@ -337,9 +346,7 @@ describe("V3Patcher", () => {
       // Simulates: another writer bumped dag_version between our read (CAS ok)
       // and our UPDATE.  The .returning() returns [] → version_conflict.
       const V3Patcher = await getPatcher();
-      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
-        makeNode(),
-      ]);
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [makeNode()]);
 
       hoisted.simulateCasRace = true;
 
@@ -367,9 +374,7 @@ describe("V3Patcher", () => {
   describe("modify_node mutation", () => {
     it("modify_node updates prompt and model_override", async () => {
       const V3Patcher = await getPatcher();
-      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
-        makeNode(),
-      ]);
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [makeNode()]);
 
       const patcher = new V3Patcher(db);
       const result = await patcher.applyPatch({
@@ -391,9 +396,7 @@ describe("V3Patcher", () => {
 
     it("modify_node updates guard and deps (G11 extension)", async () => {
       const V3Patcher = await getPatcher();
-      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
-        makeNode(),
-      ]);
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [makeNode()]);
 
       const patcher = new V3Patcher(db);
       const result = await patcher.applyPatch({
@@ -418,9 +421,7 @@ describe("V3Patcher", () => {
       const { db } = createMockDb(
         makeRun({
           dag: {
-            nodes: [
-              { id: "loop1", type: "loop", body: "b", deps: [] },
-            ],
+            nodes: [{ id: "loop1", type: "loop", body: "b", deps: [] }],
           },
         }),
         [makeNode({ nodeIdInDag: "loop1", type: "loop" })],
@@ -448,9 +449,7 @@ describe("V3Patcher", () => {
 
     it("modify_node rejects missing node", async () => {
       const V3Patcher = await getPatcher();
-      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
-        makeNode(),
-      ]);
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [makeNode()]);
 
       const patcher = new V3Patcher(db);
       const result = await patcher.applyPatch({
@@ -559,9 +558,7 @@ describe("V3Patcher", () => {
   describe("add_node mutation", () => {
     it("add_node pushes new node to DAG", async () => {
       const V3Patcher = await getPatcher();
-      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
-        makeNode(),
-      ]);
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [makeNode()]);
 
       const patcher = new V3Patcher(db);
       const result = await patcher.applyPatch({
@@ -587,9 +584,7 @@ describe("V3Patcher", () => {
 
     it("add_node rejects duplicate id", async () => {
       const V3Patcher = await getPatcher();
-      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
-        makeNode(),
-      ]);
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [makeNode()]);
 
       const patcher = new V3Patcher(db);
       const result = await patcher.applyPatch({
@@ -730,9 +725,7 @@ describe("V3Patcher", () => {
             ],
           },
         }),
-        [
-          makeNode({ nodeIdInDag: "loop1", type: "loop", id: "node-loop" }),
-        ],
+        [makeNode({ nodeIdInDag: "loop1", type: "loop", id: "node-loop" })],
       );
 
       const patcher = new V3Patcher(db);
@@ -755,9 +748,7 @@ describe("V3Patcher", () => {
 
     it("modify_loop rejects non-loop node", async () => {
       const V3Patcher = await getPatcher();
-      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
-        makeNode(),
-      ]);
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [makeNode()]);
 
       const patcher = new V3Patcher(db);
       const result = await patcher.applyPatch({
@@ -797,7 +788,14 @@ describe("V3Patcher", () => {
             ],
           },
         }),
-        [makeNode({ nodeIdInDag: "loop1", type: "loop", id: "node-loop", status: "running" })],
+        [
+          makeNode({
+            nodeIdInDag: "loop1",
+            type: "loop",
+            id: "node-loop",
+            status: "running",
+          }),
+        ],
       );
 
       const patcher = new V3Patcher(db);
@@ -839,7 +837,14 @@ describe("V3Patcher", () => {
             ],
           },
         }),
-        [makeNode({ nodeIdInDag: "loop1", type: "loop", id: "node-loop", status: "done" })],
+        [
+          makeNode({
+            nodeIdInDag: "loop1",
+            type: "loop",
+            id: "node-loop",
+            status: "done",
+          }),
+        ],
       );
 
       const patcher = new V3Patcher(db);
@@ -880,7 +885,14 @@ describe("V3Patcher", () => {
             ],
           },
         }),
-        [makeNode({ nodeIdInDag: "loop1", type: "loop", id: "node-loop", status: "ready" })],
+        [
+          makeNode({
+            nodeIdInDag: "loop1",
+            type: "loop",
+            id: "node-loop",
+            status: "ready",
+          }),
+        ],
       );
 
       const patcher = new V3Patcher(db);
@@ -1016,9 +1028,7 @@ describe("V3Patcher", () => {
         errors: ["Cycle detected involving 'a'"],
       };
 
-      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [
-        makeNode(),
-      ]);
+      const { db } = createMockDb(makeRun({ dagVersion: 1 }), [makeNode()]);
 
       const patcher = new V3Patcher(db);
       const result = await patcher.applyPatch({
@@ -1042,9 +1052,7 @@ describe("V3Patcher", () => {
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error).toBe("validation_failed");
-        expect(result.errors).toContainEqual(
-          expect.stringContaining("Cycle"),
-        );
+        expect(result.errors).toContainEqual(expect.stringContaining("Cycle"));
       }
     });
   });

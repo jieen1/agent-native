@@ -4,6 +4,7 @@
 // header) so these are tested directly, with no Drizzle mocking required.
 
 import { describe, it, expect } from "vitest";
+
 import { computeRunStats, diffDagNodes } from "../workflow-stats.js";
 
 describe("computeRunStats", () => {
@@ -72,8 +73,14 @@ describe("diffDagNodes", () => {
   });
 
   it("returns all-empty arrays for two identical node sets", () => {
-    const nodes = [{ id: "a", x: 1 }, { id: "b", x: 2 }];
-    const diff = diffDagNodes(nodes, nodes.map((n) => ({ ...n })));
+    const nodes = [
+      { id: "a", x: 1 },
+      { id: "b", x: 2 },
+    ];
+    const diff = diffDagNodes(
+      nodes,
+      nodes.map((n) => ({ ...n })),
+    );
     expect(diff).toEqual({
       added: [],
       removed: [],

@@ -26,6 +26,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { getUserSetting, putUserSetting } from "@agent-native/core/settings";
 import { z } from "zod";
+
 import {
   refreshManagedTokenIfNeeded,
   readManagedAccessToken,
@@ -117,11 +118,10 @@ async function fetchJson(
   { ok: true; body: Record<string, unknown> } | { ok: false; status: number }
 > {
   try {
-    const body = (await oauthApiGet(
-      url,
-      token,
-      FETCH_TIMEOUT_MS,
-    )) as Record<string, unknown>;
+    const body = (await oauthApiGet(url, token, FETCH_TIMEOUT_MS)) as Record<
+      string,
+      unknown
+    >;
     return { ok: true, body };
   } catch {
     return { ok: false, status: 0 };

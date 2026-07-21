@@ -39,9 +39,14 @@ E. 可观测性持久化 (~0.5天)
 **V2 无此能力**：V2 scheduler 一次性执行，无 mid-run DAG mutation。Patch 是 V3 核心增量。
 
 **核心机制**：CAS 保护的 DAG 突变
+
 ```typescript
 // server/engine/v3-patcher.ts
-async function applyPatch(runId: string, dagVersion: number, mutations: DAGMutation[]) {
+async function applyPatch(
+  runId: string,
+  dagVersion: number,
+  mutations: DAGMutation[],
+) {
   // 1. 读取当前 v3_runs[runId].dag_version
   // 2. CAS 检查：dag_version 必须匹配（防止并发 patch 冲突）
   // 3. 应用 mutations 到 DAG 快照
@@ -52,6 +57,7 @@ async function applyPatch(runId: string, dagVersion: number, mutations: DAGMutat
 ```
 
 **Mutation 类型**（与设计 §8.6 对齐）：
+
 - `modify_node` — 修改 `prompt`/`model_override`（**只**改这两项，不改 guard/output_schema/deps）
 - `add_node` — 新增节点到运行中 DAG
 - `remove_node` — 移除节点（必须是 pending 或 skipped，设计规则 2）
@@ -63,6 +69,7 @@ async function applyPatch(runId: string, dagVersion: number, mutations: DAGMutat
 **Patch 冲突协议**：CAS 失败返回 `version_conflict` + `current_dag_version`。调用方读取新 DAG（`workflow.run.state`），基于最新版本重新构建 mutations，用新 `dag_version` 重试。单批次 mutations 是原子操作——要么全过，要么全不过。
 
 **Reconciler 响应**：
+
 - `patch_applied` 事件触发 tick
 - 重新计算 ready 节点集
 - 新增节点参与调度
@@ -70,6 +77,7 @@ async function applyPatch(runId: string, dagVersion: number, mutations: DAGMutat
 - **`running` 状态节点的修改**：如果 patch 移除了正在运行的节点，该节点按原路径完成，其结果不影响 downstream（因 edge 已被移除）
 
 **v3_patches 表**：
+
 ```sql
 CREATE TABLE v3_patches (
   id TEXT PRIMARY KEY,
@@ -89,7 +97,10 @@ CREATE TABLE v3_patches (
 
 ```typescript
 // server/engine/v3-fork.ts
-async function forkRun(sourceRunId: string, options: ForkOptions): Promise<string> {
+async function forkRun(
+  sourceRunId: string,
+  options: ForkOptions,
+): Promise<string> {
   // 1. 读取 sourceRun 的 DAG 快照、inputs、tags
   // 2. 创建新 v3_runs 行（状态=pending，DAG=克隆）
   // 3. 克隆 source 的所有 v3_nodes
@@ -107,6 +118,7 @@ async function forkRun(sourceRunId: string, options: ForkOptions): Promise<strin
 **Artifact 路径问题**：artifact 可能包含 VM 临时路径（如 `/tmp/vm-abc/output.md`），fork 后这些路径已失效。已知限制：路径类 artifact 需在 fork 时标记 `stale: true`，由新节点重新生成。
 
 **Fork 选项**：
+
 - `fromNode` — 从哪个节点开始重新执行（语义见上）
 - `extraTags` — 附加标签（与 source tags **合并**，extraTags 覆盖同名字段）
 - `overrideInputs` — 覆盖部分 inputs。pending 节点使用新 inputs 渲染，已复用 artifact 的节点不受影响
@@ -123,9 +135,9 @@ async function forkRun(sourceRunId: string, options: ForkOptions): Promise<strin
 // server/engine/v3-tags.ts
 interface V3Tags {
   // 来源追踪
-  source_app?: string;      // 发起方应用 ID
-  source_run_id?: string;    // 发起方 run ID
-  source_node_id?: string;   // 发起方节点 ID
+  source_app?: string; // 发起方应用 ID
+  source_run_id?: string; // 发起方 run ID
+  source_node_id?: string; // 发起方节点 ID
 
   // 业务语义
   project_id?: string;
@@ -138,12 +150,14 @@ interface V3Tags {
 ```
 
 **Tag 规则**（遵循设计 §16 的"opaque"语义）：
+
 - Tags 是**不透明 JSONB**，orchestrator 逻辑不解释内容。不存在"继承"或"合并"。
 - run 创建时：`workflow.run` 接收 `tags` 参数，原样写入 `v3_runs.tags`
 - fork 时：copy source.run.tags → 新 run.tags，然后与 options.extraTags **合并**（extraKeys 覆盖同名字段）
 - **无 tag 继承链**。spawn 不复制 tags；tags 是 run 级别的追踪字段
 
 **Action 扩展**：
+
 - `workflow.run` 接收 `tags` 参数
 - `run.state` 返回 tags
 - `runs.list` 支持 `?tagSource=app-name` 过滤（SQL：`tags->>'source_app' = 'app-name'`）
@@ -153,6 +167,7 @@ interface V3Tags {
 **可复用**：`acp-adapter.ts`（869 LOC）完整 ACP adapter + session/update mapping + builtin presets。
 
 **对接工作**：
+
 1. **`registerBuiltinAcpHarnesses()` 启动时注册** — 确保 `acp:gemini`, `acp:claude-code` 等预设可被 `resolveAgentHarness()` 找到
 2. V3 dispatcher 检测 `runtime: "acp:*"` 前缀（**字段名是 `runtime`，不是 `engine`**）
 3. **调用 `resolveAgentHarness("acp:claude-code")`**（不是 `createAcpHarnessAdapter()`）— 通过注册表解析适配器，保持可扩展性
@@ -162,6 +177,7 @@ interface V3Tags {
 **Session 状态**：ACP harness 使用 framework 的 `agent_harness_sessions` 表。V3 dispatcher 需要在 spawn 行记录 `session_id` 以便追踪。
 
 **降级路径 — error 分类细化**：
+
 - ACP harness **未注册**（配置错误） → error_class=permanent → 节点 skip
 - ACP binary **未找到但可安装**（npm cache miss） → error_class=transient → 重试（重试失败 → 转为 permanent）
 - ACP binary **无法安装** → error_class=permanent → 节点 skip
@@ -169,6 +185,7 @@ interface V3Tags {
 - ACP session **超时** → error_class=transient → 重试
 
 **ACP stub 验证**：
+
 - 未注册 → permanent；可安装的 transient → permanent 转换链符合预期
 
 #### E. 可观测性数据持久化（设计 §14）
@@ -176,12 +193,14 @@ interface V3Tags {
 **现有**：V2 engine 有 node_runs 表 + events + artifacts。V3 需要写入 v3 表。
 
 **Dispatcher 写入时机**：
+
 1. **spawn 开始时**：写入 v3_spawns 行（含 `rendered_prompt`、`log_ref`）
 2. **spawn 结束时**：写入 v3_artifacts（text_content / object_content）
 3. **状态转换时**：reconciler 写入 v3_nodes.status
 4. **v3_events** — 每 tick 由 reconciler 写入（含 seq_num）
 
 **Action 扩展**：
+
 - `spawn.logs` — 读取 spawn 日志（通过 `log_ref` 定位文件）
 - `run.events` — 读取事件流
 - `node.output` — 读取节点输出（从 v3_artifacts）
@@ -211,6 +230,7 @@ interface V3Tags {
 ---
 
 **与原版 P2 相比的变化**：
+
 - 去掉 ACP runtime 从零搭建（复用 acp-adapter.ts 完整实现）
 - 去掉 ACP session management（复用 harness/store.ts）
 - 去掉 Git delivery 实现（复用 git-wrapper.ts）

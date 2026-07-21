@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
 import { IconBrain, IconFileText, IconSearch } from "@tabler/icons-react";
-import { cn } from "@/lib/utils";
+import { useMemo, useState } from "react";
+
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 export interface SkillListEntry {
   path: string;

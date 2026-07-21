@@ -73,7 +73,12 @@ export default defineAction({
           orgId: schema.workItems.orgId,
         })
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found");

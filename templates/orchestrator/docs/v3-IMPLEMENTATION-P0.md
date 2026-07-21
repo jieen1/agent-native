@@ -57,6 +57,7 @@ spike 失败时 scaffold 已做的工作丢弃，损失最小。
 产出 `docs/spike-worker-shim.md`（结果 + 实测时延 + go/no-go）
 
 **Worker shim 构建流水线**（P0 spike 验证，P1 产品化）：
+
 - Shim 源码位置：`server/runtime/worker-shim/` 目录
 - 依赖打包：`npm pack` 将 shim + node_modules (`@anthropic-ai/sdk`, `openai`, `ajv`) 打成一个 tarball
 - 预烤 image：Alpine → `npm install -g <tarball>` → `msb snapshot` → 得 base_image_ref
@@ -74,6 +75,7 @@ D0 go 之后执行。
 - 确认 `drizzle-orm` 的 pg 连接已在 `packages/core` 中支持（framework 已有 `postgres` 包引用）
 
 **数据库策略**（重要）：V2 用 LibSQL，V3 切 Postgres。V3 不替换 LibSQL — 双数据库共存：
+
 - LibSQL 继续服务 V2 表
 - Postgres 服务 V3 表（`v3_*` 前缀）
 - `server/db/index.ts` 新增 `getV3Db()` 函数，返回 Postgres 连接的 drizzle 实例
@@ -89,16 +91,16 @@ v3 数据模型和 v2 完全不同（无 projects/work_items/node_defs/status_lo
 完全不同（v2 `artifacts` 有 `runId/nodeRunId/kind/ref/summary`，v3 `artifacts` 有
 `spawn_id/text_content/object_content/full_content_ref`）。v3 使用**新表名**避免冲突：
 
-| v3 表名 | v2 同名表 | 说明 |
-|---|---|---|
-| `v3_workflow_templates` | `workflow_templates` | 命名、版本化 DAG + input_schema |
-| `v3_runs` | `workflow_runs` | 一次执行实例，含 DAG 快照 + inputs + status + dag_version + tags |
-| `v3_nodes` | `node_runs` | DAG 中一个节点，关联 run，含 status/iteration/fanout_index |
-| `v3_spawns` | —（新） | 一次 worker 调用，最小单元。可为 ad-hoc 或 node 的执行尝试 |
-| `v3_artifacts` | `artifacts` | spawn 的持久化结果，含 text_content / object_content / full_content_ref |
-| `v3_workspaces` | —（新） | 长生命周期 microVM，含 git checkout，跨 spawn 共享 |
-| `v3_patches` | —（新） | 对 live run DAG 的变异操作，CAS 保护 |
-| `v3_events` | —（新） | 事件日志，run/spawn 级 |
+| v3 表名                 | v2 同名表            | 说明                                                                    |
+| ----------------------- | -------------------- | ----------------------------------------------------------------------- |
+| `v3_workflow_templates` | `workflow_templates` | 命名、版本化 DAG + input_schema                                         |
+| `v3_runs`               | `workflow_runs`      | 一次执行实例，含 DAG 快照 + inputs + status + dag_version + tags        |
+| `v3_nodes`              | `node_runs`          | DAG 中一个节点，关联 run，含 status/iteration/fanout_index              |
+| `v3_spawns`             | —（新）              | 一次 worker 调用，最小单元。可为 ad-hoc 或 node 的执行尝试              |
+| `v3_artifacts`          | `artifacts`          | spawn 的持久化结果，含 text_content / object_content / full_content_ref |
+| `v3_workspaces`         | —（新）              | 长生命周期 microVM，含 git checkout，跨 spawn 共享                      |
+| `v3_patches`            | —（新）              | 对 live run DAG 的变异操作，CAS 保护                                    |
+| `v3_events`             | —（新）              | 事件日志，run/spawn 级                                                  |
 
 - **全部加性、不删 v2 表**（设计 §3, CLAUDE.md 加性约束）
 - 所有表用 `ownableColumns()`（framework 自带 owner 作用域）
@@ -121,6 +123,7 @@ v3 数据模型和 v2 完全不同（无 projects/work_items/node_defs/status_lo
 
 - 确认 `.claude/agents/` 目录存在、可用 framework 的 subagent loader
 - 建立 starter agent 模板（`implementer.md`）验证 frontmatter 加载：
+
   ```markdown
   ---
   name: implementer
@@ -135,6 +138,7 @@ v3 数据模型和 v2 完全不同（无 projects/work_items/node_defs/status_lo
 
   You are a backend implementation agent...
   ```
+
 - 写一个 `loadAgent(name)` 工具函数，复用 framework loader 逻辑，验证 .md → frontmatter 解析
 - **Engine 解析验证**（设计 §7.2）：调用 framework `resolveEngine("ai-sdk:openai")` 确认返回可调用对象
   （base_url, model_id, api_key_env）；不解析则 P1 无 executor
@@ -142,6 +146,7 @@ v3 数据模型和 v2 完全不同（无 projects/work_items/node_defs/status_lo
 #### E. 基础 Actions + 表达式解析器 + 插值渲染器（设计 §5.1, §5.2, §6.4, §8.3, §8.4）
 
 **Action 列表**（不接引擎、只读写数据库）：
+
 - `workflow.list()` — 返回模板列表
 - `workflow.get(id|name, version?)` — 返回模板详情
 - `workflow.save({name, dag, input_schema, description?})` — 验证 DAG schema + 表达式语法 + 写库 → 返回 `{id, version}`
@@ -151,6 +156,7 @@ v3 数据模型和 v2 完全不同（无 projects/work_items/node_defs/status_lo
 - `run.state(runId)` — 返回 run 当前状态（status + 节点计数）
 
 **DAG 验证器**（`workflow.save` 内调用）：
+
 - 节点类型只能是 `agent | parallel_over | loop | human_gate`
 - `deps` 引用必须存在（对 `agent`, `human_gate`, **`parallel_over`**）；
   `parallel_over.body` 必须是 agent；`loop.body` 引用的节点 id 必须存在
@@ -159,6 +165,7 @@ v3 数据模型和 v2 完全不同（无 projects/work_items/node_defs/status_lo
 - `output_schema` 合法（ajv `compile` 不抛）
 
 **表达式解析器**（设计 §5.2，完整实现，不做 MVP 子集）：
+
 - 运算符：`== != > >= < <= && || !`
 - 函数：`len(x)`, `contains(arr, x)`, `startsWith(s, p)`, `endsWith(s, p)`, `exists(path)`, `coalesce(a, b, ...)`
 - 字面量：string（`"..."` 或 `'...'`），number, boolean, null
@@ -167,6 +174,7 @@ v3 数据模型和 v2 完全不同（无 projects/work_items/node_defs/status_lo
 - 实现：~50 LOC tokenizer + 递归下降求值器。不在 P0 做，语法校验在 P0
 
 **插值渲染器 MVP**（设计 §5.1, §6.4）：
+
 - 解析 `{{ ... }}` 占位，对给定的 context 对象做路径查找和替换
 - 规则：string→verbatim, number/boolean/null→literal, object/array→`JSON.stringify`, undefined→render fail
 - P0 只做单测验证（不接入实际 spawn dispatch），P1 接入 Worker Dispatcher
@@ -190,13 +198,13 @@ v3 数据模型和 v2 完全不同（无 projects/work_items/node_defs/status_lo
   - secrets 注入在 VM 内可见
 - [ ] **go/no-go 分条目判定**（每个门槛独立 go/no-go + 补偿动作）：
 
-  | 门槛 | go 标准 | 不达标补偿 |
-  |---|---|---|
-  | Image 大小 | < 500MB | 从 base image 移除 nodejs（改用更精简 runtime），重试 |
-  | 冷启时延 | ≤ 2s | 优化 image 层数/减小 shim 体积，重试 |
-  | 并发 VM | ≥ 4 不 OOM | 降低 pool 默认值（设计 §10.2 default 4 → 2），重试 |
-  | 输出链路 | 三种输出均通过 | 阻塞，无补偿方案 |
-  | secrets 注入 | VM 内可见 | 阻塞，无补偿方案 |
+  | 门槛         | go 标准        | 不达标补偿                                            |
+  | ------------ | -------------- | ----------------------------------------------------- |
+  | Image 大小   | < 500MB        | 从 base image 移除 nodejs（改用更精简 runtime），重试 |
+  | 冷启时延     | ≤ 2s           | 优化 image 层数/减小 shim 体积，重试                  |
+  | 并发 VM      | ≥ 4 不 OOM     | 降低 pool 默认值（设计 §10.2 default 4 → 2），重试    |
+  | 输出链路     | 三种输出均通过 | 阻塞，无补偿方案                                      |
+  | secrets 注入 | VM 内可见      | 阻塞，无补偿方案                                      |
 
   输出链路 / secrets 注入任一 no-go → **整个 spike no-go**，P1 不得开工。
   其余门槛有补偿动作，可重试一次后判定。
@@ -232,6 +240,7 @@ v3 数据模型和 v2 完全不同（无 projects/work_items/node_defs/status_lo
 ---
 
 **风险**：
+
 - Postgres 迁移：当前模板用 LibSQL，v3 切 Postgres → framework `postgres` 包已存在，
   表名加 `v3_` 前缀避免冲突（已在 B 中解决）
 - Worker shim 复杂度：agent loop + tool execution 的 shim 层约 300-500 LOC，spike 只做无 tool 对话

@@ -29,8 +29,7 @@ const hoisted = vi.hoisted(() => ({
 }));
 
 vi.mock("@agent-native/core/server", () => ({
-  runAgentLoopDirectWithSoftTimeout:
-    hoisted.runAgentLoopDirectWithSoftTimeout,
+  runAgentLoopDirectWithSoftTimeout: hoisted.runAgentLoopDirectWithSoftTimeout,
   actionsToEngineTools: hoisted.actionsToEngineTools,
 }));
 
@@ -114,7 +113,9 @@ beforeEach(() => {
 
 describe("threadId + ownerEmail/orgId wiring (conclusion B ②)", () => {
   it("passes threadId=spawn:<spawnId> plus ownerEmail/orgId into the framework loop", async () => {
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
     const ctx = makeCtx({
       spawnId: "sp_123",
       node: { id: "node-xyz", type: "agent", title: "t" } as never,
@@ -135,9 +136,13 @@ describe("threadId + ownerEmail/orgId wiring (conclusion B ②)", () => {
   });
 
   it("falls back to spawn:<nodeId> when no spawnId is threaded through", async () => {
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
     await runEngineLoopInVm({
-      ctx: makeCtx({ node: { id: "node-a", type: "agent", title: "t" } as never }),
+      ctx: makeCtx({
+        node: { id: "node-a", type: "agent", title: "t" } as never,
+      }),
       engine: {} as never,
       model: "m1",
       kind: "vllm",
@@ -171,7 +176,9 @@ describe("threadId + ownerEmail/orgId wiring (conclusion B ②)", () => {
 
 describe("outer wrapper soft-timeout passthrough (conclusion B ④)", () => {
   it("routes through runAgentLoopDirectWithSoftTimeout with a dev-shaped background budget (not 40s)", async () => {
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
     await runEngineLoopInVm({
       ctx: makeCtx(),
       engine: {} as never,
@@ -189,7 +196,9 @@ describe("outer wrapper soft-timeout passthrough (conclusion B ④)", () => {
 
   it("honors an ORCH_DEV_SOFT_TIMEOUT_MS override (0 disables the wrapper)", async () => {
     process.env.ORCH_DEV_SOFT_TIMEOUT_MS = "0";
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
     await runEngineLoopInVm({
       ctx: makeCtx(),
       engine: {} as never,
@@ -204,7 +213,9 @@ describe("outer wrapper soft-timeout passthrough (conclusion B ④)", () => {
 
 describe("devMaxOutputTokens (T-F2-08 — 32k regression)", () => {
   it("defaults maxOutputTokens to 32000", async () => {
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
     await runEngineLoopInVm({
       ctx: makeCtx(),
       engine: {} as never,
@@ -212,13 +223,16 @@ describe("devMaxOutputTokens (T-F2-08 — 32k regression)", () => {
       kind: "vllm",
     });
     expect(
-      hoisted.runAgentLoopDirectWithSoftTimeout.mock.calls[0][0].maxOutputTokens,
+      hoisted.runAgentLoopDirectWithSoftTimeout.mock.calls[0][0]
+        .maxOutputTokens,
     ).toBe(32_000);
   });
 
   it("respects an ORCH_DEV_MAX_OUTPUT_TOKENS override", async () => {
     process.env.ORCH_DEV_MAX_OUTPUT_TOKENS = "16000";
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
     await runEngineLoopInVm({
       ctx: makeCtx(),
       engine: {} as never,
@@ -226,13 +240,16 @@ describe("devMaxOutputTokens (T-F2-08 — 32k regression)", () => {
       kind: "vllm",
     });
     expect(
-      hoisted.runAgentLoopDirectWithSoftTimeout.mock.calls[0][0].maxOutputTokens,
+      hoisted.runAgentLoopDirectWithSoftTimeout.mock.calls[0][0]
+        .maxOutputTokens,
     ).toBe(16_000);
   });
 
   it("never reverts to the old 200000 hardcode regardless of override", async () => {
     process.env.ORCH_DEV_MAX_OUTPUT_TOKENS = "not-a-number";
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
     await runEngineLoopInVm({
       ctx: makeCtx(),
       engine: {} as never,
@@ -240,7 +257,8 @@ describe("devMaxOutputTokens (T-F2-08 — 32k regression)", () => {
       kind: "vllm",
     });
     expect(
-      hoisted.runAgentLoopDirectWithSoftTimeout.mock.calls[0][0].maxOutputTokens,
+      hoisted.runAgentLoopDirectWithSoftTimeout.mock.calls[0][0]
+        .maxOutputTokens,
     ).toBe(32_000);
   });
 });
@@ -256,7 +274,9 @@ describe("OM-injection trace in spawn_events (conclusion B ⑤)", () => {
       recentMessages: [],
     });
     hoisted.hasObservationalMemory.mockReturnValueOnce(true);
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
 
     const result = await runEngineLoopInVm({
       ctx: makeCtx({ spawnId: "sp_om" }),
@@ -275,7 +295,9 @@ describe("OM-injection trace in spawn_events (conclusion B ⑤)", () => {
   });
 
   it("does not emit the OM trace for a short thread with no OM", async () => {
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
     const result = await runEngineLoopInVm({
       ctx: makeCtx(),
       engine: {} as never,
@@ -289,7 +311,9 @@ describe("OM-injection trace in spawn_events (conclusion B ⑤)", () => {
   });
 
   it("skips the OM read entirely for an anonymous (no-owner) run", async () => {
-    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(baseUsage());
+    hoisted.runAgentLoopDirectWithSoftTimeout.mockResolvedValueOnce(
+      baseUsage(),
+    );
     await runEngineLoopInVm({
       ctx: makeCtx({ ownerEmail: "" }),
       engine: {} as never,
@@ -355,7 +379,11 @@ describe("compaction threshold trigger (conclusion B ③)", () => {
     process.env.ORCH_DEV_COMPACT_THRESHOLD_TOKENS = "1";
     hoisted.runAgentLoopDirectWithSoftTimeout.mockImplementationOnce(
       async (opts: { send: SendFn }) => {
-        opts.send({ type: "tool_start", tool: "bash", input: { command: "ls" } });
+        opts.send({
+          type: "tool_start",
+          tool: "bash",
+          input: { command: "ls" },
+        });
         opts.send({ type: "tool_done", tool: "bash", result: "a.ts\nb.ts" });
         return baseUsage();
       },
@@ -382,7 +410,9 @@ describe("compaction threshold trigger (conclusion B ③)", () => {
 describe("compaction failure never breaks the run (T-F2-13)", () => {
   it("swallows a maybeCompactThread rejection and completes normally", async () => {
     process.env.ORCH_DEV_COMPACT_THRESHOLD_TOKENS = "1";
-    hoisted.maybeCompactThread.mockRejectedValueOnce(new Error("compaction boom"));
+    hoisted.maybeCompactThread.mockRejectedValueOnce(
+      new Error("compaction boom"),
+    );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     hoisted.runAgentLoopDirectWithSoftTimeout.mockImplementationOnce(
@@ -414,8 +444,16 @@ describe("checkpoint persistence on success (T-F2-07)", () => {
   it("persists a checkpoint after a normal successful completion", async () => {
     hoisted.runAgentLoopDirectWithSoftTimeout.mockImplementationOnce(
       async (opts: { send: SendFn }) => {
-        opts.send({ type: "tool_start", tool: "write", input: { filePath: "a.ts" } });
-        opts.send({ type: "tool_done", tool: "write", result: "Wrote a.ts (1 line)." });
+        opts.send({
+          type: "tool_start",
+          tool: "write",
+          input: { filePath: "a.ts" },
+        });
+        opts.send({
+          type: "tool_done",
+          tool: "write",
+          result: "Wrote a.ts (1 line).",
+        });
         opts.send({ type: "text", text: "Done." });
         return baseUsage();
       },

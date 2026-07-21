@@ -2391,9 +2391,7 @@ function findInstalledExactScopedPackage(
  */
 function pnpmResolutionFolderOf(realPackageDir: string): string {
   const parent = path.dirname(realPackageDir);
-  return path.basename(parent).startsWith("@")
-    ? path.dirname(parent)
-    : parent;
+  return path.basename(parent).startsWith("@") ? path.dirname(parent) : parent;
 }
 
 /** Every package entry (scoped or not) directly inside a resolution folder. */
@@ -2431,9 +2429,7 @@ function listResolutionFolderPackages(resolutionFolder: string): string[] {
  * collecting every package in the transitive closure. Returns a map of
  * `<scope>/<name>` (or `<name>`) destination path -> real source directory.
  */
-function collectPnpmDependencyClosure(
-  rootDirs: string[],
-): Map<string, string> {
+function collectPnpmDependencyClosure(rootDirs: string[]): Map<string, string> {
   const collected = new Map<string, string>();
   const visitedReal = new Set<string>();
   const queue: string[] = [...rootDirs];

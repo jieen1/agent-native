@@ -5,6 +5,7 @@ import {
 } from "@agent-native/core/server/request-context";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
@@ -32,16 +33,22 @@ export default defineAction({
     key: z
       .string()
       .optional()
-      .describe("Short id prefix (e.g. PAY). Auto-derived from name if omitted."),
+      .describe(
+        "Short id prefix (e.g. PAY). Auto-derived from name if omitted.",
+      ),
     description: z.string().optional().describe("Project description"),
     gitRemote: z
       .string()
       .optional()
-      .describe("Git remote URL the orchestrator clones, e.g. https://github.com/org/repo.git"),
+      .describe(
+        "Git remote URL the orchestrator clones, e.g. https://github.com/org/repo.git",
+      ),
     defaultBranch: z
       .string()
       .optional()
-      .describe("Default base branch the orchestrator cuts from (default main)"),
+      .describe(
+        "Default base branch the orchestrator cuts from (default main)",
+      ),
   }),
   http: { method: "POST" },
   run: async (args) => {

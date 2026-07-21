@@ -57,7 +57,11 @@ function makeEvidence(variant: EvidenceVariant): TransitionEvidence {
     // done's "commit is required, no substitute" (denied) AND 交付's
     // "commit OR links, links alone suffices" (ok) in the SAME fixture.
     case "missing-commit":
-      return { verdict: "PASSED", links: ["https://example.com/pr/1"], deliveryItems: [] };
+      return {
+        verdict: "PASSED",
+        links: ["https://example.com/pr/1"],
+        deliveryItems: [],
+      };
     // missing-verdict: `verdict` absent but `commit` present — exercises
     // done's "verdict is required, no substitute" (denied) AND 交付's
     // "commit alone suffices, links optional" (ok).
@@ -77,11 +81,25 @@ function execStateFor(source: GuardState): string | null {
 }
 
 function makeItem(source: GuardState): GuardWorkItem {
-  if (source === "done") return { currentStageName: "交付", status: "done", execState: "dispatched" };
-  if (source === "closed") return { currentStageName: "待办", status: "closed", execState: execStateFor(source) };
+  if (source === "done")
+    return {
+      currentStageName: "交付",
+      status: "done",
+      execState: "dispatched",
+    };
+  if (source === "closed")
+    return {
+      currentStageName: "待办",
+      status: "closed",
+      execState: execStateFor(source),
+    };
   // Map guard state back to a currentStageName the way the real DB would store it.
   const stageName = source === "待人工评审" ? "验收" : source;
-  return { currentStageName: stageName, status: "open", execState: execStateFor(source) };
+  return {
+    currentStageName: stageName,
+    status: "open",
+    execState: execStateFor(source),
+  };
 }
 
 type Expectation =
@@ -100,26 +118,34 @@ function oracleEligible(
   if (target === "done") {
     // 02 §8: done 仅人 + 仅自「待人工评审」。actor check first (see header).
     if (actorKind !== "human") return { eligible: false, code: "actor-denied" };
-    if (source !== "待人工评审") return { eligible: false, code: "invalid-source-state" };
+    if (source !== "待人工评审")
+      return { eligible: false, code: "invalid-source-state" };
     return { eligible: true };
   }
   if (target === "closed") {
     if (actorKind !== "human") return { eligible: false, code: "actor-denied" };
     const notDispatched = execStateFor(source) === null;
-    return notDispatched ? { eligible: true } : { eligible: false, code: "already-dispatched" };
+    return notDispatched
+      ? { eligible: true }
+      : { eligible: false, code: "already-dispatched" };
   }
   if (target === "交付") {
     if (actorKind !== "human") return { eligible: false, code: "actor-denied" };
-    if (source === "done" || source === "closed") return { eligible: false, code: "terminal-state" };
+    if (source === "done" || source === "closed")
+      return { eligible: false, code: "terminal-state" };
     return { eligible: true };
   }
   // Ladder targets: 待办 / 实施 / 测试 / 待人工评审.
-  if (source === "done" || source === "closed") return { eligible: false, code: "terminal-state" };
+  if (source === "done" || source === "closed")
+    return { eligible: false, code: "terminal-state" };
   const sourceRank = LADDER.indexOf(source);
   const targetRank = LADDER.indexOf(target);
-  if (targetRank > sourceRank) return { eligible: false, code: "forward-not-allowed" };
+  if (targetRank > sourceRank)
+    return { eligible: false, code: "forward-not-allowed" };
   // backward — manual override, human only
-  return actorKind === "human" ? { eligible: true } : { eligible: false, code: "actor-denied" };
+  return actorKind === "human"
+    ? { eligible: true }
+    : { eligible: false, code: "actor-denied" };
 }
 
 /** Full oracle including the evidence dimension — only meaningful when
@@ -155,7 +181,11 @@ function needForDone(variant: EvidenceVariant): Expectation {
     case "missing-verdict":
       return { kind: "denied", code: "evidence-missing", need: ["verdict"] };
     case "empty":
-      return { kind: "denied", code: "evidence-missing", need: ["verdict", "commit"] };
+      return {
+        kind: "denied",
+        code: "evidence-missing",
+        need: ["verdict", "commit"],
+      };
   }
 }
 
@@ -168,12 +198,21 @@ function needForDelivery(variant: EvidenceVariant): Expectation {
     case "missing-verdict":
       return { kind: "ok" }; // commit present (verdict irrelevant to 交付)
     case "empty":
-      return { kind: "denied", code: "evidence-missing", need: ["commit", "links"] };
+      return {
+        kind: "denied",
+        code: "evidence-missing",
+        need: ["commit", "links"],
+      };
   }
 }
 
 const ACTORS: ActorKind[] = ["human", "agent"];
-const VARIANTS: EvidenceVariant[] = ["full", "missing-commit", "missing-verdict", "empty"];
+const VARIANTS: EvidenceVariant[] = [
+  "full",
+  "missing-commit",
+  "missing-verdict",
+  "empty",
+];
 
 // Build the full 2 × 7 × 7 × 4 = 392-cell matrix.
 const MATRIX_CASES: Array<{
@@ -201,15 +240,22 @@ describe("T-F3-01: transition-guard 全矩阵 (392 cells)", () => {
     "actor=$actorKind source=$source target=$target evidence=$variant",
     ({ actorKind, source, target, variant }) => {
       const item = makeItem(source);
-      const actor: Actor = { kind: actorKind, email: actorKind === "human" ? "u@x.com" : null };
+      const actor: Actor = {
+        kind: actorKind,
+        email: actorKind === "human" ? "u@x.com" : null,
+      };
       const evidence = makeEvidence(variant);
       const expected = oracleOutcome(actorKind, source, target, variant);
 
       // --- assertTransition ---
       if (expected.kind === "noop") {
-        expect(assertTransition(item, target, actor, evidence)).toEqual({ noop: true });
+        expect(assertTransition(item, target, actor, evidence)).toEqual({
+          noop: true,
+        });
       } else if (expected.kind === "ok") {
-        expect(assertTransition(item, target, actor, evidence)).toEqual({ noop: false });
+        expect(assertTransition(item, target, actor, evidence)).toEqual({
+          noop: false,
+        });
       } else {
         let caught: unknown;
         try {
@@ -221,7 +267,9 @@ describe("T-F3-01: transition-guard 全矩阵 (392 cells)", () => {
         expect(caught).toBeInstanceOf(TransitionGuardError);
         expect((caught as TransitionGuardError).code).toBe(expected.code);
         if (expected.need) {
-          expect(new Set((caught as TransitionGuardError).need)).toEqual(new Set(expected.need));
+          expect(new Set((caught as TransitionGuardError).need)).toEqual(
+            new Set(expected.need),
+          );
         }
       }
 
@@ -230,7 +278,9 @@ describe("T-F3-01: transition-guard 全矩阵 (392 cells)", () => {
       // change eligibility, so this is invariant across the 4 variants; we
       // still run it every time to catch any accidental evidence-leak bug.
       const el = oracleEligible(actorKind, source, target);
-      const listed = allowedTransitions(item, actor).some((d) => d.target === target);
+      const listed = allowedTransitions(item, actor).some(
+        (d) => d.target === target,
+      );
       if (target === source) {
         expect(listed).toBe(false); // noop excluded from the Select's menu
       } else {
@@ -246,7 +296,11 @@ describe("T-F3-01: transition-guard 全矩阵 (392 cells)", () => {
 
 describe("T-F3-02: evidence-missing 结构化错误", () => {
   it("assertTransition(item,'done',human,{verdict:'PASSED'}) throws exactly {code:'evidence-missing', need:['commit']}", () => {
-    const item: GuardWorkItem = { currentStageName: "验收", status: "open", execState: "dispatched" };
+    const item: GuardWorkItem = {
+      currentStageName: "验收",
+      status: "open",
+      execState: "dispatched",
+    };
     const human: Actor = { kind: "human", email: "u@x.com" };
     let caught: unknown;
     try {
@@ -261,7 +315,11 @@ describe("T-F3-02: evidence-missing 结构化错误", () => {
   });
 
   it("missing both verdict and commit → need=['verdict','commit']", () => {
-    const item: GuardWorkItem = { currentStageName: "验收", status: "open", execState: "dispatched" };
+    const item: GuardWorkItem = {
+      currentStageName: "验收",
+      status: "open",
+      execState: "dispatched",
+    };
     const human: Actor = { kind: "human", email: "u@x.com" };
     try {
       assertTransition(item, "done", human, {});
@@ -272,7 +330,11 @@ describe("T-F3-02: evidence-missing 结构化错误", () => {
   });
 
   it("交付 missing both commit and links → need=['commit','links']", () => {
-    const item: GuardWorkItem = { currentStageName: "实施", status: "open", execState: "dispatched" };
+    const item: GuardWorkItem = {
+      currentStageName: "实施",
+      status: "open",
+      execState: "dispatched",
+    };
     const human: Actor = { kind: "human", email: "u@x.com" };
     try {
       assertTransition(item, "交付", human, {});
@@ -295,14 +357,24 @@ describe("done 源态约束: 仅待人工评审可达 done", () => {
   const FULL = { verdict: "PASSED" as const, commit: "abcdef1" };
 
   it("human + 全证据 自「待人工评审」→ done 通过", () => {
-    const item: GuardWorkItem = { currentStageName: "验收", status: "open", execState: "dispatched" };
-    expect(assertTransition(item, "done", human, FULL)).toEqual({ noop: false });
+    const item: GuardWorkItem = {
+      currentStageName: "验收",
+      status: "open",
+      execState: "dispatched",
+    };
+    expect(assertTransition(item, "done", human, FULL)).toEqual({
+      noop: false,
+    });
   });
 
   it.each(["待办", "分析", "设计", "实施", "测试", "交付"])(
     "human + 全证据 自「%s」→ done 被拒 invalid-source-state",
     (stageName) => {
-      const item: GuardWorkItem = { currentStageName: stageName, status: "open", execState: "dispatched" };
+      const item: GuardWorkItem = {
+        currentStageName: stageName,
+        status: "open",
+        execState: "dispatched",
+      };
       let caught: unknown;
       try {
         assertTransition(item, "done", human, FULL);
@@ -310,20 +382,40 @@ describe("done 源态约束: 仅待人工评审可达 done", () => {
         caught = e;
       }
       expect(caught).toBeInstanceOf(TransitionGuardError);
-      expect((caught as TransitionGuardError).code).toBe("invalid-source-state");
+      expect((caught as TransitionGuardError).code).toBe(
+        "invalid-source-state",
+      );
     },
   );
 
   it("allowedTransitions 只在源态==待人工评审 时把 done 列为选项", () => {
-    for (const stageName of ["待办", "分析", "设计", "实施", "测试", "验收", "交付"]) {
-      const item: GuardWorkItem = { currentStageName: stageName, status: "open", execState: "dispatched" };
-      const listed = allowedTransitions(item, human).some((d) => d.target === "done");
+    for (const stageName of [
+      "待办",
+      "分析",
+      "设计",
+      "实施",
+      "测试",
+      "验收",
+      "交付",
+    ]) {
+      const item: GuardWorkItem = {
+        currentStageName: stageName,
+        status: "open",
+        execState: "dispatched",
+      };
+      const listed = allowedTransitions(item, human).some(
+        (d) => d.target === "done",
+      );
       expect(listed).toBe(stageName === "验收");
     }
   });
 
   it("agent 自待人工评审发 done 仍是 actor-denied(actor 检查先于源态)", () => {
-    const item: GuardWorkItem = { currentStageName: "验收", status: "open", execState: "dispatched" };
+    const item: GuardWorkItem = {
+      currentStageName: "验收",
+      status: "open",
+      execState: "dispatched",
+    };
     let caught: unknown;
     try {
       assertTransition(item, "done", { kind: "agent", email: null }, FULL);
@@ -387,19 +479,34 @@ describe("currentGuardState / guardStateToStageName round-trip", () => {
 
 describe("actorFromCaller", () => {
   it("caller='tool' → agent, regardless of email", () => {
-    expect(actorFromCaller("tool", "u@x.com")).toEqual({ kind: "agent", email: "u@x.com" });
-    expect(actorFromCaller("tool", undefined)).toEqual({ kind: "agent", email: null });
+    expect(actorFromCaller("tool", "u@x.com")).toEqual({
+      kind: "agent",
+      email: "u@x.com",
+    });
+    expect(actorFromCaller("tool", undefined)).toEqual({
+      kind: "agent",
+      email: null,
+    });
   });
 
   it("caller='frontend'/'http'/'cli'/'mcp' with a resolved email → human", () => {
     for (const caller of ["frontend", "http", "cli", "mcp"]) {
-      expect(actorFromCaller(caller, "u@x.com")).toEqual({ kind: "human", email: "u@x.com" });
+      expect(actorFromCaller(caller, "u@x.com")).toEqual({
+        kind: "human",
+        email: "u@x.com",
+      });
     }
   });
 
   it("no resolved email at all → system", () => {
-    expect(actorFromCaller("http", undefined)).toEqual({ kind: "system", email: null });
-    expect(actorFromCaller(undefined, null)).toEqual({ kind: "system", email: null });
+    expect(actorFromCaller("http", undefined)).toEqual({
+      kind: "system",
+      email: null,
+    });
+    expect(actorFromCaller(undefined, null)).toEqual({
+      kind: "system",
+      email: null,
+    });
   });
 
   // F9 (T-F9-04): the reconciler's writeback channel calls the tracker over
@@ -422,6 +529,9 @@ describe("actorFromCaller", () => {
   it("F9: a normal human email over 'mcp' is UNAFFECTED — still classified human", async () => {
     const { writebackActorEmail } = await import("../writeback-actor.js");
     expect(writebackActorEmail()).not.toBe("u@x.com");
-    expect(actorFromCaller("mcp", "u@x.com")).toEqual({ kind: "human", email: "u@x.com" });
+    expect(actorFromCaller("mcp", "u@x.com")).toEqual({
+      kind: "human",
+      email: "u@x.com",
+    });
   });
 });

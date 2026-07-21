@@ -1,17 +1,18 @@
 import { defineAction } from "@agent-native/core";
 import {
-  getRequestUserEmail,
-  getRequestOrgId,
-} from "@agent-native/core/server/request-context";
-import {
   resolveAgentHarness,
   startAgentHarnessRun,
   ensureAgentHarnessSessionTables,
 } from "@agent-native/core/agent/harness";
+import {
+  getRequestUserEmail,
+  getRequestOrgId,
+} from "@agent-native/core/server/request-context";
 import { z } from "zod";
-import { newId } from "./_util.js";
-import { registerOrchestratorRuntime } from "../server/register-runtime.js";
+
 import { getClaudeCodeAuthStatus } from "../server/claude-code-status.js";
+import { registerOrchestratorRuntime } from "../server/register-runtime.js";
+import { newId } from "./_util.js";
 
 // Run a prompt on the local Claude Code harness (uses the machine's `claude`
 // login = your Pro/Max subscription, not an API key). By default it AWAITS the
@@ -103,7 +104,10 @@ export default defineAction({
             activity.push(e.type); // diagnostic: record every event type
             if (e.type === "text-delta" && typeof e.text === "string") {
               chunks.push(e.text);
-            } else if (e.type === "thinking-delta" && typeof e.text === "string") {
+            } else if (
+              e.type === "thinking-delta" &&
+              typeof e.text === "string"
+            ) {
               chunks.push(e.text);
             } else if (e.type === "error") {
               harnessError = String(e.error ?? "harness error");

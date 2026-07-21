@@ -1,10 +1,11 @@
-import { useState } from "react";
 import {
   IconGripVertical,
   IconPlus,
   IconTrash,
   IconChevronDown,
 } from "@tabler/icons-react";
+import { useState } from "react";
+
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,13 +14,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { NodeTypeDot } from "./WorkflowNodeTypeIcon";
+
 import {
   NODE_TYPES,
   NODE_TYPE_LABEL,
   type WorkflowNode,
   type WorkflowNodeType,
 } from "./workflow-dag-types";
+import { NodeTypeDot } from "./WorkflowNodeTypeIcon";
 
 export interface WorkflowNodeListProps {
   nodes: WorkflowNode[];

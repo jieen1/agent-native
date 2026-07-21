@@ -1,9 +1,10 @@
+import { createGetDb, getDbExec } from "@agent-native/core/db";
+import { getRequestUserEmail } from "@agent-native/core/server/request-context";
+import { registerShareableResource } from "@agent-native/core/sharing";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+
 import * as schema from "./schema.js";
 import * as v3Schema from "./v3-schema.js";
-import { createGetDb, getDbExec } from "@agent-native/core/db";
-import { registerShareableResource } from "@agent-native/core/sharing";
-import { getRequestUserEmail } from "@agent-native/core/server/request-context";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 // V3 (DESIGN §3) used to run on its OWN Postgres connection (server/db/v3.ts,
 // now deleted) even though it targets the SAME physical Postgres database as

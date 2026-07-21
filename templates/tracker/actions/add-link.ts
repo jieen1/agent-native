@@ -6,6 +6,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -19,7 +20,10 @@ export default defineAction({
   schema: z.object({
     fromItemId: z.string().min(1).describe("Source work item id"),
     toItemId: z.string().min(1).describe("Target work item id"),
-    linkType: z.string().min(1).describe("Link type, e.g. depends-on, blocks, relates-to"),
+    linkType: z
+      .string()
+      .min(1)
+      .describe("Link type, e.g. depends-on, blocks, relates-to"),
   }),
   http: { method: "POST" },
   run: async (args) => {
@@ -43,10 +47,16 @@ export default defineAction({
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.fromItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.fromItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
-    if (!fromItem) throw new Error("Source work item not found or not accessible");
+    if (!fromItem)
+      throw new Error("Source work item not found or not accessible");
 
     // Check for duplicate link.
     const existing = await db
@@ -56,8 +66,8 @@ export default defineAction({
         and(
           eq(schema.links.fromItemId, args.fromItemId),
           eq(schema.links.toItemId, args.toItemId),
-          eq(schema.links.linkType, args.linkType)
-        )
+          eq(schema.links.linkType, args.linkType),
+        ),
       )
       .limit(1);
     if (existing.length > 0) throw new Error("Link already exists");

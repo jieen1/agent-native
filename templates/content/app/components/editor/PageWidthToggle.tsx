@@ -1,3 +1,4 @@
+import { IconViewportNarrow, IconViewportWide } from "@tabler/icons-react";
 /**
  * LOCAL CUSTOMIZATION — not from upstream agent-native.
  *
@@ -16,7 +17,7 @@
  * See `templates/content/LOCAL_CHANGES.md` for the full list of local deltas.
  */
 import { useEffect } from "react";
-import { IconViewportNarrow, IconViewportWide } from "@tabler/icons-react";
+
 import {
   Tooltip,
   TooltipContent,

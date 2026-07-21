@@ -3,6 +3,7 @@
 // Tests mergeTags and validateTagsFormat from v3-tags.ts.
 
 import { describe, it, expect } from "vitest";
+
 import { mergeTags, validateTagsFormat } from "./v3-tags.js";
 
 describe("mergeTags", () => {
@@ -82,7 +83,9 @@ describe("mergeTags", () => {
 
 describe("validateTagsFormat", () => {
   it("accepts valid plain object with string values", () => {
-    expect(validateTagsFormat({ project: "alpha", env: "dev" })).toBeUndefined();
+    expect(
+      validateTagsFormat({ project: "alpha", env: "dev" }),
+    ).toBeUndefined();
     expect(validateTagsFormat({})).toBeUndefined();
   });
 

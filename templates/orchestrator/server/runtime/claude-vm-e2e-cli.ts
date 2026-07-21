@@ -12,8 +12,8 @@
 // Requires WSL2 + microsandbox (`msb`) + a real `~/.claude` login on the host.
 // Skips (exit 0) with a clear message if msb is not present.
 
-import { msbAvailable } from "./wsl-msb.js";
 import { runClaudeVmE2e, runGitWrapperE2e } from "./claude-vm-e2e.js";
+import { msbAvailable } from "./wsl-msb.js";
 
 async function main(): Promise<void> {
   if (!(await msbAvailable())) {
@@ -48,6 +48,8 @@ main().catch((err: unknown) => {
   // eslint-disable-next-line no-console
   console.error("\n=== P2c E2E: FAIL ===");
   // eslint-disable-next-line no-console
-  console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
+  console.error(
+    err instanceof Error ? (err.stack ?? err.message) : String(err),
+  );
   process.exit(1);
 });

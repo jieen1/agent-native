@@ -1,22 +1,21 @@
+import type { Sprint, ItemType, ItemRisk } from "@shared/types";
+import {
+  IconArrowLeft,
+  IconGitBranch,
+  IconLoader2,
+  IconMailPlus,
+  IconListCheck,
+  IconX,
+} from "@tabler/icons-react";
 import { useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
-import {
-  useCreateWorkItem,
-  useEnqueueWorkItem,
-  useSprints,
-  useProjects,
-} from "@/hooks/use-tracker";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -26,15 +25,12 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
-  IconArrowLeft,
-  IconGitBranch,
-  IconLoader2,
-  IconMailPlus,
-  IconListCheck,
-  IconX,
-} from "@tabler/icons-react";
+  useCreateWorkItem,
+  useEnqueueWorkItem,
+  useSprints,
+  useProjects,
+} from "@/hooks/use-tracker";
 import { cn } from "@/lib/utils";
-import type { Sprint, ItemType, ItemRisk } from "@shared/types";
 
 // ── Segment toggle group ────────────────────────────────────────────────────
 
@@ -116,14 +112,10 @@ function Field({
     <div className="space-y-1.5">
       <Label className="flex items-center gap-1.5 text-sm font-medium">
         {label}
-        {required && (
-          <span className="text-destructive">*</span>
-        )}
+        {required && <span className="text-destructive">*</span>}
       </Label>
       {children}
-      {hint ? (
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      ) : null}
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
@@ -160,9 +152,7 @@ function NatureTags({
                 : "border-border bg-background text-muted-foreground hover:bg-accent",
             )}
           >
-            {active ? (
-              <IconMailPlus className="size-3" />
-            ) : null}
+            {active ? <IconMailPlus className="size-3" /> : null}
             {tag}
           </button>
         );
@@ -182,7 +172,14 @@ export function NewWorkItemPage() {
 
   // Type (single)
   const [type, setType] = useState<ItemType | string>("需求");
-  const TYPE_OPTIONS: ItemType[] = ["需求", "任务", "缺陷", "测试", "生产问题", "集合"];
+  const TYPE_OPTIONS: ItemType[] = [
+    "需求",
+    "任务",
+    "缺陷",
+    "测试",
+    "生产问题",
+    "集合",
+  ];
 
   // Priority (single)
   const [priorityLabel, setPriorityLabel] = useState("中");
@@ -204,7 +201,10 @@ export function NewWorkItemPage() {
 
   // Hook states
   const { data: projectsData } = useProjects();
-  const projects = useMemo(() => (Array.isArray(projectsData) ? projectsData : []), [projectsData]);
+  const projects = useMemo(
+    () => (Array.isArray(projectsData) ? projectsData : []),
+    [projectsData],
+  );
   const { data: sprintsData, isLoading: sprintsLoading } = useSprints();
   const sprints: Sprint[] = useMemo(
     () => (Array.isArray(sprintsData) ? sprintsData : []),
@@ -271,9 +271,7 @@ export function NewWorkItemPage() {
               <IconArrowLeft className="size-3.5" />
               看板
             </Link>
-            <h1 className="text-lg font-semibold tracking-tight">
-              新建工作项
-            </h1>
+            <h1 className="text-lg font-semibold tracking-tight">新建工作项</h1>
           </div>
         </div>
       </div>
@@ -354,22 +352,13 @@ export function NewWorkItemPage() {
                   options={["低", "中", "高"]}
                   value={risk === "low" ? "低" : risk === "high" ? "高" : "中"}
                   onChange={(v) =>
-                    setRisk(
-                      v === "低"
-                        ? "low"
-                        : v === "高"
-                          ? "high"
-                          : "medium",
-                    )
+                    setRisk(v === "低" ? "low" : v === "高" ? "high" : "medium")
                   }
                 />
               </Field>
 
               <Field label="性质标签">
-                <NatureTags
-                  value={natureTags}
-                  onChange={setNatureTags}
-                />
+                <NatureTags value={natureTags} onChange={setNatureTags} />
               </Field>
             </CardContent>
           </Card>
@@ -388,10 +377,7 @@ export function NewWorkItemPage() {
                     加载中…
                   </div>
                 ) : (
-                  <Select
-                    value={sprintId}
-                    onValueChange={setSprintId}
-                  >
+                  <Select value={sprintId} onValueChange={setSprintId}>
                     <SelectTrigger className="w-56">
                       <SelectValue placeholder="选择 Sprint" />
                     </SelectTrigger>
@@ -428,9 +414,7 @@ export function NewWorkItemPage() {
                 <div>
                   <p className="text-sm font-medium">执行模式</p>
                   <p className="text-xs text-muted-foreground">
-                    {autoMode
-                      ? "自动创建后直接并入队列"
-                      : "创建后手动入队"}
+                    {autoMode ? "自动创建后直接并入队列" : "创建后手动入队"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -463,12 +447,7 @@ export function NewWorkItemPage() {
 
           {/* ── Action row ── */}
           <div className="flex items-center justify-end gap-2 rounded-lg border border-border bg-card p-4 shadow-sm">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              asChild
-            >
+            <Button type="button" variant="outline" size="sm" asChild>
               <Link to="/board">
                 <IconX className="size-4" />
                 取消
@@ -513,10 +492,15 @@ export function NewWorkItemPage() {
 
 function priorityMap(label: string): number {
   switch (label) {
-    case "紧急": return 1;
-    case "高": return 2;
-    case "中": return 3;
-    case "低": return 4;
-    default: return 3;
+    case "紧急":
+      return 1;
+    case "高":
+      return 2;
+    case "中":
+      return 3;
+    case "低":
+      return 4;
+    default:
+      return 3;
   }
 }

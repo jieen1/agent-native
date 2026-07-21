@@ -27,6 +27,7 @@ D0 (spike 闸门, ~0.5天)
 **依赖关系**：A 先（双数据库是基础设施）→ B 依赖 A（V3 表需要 Postgres 连接）→ E 依赖 B（action 读写 V3 表）。C 独立，可与任何阶段并行。
 
 **Fallback 策略**（Spike 失败时）：
+
 - 若 NodeRunner 输入格式不兼容 → 在 NodeRunner 前方加 adapter 层，将 V3 4 输入转换为 NodeRunner 期望的 `node/deps/item` 格式
 - 若输出 3 路径无法验证 → 先实现 schema-violation 路径，string/object 走现有 `unknown` 类型
 - 若 `max_summary_tokens` 不存在 → 先不加截断，P1 时在 dispatcher 层实现
@@ -64,16 +65,16 @@ V2 用 LibSQL，V3 切 Postgres。双库共存，不替换。
 
 8 张 `v3_*` 前缀表，全部加性。
 
-| v3 表 | 复用 V2 表？ | 说明 |
-|---|---|---|
-| `v3_workflow_templates` | 不，V2 表名不同 | 版本化 DAG + input_schema |
-| `v3_runs` | 不，V2 用 workflow_runs | 执行实例，含 DAG 快照 + tags + dag_version |
-| `v3_nodes` | 不，V2 用 node_runs | DAG 节点，含 fanout_index/iteration |
-| `v3_spawns` | 无对应 | 最小 worker 调用，可为 ad-hoc |
-| `v3_artifacts` | 不，V2 artifacts schema 不同 | spawn 输出 |
-| `v3_workspaces` | 无对应 | 长生命周期 VM + git checkout |
-| `v3_patches` | 无对应 | CAS DAG mutation |
-| `v3_events` | 无对应 | 事件日志 + seq_num |
+| v3 表                   | 复用 V2 表？                 | 说明                                       |
+| ----------------------- | ---------------------------- | ------------------------------------------ |
+| `v3_workflow_templates` | 不，V2 表名不同              | 版本化 DAG + input_schema                  |
+| `v3_runs`               | 不，V2 用 workflow_runs      | 执行实例，含 DAG 快照 + tags + dag_version |
+| `v3_nodes`              | 不，V2 用 node_runs          | DAG 节点，含 fanout_index/iteration        |
+| `v3_spawns`             | 无对应                       | 最小 worker 调用，可为 ad-hoc              |
+| `v3_artifacts`          | 不，V2 artifacts schema 不同 | spawn 输出                                 |
+| `v3_workspaces`         | 无对应                       | 长生命周期 VM + git checkout               |
+| `v3_patches`            | 无对应                       | CAS DAG mutation                           |
+| `v3_events`             | 无对应                       | 事件日志 + seq_num                         |
 
 - 所有表用 `ownableColumns()`
 - `v3_spawns` 含 `log_ref`（spawn 日志文件路径）+ `rendered_prompt TEXT NOT NULL`
@@ -92,17 +93,20 @@ V2 用 LibSQL，V3 切 Postgres。双库共存，不替换。
 #### E. V3 Actions + 表达式解析器 + 插值渲染器
 
 **Action 骨架**（读写 V3 数据库，不接引擎）：
+
 - `workflow.list/get/save/delete` — 模板 CRUD
 - `workflow.run` — stub：验证 inputs、插入 run/nodes 行
 - `runs.list`, `run.state` — 观察者
 
 **DAG 验证器**（`workflow.save` 内）：
+
 - 节点类型 `agent | parallel_over | loop | human_gate`
 - deps 引用存在 + 无环
 - guard/until/items_from 表达式语法合法
 - output_schema ajv compile 不抛
 
 **表达式解析器**（设计 §5.2）：
+
 - **路径表达式**（核心能力，不能省略）：
   - `inputs.X` — 输入值
   - `deps.NODE.output[.path]` — 依赖节点输出
@@ -115,6 +119,7 @@ V2 用 LibSQL，V3 切 Postgres。双库共存，不替换。
 - 完整实现，不做 MVP 子集。~100 LOC tokenizer + 递归下降求值器
 
 **插值渲染器**（设计 §5.1, §6.4）：
+
 - `{{ ... }}` 占位 → context 路径查找替换
 - string→verbatim, number→literal, object→JSON.stringify, undefined→render fail
 - P0 阶段独立单测验证，不接入实际 dispatch
@@ -140,6 +145,7 @@ V2 用 LibSQL，V3 切 Postgres。双库共存，不替换。
 ---
 
 **与原版 P0 相比的变化**：
+
 - 去掉 worker-shim 从零搭建（复用 NodeRunner + acting-bridge）
 - 去掉 VM provision/teardown（复用 MicrosandboxRuntime）
 - 去掉 tools 实现（复用 existing tool surface）

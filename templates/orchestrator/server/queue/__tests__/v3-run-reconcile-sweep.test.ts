@@ -23,6 +23,7 @@
 //     requires (pending+running only — 'paused' excluded; done/failed/skipped)
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import { v3Runs, v3Nodes } from "../../db/v3-schema.js";
 
 const triggerTickSafeMock = vi.fn(async (_runId: string) => {});
@@ -43,7 +44,11 @@ vi.mock("@agent-native/core/db", () => ({
   isPostgres: () => mockIsConfigured,
 }));
 
-type NodeRow = { status?: string; startedAt: string | null; completedAt: string | null };
+type NodeRow = {
+  status?: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
 /** Either a resolved row set, or `{ reject }` to simulate a DB error for that call. */
 type NodeStep = NodeRow[] | { reject: unknown };
 
@@ -106,7 +111,8 @@ describe("reconcileStrandedV3RunsOnce", () => {
   it("returns [] immediately when V3 Postgres is not configured (no db call attempted)", async () => {
     mockIsConfigured = false;
     mockDb = makeMockDb([], []);
-    const { reconcileStrandedV3RunsOnce } = await import("../v3-run-reconcile-sweep.js");
+    const { reconcileStrandedV3RunsOnce } =
+      await import("../v3-run-reconcile-sweep.js");
 
     const result = await reconcileStrandedV3RunsOnce();
 
@@ -123,7 +129,8 @@ describe("reconcileStrandedV3RunsOnce", () => {
         [{ status: "done", startedAt: stale, completedAt: stale }],
       ],
     );
-    const { reconcileStrandedV3RunsOnce } = await import("../v3-run-reconcile-sweep.js");
+    const { reconcileStrandedV3RunsOnce } =
+      await import("../v3-run-reconcile-sweep.js");
 
     const result = await reconcileStrandedV3RunsOnce();
 
@@ -139,7 +146,8 @@ describe("reconcileStrandedV3RunsOnce", () => {
         [{ status: "running", startedAt: null, completedAt: null }], // non-terminal probe: found one → short-circuit, no 2nd query issued
       ],
     );
-    const { reconcileStrandedV3RunsOnce } = await import("../v3-run-reconcile-sweep.js");
+    const { reconcileStrandedV3RunsOnce } =
+      await import("../v3-run-reconcile-sweep.js");
 
     const result = await reconcileStrandedV3RunsOnce();
 
@@ -155,7 +163,8 @@ describe("reconcileStrandedV3RunsOnce", () => {
         [], // all-nodes fetch: empty → no timestamp to judge silence from → skip
       ],
     );
-    const { reconcileStrandedV3RunsOnce } = await import("../v3-run-reconcile-sweep.js");
+    const { reconcileStrandedV3RunsOnce } =
+      await import("../v3-run-reconcile-sweep.js");
 
     const result = await reconcileStrandedV3RunsOnce();
 
@@ -167,12 +176,10 @@ describe("reconcileStrandedV3RunsOnce", () => {
     const recent = new Date(Date.now() - 1_000).toISOString(); // 1s ago < 30s default
     mockDb = makeMockDb(
       [{ id: "run-4", status: "running" }],
-      [
-        [],
-        [{ status: "done", startedAt: recent, completedAt: recent }],
-      ],
+      [[], [{ status: "done", startedAt: recent, completedAt: recent }]],
     );
-    const { reconcileStrandedV3RunsOnce } = await import("../v3-run-reconcile-sweep.js");
+    const { reconcileStrandedV3RunsOnce } =
+      await import("../v3-run-reconcile-sweep.js");
 
     const result = await reconcileStrandedV3RunsOnce();
 
@@ -194,7 +201,8 @@ describe("reconcileStrandedV3RunsOnce", () => {
         [{ status: "done", startedAt: stale, completedAt: stale }], // run-good: all-nodes fetch
       ],
     );
-    const { reconcileStrandedV3RunsOnce } = await import("../v3-run-reconcile-sweep.js");
+    const { reconcileStrandedV3RunsOnce } =
+      await import("../v3-run-reconcile-sweep.js");
 
     const result = await reconcileStrandedV3RunsOnce();
 
@@ -206,44 +214,55 @@ describe("reconcileStrandedV3RunsOnce", () => {
 
 describe("sweep candidate/terminal status sets", () => {
   it("CANDIDATE_RUN_STATUSES is exactly pending + running ('paused' excluded)", async () => {
-    const { CANDIDATE_RUN_STATUSES } = await import("../v3-run-reconcile-sweep.js");
+    const { CANDIDATE_RUN_STATUSES } =
+      await import("../v3-run-reconcile-sweep.js");
     expect([...CANDIDATE_RUN_STATUSES].sort()).toEqual(["pending", "running"]);
   });
 
   it("TERMINAL_NODE_STATUSES mirrors the reconciler's TERMINAL_STATUSES (done/failed/skipped)", async () => {
-    const { TERMINAL_NODE_STATUSES } = await import("../v3-run-reconcile-sweep.js");
-    expect([...TERMINAL_NODE_STATUSES].sort()).toEqual(["done", "failed", "skipped"]);
+    const { TERMINAL_NODE_STATUSES } =
+      await import("../v3-run-reconcile-sweep.js");
+    expect([...TERMINAL_NODE_STATUSES].sort()).toEqual([
+      "done",
+      "failed",
+      "skipped",
+    ]);
   });
 });
 
 describe("defaultSweepIntervalMs", () => {
   it("defaults to 90000ms when V3_RUN_RECONCILE_SWEEP_INTERVAL_MS is unset", async () => {
-    const { defaultSweepIntervalMs } = await import("../v3-run-reconcile-sweep.js");
+    const { defaultSweepIntervalMs } =
+      await import("../v3-run-reconcile-sweep.js");
     expect(defaultSweepIntervalMs()).toBe(90_000);
   });
 
   it("honors a valid override within the 60-120s window", async () => {
     process.env.V3_RUN_RECONCILE_SWEEP_INTERVAL_MS = "75000";
-    const { defaultSweepIntervalMs } = await import("../v3-run-reconcile-sweep.js");
+    const { defaultSweepIntervalMs } =
+      await import("../v3-run-reconcile-sweep.js");
     expect(defaultSweepIntervalMs()).toBe(75_000);
   });
 
   it("falls back to the default for a non-numeric override", async () => {
     process.env.V3_RUN_RECONCILE_SWEEP_INTERVAL_MS = "not-a-number";
-    const { defaultSweepIntervalMs } = await import("../v3-run-reconcile-sweep.js");
+    const { defaultSweepIntervalMs } =
+      await import("../v3-run-reconcile-sweep.js");
     expect(defaultSweepIntervalMs()).toBe(90_000);
   });
 });
 
 describe("defaultNodesSilentThresholdMs", () => {
   it("defaults to 30000ms when V3_NODES_SILENT_THRESHOLD_MS is unset", async () => {
-    const { defaultNodesSilentThresholdMs } = await import("../v3-run-reconcile-sweep.js");
+    const { defaultNodesSilentThresholdMs } =
+      await import("../v3-run-reconcile-sweep.js");
     expect(defaultNodesSilentThresholdMs()).toBe(30_000);
   });
 
   it("honors a valid override", async () => {
     process.env.V3_NODES_SILENT_THRESHOLD_MS = "45000";
-    const { defaultNodesSilentThresholdMs } = await import("../v3-run-reconcile-sweep.js");
+    const { defaultNodesSilentThresholdMs } =
+      await import("../v3-run-reconcile-sweep.js");
     expect(defaultNodesSilentThresholdMs()).toBe(45_000);
   });
 });

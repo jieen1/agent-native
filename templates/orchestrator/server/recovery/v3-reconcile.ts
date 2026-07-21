@@ -14,6 +14,7 @@
 // Best-effort: errors must not block boot (caller catches and logs).
 
 import { eq, inArray } from "drizzle-orm";
+
 import { getV3Db } from "../db/index.js";
 import { v3Runs, v3Nodes } from "../db/v3-schema.js";
 import { triggerTickSafe } from "../plugins/v3-reconciler.js";

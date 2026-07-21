@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { evaluateExpression, validateExpressionSyntax, type ExpressionContext } from "./expression-parser.js";
-import { renderTemplate } from "./interpolation.js";
+
 import { validateDag, type V3Dag } from "./dag-validator.js";
+import {
+  evaluateExpression,
+  validateExpressionSyntax,
+  type ExpressionContext,
+} from "./expression-parser.js";
+import { renderTemplate } from "./interpolation.js";
 
 const ctx: ExpressionContext = {
   inputs: { feature: "auth" },
@@ -23,17 +28,23 @@ describe("expression parser — paths", () => {
   });
 
   it("deps.spec.output resolves to nested object", () => {
-    expect(evaluateExpression("deps.spec.output", ctx)).toEqual({ plan: "implement auth module" });
+    expect(evaluateExpression("deps.spec.output", ctx)).toEqual({
+      plan: "implement auth module",
+    });
   });
 
   it("deps.spec.output.plan drills into leaf string", () => {
-    expect(evaluateExpression("deps.spec.output.plan", ctx)).toBe("implement auth module");
+    expect(evaluateExpression("deps.spec.output.plan", ctx)).toBe(
+      "implement auth module",
+    );
   });
 });
 
 describe("expression parser — comparisons", () => {
   it('deps.review.output.verdict == "pass"', () => {
-    expect(evaluateExpression('deps.review.output.verdict == "pass"', ctx)).toBe(true);
+    expect(
+      evaluateExpression('deps.review.output.verdict == "pass"', ctx),
+    ).toBe(true);
   });
 
   it("deps.review.output.score > 90", () => {
@@ -43,7 +54,8 @@ describe("expression parser — comparisons", () => {
 
 describe("expression parser — boolean", () => {
   it("&& combines two comparisons", () => {
-    const expr = 'deps.review.output.verdict == "pass" && deps.review.output.score > 90';
+    const expr =
+      'deps.review.output.verdict == "pass" && deps.review.output.score > 90';
     expect(evaluateExpression(expr, ctx)).toBe(true);
   });
 
@@ -58,7 +70,9 @@ describe("expression parser — functions", () => {
   });
 
   it('contains("hello world", "world") => true', () => {
-    expect(evaluateExpression('contains("hello world", "world")', ctx)).toBe(true);
+    expect(evaluateExpression('contains("hello world", "world")', ctx)).toBe(
+      true,
+    );
   });
 
   it('startsWith("hello", "hel") => true', () => {
@@ -75,7 +89,9 @@ describe("expression parser — functions", () => {
   });
 
   it('coalesce(null, "fallback") => "fallback"', () => {
-    expect(evaluateExpression('coalesce(null, "fallback")', ctx)).toBe("fallback");
+    expect(evaluateExpression('coalesce(null, "fallback")', ctx)).toBe(
+      "fallback",
+    );
   });
 });
 
@@ -102,7 +118,9 @@ describe("interpolation — renderTemplate", () => {
   });
 
   it("number interpolation", () => {
-    expect(renderTemplate("Score: {{deps.review.output.score}}", ctx)).toBe("Score: 95");
+    expect(renderTemplate("Score: {{deps.review.output.score}}", ctx)).toBe(
+      "Score: 95",
+    );
   });
 
   it("object interpolation serializes as JSON", () => {
@@ -112,7 +130,7 @@ describe("interpolation — renderTemplate", () => {
 
   it("undefined path throws", () => {
     expect(() => renderTemplate("{{inputs.nonexistent}}", ctx)).toThrow(
-      "interpolation error: path not found in {{ inputs.nonexistent }}"
+      "interpolation error: path not found in {{ inputs.nonexistent }}",
     );
   });
 });
@@ -126,9 +144,25 @@ describe("dag validator — validateDag", () => {
     const dag: V3Dag = {
       nodes: [
         { type: "agent", id: "spec", agent: "claude", prompt: "Write spec" },
-        { type: "agent", id: "review", agent: "claude", prompt: "Review spec", deps: ["spec"] },
-        { type: "parallel_over", id: "reviews", deps: ["spec"], body: "review" },
-        { type: "loop", id: "refine", body: "spec", until: "deps.review.output.verdict == 'pass'" },
+        {
+          type: "agent",
+          id: "review",
+          agent: "claude",
+          prompt: "Review spec",
+          deps: ["spec"],
+        },
+        {
+          type: "parallel_over",
+          id: "reviews",
+          deps: ["spec"],
+          body: "review",
+        },
+        {
+          type: "loop",
+          id: "refine",
+          body: "spec",
+          until: "deps.review.output.verdict == 'pass'",
+        },
       ],
     };
     const result = validateDag(dag);
@@ -158,7 +192,12 @@ describe("dag validator — validateDag", () => {
   it("parallel_over with missing deps is rejected", () => {
     const result = validateDag({
       nodes: [
-        { type: "parallel_over", id: "p", deps: ["nonexistent"], body: "body_node" },
+        {
+          type: "parallel_over",
+          id: "p",
+          deps: ["nonexistent"],
+          body: "body_node",
+        },
         { type: "agent", id: "body_node", agent: "x", prompt: "p" },
       ],
     });
@@ -168,9 +207,7 @@ describe("dag validator — validateDag", () => {
 
   it("loop with nonexistent body is rejected", () => {
     const result = validateDag({
-      nodes: [
-        { type: "loop", id: "l", body: "ghost" },
-      ],
+      nodes: [{ type: "loop", id: "l", body: "ghost" }],
     });
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toContain("not found");

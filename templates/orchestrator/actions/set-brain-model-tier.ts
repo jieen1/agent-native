@@ -4,14 +4,15 @@
 // is cleared so the brain falls back to the CLI default (Sonnet).
 
 import { defineAction } from "@agent-native/core";
+import { putSetting } from "@agent-native/core/settings";
 import { z } from "zod";
+
 import {
   setBrainModelTier,
   getBrainModel,
   isModelAllowedInTier,
   BRAIN_MODEL_KEY,
 } from "../server/brain/brain-model.js";
-import { putSetting } from "@agent-native/core/settings";
 import type { BrainModelTier } from "../server/brain/brain-model.js";
 
 export default defineAction({

@@ -32,13 +32,14 @@
 // The orchestrator agent then invokes the corresponding action as a tool,
 // scoped to the caller's verified identity.
 
+import { mountA2A } from "@agent-native/core/a2a";
+import type { AgentSkill } from "@agent-native/core/a2a";
 import {
   getH3App,
   markDefaultPluginProvided,
   loadActionsFromStaticRegistry,
 } from "@agent-native/core/server";
-import { mountA2A } from "@agent-native/core/a2a";
-import type { AgentSkill } from "@agent-native/core/a2a";
+
 import actionsRegistry from "../../.generated/actions-registry.js";
 
 const A2A_MOUNTED = Symbol.for("orchestrator.a2a.mounted");

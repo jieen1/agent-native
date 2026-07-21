@@ -1,9 +1,3 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
-import { useCallback, useState } from "react";
-import { I18nextProvider, useTranslation } from "react-i18next";
-import { useNavigationState } from "@/hooks/use-navigation-state";
-import { useQueryClient } from "@tanstack/react-query";
-import { useTheme } from "next-themes";
 import { useDbSync } from "@agent-native/core/client";
 import {
   AppProviders,
@@ -15,11 +9,19 @@ import {
   useCommandMenuShortcut,
 } from "@agent-native/core/client";
 import { IconSun, IconMoon, IconLanguage } from "@tabler/icons-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTheme } from "next-themes";
+import { useCallback, useState } from "react";
+import { I18nextProvider, useTranslation } from "react-i18next";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import type { LinksFunction } from "react-router";
+
 import { Layout as AppLayout } from "@/components/layout/Layout";
-import { TAB_ID } from "@/lib/tab-id";
+import { useNavigationState } from "@/hooks/use-navigation-state";
 import { APP_TITLE } from "@/lib/app-config";
 import i18n, { persistLang, type Lang } from "@/lib/i18n";
-import type { LinksFunction } from "react-router";
+import { TAB_ID } from "@/lib/tab-id";
+
 import stylesheet from "./global.css?url";
 
 configureTracking({

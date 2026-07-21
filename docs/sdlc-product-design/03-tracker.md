@@ -65,6 +65,7 @@ metrics / new-item` 视图（现状缺失导致 agent 对这些页面失明）�
 布局：两栏 list+detail（multica inbox 范式，左 360px 列表可拖）。
 
 左列表：分组眉题 + 行（ActorAvatar + 标题 + 摘要 + 相对时间 + 状态环）：
+
 - **签核**：plan-signoff / ui-signoff / design-signoff 待批
 - **评审请求**（v2.2 新增，自举簇六）：处于「待人工评审」的 agent 交付
   ——run 终态且分支已推送后由回写通道生成（02 §8 迁移表），
@@ -75,6 +76,7 @@ metrics / new-item` 视图（现状缺失导致 agent 对这些页面失明）�
 - **通知**（只读）：sprint phase 推进、verify GREEN/RED、promote 完成
 
 右详情：按类型渲染专用卡：
+
 - 签核 → **GateBanner**（判据 checklist 逐条勾叉 + 缺失原因 + 关联产物
   ArtifactCard 内嵌预览 + 批准/驳回）。
 - escalation → 上下文卡（工作项 + run 深链 + 最近失败 TimelineCollapse
@@ -134,6 +136,7 @@ metrics / new-item` 视图（现状缺失导致 agent 对这些页面失明）�
 强制附 PR/commit 证据推进实施→测试，见 02 §1.3）/删除带确认）。
 
 **内容流（上→下）**：
+
 1. **StageStepper**（全宽，plannedStages 子集感知；每个门位可点开
    GateBanner 弹层看判据）。
 2. **需求区**：description（markdown 渲染 + 编辑）；UI 项附
@@ -148,7 +151,7 @@ metrics / new-item` 视图（现状缺失导致 agent 对这些页面失明）�
    版本链入口。产物卡带「在 content 打开」深链（human 富呈现页），
    卡内预览与签核判据锚定 tracker 纯文本版（P11 双表征）。
 5. **依赖关系**：mini 依赖图（本项 ± 1 度邻居，blocked-by 红边高亮未解除者）
-   + 添加链接（组合框搜索工作项，7 种链接类型）。
+   - 添加链接（组合框搜索工作项，7 种链接类型）。
 6. **活动与评论**：统一时间线（本地活动 + 回写事件 + 评论混排，
    actorKind 徽标区分；回写事件标注来源 reconciler/轮询）。评论用
    TiptapComposer。
@@ -199,6 +202,7 @@ status→已发布 + changelog 联动，幂等）。
 ```
 
 **相位面板**（①）随 phase 呈现当下最重要的事：
+
 - planning/designing：进入规划工作台的分步进度卡（六步各自状态环）。
 - executing：派发看板（队列中/运行中/已合入 三列微缩卡 + 依赖等待
   标注"等待 R2"）+ 实时合入流（sprint 分支 git 时间线）。
@@ -267,10 +271,10 @@ status→已发布 + changelog 联动，幂等）。
     工作台只是渲染面），经 `set-artifact-review` 回流为 plan-signoff 判据；
     产物出新版本时勾选确定性重置。签核判据仍锚定 tracker 纯文本版本。
   - ④ UI 设计：ui-spec 屏卡片 + `生成原型`（触发 sdlc-ui-build，进度内嵌）
-    + 原型就绪后切**评审模式**：内嵌 design 应用 present 视图 iframe
-    （多屏 data-screen 切换）+ 右侧批注列表（锚定屏+区域，批注状态
-    open/resolved）+ `请求修改`（批注集→ui-spec 修订→重生成）/
-    `发起 ui-signoff`。详见 05 章 §3。
+    - 原型就绪后切**评审模式**：内嵌 design 应用 present 视图 iframe
+      （多屏 data-screen 切换）+ 右侧批注列表（锚定屏+区域，批注状态
+      open/resolved）+ `请求修改`（批注集→ui-spec 修订→重生成）/
+      `发起 ui-signoff`。详见 05 章 §3。
   - ⑤ 技术设计：technical-design §1–§9 渲染（§4 每工作项锚点导航、
     §7 矩阵表格化）+ 引用完整性徽标（文件路径存在性、ui-spec 屏引用）。
   - ⑥ 对抗评审：轮次报告表（轮/模型/发现/修订）+ 每轮发现列表
@@ -312,12 +316,12 @@ status→已发布 + changelog 联动，幂等）。
 
 列表保持卡片网格（加：phase 中 sprint 徽标）。项目设置页扩展为 tab：
 
-| tab | 内容 |
-|---|---|
-| 基本 | key/名称/描述 |
-| 仓库 | project_repos 管理表（gitRemote/baseBranch/testCmdUnit/testCmdFull/e2e 路径/buildTool/**ciMode(github|none)**/**gateMode(stack|tests-only|none)**/devModel 覆盖）；行内编辑 + 连通性测试按钮（clone 探测） |
+| tab  | 内容                                                                                                                                                         |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ | ---------- | ------------------------------------------------------------------ |
+| 基本 | key/名称/描述                                                                                                                                                |
+| 仓库 | project_repos 管理表（gitRemote/baseBranch/testCmdUnit/testCmdFull/e2e 路径/buildTool/\*\*ciMode(github                                                      | none)**/**gateMode(stack | tests-only | none)\*\*/devModel 覆盖）；行内编辑 + 连通性测试按钮（clone 探测） |
 | 流程 | 阶段门判据 JSON 的**表单化编辑**（每相位一张判据卡：所需产物 docKey 多选 + 所需签核 + 附加校验开关）；类型→工作流模板映射表；模板参数覆盖（评审轮数/模型档） |
-| 成员 | 负责人候选与通知设置 |
+| 成员 | 负责人候选与通知设置                                                                                                                                         |
 
 ## 10. 度量（`/metrics`）
 
@@ -342,16 +346,16 @@ v1.1 §3.3 的增量全部保留（project_repos / tracker_sprint_artifacts /
 tracker_approvals / work_items 加列 / sprints 加列 phase+executorThreadId），
 v2.0 追加：
 
-| 对象 | 增量 | 用途 |
-|---|---|---|
-| tracker_sprint_artifacts | docKey 新增 `ui-spec` / `ui-prototype` / `brainstorm-notes` / `spike-report` / `briefs-index`；`contentRef` 支持 `design:<id>` / `content:<id>` 外链 | UI track 与跨应用产物 |
-| tracker_artifact_comments（新表） | artifactId / anchor(JSON: screen/region) / body / status(open|resolved) / authorKind | 原型批注与产物评审意见 |
-| tracker_approvals | gateKey 新增 `ui-signoff` / `accept-defer` | 三道签核 + story 裁决 |
-| exec_queue | + position（人工排序持久化）+ waitingOn(JSON: deps|health) + healthCheckLog | 调度器接真 |
-| projects | + gateConfig(JSON) + workflowMapping(JSON) | 流程 tab 配置 |
-| work_items | + workflowTemplate(nullable 覆盖) | 工作流选择器 |
-| work_items.item_key | **项目级序列器单点分配**（DB 序列/advisory lock，create 时分配，调用方不报数；撞号=分配失败出声） | 标识权威（02 §8，SDLC-038 两次复发的机制性了结 |
-| navigation 应用状态 | 视图枚举补齐 + 各页焦点对象 | agent context 修复 |
+| 对象                              | 增量                                                                                                                                                 | 用途                                           |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------- |
+| tracker_sprint_artifacts          | docKey 新增 `ui-spec` / `ui-prototype` / `brainstorm-notes` / `spike-report` / `briefs-index`；`contentRef` 支持 `design:<id>` / `content:<id>` 外链 | UI track 与跨应用产物                          |
+| tracker_artifact_comments（新表） | artifactId / anchor(JSON: screen/region) / body / status(open                                                                                        | resolved) / authorKind                         | 原型批注与产物评审意见 |
+| tracker_approvals                 | gateKey 新增 `ui-signoff` / `accept-defer`                                                                                                           | 三道签核 + story 裁决                          |
+| exec_queue                        | + position（人工排序持久化）+ waitingOn(JSON: deps                                                                                                   | health) + healthCheckLog                       | 调度器接真             |
+| projects                          | + gateConfig(JSON) + workflowMapping(JSON)                                                                                                           | 流程 tab 配置                                  |
+| work_items                        | + workflowTemplate(nullable 覆盖)                                                                                                                    | 工作流选择器                                   |
+| work_items.item_key               | **项目级序列器单点分配**（DB 序列/advisory lock，create 时分配，调用方不报数；撞号=分配失败出声）                                                    | 标识权威（02 §8，SDLC-038 两次复发的机制性了结 |
+| navigation 应用状态               | 视图枚举补齐 + 各页焦点对象                                                                                                                          | agent context 修复                             |
 
 action 增量（对齐页面）：`list-inbox` / `resolve-inbox-item`、
 `reorder-queue` / `pause-scheduler`、`create-artifact-comment` /
@@ -372,5 +376,5 @@ priority 常量统一、发布 sprint 接真、list-sprints 去 Postgres-only SQ
 `sprint-design` / `sprint-review` / `draft-fix-issue` / `sprint-story` /
 `sprint-recap`（产物模板与质量门按 02 章 §2）；
 `orchestrating-dispatch`（派发协议：载荷白名单、tags 身份、模板选择）。
-清理：残留的 form-* 技能移除；AGENTS.md 按本章导航与类型枚举重写
+清理：残留的 form-\* 技能移除；AGENTS.md 按本章导航与类型枚举重写
 （类型统一为 需求/任务/缺陷/测试/生产问题 并补全样式映射）。

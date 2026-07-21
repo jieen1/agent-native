@@ -1,7 +1,11 @@
 import { defineAction } from "@agent-native/core";
-import { getRequestUserEmail, getRequestOrgId } from "@agent-native/core/server/request-context";
+import {
+  getRequestUserEmail,
+  getRequestOrgId,
+} from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { reevaluateBlockedQueue } from "../server/lib/dispatch-gate.js";
@@ -28,7 +32,10 @@ export default defineAction({
     "merge commit (F3 状态迁移守卫).",
   schema: z.object({
     workItemId: z.string().min(1).describe("Work item whose stage to complete"),
-    stageName: z.string().min(1).describe("Stage name (e.g. 分析, 设计, 实施, 测试, 验收, 交付)"),
+    stageName: z
+      .string()
+      .min(1)
+      .describe("Stage name (e.g. 分析, 设计, 实施, 测试, 验收, 交付)"),
     verdict: VerdictSchema.optional().describe(
       "Optional verdict object. When provided, `result` is a required enum " +
         "(PASSED | CHANGES_REQUESTED) — extra fields (e.g. notes) are preserved.",
@@ -46,7 +53,15 @@ export default defineAction({
 
     const db = getDb();
     const now = new Date().toISOString();
-    const VALID_STAGES = ["待办", "分析", "设计", "实施", "测试", "验收", "交付"];
+    const VALID_STAGES = [
+      "待办",
+      "分析",
+      "设计",
+      "实施",
+      "测试",
+      "验收",
+      "交付",
+    ];
     if (!VALID_STAGES.includes(args.stageName))
       throw new Error(`Invalid stage: ${args.stageName}`);
 
@@ -55,7 +70,12 @@ export default defineAction({
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found or not accessible");
@@ -73,12 +93,15 @@ export default defineAction({
         )
         .limit(1)
     )[0];
-    if (!stage) throw new Error(`Stage '${args.stageName}' not found — call trigger-stage first`);
+    if (!stage)
+      throw new Error(
+        `Stage '${args.stageName}' not found — call trigger-stage first`,
+      );
 
     const verdictStr = args.verdict ? JSON.stringify(args.verdict) : null;
     const deliveryItemsStr = args.deliveryItems
       ? JSON.stringify(args.deliveryItems)
-      : stage.deliveryItems ?? "[]";
+      : (stage.deliveryItems ?? "[]");
 
     await db
       .update(schema.stages)

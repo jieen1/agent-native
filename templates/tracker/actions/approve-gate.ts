@@ -1,11 +1,13 @@
 import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
-import { z } from "zod";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 
 export default defineAction({
-  description: "Approve a pending approval gate. Records the decider and timestamp.",
+  description:
+    "Approve a pending approval gate. Records the decider and timestamp.",
   schema: z.object({
     id: z.string().min(1).describe("Approval ID to approve"),
     reason: z.string().optional().describe("Optional approval note / reason"),

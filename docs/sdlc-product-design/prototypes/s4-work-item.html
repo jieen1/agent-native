@@ -1,669 +1,1971 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Foundry · 工作项详情 PAY-203</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
-<style>
-/* ============ Foundry tokens ============ */
-:root{
-  --background:oklch(1 0 0); --foreground:oklch(.141 .005 285.82);
-  --card:oklch(1 0 0); --muted:oklch(.967 .001 286.38);
-  --muted-foreground:oklch(.552 .016 285.94);
-  --border:oklch(.945 .003 286.32); --input:oklch(.92 .004 286.32);
-  --ring:oklch(.705 .015 286.07);
-  --primary:oklch(.21 .006 285.89); --primary-foreground:oklch(.985 0 0);
-  --brand:oklch(.55 .16 255); --brand-foreground:oklch(.985 0 0);
-  --success:oklch(.55 .16 145); --warning:oklch(.68 .15 85);
-  --info:oklch(.55 .18 250); --destructive:oklch(.577 .245 27.33);
-  --agent:oklch(.55 .14 300); --evidence:oklch(.48 .10 180);
-  --chart-1:oklch(.55 .16 255); --chart-2:oklch(.65 .13 255);
-  --chart-3:oklch(.75 .10 255); --chart-4:oklch(.84 .07 255); --chart-5:oklch(.92 .04 255);
-  --sidebar:oklch(.985 .001 286.38);
-  --radius:10px; --radius-sm:6px; --radius-md:8px; --radius-xl:14px;
-  --panel:oklch(.972 .002 286.35);
-  --font-sans:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
-  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
-}
-.dark{
-  --background:oklch(.18 .005 285.82); --foreground:oklch(.985 0 0);
-  --card:oklch(.21 .006 285.89); --muted:oklch(.274 .006 286.03);
-  --muted-foreground:oklch(.705 .015 286.07);
-  --border:oklch(1 0 0/.08); --input:oklch(1 0 0/.15);
-  --primary:oklch(.92 .004 286.32); --primary-foreground:oklch(.21 .006 285.89);
-  --brand:oklch(.65 .16 255); --success:oklch(.65 .14 145);
-  --warning:oklch(.8 .14 85); --info:oklch(.65 .16 250); --destructive:oklch(.66 .2 27);
-  --agent:oklch(.68 .13 300); --evidence:oklch(.62 .09 180);
-  --chart-1:oklch(.72 .14 255); --chart-2:oklch(.62 .13 255);
-  --chart-3:oklch(.52 .11 255); --chart-4:oklch(.42 .09 255); --chart-5:oklch(.32 .06 255);
-  --sidebar:oklch(.16 .005 285.82);
-  --panel:oklch(.215 .006 285.9);/*--panel-dark-done*/
-}
-/* ============ base ============ */
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{font-family:var(--font-sans);font-size:13px;line-height:1.55;color:var(--foreground);
-  background:var(--background);-webkit-font-smoothing:antialiased;text-autospace:ideograph-alpha ideograph-numeric}
-a{color:inherit;text-decoration:none}
-button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
-.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-thumb{background:oklch(0 0 0/.12);border-radius:3px}
-.dark ::-webkit-scrollbar-thumb{background:oklch(1 0 0/.14)}
-i.ti{font-size:16px;line-height:1;vertical-align:-2px}
-.proto-bar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:2px;
-  padding:4px 10px;background:oklch(.18 .01 260);color:oklch(.8 .01 260);
-  font-size:11px;overflow-x:auto;white-space:nowrap}
-.proto-bar .pb-title{font-weight:600;color:oklch(.98 0 0);margin-right:8px;display:flex;gap:6px;align-items:center}
-.proto-bar a{padding:3px 8px;border-radius:6px;cursor:pointer}
-.proto-bar a:hover{background:oklch(1 0 0/.1)}
-.proto-bar a.active{background:var(--brand);color:var(--brand-foreground)}
-.proto-bar .pb-theme{margin-left:auto;padding:3px 8px;border-radius:6px;display:flex;gap:4px;align-items:center}
-.proto-bar .pb-theme:hover{background:oklch(1 0 0/.1)}
-.app{display:flex;height:calc(100vh - 27px)}
-.sidebar{width:232px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;padding:10px;gap:2px;overflow-y:auto}
-.sb-head{display:flex;align-items:center;gap:8px;padding:6px 8px 10px;font-weight:600;font-size:13px}
-.sb-head .logo{width:22px;height:22px;border-radius:6px;background:var(--brand);color:var(--brand-foreground);
-  display:flex;align-items:center;justify-content:center}
-.sb-search{display:flex;align-items:center;gap:6px;margin:0 4px 8px;padding:5px 8px;border:1px solid var(--border);
-  border-radius:var(--radius-md);color:var(--muted-foreground);font-size:12px;background:var(--card)}
-.sb-search kbd{margin-left:auto}
-.sb-group{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);
-  padding:12px 8px 4px;font-weight:600}
-.sb-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--radius-md);
-  color:var(--foreground);font-size:13px;cursor:pointer}
-.sb-item i{font-size:17px;color:var(--muted-foreground)}
-.sb-item:hover{background:oklch(0 0 0/.045)}
-.dark .sb-item:hover{background:oklch(1 0 0/.06)}
-.sb-item.active{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand);font-weight:500}
-.sb-item.active i{color:var(--brand)}
-.sb-item .count{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
-.sb-item .dot-badge{margin-left:auto;min-width:16px;height:16px;padding:0 5px;border-radius:8px;
-  background:var(--brand);color:var(--brand-foreground);font-size:10px;font-weight:600;
-  display:flex;align-items:center;justify-content:center;font-family:var(--font-mono)}
-.inset{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--background)}
-.page-header{display:flex;align-items:center;gap:10px;padding:14px 24px 10px}
-.page-header h1{font-size:16px;font-weight:600}
-.content{flex:1;overflow:auto}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-md);
-  font-size:12.5px;font-weight:500;border:1px solid transparent;cursor:pointer;white-space:nowrap}
-.btn-primary{background:var(--primary);color:var(--primary-foreground)}
-.btn-primary:hover{opacity:.9}
-.btn-outline{border-color:var(--border);background:var(--card)}
-.btn-outline:hover{background:var(--muted)}
-.btn-ghost:hover{background:var(--muted)}
-.btn:disabled{opacity:.45;cursor:not-allowed}
-.btn-sm{padding:3px 8px;font-size:12px}
-.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
-  font-size:11.5px;font-weight:500;border:1px solid var(--border);background:var(--card)}
-.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:500}
-.badge.b-success{background:color-mix(in oklch,var(--success) 14%,transparent);color:var(--success)}
-.badge.b-warning{background:color-mix(in oklch,var(--warning) 16%,transparent);color:oklch(.55 .13 85)}
-.dark .badge.b-warning{color:var(--warning)}
-.badge.b-info{background:color-mix(in oklch,var(--info) 14%,transparent);color:var(--info)}
-.badge.b-destructive{background:color-mix(in oklch,var(--destructive) 12%,transparent);color:var(--destructive)}
-.badge.b-agent{background:color-mix(in oklch,var(--agent) 12%,transparent);color:var(--agent)}
-.badge.b-brand{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand)}
-.badge.b-muted{background:var(--muted);color:var(--muted-foreground)}
-.badge.b-evidence{background:color-mix(in oklch,var(--evidence) 12%,transparent);color:var(--evidence)}
-kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid var(--border);
-  border-bottom-width:2px;border-radius:4px;background:var(--muted);color:var(--muted-foreground)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}
-.card-pad{padding:14px 16px}
-.section-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
-.group-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);font-weight:600}
-.divider{height:1px;background:var(--border)}
-.ring{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-block;position:relative}
-.st-icon{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;vertical-align:-2px;color:#fff}
-.st-icon i{font-size:10px;line-height:1;display:block}
-.st-icon.sm{width:12px;height:12px}.st-icon.sm i{font-size:8.5px}
-.st-icon.lg{width:18px;height:18px}.st-icon.lg i{font-size:12.5px}
-.st-icon.ok{background:var(--success)}.st-icon.err{background:var(--destructive)}.st-icon.warn{background:var(--warning)}.st-icon.inf{background:var(--info)}.st-icon.mut{background:var(--muted-foreground)}
-.runbadge .st-icon{width:11px;height:11px}.runbadge .st-icon i{font-size:8px}
-.ring.r-pending{border:1.6px dashed var(--muted-foreground)}
-.ring.r-queued{border:1.6px solid var(--warning)}
-.ring.r-queued::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--warning)}
-.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%)}
-.ring.r-review{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 75%,transparent 75% 100%)}
-.ring.r-gate{border:1.6px solid var(--warning)}
-.ring.r-gate::after{content:'';position:absolute;left:5.5px;top:3px;width:1.8px;height:7px;background:var(--warning)}
-.ring.r-skipped{border:1.6px solid var(--muted-foreground);background:linear-gradient(135deg,transparent 45%,var(--muted-foreground) 45%,var(--muted-foreground) 55%,transparent 55%)}
-.pbars{display:inline-flex;gap:1.5px;align-items:flex-end;height:12px}
-.pbars span{width:3px;border-radius:1px;background:var(--border)}
-.pbars span:nth-child(1){height:4px}.pbars span:nth-child(2){height:6.5px}
-.pbars span:nth-child(3){height:9px}.pbars span:nth-child(4){height:12px}
-.pbars.p0 span{background:var(--destructive)}
-.pbars.p1 span:nth-child(-n+3){background:oklch(.55 .13 85)}
-.pbars.p2 span:nth-child(-n+2){background:var(--info)}
-.pbars.p3 span:nth-child(1){background:var(--muted-foreground)}
-.avatar{width:20px;height:20px;border-radius:50%;background:var(--brand);color:#fff;
-  display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0}
-.avatar.a-agent{border-radius:6px;background:color-mix(in oklch,var(--agent) 15%,transparent);
-  color:var(--agent);border:1px solid color-mix(in oklch,var(--agent) 40%,transparent)}
-.avatar.a-brain{border-radius:6px;background:color-mix(in oklch,var(--brand) 15%,transparent);
-  color:var(--brand);border:1px solid color-mix(in oklch,var(--brand) 40%,transparent)}
-table.fd{width:100%;border-collapse:collapse;font-size:12.5px}
-table.fd th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
-  color:var(--muted-foreground);font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border)}
-table.fd td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
-table.fd tr:hover td{background:oklch(0 0 0/.02)}
-.dark table.fd tr:hover td{background:oklch(1 0 0/.03)}
-.empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px;color:var(--muted-foreground)}
-.empty .e-icon{width:40px;height:40px;border-radius:50%;background:var(--muted);
-  display:flex;align-items:center;justify-content:center;font-size:20px}
-/* ============ 本屏 ============ */
-.crumbs{display:flex;align-items:center;gap:6px;padding:12px 24px 0;font-size:12px;color:var(--muted-foreground)}
-.crumbs i{font-size:13px}
-.detail-wrap{display:flex;gap:20px;padding:8px 24px 32px;align-items:flex-start}
-.detail-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:20px}
-.inspector{width:320px;flex-shrink:0;position:sticky;top:8px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-xl);padding:2px 16px}
-/* 侧栏扁平分组：单层容器，节间用 border-top 分隔，不再嵌套完整卡片 */
-.insp-sec{padding:18px 0 14px;border-top:1px solid var(--border)}
-.insp-sec .group-label{display:block;margin-bottom:9px}
-.insp-sec:first-child{border-top:none}
-.proprow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;font-size:12.5px}
-.proprow .pl{color:var(--muted-foreground);font-size:12px;flex-shrink:0}
-.proprow .pv{display:flex;align-items:center;gap:6px;text-align:right;min-width:0;font-variant-numeric:tabular-nums}
-.proprow .pv:hover{color:var(--brand);cursor:pointer}
-.stepper{display:flex;align-items:center;gap:8px;padding:14px 16px}
-.step{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500}
-.step .s-label{white-space:nowrap}
-.step-line{flex:1;height:2px;border-radius:1px;background:var(--border);min-width:40px}
-.step-line.done{background:var(--success)}
-.minidag{display:flex;align-items:center;gap:0;margin:10px 0 4px;flex-wrap:wrap}
-.md-node{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted-foreground)}
-.md-node .mono{font-size:11px}
-.md-link{width:22px;height:1.6px;background:var(--border);margin:0 4px}
-.md-link.done{background:var(--success)}
-.evidence{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--border);
-  border:1px solid color-mix(in oklch,var(--destructive) 28%,var(--border));border-radius:var(--radius-md);background:color-mix(in oklch,var(--destructive) 4%,var(--card))}
-.evidence code{font-family:var(--font-mono);font-size:12px;word-break:break-all}
-.timeline{display:flex;flex-direction:column}
-.tl-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);align-items:flex-start}
-.tl-row:last-child{border-bottom:none}
-.tl-row .tl-body{flex:1;min-width:0}
-.tl-row .tl-time{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);flex-shrink:0}
-.composer{display:flex;align-items:center;gap:8px;border:1px solid var(--input);border-radius:var(--radius-md);
-  padding:7px 10px;background:var(--card)}
-.composer input{flex:1;border:none;outline:none;background:none;font:inherit;color:inherit}
-.artifact-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);
-  border-radius:var(--radius-md);background:var(--card)}
-.artifact-row i{color:var(--muted-foreground)}
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Foundry · 工作项详情 PAY-203</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css"
+    />
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"
+    ></script>
+    <style>
+      /* ============ Foundry tokens ============ */
+      :root {
+        --background: oklch(1 0 0);
+        --foreground: oklch(0.141 0.005 285.82);
+        --card: oklch(1 0 0);
+        --muted: oklch(0.967 0.001 286.38);
+        --muted-foreground: oklch(0.552 0.016 285.94);
+        --border: oklch(0.945 0.003 286.32);
+        --input: oklch(0.92 0.004 286.32);
+        --ring: oklch(0.705 0.015 286.07);
+        --primary: oklch(0.21 0.006 285.89);
+        --primary-foreground: oklch(0.985 0 0);
+        --brand: oklch(0.55 0.16 255);
+        --brand-foreground: oklch(0.985 0 0);
+        --success: oklch(0.55 0.16 145);
+        --warning: oklch(0.68 0.15 85);
+        --info: oklch(0.55 0.18 250);
+        --destructive: oklch(0.577 0.245 27.33);
+        --agent: oklch(0.55 0.14 300);
+        --evidence: oklch(0.48 0.1 180);
+        --chart-1: oklch(0.55 0.16 255);
+        --chart-2: oklch(0.65 0.13 255);
+        --chart-3: oklch(0.75 0.1 255);
+        --chart-4: oklch(0.84 0.07 255);
+        --chart-5: oklch(0.92 0.04 255);
+        --sidebar: oklch(0.985 0.001 286.38);
+        --radius: 10px;
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --radius-xl: 14px;
+        --panel: oklch(0.972 0.002 286.35);
+        --font-sans:
+          "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+      }
+      .dark {
+        --background: oklch(0.18 0.005 285.82);
+        --foreground: oklch(0.985 0 0);
+        --card: oklch(0.21 0.006 285.89);
+        --muted: oklch(0.274 0.006 286.03);
+        --muted-foreground: oklch(0.705 0.015 286.07);
+        --border: oklch(1 0 0/0.08);
+        --input: oklch(1 0 0/0.15);
+        --primary: oklch(0.92 0.004 286.32);
+        --primary-foreground: oklch(0.21 0.006 285.89);
+        --brand: oklch(0.65 0.16 255);
+        --success: oklch(0.65 0.14 145);
+        --warning: oklch(0.8 0.14 85);
+        --info: oklch(0.65 0.16 250);
+        --destructive: oklch(0.66 0.2 27);
+        --agent: oklch(0.68 0.13 300);
+        --evidence: oklch(0.62 0.09 180);
+        --chart-1: oklch(0.72 0.14 255);
+        --chart-2: oklch(0.62 0.13 255);
+        --chart-3: oklch(0.52 0.11 255);
+        --chart-4: oklch(0.42 0.09 255);
+        --chart-5: oklch(0.32 0.06 255);
+        --sidebar: oklch(0.16 0.005 285.82);
+        --panel: oklch(0.215 0.006 285.9); /*--panel-dark-done*/
+      }
+      /* ============ base ============ */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        font-family: var(--font-sans);
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--foreground);
+        background: var(--background);
+        -webkit-font-smoothing: antialiased;
+        text-autospace: ideograph-alpha ideograph-numeric;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+        background: none;
+        border: none;
+        cursor: pointer;
+      }
+      .mono {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: oklch(0 0 0/0.12);
+        border-radius: 3px;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: oklch(1 0 0/0.14);
+      }
+      i.ti {
+        font-size: 16px;
+        line-height: 1;
+        vertical-align: -2px;
+      }
+      .proto-bar {
+        position: sticky;
+        top: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 4px 10px;
+        background: oklch(0.18 0.01 260);
+        color: oklch(0.8 0.01 260);
+        font-size: 11px;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .proto-bar .pb-title {
+        font-weight: 600;
+        color: oklch(0.98 0 0);
+        margin-right: 8px;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .proto-bar a {
+        padding: 3px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .proto-bar a:hover {
+        background: oklch(1 0 0/0.1);
+      }
+      .proto-bar a.active {
+        background: var(--brand);
+        color: var(--brand-foreground);
+      }
+      .proto-bar .pb-theme {
+        margin-left: auto;
+        padding: 3px 8px;
+        border-radius: 6px;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+      .proto-bar .pb-theme:hover {
+        background: oklch(1 0 0/0.1);
+      }
+      .app {
+        display: flex;
+        height: calc(100vh - 27px);
+      }
+      .sidebar {
+        width: 232px;
+        flex-shrink: 0;
+        background: var(--sidebar);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        padding: 10px;
+        gap: 2px;
+        overflow-y: auto;
+      }
+      .sb-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px 10px;
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .sb-head .logo {
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        background: var(--brand);
+        color: var(--brand-foreground);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .sb-search {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 4px 8px;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        color: var(--muted-foreground);
+        font-size: 12px;
+        background: var(--card);
+      }
+      .sb-search kbd {
+        margin-left: auto;
+      }
+      .sb-group {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted-foreground);
+        padding: 12px 8px 4px;
+        font-weight: 600;
+      }
+      .sb-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 8px;
+        border-radius: var(--radius-md);
+        color: var(--foreground);
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .sb-item i {
+        font-size: 17px;
+        color: var(--muted-foreground);
+      }
+      .sb-item:hover {
+        background: oklch(0 0 0/0.045);
+      }
+      .dark .sb-item:hover {
+        background: oklch(1 0 0/0.06);
+      }
+      .sb-item.active {
+        background: color-mix(in oklch, var(--brand) 12%, transparent);
+        color: var(--brand);
+        font-weight: 500;
+      }
+      .sb-item.active i {
+        color: var(--brand);
+      }
+      .sb-item .count {
+        margin-left: auto;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted-foreground);
+      }
+      .sb-item .dot-badge {
+        margin-left: auto;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 5px;
+        border-radius: 8px;
+        background: var(--brand);
+        color: var(--brand-foreground);
+        font-size: 10px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+      }
+      .inset {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--background);
+      }
+      .page-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 24px 10px;
+      }
+      .page-header h1 {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .content {
+        flex: 1;
+        overflow: auto;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 12px;
+        border-radius: var(--radius-md);
+        font-size: 12.5px;
+        font-weight: 500;
+        border: 1px solid transparent;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+      .btn-primary:hover {
+        opacity: 0.9;
+      }
+      .btn-outline {
+        border-color: var(--border);
+        background: var(--card);
+      }
+      .btn-outline:hover {
+        background: var(--muted);
+      }
+      .btn-ghost:hover {
+        background: var(--muted);
+      }
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .btn-sm {
+        padding: 3px 8px;
+        font-size: 12px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11.5px;
+        font-weight: 500;
+        border: 1px solid var(--border);
+        background: var(--card);
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 7px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .badge.b-success {
+        background: color-mix(in oklch, var(--success) 14%, transparent);
+        color: var(--success);
+      }
+      .badge.b-warning {
+        background: color-mix(in oklch, var(--warning) 16%, transparent);
+        color: oklch(0.55 0.13 85);
+      }
+      .dark .badge.b-warning {
+        color: var(--warning);
+      }
+      .badge.b-info {
+        background: color-mix(in oklch, var(--info) 14%, transparent);
+        color: var(--info);
+      }
+      .badge.b-destructive {
+        background: color-mix(in oklch, var(--destructive) 12%, transparent);
+        color: var(--destructive);
+      }
+      .badge.b-agent {
+        background: color-mix(in oklch, var(--agent) 12%, transparent);
+        color: var(--agent);
+      }
+      .badge.b-brand {
+        background: color-mix(in oklch, var(--brand) 12%, transparent);
+        color: var(--brand);
+      }
+      .badge.b-muted {
+        background: var(--muted);
+        color: var(--muted-foreground);
+      }
+      .badge.b-evidence {
+        background: color-mix(in oklch, var(--evidence) 12%, transparent);
+        color: var(--evidence);
+      }
+      kbd {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        padding: 1px 5px;
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        background: var(--muted);
+        color: var(--muted-foreground);
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+      .card-pad {
+        padding: 14px 16px;
+      }
+      .section-title {
+        font-size: 13px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .group-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted-foreground);
+        font-weight: 600;
+      }
+      .divider {
+        height: 1px;
+        background: var(--border);
+      }
+      .ring {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        display: inline-block;
+        position: relative;
+      }
+      .st-icon {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        vertical-align: -2px;
+        color: #fff;
+      }
+      .st-icon i {
+        font-size: 10px;
+        line-height: 1;
+        display: block;
+      }
+      .st-icon.sm {
+        width: 12px;
+        height: 12px;
+      }
+      .st-icon.sm i {
+        font-size: 8.5px;
+      }
+      .st-icon.lg {
+        width: 18px;
+        height: 18px;
+      }
+      .st-icon.lg i {
+        font-size: 12.5px;
+      }
+      .st-icon.ok {
+        background: var(--success);
+      }
+      .st-icon.err {
+        background: var(--destructive);
+      }
+      .st-icon.warn {
+        background: var(--warning);
+      }
+      .st-icon.inf {
+        background: var(--info);
+      }
+      .st-icon.mut {
+        background: var(--muted-foreground);
+      }
+      .runbadge .st-icon {
+        width: 11px;
+        height: 11px;
+      }
+      .runbadge .st-icon i {
+        font-size: 8px;
+      }
+      .ring.r-pending {
+        border: 1.6px dashed var(--muted-foreground);
+      }
+      .ring.r-queued {
+        border: 1.6px solid var(--warning);
+      }
+      .ring.r-queued::after {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border-radius: 50%;
+        background: var(--warning);
+      }
+      .ring.r-running {
+        border: 1.6px solid var(--info);
+        background: conic-gradient(var(--info) 0 50%, transparent 50% 100%);
+      }
+      .ring.r-review {
+        border: 1.6px solid var(--info);
+        background: conic-gradient(var(--info) 0 75%, transparent 75% 100%);
+      }
+      .ring.r-gate {
+        border: 1.6px solid var(--warning);
+      }
+      .ring.r-gate::after {
+        content: "";
+        position: absolute;
+        left: 5.5px;
+        top: 3px;
+        width: 1.8px;
+        height: 7px;
+        background: var(--warning);
+      }
+      .ring.r-skipped {
+        border: 1.6px solid var(--muted-foreground);
+        background: linear-gradient(
+          135deg,
+          transparent 45%,
+          var(--muted-foreground) 45%,
+          var(--muted-foreground) 55%,
+          transparent 55%
+        );
+      }
+      .pbars {
+        display: inline-flex;
+        gap: 1.5px;
+        align-items: flex-end;
+        height: 12px;
+      }
+      .pbars span {
+        width: 3px;
+        border-radius: 1px;
+        background: var(--border);
+      }
+      .pbars span:nth-child(1) {
+        height: 4px;
+      }
+      .pbars span:nth-child(2) {
+        height: 6.5px;
+      }
+      .pbars span:nth-child(3) {
+        height: 9px;
+      }
+      .pbars span:nth-child(4) {
+        height: 12px;
+      }
+      .pbars.p0 span {
+        background: var(--destructive);
+      }
+      .pbars.p1 span:nth-child(-n + 3) {
+        background: oklch(0.55 0.13 85);
+      }
+      .pbars.p2 span:nth-child(-n + 2) {
+        background: var(--info);
+      }
+      .pbars.p3 span:nth-child(1) {
+        background: var(--muted-foreground);
+      }
+      .avatar {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--brand);
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .avatar.a-agent {
+        border-radius: 6px;
+        background: color-mix(in oklch, var(--agent) 15%, transparent);
+        color: var(--agent);
+        border: 1px solid color-mix(in oklch, var(--agent) 40%, transparent);
+      }
+      .avatar.a-brain {
+        border-radius: 6px;
+        background: color-mix(in oklch, var(--brand) 15%, transparent);
+        color: var(--brand);
+        border: 1px solid color-mix(in oklch, var(--brand) 40%, transparent);
+      }
+      table.fd {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12.5px;
+      }
+      table.fd th {
+        text-align: left;
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted-foreground);
+        font-weight: 600;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      table.fd td {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+      table.fd tr:hover td {
+        background: oklch(0 0 0/0.02);
+      }
+      .dark table.fd tr:hover td {
+        background: oklch(1 0 0/0.03);
+      }
+      .empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 40px;
+        color: var(--muted-foreground);
+      }
+      .empty .e-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+      }
+      /* ============ 本屏 ============ */
+      .crumbs {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 12px 24px 0;
+        font-size: 12px;
+        color: var(--muted-foreground);
+      }
+      .crumbs i {
+        font-size: 13px;
+      }
+      .detail-wrap {
+        display: flex;
+        gap: 20px;
+        padding: 8px 24px 32px;
+        align-items: flex-start;
+      }
+      .detail-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .inspector {
+        width: 320px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 8px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-xl);
+        padding: 2px 16px;
+      }
+      /* 侧栏扁平分组：单层容器，节间用 border-top 分隔，不再嵌套完整卡片 */
+      .insp-sec {
+        padding: 18px 0 14px;
+        border-top: 1px solid var(--border);
+      }
+      .insp-sec .group-label {
+        display: block;
+        margin-bottom: 9px;
+      }
+      .insp-sec:first-child {
+        border-top: none;
+      }
+      .proprow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 6px 0;
+        font-size: 12.5px;
+      }
+      .proprow .pl {
+        color: var(--muted-foreground);
+        font-size: 12px;
+        flex-shrink: 0;
+      }
+      .proprow .pv {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        text-align: right;
+        min-width: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .proprow .pv:hover {
+        color: var(--brand);
+        cursor: pointer;
+      }
+      .stepper {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 16px;
+      }
+      .step {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12.5px;
+        font-weight: 500;
+      }
+      .step .s-label {
+        white-space: nowrap;
+      }
+      .step-line {
+        flex: 1;
+        height: 2px;
+        border-radius: 1px;
+        background: var(--border);
+        min-width: 40px;
+      }
+      .step-line.done {
+        background: var(--success);
+      }
+      .minidag {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        margin: 10px 0 4px;
+        flex-wrap: wrap;
+      }
+      .md-node {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 11.5px;
+        color: var(--muted-foreground);
+      }
+      .md-node .mono {
+        font-size: 11px;
+      }
+      .md-link {
+        width: 22px;
+        height: 1.6px;
+        background: var(--border);
+        margin: 0 4px;
+      }
+      .md-link.done {
+        background: var(--success);
+      }
+      .evidence {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border: 1px solid
+          color-mix(in oklch, var(--destructive) 28%, var(--border));
+        border-radius: var(--radius-md);
+        background: color-mix(in oklch, var(--destructive) 4%, var(--card));
+      }
+      .evidence code {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        word-break: break-all;
+      }
+      .timeline {
+        display: flex;
+        flex-direction: column;
+      }
+      .tl-row {
+        display: flex;
+        gap: 10px;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--border);
+        align-items: flex-start;
+      }
+      .tl-row:last-child {
+        border-bottom: none;
+      }
+      .tl-row .tl-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .tl-row .tl-time {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted-foreground);
+        flex-shrink: 0;
+      }
+      .composer {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--input);
+        border-radius: var(--radius-md);
+        padding: 7px 10px;
+        background: var(--card);
+      }
+      .composer input {
+        flex: 1;
+        border: none;
+        outline: none;
+        background: none;
+        font: inherit;
+        color: inherit;
+      }
+      .artifact-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--card);
+      }
+      .artifact-row i {
+        color: var(--muted-foreground);
+      }
 
-/* RunBadge：run 实体统一徽标（01 章 §4.3） */
-.runbadge{display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border:1px solid var(--border);
-  border-radius:6px;font-family:var(--font-mono);font-size:11px;color:var(--foreground);background:var(--card);cursor:pointer}
-.runbadge:hover{border-color:color-mix(in oklch,var(--brand) 55%,transparent);color:var(--brand)}
-.runbadge .ring{width:9px;height:9px}
+      /* RunBadge：run 实体统一徽标（01 章 §4.3） */
+      .runbadge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 1px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--foreground);
+        background: var(--card);
+        cursor: pointer;
+      }
+      .runbadge:hover {
+        border-color: color-mix(in oklch, var(--brand) 55%, transparent);
+        color: var(--brand);
+      }
+      .runbadge .ring {
+        width: 9px;
+        height: 9px;
+      }
 
-/* 受守卫流转对话框（03 §4 InspectorPanel · 02 §8 守卫表） */
-.ovl{position:fixed;inset:0;background:oklch(0 0 0/.4);display:flex;align-items:center;justify-content:center;z-index:80}
-.dlg{width:440px;max-height:86vh;overflow-y:auto;background:var(--card);border:1px solid var(--border);
-  border-radius:var(--radius-xl);box-shadow:0 18px 50px oklch(0 0 0/.25);padding:18px 20px}
-.dlg h3{font-size:15px;font-weight:600;margin-bottom:2px}
-.dlg .sub{font-size:12px;color:var(--muted-foreground);margin-bottom:14px;display:flex;align-items:center;gap:6px}
-.dlg .fld{margin-bottom:12px}
-.dlg .fld>label{display:block;font-size:11.5px;font-weight:600;margin-bottom:5px}
-.dlg .fld .req{color:var(--destructive);margin-left:2px}
-.dlg select,.dlg input,.dlg textarea{width:100%;font:inherit;font-size:12.5px;color:var(--foreground);
-  background:var(--background);border:1px solid var(--input);border-radius:var(--radius-md);padding:6px 9px}
-.dlg textarea{min-height:56px;resize:vertical}
-.dlg select:focus,.dlg input:focus,.dlg textarea:focus{outline:2px solid var(--ring);outline-offset:1px}
-.dlg .hint{font-size:11px;color:var(--muted-foreground);margin-top:4px}
-.dlg .radio-row{display:flex;gap:14px;font-size:12.5px}
-.dlg .radio-row label{display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
-.dlg .radio-row input{width:auto}
-.dlg .gap-note{background:color-mix(in oklch,var(--destructive) 12%,transparent);border-radius:var(--radius-md);
-  padding:8px 10px;font-size:11.5px;color:var(--destructive);margin-bottom:12px;display:flex;gap:6px;align-items:flex-start}
-.dlg .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
-.dlg .item-row{display:flex;gap:6px;margin-bottom:6px}
-.dlg .item-row input{flex:1}
-/* 对话框开合：接 fm-overlay-enter/exit（Alpine x-transition 驱动，节奏用 fm 令牌） */
-.ovl.fm-overlay-enter{transition-property:opacity;transition-duration:var(--fm-dur-3);transition-timing-function:var(--fm-ease-enter)}
-.ovl.fm-overlay-exit{transition-property:opacity;transition-duration:var(--fm-dur-2);transition-timing-function:var(--fm-ease-exit)}
-.fm-op-0{opacity:0}
-.fm-op-1{opacity:1}
-</style>
-<style id="foundry-motion">
-  /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
-  :root {
-    /* 一次性动效时长梯度 */
-    --fm-dur-1: 120ms;   /* 微反馈:hover、图标切换 */
-    --fm-dur-2: 240ms;   /* 小型:按钮/开关状态、Toast、菜单 */
-    --fm-dur-3: 400ms;   /* 中型:对话框 enter、完成打勾、区块 reveal */
-    --fm-dur-4: 700ms;   /* 大型:庆祝时刻、欢迎/空状态插画 */
-    /* 氛围循环档(持续存在感,允许慢) */
-    --fm-ambient-1: 1600ms;  /* 活跃脉动 */
-    --fm-ambient-2: 2500ms;  /* thinking 扫光 */
-    --fm-ambient-3: 3200ms;  /* 描边光束(仅单一 CTA 级场景) */
-    /* 曲线 */
-    --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);   /* 一切常规过渡 */
-    --fm-ease-enter:    cubic-bezier(0.16, 1, 0.3, 1);   /* 进场从容 */
-    --fm-ease-exit:     cubic-bezier(0.7, 0, 0.84, 0);   /* 离场干脆 */
-    --fm-ease-bounce:   cubic-bezier(0.5, 1.5, 0.4, 1);  /* 仅庆祝时刻 */
-    /* 位移与缩放(工具产品克制档) */
-    --fm-shift-1: 4px;
-    --fm-shift-2: 8px;
-    --fm-scale-hover: 1.02;
-    --fm-scale-active: 0.98;
-  }
+      /* 受守卫流转对话框（03 §4 InspectorPanel · 02 §8 守卫表） */
+      .ovl {
+        position: fixed;
+        inset: 0;
+        background: oklch(0 0 0/0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 80;
+      }
+      .dlg {
+        width: 440px;
+        max-height: 86vh;
+        overflow-y: auto;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-xl);
+        box-shadow: 0 18px 50px oklch(0 0 0/0.25);
+        padding: 18px 20px;
+      }
+      .dlg h3 {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 2px;
+      }
+      .dlg .sub {
+        font-size: 12px;
+        color: var(--muted-foreground);
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .dlg .fld {
+        margin-bottom: 12px;
+      }
+      .dlg .fld > label {
+        display: block;
+        font-size: 11.5px;
+        font-weight: 600;
+        margin-bottom: 5px;
+      }
+      .dlg .fld .req {
+        color: var(--destructive);
+        margin-left: 2px;
+      }
+      .dlg select,
+      .dlg input,
+      .dlg textarea {
+        width: 100%;
+        font: inherit;
+        font-size: 12.5px;
+        color: var(--foreground);
+        background: var(--background);
+        border: 1px solid var(--input);
+        border-radius: var(--radius-md);
+        padding: 6px 9px;
+      }
+      .dlg textarea {
+        min-height: 56px;
+        resize: vertical;
+      }
+      .dlg select:focus,
+      .dlg input:focus,
+      .dlg textarea:focus {
+        outline: 2px solid var(--ring);
+        outline-offset: 1px;
+      }
+      .dlg .hint {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        margin-top: 4px;
+      }
+      .dlg .radio-row {
+        display: flex;
+        gap: 14px;
+        font-size: 12.5px;
+      }
+      .dlg .radio-row label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .dlg .radio-row input {
+        width: auto;
+      }
+      .dlg .gap-note {
+        background: color-mix(in oklch, var(--destructive) 12%, transparent);
+        border-radius: var(--radius-md);
+        padding: 8px 10px;
+        font-size: 11.5px;
+        color: var(--destructive);
+        margin-bottom: 12px;
+        display: flex;
+        gap: 6px;
+        align-items: flex-start;
+      }
+      .dlg .acts {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      .dlg .item-row {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 6px;
+      }
+      .dlg .item-row input {
+        flex: 1;
+      }
+      /* 对话框开合：接 fm-overlay-enter/exit（Alpine x-transition 驱动，节奏用 fm 令牌） */
+      .ovl.fm-overlay-enter {
+        transition-property: opacity;
+        transition-duration: var(--fm-dur-3);
+        transition-timing-function: var(--fm-ease-enter);
+      }
+      .ovl.fm-overlay-exit {
+        transition-property: opacity;
+        transition-duration: var(--fm-dur-2);
+        transition-timing-function: var(--fm-ease-exit);
+      }
+      .fm-op-0 {
+        opacity: 0;
+      }
+      .fm-op-1 {
+        opacity: 1;
+      }
+    </style>
+    <style id="foundry-motion">
+      /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
+      :root {
+        /* 一次性动效时长梯度 */
+        --fm-dur-1: 120ms; /* 微反馈:hover、图标切换 */
+        --fm-dur-2: 240ms; /* 小型:按钮/开关状态、Toast、菜单 */
+        --fm-dur-3: 400ms; /* 中型:对话框 enter、完成打勾、区块 reveal */
+        --fm-dur-4: 700ms; /* 大型:庆祝时刻、欢迎/空状态插画 */
+        /* 氛围循环档(持续存在感,允许慢) */
+        --fm-ambient-1: 1600ms; /* 活跃脉动 */
+        --fm-ambient-2: 2500ms; /* thinking 扫光 */
+        --fm-ambient-3: 3200ms; /* 描边光束(仅单一 CTA 级场景) */
+        /* 曲线 */
+        --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1); /* 一切常规过渡 */
+        --fm-ease-enter: cubic-bezier(0.16, 1, 0.3, 1); /* 进场从容 */
+        --fm-ease-exit: cubic-bezier(0.7, 0, 0.84, 0); /* 离场干脆 */
+        --fm-ease-bounce: cubic-bezier(0.5, 1.5, 0.4, 1); /* 仅庆祝时刻 */
+        /* 位移与缩放(工具产品克制档) */
+        --fm-shift-1: 4px;
+        --fm-shift-2: 8px;
+        --fm-scale-hover: 1.02;
+        --fm-scale-active: 0.98;
+      }
 
-  /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
-  @keyframes fm-text-shimmer {
-    0%   { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-  .fm-thinking {
-    background-image: linear-gradient(90deg,
-      var(--muted-foreground) 0%, var(--muted-foreground) 35%,
-      var(--foreground) 50%,
-      var(--muted-foreground) 65%, var(--muted-foreground) 100%);
-    background-size: 200% 100%;
-    -webkit-background-clip: text; background-clip: text;
-    color: transparent;
-    animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
-  }
+      /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
+      @keyframes fm-text-shimmer {
+        0% {
+          background-position: 200% 0;
+        }
+        100% {
+          background-position: -200% 0;
+        }
+      }
+      .fm-thinking {
+        background-image: linear-gradient(
+          90deg,
+          var(--muted-foreground) 0%,
+          var(--muted-foreground) 35%,
+          var(--foreground) 50%,
+          var(--muted-foreground) 65%,
+          var(--muted-foreground) 100%
+        );
+        background-size: 200% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
+      }
 
-  /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
-  @keyframes fm-impulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent); }
-    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent); }
-  }
-  .fm-live { animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite; }
+      /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
+      @keyframes fm-impulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0
+            color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent);
+        }
+        50% {
+          box-shadow: 0 0 0 4px
+            color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent);
+        }
+      }
+      .fm-live {
+        animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite;
+      }
 
-  /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
-  @keyframes fm-complete-badge {
-    0% { transform: scale(0); } 60% { transform: scale(1.12); } 100% { transform: scale(1); }
-  }
-  @keyframes fm-complete-check { to { stroke-dashoffset: 0; } }
-  .fm-complete { animation: fm-complete-badge 500ms var(--fm-ease-bounce) both; }
-  .fm-complete svg path, .fm-complete svg polyline {
-    stroke-dasharray: 48; stroke-dashoffset: 48;
-    animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
-  }
+      /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
+      @keyframes fm-complete-badge {
+        0% {
+          transform: scale(0);
+        }
+        60% {
+          transform: scale(1.12);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+      @keyframes fm-complete-check {
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+      .fm-complete {
+        animation: fm-complete-badge 500ms var(--fm-ease-bounce) both;
+      }
+      .fm-complete svg path,
+      .fm-complete svg polyline {
+        stroke-dasharray: 48;
+        stroke-dashoffset: 48;
+        animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
+      }
 
-  /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
-  @keyframes fm-nav-sweep {
-    0% { transform: translateX(-100%); } 100% { transform: translateX(400%); }
-  }
-  .fm-nav-progress {
-    position: fixed; top: 0; left: 0; right: 0; height: 2px;
-    overflow: hidden; pointer-events: none; z-index: 9999; display: none;
-  }
-  .fm-nav-progress[data-active="true"] { display: block; }
-  .fm-nav-progress::before {
-    content: ""; display: block; height: 100%; width: 25%;
-    background: var(--primary);
-    animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
-  }
+      /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
+      @keyframes fm-nav-sweep {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(400%);
+        }
+      }
+      .fm-nav-progress {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 9999;
+        display: none;
+      }
+      .fm-nav-progress[data-active="true"] {
+        display: block;
+      }
+      .fm-nav-progress::before {
+        content: "";
+        display: block;
+        height: 100%;
+        width: 25%;
+        background: var(--primary);
+        animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
+      }
 
-  /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
-  [data-fm-reveal] {
-    opacity: 0; transform: translateY(var(--fm-shift-1));
-    transition: opacity var(--fm-dur-3) var(--fm-ease-enter),
-                transform var(--fm-dur-3) var(--fm-ease-enter);
-  }
-  [data-fm-reveal].fm-in { opacity: 1; transform: none; }
-  /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
-  .fm-scroll [data-fm-reveal] { transform: none; }
+      /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
+      [data-fm-reveal] {
+        opacity: 0;
+        transform: translateY(var(--fm-shift-1));
+        transition:
+          opacity var(--fm-dur-3) var(--fm-ease-enter),
+          transform var(--fm-dur-3) var(--fm-ease-enter);
+      }
+      [data-fm-reveal].fm-in {
+        opacity: 1;
+        transform: none;
+      }
+      /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
+      .fm-scroll [data-fm-reveal] {
+        transform: none;
+      }
 
-  /* ===== 通用交互态统一 ===== */
-  .fm-hover-lift { transition: transform var(--fm-dur-2) var(--fm-ease-standard),
-                               box-shadow var(--fm-dur-2) var(--fm-ease-standard); }
-  .fm-hover-lift:hover  { transform: translateY(calc(var(--fm-shift-1) * -1)); }
-  .fm-hover-lift:active { transform: scale(var(--fm-scale-active)); }
-  .fm-underline {
-    background-image: linear-gradient(currentColor, currentColor);
-    background-size: 0% 1px; background-position: 0 100%; background-repeat: no-repeat;
-    transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
-  }
-  .fm-underline:hover { background-size: 100% 1px; }
-  /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
-  .fm-overlay-enter { animation-duration: var(--fm-dur-3); animation-timing-function: var(--fm-ease-enter); }
-  .fm-overlay-exit  { animation-duration: var(--fm-dur-2); animation-timing-function: var(--fm-ease-exit); }
-  /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
-  [data-fm-gesturing="true"], [data-fm-gesturing="true"] * { transition: none !important; }
+      /* ===== 通用交互态统一 ===== */
+      .fm-hover-lift {
+        transition:
+          transform var(--fm-dur-2) var(--fm-ease-standard),
+          box-shadow var(--fm-dur-2) var(--fm-ease-standard);
+      }
+      .fm-hover-lift:hover {
+        transform: translateY(calc(var(--fm-shift-1) * -1));
+      }
+      .fm-hover-lift:active {
+        transform: scale(var(--fm-scale-active));
+      }
+      .fm-underline {
+        background-image: linear-gradient(currentColor, currentColor);
+        background-size: 0% 1px;
+        background-position: 0 100%;
+        background-repeat: no-repeat;
+        transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
+      }
+      .fm-underline:hover {
+        background-size: 100% 1px;
+      }
+      /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
+      .fm-overlay-enter {
+        animation-duration: var(--fm-dur-3);
+        animation-timing-function: var(--fm-ease-enter);
+      }
+      .fm-overlay-exit {
+        animation-duration: var(--fm-dur-2);
+        animation-timing-function: var(--fm-ease-exit);
+      }
+      /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
+      [data-fm-gesturing="true"],
+      [data-fm-gesturing="true"] * {
+        transition: none !important;
+      }
 
-  /* ===== 全量降级 ===== */
-  @media (prefers-reduced-motion: reduce) {
-    .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
-    .fm-nav-progress::before { animation: none !important; }
-    /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
-    .fm-complete svg path, .fm-complete svg polyline { stroke-dashoffset: 0; }
-    .fm-thinking { color: var(--muted-foreground); background: none; }
-    [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
-    .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }
-  }
-</style>
-</head>
-<body>
-<nav class="proto-bar">
-  <span class="pb-title"><i class="ti ti-flame"></i>Foundry · SDLC 原型</span>
-  <a data-screen="index.html">总览</a>
-  <a data-screen="s1-tracker-board.html">看板</a>
-  <a data-screen="s2-sprint-studio.html">规划工作台</a>
-  <a data-screen="s3-ui-review.html">UI 评审</a>
-  <a data-screen="s4-work-item.html" class="active">工作项</a>
-  <a data-screen="s5-inbox.html">收件箱</a>
-  <a data-screen="s6-sprint-cockpit.html">Sprint 驾驶舱</a>
-  <a data-screen="s7-run-detail.html">运行详情</a>
-  <a data-screen="s8-workflow-library.html">工作流库</a>
-  <a data-screen="s9-brain-console.html">Brain</a>
-  <a data-screen="s10-health-insights.html">健康与洞察</a>
-  <button class="pb-theme" onclick="document.documentElement.classList.toggle('dark')">
-    <i class="ti ti-moon"></i>主题</button>
-</nav>
-<div class="app">
-  <aside class="sidebar">
-    <div class="sb-head"><span class="logo"><i class="ti ti-clipboard-list" style="font-size:13px"></i></span>Tracker</div>
-    <div class="sb-search"><i class="ti ti-search"></i>搜索<kbd>⌘K</kbd></div>
-    <a class="sb-item"><i class="ti ti-message-circle"></i>问 Tracker</a>
-    <a class="sb-item" data-screen="s5-inbox.html"><i class="ti ti-inbox"></i>收件箱<span class="dot-badge">3</span></a>
-    <div class="sb-group">工作</div>
-    <a class="sb-item active" data-screen="s1-tracker-board.html"><i class="ti ti-layout-kanban"></i>看板</a>
-    <a class="sb-item" data-screen="s6-sprint-cockpit.html"><i class="ti ti-run"></i>Sprint</a>
-    <a class="sb-item"><i class="ti ti-list-numbers"></i>队列<span class="count">4</span></a>
-    <a class="sb-item"><i class="ti ti-chart-dots"></i>度量</a>
-    <div class="sb-group">项目</div>
-    <a class="sb-item"><i class="ti ti-folder"></i>支付中心<span class="count">PAY</span></a>
-    <div style="margin-top:auto"></div>
-    <div class="divider" style="margin:8px 4px"></div>
-    <a class="sb-item"><i class="ti ti-users"></i>Team</a>
-    <a class="sb-item"><i class="ti ti-settings"></i>设置</a>
-  </aside>
-  <main class="inset">
-    <div class="crumbs">
-      <a>支付中心</a><i class="ti ti-chevron-right"></i>
-      <a data-screen="s6-sprint-cockpit.html">Sprint 3</a><i class="ti ti-chevron-right"></i>
-      <span class="mono" style="color:var(--foreground)">PAY-203</span>
-    </div>
-    <div class="page-header">
-      <span class="mono" style="font-size:13px;color:var(--muted-foreground)">PAY-203</span>
-      <span class="badge b-destructive">缺陷</span>
-      <span class="st-icon err"><i class="ti ti-x"></i></span>
-      <h1>金额四舍五入精度错误</h1>
-      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-        <button class="btn btn-primary"><i class="ti ti-refresh"></i>重派</button>
-        <button class="btn btn-outline"><i class="ti ti-arrow-back-up"></i>回退阶段</button>
-        <button class="btn btn-outline"><i class="ti ti-arrow-up-right"></i>升级</button>
-        <button class="btn btn-ghost"><i class="ti ti-dots"></i></button>
-      </div>
-    </div>
-    <div class="content">
-      <div class="detail-wrap">
-        <div class="detail-main">
-
-          <!-- 阶段步进条：plannedStages 子集 -->
-          <div class="card">
-            <div class="stepper">
-              <div class="step"><span class="st-icon err"><i class="ti ti-x"></i></span><span class="s-label">实施</span></div>
-              <div class="step-line"></div>
-              <div class="step" style="color:var(--muted-foreground)"><span class="ring r-pending"></span><span class="s-label">测试</span></div>
-              <span style="margin-left:auto" class="chip"><i class="ti ti-route" style="font-size:13px"></i>缺陷类型 · 阶段子集</span>
-            </div>
-          </div>
-
-          <!-- 需求 -->
-          <section>
-            <div class="section-title" style="margin-bottom:8px"><i class="ti ti-file-description" style="color:var(--muted-foreground)"></i>需求</div>
-            <div class="card card-pad" style="font-size:13px;display:flex;flex-direction:column;gap:8px">
-              <p>商户账单中金额字段在 0.005 边界处出现入账误差：<span class="mono">calc.round</span> 使用银行家舍入，而 <span class="mono">invoice</span> 汇总按四舍五入累计，导致对账单与账单导出结果相差 0.01 元。</p>
-              <p>期望：统一舍入策略为分位截断后四舍五入，并在汇总处复用 <span class="mono">calc.round</span>，保证导出、对账、页面三处一致。</p>
-            </div>
-          </section>
-
-          <!-- 执行记录 -->
-          <section x-data="{past:false}">
-            <div class="section-title" style="margin-bottom:8px"><i class="ti ti-player-play" style="color:var(--muted-foreground)"></i>执行记录</div>
-            <div class="card card-pad" style="display:flex;flex-direction:column;gap:10px">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <span class="runbadge" data-screen="s7-run-detail.html"><span class="st-icon err"><i class="ti ti-x"></i></span>run_6c8p17</span>
-                <span class="badge b-muted">hotfix@v3</span>
-                <span class="badge b-destructive"><i class="ti ti-x" style="font-size:12px"></i>失败</span>
-                <span class="badge b-muted">errorClass: permanent</span>
-                <a class="chip" style="margin-left:auto" data-screen="s7-run-detail.html"><i class="ti ti-external-link" style="font-size:13px"></i>打开运行</a>
-                <button class="btn btn-sm btn-outline"><i class="ti ti-file-text" style="font-size:13px"></i>查看转录</button>
-              </div>
-              <div class="minidag">
-                <span class="md-node"><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="mono">reproduce</span></span>
-                <span class="md-link done"></span>
-                <span class="md-node"><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="mono">fix</span></span>
-                <span class="md-link done"></span>
-                <span class="md-node"><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="mono">regression</span></span>
-                <span class="md-link done"></span>
-                <span class="md-node"><span class="st-icon ok"><i class="ti ti-check"></i></span><span class="mono">reviewer</span></span>
-                <span class="md-link done"></span>
-                <span class="md-node"><span class="st-icon err"><i class="ti ti-x"></i></span><span class="mono">pr</span></span>
-              </div>
-              <div class="evidence">
-                <i class="ti ti-alert-triangle" style="color:var(--destructive);margin-top:2px"></i>
-                <div style="flex:1;min-width:0">
-                  <code>git push origin sprint-3 -> 403: authentication failed</code>
-                  <div style="font-size:12px;color:var(--muted-foreground);margin-top:4px">gitRemote 凭证失效 · 修复配置后可重派</div>
-                </div>
-                <button class="btn btn-ghost btn-sm" title="复制"><i class="ti ti-copy"></i></button>
-              </div>
-              <button class="btn btn-ghost btn-sm" style="align-self:flex-start;color:var(--muted-foreground)" @click="past=!past">
-                <i class="ti" :class="past?'ti-chevron-down':'ti-chevron-right'"></i>历史运行 (1)
-              </button>
-              <div x-show="past" x-cloak style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-md)">
-                <span class="ring r-skipped"></span>
-                <span class="mono" style="font-size:12px">run_5x1k07</span>
-                <span class="badge b-muted">hotfix@v3</span>
-                <span style="font-size:12px;color:var(--muted-foreground)">transient 失败 · 已自动重试为 run_6c8p17</span>
-                <span class="tl-time" style="margin-left:auto">10:31</span>
-              </div>
-            </div>
-          </section>
-
-          <!-- 产物 -->
-          <section>
-            <div class="section-title" style="margin-bottom:8px"><i class="ti ti-file-text" style="color:var(--muted-foreground)"></i>产物</div>
-            <div style="display:flex;flex-direction:column;gap:8px">
-              <div class="artifact-row">
-                <i class="ti ti-certificate" style="color:var(--evidence)"></i>
-                <span style="font-weight:500">复现测试证据</span>
-                <span class="badge b-agent"><i class="ti ti-robot" style="font-size:12px"></i>agent</span>
-                <span class="badge b-muted mono">v1</span>
-                <span style="font-size:12px;color:var(--muted-foreground)">test/calc-round.red.txt · 失败输出已捕获</span><span class="chip" title="human 富呈现" style="font-size:10.5px;margin-left:auto"><i class="ti ti-book-2" style="font-size:12px"></i>content</span>
-                <button class="btn btn-ghost btn-sm" style="margin-left:auto"><i class="ti ti-eye"></i></button>
-              </div>
-              <div class="artifact-row">
-                <i class="ti ti-file-text"></i>
-                <span style="font-weight:500">brief:PAY-203</span>
-                <span class="badge b-agent"><i class="ti ti-robot" style="font-size:12px"></i>agent</span>
-                <span class="badge b-muted mono">v2</span>
-                <span style="font-size:12px;color:var(--muted-foreground)">supersedes v1</span><span class="chip" title="agent 读的纯文本版（brief 本身即 agent 口粮）" style="font-size:10.5px;margin-left:auto"><i class="ti ti-file-text" style="font-size:12px"></i>agent 视图</span>
-                <button class="btn btn-ghost btn-sm" style="margin-left:auto"><i class="ti ti-eye"></i></button>
-              </div>
-            </div>
-          </section>
-
-          <!-- 依赖 -->
-          <section>
-            <div class="section-title" style="margin-bottom:8px"><i class="ti ti-arrow-ramp-right" style="color:var(--muted-foreground)"></i>依赖关系</div>
-            <div class="card card-pad" style="display:flex;align-items:center;gap:8px;color:var(--muted-foreground);font-size:12.5px">
-              <i class="ti ti-circle-dashed"></i>无依赖 · 本项独立
-              <button class="btn btn-sm btn-ghost" style="margin-left:auto;color:var(--muted-foreground)"><i class="ti ti-plus" style="font-size:13px"></i>添加链接</button>
-            </div>
-          </section>
-
-          <!-- 活动与评论 -->
-          <section>
-            <div class="section-title" style="margin-bottom:8px"><i class="ti ti-history" style="color:var(--muted-foreground)"></i>活动与评论</div>
-            <div class="card card-pad">
-              <div class="timeline">
-                <div class="tl-row">
-                  <span class="avatar a-agent"><i class="ti ti-cpu" style="font-size:11px"></i></span>
-                  <div class="tl-body"><span class="badge b-muted" style="margin-right:6px">回写:reconciler</span>实施阶段 run 失败 · 工作项状态置为失败</div>
-                  <span class="tl-time">10:42</span>
-                </div>
-                <div class="tl-row">
-                  <span class="avatar a-agent"><i class="ti ti-cpu" style="font-size:11px"></i></span>
-                  <div class="tl-body">transient 错误自动重试 1 次（attempt 2）</div>
-                  <span class="tl-time">10:31</span>
-                </div>
-                <div class="tl-row">
-                  <span class="avatar">S</span>
-                  <div class="tl-body"><b>Steve</b> · 先修 Vault 里的 payhub 凭证，再重派。</div>
-                  <span class="tl-time">10:12</span>
-                </div>
-                <div class="tl-row">
-                  <span class="avatar a-brain"><i class="ti ti-brain" style="font-size:11px"></i></span>
-                  <div class="tl-body">派发 · hotfix@v3 · <span class="mono">run_6c8p17</span> · tags: item_id=PAY-203</div>
-                  <span class="tl-time">09:58</span>
-                </div>
-              </div>
-              <div class="composer" style="margin-top:10px">
-                <i class="ti ti-message" style="color:var(--muted-foreground)"></i>
-                <input placeholder="写评论…（@ 提及，⌘Enter 发送）">
-                <button class="btn btn-ghost btn-sm"><i class="ti ti-send"></i></button>
-              </div>
-            </div>
-          </section>
-
+      /* ===== 全量降级 ===== */
+      @media (prefers-reduced-motion: reduce) {
+        .fm-thinking,
+        .fm-live,
+        .fm-complete,
+        .fm-complete svg path,
+        .fm-complete svg polyline,
+        .fm-nav-progress::before {
+          animation: none !important;
+        }
+        /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
+        .fm-complete svg path,
+        .fm-complete svg polyline {
+          stroke-dashoffset: 0;
+        }
+        .fm-thinking {
+          color: var(--muted-foreground);
+          background: none;
+        }
+        [data-fm-reveal] {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+        .fm-hover-lift,
+        .fm-underline,
+        .fm-overlay-enter,
+        .fm-overlay-exit {
+          transition: none !important;
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="proto-bar">
+      <span class="pb-title"
+        ><i class="ti ti-flame"></i>Foundry · SDLC 原型</span
+      >
+      <a data-screen="index.html">总览</a>
+      <a data-screen="s1-tracker-board.html">看板</a>
+      <a data-screen="s2-sprint-studio.html">规划工作台</a>
+      <a data-screen="s3-ui-review.html">UI 评审</a>
+      <a data-screen="s4-work-item.html" class="active">工作项</a>
+      <a data-screen="s5-inbox.html">收件箱</a>
+      <a data-screen="s6-sprint-cockpit.html">Sprint 驾驶舱</a>
+      <a data-screen="s7-run-detail.html">运行详情</a>
+      <a data-screen="s8-workflow-library.html">工作流库</a>
+      <a data-screen="s9-brain-console.html">Brain</a>
+      <a data-screen="s10-health-insights.html">健康与洞察</a>
+      <button
+        class="pb-theme"
+        onclick="document.documentElement.classList.toggle('dark')"
+      >
+        <i class="ti ti-moon"></i>主题
+      </button>
+    </nav>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sb-head">
+          <span class="logo"
+            ><i class="ti ti-clipboard-list" style="font-size: 13px"></i></span
+          >Tracker
         </div>
+        <div class="sb-search">
+          <i class="ti ti-search"></i>搜索<kbd>⌘K</kbd>
+        </div>
+        <a class="sb-item"><i class="ti ti-message-circle"></i>问 Tracker</a>
+        <a class="sb-item" data-screen="s5-inbox.html"
+          ><i class="ti ti-inbox"></i>收件箱<span class="dot-badge">3</span></a
+        >
+        <div class="sb-group">工作</div>
+        <a class="sb-item active" data-screen="s1-tracker-board.html"
+          ><i class="ti ti-layout-kanban"></i>看板</a
+        >
+        <a class="sb-item" data-screen="s6-sprint-cockpit.html"
+          ><i class="ti ti-run"></i>Sprint</a
+        >
+        <a class="sb-item"
+          ><i class="ti ti-list-numbers"></i>队列<span class="count">4</span></a
+        >
+        <a class="sb-item"><i class="ti ti-chart-dots"></i>度量</a>
+        <div class="sb-group">项目</div>
+        <a class="sb-item"
+          ><i class="ti ti-folder"></i>支付中心<span class="count">PAY</span></a
+        >
+        <div style="margin-top: auto"></div>
+        <div class="divider" style="margin: 8px 4px"></div>
+        <a class="sb-item"><i class="ti ti-users"></i>Team</a>
+        <a class="sb-item"><i class="ti ti-settings"></i>设置</a>
+      </aside>
+      <main class="inset">
+        <div class="crumbs">
+          <a>支付中心</a><i class="ti ti-chevron-right"></i>
+          <a data-screen="s6-sprint-cockpit.html">Sprint 3</a
+          ><i class="ti ti-chevron-right"></i>
+          <span class="mono" style="color: var(--foreground)">PAY-203</span>
+        </div>
+        <div class="page-header">
+          <span
+            class="mono"
+            style="font-size: 13px; color: var(--muted-foreground)"
+            >PAY-203</span
+          >
+          <span class="badge b-destructive">缺陷</span>
+          <span class="st-icon err"><i class="ti ti-x"></i></span>
+          <h1>金额四舍五入精度错误</h1>
+          <div
+            style="
+              margin-left: auto;
+              display: flex;
+              gap: 8px;
+              align-items: center;
+            "
+          >
+            <button class="btn btn-primary">
+              <i class="ti ti-refresh"></i>重派
+            </button>
+            <button class="btn btn-outline">
+              <i class="ti ti-arrow-back-up"></i>回退阶段
+            </button>
+            <button class="btn btn-outline">
+              <i class="ti ti-arrow-up-right"></i>升级
+            </button>
+            <button class="btn btn-ghost"><i class="ti ti-dots"></i></button>
+          </div>
+        </div>
+        <div class="content">
+          <div class="detail-wrap">
+            <div class="detail-main">
+              <!-- 阶段步进条：plannedStages 子集 -->
+              <div class="card">
+                <div class="stepper">
+                  <div class="step">
+                    <span class="st-icon err"><i class="ti ti-x"></i></span
+                    ><span class="s-label">实施</span>
+                  </div>
+                  <div class="step-line"></div>
+                  <div class="step" style="color: var(--muted-foreground)">
+                    <span class="ring r-pending"></span
+                    ><span class="s-label">测试</span>
+                  </div>
+                  <span style="margin-left: auto" class="chip"
+                    ><i class="ti ti-route" style="font-size: 13px"></i>缺陷类型
+                    · 阶段子集</span
+                  >
+                </div>
+              </div>
 
-        <!-- 右栏 Inspector -->
-        <aside class="inspector" x-data="{tdlg:false, tgt:'', reason:'', verdict:'', commit:'', run:'run_6c8p17', items:['hotfix 分支已实现修复'],
+              <!-- 需求 -->
+              <section>
+                <div class="section-title" style="margin-bottom: 8px">
+                  <i
+                    class="ti ti-file-description"
+                    style="color: var(--muted-foreground)"
+                  ></i
+                  >需求
+                </div>
+                <div
+                  class="card card-pad"
+                  style="
+                    font-size: 13px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                  "
+                >
+                  <p>
+                    商户账单中金额字段在 0.005 边界处出现入账误差：<span
+                      class="mono"
+                      >calc.round</span
+                    >
+                    使用银行家舍入，而
+                    <span class="mono">invoice</span>
+                    汇总按四舍五入累计，导致对账单与账单导出结果相差 0.01 元。
+                  </p>
+                  <p>
+                    期望：统一舍入策略为分位截断后四舍五入，并在汇总处复用
+                    <span class="mono">calc.round</span
+                    >，保证导出、对账、页面三处一致。
+                  </p>
+                </div>
+              </section>
+
+              <!-- 执行记录 -->
+              <section x-data="{past:false}">
+                <div class="section-title" style="margin-bottom: 8px">
+                  <i
+                    class="ti ti-player-play"
+                    style="color: var(--muted-foreground)"
+                  ></i
+                  >执行记录
+                </div>
+                <div
+                  class="card card-pad"
+                  style="display: flex; flex-direction: column; gap: 10px"
+                >
+                  <div
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      flex-wrap: wrap;
+                    "
+                  >
+                    <span class="runbadge" data-screen="s7-run-detail.html"
+                      ><span class="st-icon err"><i class="ti ti-x"></i></span
+                      >run_6c8p17</span
+                    >
+                    <span class="badge b-muted">hotfix@v3</span>
+                    <span class="badge b-destructive"
+                      ><i class="ti ti-x" style="font-size: 12px"></i>失败</span
+                    >
+                    <span class="badge b-muted">errorClass: permanent</span>
+                    <a
+                      class="chip"
+                      style="margin-left: auto"
+                      data-screen="s7-run-detail.html"
+                      ><i
+                        class="ti ti-external-link"
+                        style="font-size: 13px"
+                      ></i
+                      >打开运行</a
+                    >
+                    <button class="btn btn-sm btn-outline">
+                      <i class="ti ti-file-text" style="font-size: 13px"></i
+                      >查看转录
+                    </button>
+                  </div>
+                  <div class="minidag">
+                    <span class="md-node"
+                      ><span class="st-icon ok"
+                        ><i class="ti ti-check"></i></span
+                      ><span class="mono">reproduce</span></span
+                    >
+                    <span class="md-link done"></span>
+                    <span class="md-node"
+                      ><span class="st-icon ok"
+                        ><i class="ti ti-check"></i></span
+                      ><span class="mono">fix</span></span
+                    >
+                    <span class="md-link done"></span>
+                    <span class="md-node"
+                      ><span class="st-icon ok"
+                        ><i class="ti ti-check"></i></span
+                      ><span class="mono">regression</span></span
+                    >
+                    <span class="md-link done"></span>
+                    <span class="md-node"
+                      ><span class="st-icon ok"
+                        ><i class="ti ti-check"></i></span
+                      ><span class="mono">reviewer</span></span
+                    >
+                    <span class="md-link done"></span>
+                    <span class="md-node"
+                      ><span class="st-icon err"><i class="ti ti-x"></i></span
+                      ><span class="mono">pr</span></span
+                    >
+                  </div>
+                  <div class="evidence">
+                    <i
+                      class="ti ti-alert-triangle"
+                      style="color: var(--destructive); margin-top: 2px"
+                    ></i>
+                    <div style="flex: 1; min-width: 0">
+                      <code
+                        >git push origin sprint-3 -> 403: authentication
+                        failed</code
+                      >
+                      <div
+                        style="
+                          font-size: 12px;
+                          color: var(--muted-foreground);
+                          margin-top: 4px;
+                        "
+                      >
+                        gitRemote 凭证失效 · 修复配置后可重派
+                      </div>
+                    </div>
+                    <button class="btn btn-ghost btn-sm" title="复制">
+                      <i class="ti ti-copy"></i>
+                    </button>
+                  </div>
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    style="
+                      align-self: flex-start;
+                      color: var(--muted-foreground);
+                    "
+                    @click="past=!past"
+                  >
+                    <i
+                      class="ti"
+                      :class="past?'ti-chevron-down':'ti-chevron-right'"
+                    ></i
+                    >历史运行 (1)
+                  </button>
+                  <div
+                    x-show="past"
+                    x-cloak
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      padding: 8px 10px;
+                      border: 1px solid var(--border);
+                      border-radius: var(--radius-md);
+                    "
+                  >
+                    <span class="ring r-skipped"></span>
+                    <span class="mono" style="font-size: 12px">run_5x1k07</span>
+                    <span class="badge b-muted">hotfix@v3</span>
+                    <span
+                      style="font-size: 12px; color: var(--muted-foreground)"
+                      >transient 失败 · 已自动重试为 run_6c8p17</span
+                    >
+                    <span class="tl-time" style="margin-left: auto">10:31</span>
+                  </div>
+                </div>
+              </section>
+
+              <!-- 产物 -->
+              <section>
+                <div class="section-title" style="margin-bottom: 8px">
+                  <i
+                    class="ti ti-file-text"
+                    style="color: var(--muted-foreground)"
+                  ></i
+                  >产物
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px">
+                  <div class="artifact-row">
+                    <i
+                      class="ti ti-certificate"
+                      style="color: var(--evidence)"
+                    ></i>
+                    <span style="font-weight: 500">复现测试证据</span>
+                    <span class="badge b-agent"
+                      ><i class="ti ti-robot" style="font-size: 12px"></i
+                      >agent</span
+                    >
+                    <span class="badge b-muted mono">v1</span>
+                    <span
+                      style="font-size: 12px; color: var(--muted-foreground)"
+                      >test/calc-round.red.txt · 失败输出已捕获</span
+                    ><span
+                      class="chip"
+                      title="human 富呈现"
+                      style="font-size: 10.5px; margin-left: auto"
+                      ><i class="ti ti-book-2" style="font-size: 12px"></i
+                      >content</span
+                    >
+                    <button
+                      class="btn btn-ghost btn-sm"
+                      style="margin-left: auto"
+                    >
+                      <i class="ti ti-eye"></i>
+                    </button>
+                  </div>
+                  <div class="artifact-row">
+                    <i class="ti ti-file-text"></i>
+                    <span style="font-weight: 500">brief:PAY-203</span>
+                    <span class="badge b-agent"
+                      ><i class="ti ti-robot" style="font-size: 12px"></i
+                      >agent</span
+                    >
+                    <span class="badge b-muted mono">v2</span>
+                    <span
+                      style="font-size: 12px; color: var(--muted-foreground)"
+                      >supersedes v1</span
+                    ><span
+                      class="chip"
+                      title="agent 读的纯文本版（brief 本身即 agent 口粮）"
+                      style="font-size: 10.5px; margin-left: auto"
+                      ><i class="ti ti-file-text" style="font-size: 12px"></i
+                      >agent 视图</span
+                    >
+                    <button
+                      class="btn btn-ghost btn-sm"
+                      style="margin-left: auto"
+                    >
+                      <i class="ti ti-eye"></i>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <!-- 依赖 -->
+              <section>
+                <div class="section-title" style="margin-bottom: 8px">
+                  <i
+                    class="ti ti-arrow-ramp-right"
+                    style="color: var(--muted-foreground)"
+                  ></i
+                  >依赖关系
+                </div>
+                <div
+                  class="card card-pad"
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    color: var(--muted-foreground);
+                    font-size: 12.5px;
+                  "
+                >
+                  <i class="ti ti-circle-dashed"></i>无依赖 · 本项独立
+                  <button
+                    class="btn btn-sm btn-ghost"
+                    style="margin-left: auto; color: var(--muted-foreground)"
+                  >
+                    <i class="ti ti-plus" style="font-size: 13px"></i>添加链接
+                  </button>
+                </div>
+              </section>
+
+              <!-- 活动与评论 -->
+              <section>
+                <div class="section-title" style="margin-bottom: 8px">
+                  <i
+                    class="ti ti-history"
+                    style="color: var(--muted-foreground)"
+                  ></i
+                  >活动与评论
+                </div>
+                <div class="card card-pad">
+                  <div class="timeline">
+                    <div class="tl-row">
+                      <span class="avatar a-agent"
+                        ><i class="ti ti-cpu" style="font-size: 11px"></i
+                      ></span>
+                      <div class="tl-body">
+                        <span class="badge b-muted" style="margin-right: 6px"
+                          >回写:reconciler</span
+                        >实施阶段 run 失败 · 工作项状态置为失败
+                      </div>
+                      <span class="tl-time">10:42</span>
+                    </div>
+                    <div class="tl-row">
+                      <span class="avatar a-agent"
+                        ><i class="ti ti-cpu" style="font-size: 11px"></i
+                      ></span>
+                      <div class="tl-body">
+                        transient 错误自动重试 1 次（attempt 2）
+                      </div>
+                      <span class="tl-time">10:31</span>
+                    </div>
+                    <div class="tl-row">
+                      <span class="avatar">S</span>
+                      <div class="tl-body">
+                        <b>Steve</b> · 先修 Vault 里的 payhub 凭证，再重派。
+                      </div>
+                      <span class="tl-time">10:12</span>
+                    </div>
+                    <div class="tl-row">
+                      <span class="avatar a-brain"
+                        ><i class="ti ti-brain" style="font-size: 11px"></i
+                      ></span>
+                      <div class="tl-body">
+                        派发 · hotfix@v3 ·
+                        <span class="mono">run_6c8p17</span> · tags:
+                        item_id=PAY-203
+                      </div>
+                      <span class="tl-time">09:58</span>
+                    </div>
+                  </div>
+                  <div class="composer" style="margin-top: 10px">
+                    <i
+                      class="ti ti-message"
+                      style="color: var(--muted-foreground)"
+                    ></i>
+                    <input placeholder="写评论…（@ 提及，⌘Enter 发送）" />
+                    <button class="btn btn-ghost btn-sm">
+                      <i class="ti ti-send"></i>
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <!-- 右栏 Inspector -->
+            <aside
+              class="inspector"
+              x-data="{tdlg:false, tgt:'', reason:'', verdict:'', commit:'', run:'run_6c8p17', items:['hotfix 分支已实现修复'],
           reqOf(t){return {'done':'需 PASSED verdict + 合并 commit','交付':'需 PR/commit 链接(人工完成逃生口)','实施':'纠错回退,需原因','closed':'仅未派发项,需原因'}[t]||''},
           needEvi(){return this.tgt==='done'||this.tgt==='交付'},
           valid(){ if(!this.tgt||this.reason.trim().length<4) return false;
             if(this.tgt==='done') return this.verdict==='PASSED' ? /^[0-9a-f]{7,40}$/.test(this.commit) : this.verdict==='CHANGES_REQUESTED';
             if(this.tgt==='交付') return /^[0-9a-f]{7,40}$/.test(this.commit)||this.items.length>0;
-            return true }}">
-          <div class="insp-sec">
-            <div class="group-label">属性</div>
-            <div class="proprow" title="受守卫流转：仅列守卫表允许的目标状态，强制填写原因并写入审计（02 §8）" @click="tdlg=true" style="cursor:pointer;border-radius:6px" onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background=''"><span class="pl">状态</span><span class="pv" style="cursor:pointer">
-              <span class="st-icon err"><i class="ti ti-x"></i></span>失败
-              <i class="ti ti-shield-lock" style="font-size:13px;color:var(--muted-foreground);margin-left:4px" title="受守卫流转"></i>
-            </span></div>
-            <div class="proprow"><span class="pl">优先级</span><span class="pv"><span class="pbars p0"><span></span><span></span><span></span><span></span></span>P0</span></div>
-            <div class="proprow"><span class="pl">风险</span><span class="pv"><span class="badge b-destructive">高</span></span></div>
-            <div class="proprow"><span class="pl">类型</span><span class="pv">缺陷</span></div>
-            <div class="proprow"><span class="pl">性质</span><span class="pv"><span class="chip">后端</span></span></div>
-            <div class="proprow"><span class="pl">Sprint</span><span class="pv"><a class="fm-underline" data-screen="s6-sprint-cockpit.html" style="color:var(--brand)">Sprint 3</a></span></div>
-            <div class="proprow"><span class="pl">负责人</span><span class="pv"><span class="avatar">S</span>Steve</span></div>
-          </div>
-          <div class="insp-sec">
-            <div class="group-label">执行</div>
-            <div class="proprow"><span class="pl">仓库</span><span class="pv mono">payhub</span></div>
-            <div class="proprow"><span class="pl">分支</span><span class="pv mono" style="font-size:11.5px">hotfix/pay-203</span></div>
-            <div class="proprow"><span class="pl">工作流</span><span class="pv"><span class="badge b-brand">hotfix@v3</span></span></div>
-            <div class="proprow"><span class="pl">关联运行</span><span class="pv"><a class="runbadge" data-screen="s7-run-detail.html"><span class="st-icon err"><i class="ti ti-x"></i></span>run_6c8p17<i class="ti ti-external-link" style="font-size:11px"></i></a></span></div>
-          </div>
-          <div class="insp-sec">
-            <div class="group-label">时间</div>
-            <div class="proprow"><span class="pl">创建</span><span class="pv" style="color:var(--muted-foreground)">7-09 09:12</span></div>
-            <div class="proprow"><span class="pl">更新</span><span class="pv" style="color:var(--muted-foreground)">10:42</span></div>
-          </div>
+            return true }}"
+            >
+              <div class="insp-sec">
+                <div class="group-label">属性</div>
+                <div
+                  class="proprow"
+                  title="受守卫流转：仅列守卫表允许的目标状态，强制填写原因并写入审计（02 §8）"
+                  @click="tdlg=true"
+                  style="cursor: pointer; border-radius: 6px"
+                  onmouseover="this.style.background = 'var(--muted)'"
+                  onmouseout="this.style.background = ''"
+                >
+                  <span class="pl">状态</span
+                  ><span class="pv" style="cursor: pointer">
+                    <span class="st-icon err"><i class="ti ti-x"></i></span>失败
+                    <i
+                      class="ti ti-shield-lock"
+                      style="
+                        font-size: 13px;
+                        color: var(--muted-foreground);
+                        margin-left: 4px;
+                      "
+                      title="受守卫流转"
+                    ></i>
+                  </span>
+                </div>
+                <div class="proprow">
+                  <span class="pl">优先级</span
+                  ><span class="pv"
+                    ><span class="pbars p0"
+                      ><span></span><span></span><span></span
+                      ><span></span></span
+                    >P0</span
+                  >
+                </div>
+                <div class="proprow">
+                  <span class="pl">风险</span
+                  ><span class="pv"
+                    ><span class="badge b-destructive">高</span></span
+                  >
+                </div>
+                <div class="proprow">
+                  <span class="pl">类型</span><span class="pv">缺陷</span>
+                </div>
+                <div class="proprow">
+                  <span class="pl">性质</span
+                  ><span class="pv"><span class="chip">后端</span></span>
+                </div>
+                <div class="proprow">
+                  <span class="pl">Sprint</span
+                  ><span class="pv"
+                    ><a
+                      class="fm-underline"
+                      data-screen="s6-sprint-cockpit.html"
+                      style="color: var(--brand)"
+                      >Sprint 3</a
+                    ></span
+                  >
+                </div>
+                <div class="proprow">
+                  <span class="pl">负责人</span
+                  ><span class="pv"><span class="avatar">S</span>Steve</span>
+                </div>
+              </div>
+              <div class="insp-sec">
+                <div class="group-label">执行</div>
+                <div class="proprow">
+                  <span class="pl">仓库</span
+                  ><span class="pv mono">payhub</span>
+                </div>
+                <div class="proprow">
+                  <span class="pl">分支</span
+                  ><span class="pv mono" style="font-size: 11.5px"
+                    >hotfix/pay-203</span
+                  >
+                </div>
+                <div class="proprow">
+                  <span class="pl">工作流</span
+                  ><span class="pv"
+                    ><span class="badge b-brand">hotfix@v3</span></span
+                  >
+                </div>
+                <div class="proprow">
+                  <span class="pl">关联运行</span
+                  ><span class="pv"
+                    ><a class="runbadge" data-screen="s7-run-detail.html"
+                      ><span class="st-icon err"><i class="ti ti-x"></i></span
+                      >run_6c8p17<i
+                        class="ti ti-external-link"
+                        style="font-size: 11px"
+                      ></i></a
+                  ></span>
+                </div>
+              </div>
+              <div class="insp-sec">
+                <div class="group-label">时间</div>
+                <div class="proprow">
+                  <span class="pl">创建</span
+                  ><span class="pv" style="color: var(--muted-foreground)"
+                    >7-09 09:12</span
+                  >
+                </div>
+                <div class="proprow">
+                  <span class="pl">更新</span
+                  ><span class="pv" style="color: var(--muted-foreground)"
+                    >10:42</span
+                  >
+                </div>
+              </div>
 
-          <!-- 受守卫流转对话框（GuardedTransitionDialog，03 §4 / 02 §8 守卫表） -->
-          <div class="ovl" x-show="tdlg" x-cloak
-            x-transition:enter="fm-overlay-enter" x-transition:enter-start="fm-op-0" x-transition:enter-end="fm-op-1"
-            x-transition:leave="fm-overlay-exit" x-transition:leave-start="fm-op-1" x-transition:leave-end="fm-op-0"
-            @click.self="tdlg=false">
-            <div class="dlg">
-              <h3>变更状态 · PAY-203</h3>
-              <div class="sub">当前 <span class="st-icon sm err"><i class="ti ti-x"></i></span>失败 <i class="ti ti-shield-lock" style="font-size:12px"></i> 仅列守卫表允许你执行的迁移</div>
-              <div class="fld">
-                <label>目标状态<span class="req">*</span></label>
-                <select x-model="tgt">
-                  <option value="" disabled selected>选择目标状态…</option>
-                  <option value="实施">实施 —— 纠错回退,需原因</option>
-                  <option value="交付">交付 —— 人工完成逃生口,需 PR/commit</option>
-                  <option value="done">done —— 需 PASSED verdict + 合并 commit</option>
-                </select>
-                <div class="hint" x-show="tgt" x-text="reqOf(tgt)"></div>
-              </div>
-              <div class="fld">
-                <label>原因<span class="req">*</span>（写入审计与活动流）</label>
-                <textarea x-model="reason" placeholder="为什么人工变更？（至少 4 字）"></textarea>
-              </div>
-              <div class="fld" x-show="tgt==='done'" x-cloak>
-                <label>评审 verdict<span class="req">*</span></label>
-                <div class="radio-row">
-                  <label><input type="radio" name="vd" value="PASSED" x-model="verdict">PASSED（批准合并）</label>
-                  <label><input type="radio" name="vd" value="CHANGES_REQUESTED" x-model="verdict">CHANGES_REQUESTED（驳回返工）</label>
+              <!-- 受守卫流转对话框（GuardedTransitionDialog，03 §4 / 02 §8 守卫表） -->
+              <div
+                class="ovl"
+                x-show="tdlg"
+                x-cloak
+                x-transition:enter="fm-overlay-enter"
+                x-transition:enter-start="fm-op-0"
+                x-transition:enter-end="fm-op-1"
+                x-transition:leave="fm-overlay-exit"
+                x-transition:leave-start="fm-op-1"
+                x-transition:leave-end="fm-op-0"
+                @click.self="tdlg=false"
+              >
+                <div class="dlg">
+                  <h3>变更状态 · PAY-203</h3>
+                  <div class="sub">
+                    当前
+                    <span class="st-icon sm err"><i class="ti ti-x"></i></span
+                    >失败
+                    <i class="ti ti-shield-lock" style="font-size: 12px"></i>
+                    仅列守卫表允许你执行的迁移
+                  </div>
+                  <div class="fld">
+                    <label>目标状态<span class="req">*</span></label>
+                    <select x-model="tgt">
+                      <option value="" disabled selected>选择目标状态…</option>
+                      <option value="实施">实施 —— 纠错回退,需原因</option>
+                      <option value="交付">
+                        交付 —— 人工完成逃生口,需 PR/commit
+                      </option>
+                      <option value="done">
+                        done —— 需 PASSED verdict + 合并 commit
+                      </option>
+                    </select>
+                    <div class="hint" x-show="tgt" x-text="reqOf(tgt)"></div>
+                  </div>
+                  <div class="fld">
+                    <label
+                      >原因<span class="req">*</span>（写入审计与活动流）</label
+                    >
+                    <textarea
+                      x-model="reason"
+                      placeholder="为什么人工变更？（至少 4 字）"
+                    ></textarea>
+                  </div>
+                  <div class="fld" x-show="tgt==='done'" x-cloak>
+                    <label>评审 verdict<span class="req">*</span></label>
+                    <div class="radio-row">
+                      <label
+                        ><input
+                          type="radio"
+                          name="vd"
+                          value="PASSED"
+                          x-model="verdict"
+                        />PASSED（批准合并）</label
+                      >
+                      <label
+                        ><input
+                          type="radio"
+                          name="vd"
+                          value="CHANGES_REQUESTED"
+                          x-model="verdict"
+                        />CHANGES_REQUESTED（驳回返工）</label
+                      >
+                    </div>
+                  </div>
+                  <div
+                    x-show="needEvi() && verdict!=='CHANGES_REQUESTED'"
+                    x-cloak
+                  >
+                    <div class="fld">
+                      <label
+                        >合并 commit<span class="req" x-show="tgt==='done'"
+                          >*</span
+                        ></label
+                      >
+                      <input
+                        x-model="commit"
+                        class="mono"
+                        placeholder="如 c06c31a96（7–40 位 hex）"
+                      />
+                    </div>
+                    <div class="fld">
+                      <label>关联 run</label>
+                      <select x-model="run">
+                        <option value="run_6c8p17">
+                          run_6c8p17 · hotfix@v3 · 失败
+                        </option>
+                        <option value="">（不关联）</option>
+                      </select>
+                    </div>
+                    <div class="fld">
+                      <label>交付物</label>
+                      <template x-for="(it,i) in items" :key="i">
+                        <div class="item-row">
+                          <input :value="it" readonly /><button
+                            class="btn btn-ghost btn-sm"
+                            @click="items.splice(i,1)"
+                          >
+                            <i class="ti ti-trash" style="font-size: 13px"></i>
+                          </button>
+                        </div>
+                      </template>
+                      <button
+                        class="btn btn-outline btn-sm"
+                        @click="items.push('新交付物说明')"
+                      >
+                        <i class="ti ti-plus" style="font-size: 13px"></i>添加
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    class="gap-note"
+                    x-show="tgt==='done' && verdict==='PASSED' && !/^[0-9a-f]{7,40}$/.test(commit)"
+                    x-cloak
+                  >
+                    <i
+                      class="ti ti-alert-circle"
+                      style="font-size: 14px; margin-top: 1px"
+                    ></i>
+                    <span
+                      >证据缺口：done 需要有效的合并
+                      commit（evidence-missing）——补全后才能提交</span
+                    >
+                  </div>
+                  <div class="acts">
+                    <button class="btn btn-ghost" @click="tdlg=false">
+                      取消
+                    </button>
+                    <button
+                      class="btn btn-primary"
+                      :disabled="!valid()"
+                      x-text="verdict==='CHANGES_REQUESTED'?'驳回并要求返工':'确认变更'"
+                      @click="tdlg=false"
+                    ></button>
+                  </div>
                 </div>
               </div>
-              <div x-show="needEvi() && verdict!=='CHANGES_REQUESTED'" x-cloak>
-                <div class="fld">
-                  <label>合并 commit<span class="req" x-show="tgt==='done'">*</span></label>
-                  <input x-model="commit" class="mono" placeholder="如 c06c31a96（7–40 位 hex）">
-                </div>
-                <div class="fld">
-                  <label>关联 run</label>
-                  <select x-model="run"><option value="run_6c8p17">run_6c8p17 · hotfix@v3 · 失败</option><option value="">（不关联）</option></select>
-                </div>
-                <div class="fld">
-                  <label>交付物</label>
-                  <template x-for="(it,i) in items" :key="i">
-                    <div class="item-row"><input :value="it" readonly><button class="btn btn-ghost btn-sm" @click="items.splice(i,1)"><i class="ti ti-trash" style="font-size:13px"></i></button></div>
-                  </template>
-                  <button class="btn btn-outline btn-sm" @click="items.push('新交付物说明')"><i class="ti ti-plus" style="font-size:13px"></i>添加</button>
-                </div>
-              </div>
-              <div class="gap-note" x-show="tgt==='done' && verdict==='PASSED' && !/^[0-9a-f]{7,40}$/.test(commit)" x-cloak>
-                <i class="ti ti-alert-circle" style="font-size:14px;margin-top:1px"></i>
-                <span>证据缺口：done 需要有效的合并 commit（evidence-missing）——补全后才能提交</span>
-              </div>
-              <div class="acts">
-                <button class="btn btn-ghost" @click="tdlg=false">取消</button>
-                <button class="btn btn-primary" :disabled="!valid()" x-text="verdict==='CHANGES_REQUESTED'?'驳回并要求返工':'确认变更'" @click="tdlg=false"></button>
-              </div>
-            </div>
+            </aside>
           </div>
-        </aside>
-      </div>
+        </div>
+      </main>
     </div>
-  </main>
-</div>
-<style>[x-cloak]{display:none!important}</style>
-<script id="foundry-motion-js">
-  /* Foundry v3 motion runtime(零依赖) */
-  (function () {
-    var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    /* 低频页入场:一次性触发 */
-    if (!reduced && 'IntersectionObserver' in window) {
-      var io = new IntersectionObserver(function (es) {
-        es.forEach(function (e) {
-          if (e.isIntersecting) { e.target.classList.add('fm-in'); io.unobserve(e.target); }
-        });
-      }, { threshold: 0.15 });
-      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { io.observe(el); });
-    } else {
-      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { el.classList.add('fm-in'); });
-    }
-
-    /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
-    window.fmCountTo = function (el, target, opts) {
-      var dur = (opts && opts.duration) || 400;
-      var from = parseFloat((el.textContent || '0').replace(/[^0-9.-]/g, '')) || 0;
-      var fmt = (opts && opts.format) || function (v) { return Math.round(v).toLocaleString(); };
-      if (reduced || dur <= 0) { el.textContent = fmt(target); return; }
-      var t0 = performance.now();
-      function ease(t) { return 1 - Math.pow(1 - t, 3); } /* ≈ standard 曲线的收尾感 */
-      function tick(now) {
-        var p = Math.min(1, (now - t0) / dur);
-        el.textContent = fmt(from + (target - from) * ease(p));
-        if (p < 1) requestAnimationFrame(tick);
+    <style>
+      [x-cloak] {
+        display: none !important;
       }
-      requestAnimationFrame(tick);
-    };
+    </style>
+    <script id="foundry-motion-js">
+      /* Foundry v3 motion runtime(零依赖) */
+      (function () {
+        var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    /* 原型演示辅助:data-fm-count 声明式初始化 */
-    document.querySelectorAll('[data-fm-count]').forEach(function (el) {
-      var v = parseFloat(el.getAttribute('data-fm-count'));
-      if (!isNaN(v)) window.fmCountTo(el, v);
-    });
-  })();
-</script>
-</body>
+        /* 低频页入场:一次性触发 */
+        if (!reduced && "IntersectionObserver" in window) {
+          var io = new IntersectionObserver(
+            function (es) {
+              es.forEach(function (e) {
+                if (e.isIntersecting) {
+                  e.target.classList.add("fm-in");
+                  io.unobserve(e.target);
+                }
+              });
+            },
+            { threshold: 0.15 },
+          );
+          document.querySelectorAll("[data-fm-reveal]").forEach(function (el) {
+            io.observe(el);
+          });
+        } else {
+          document.querySelectorAll("[data-fm-reveal]").forEach(function (el) {
+            el.classList.add("fm-in");
+          });
+        }
+
+        /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
+        window.fmCountTo = function (el, target, opts) {
+          var dur = (opts && opts.duration) || 400;
+          var from =
+            parseFloat((el.textContent || "0").replace(/[^0-9.-]/g, "")) || 0;
+          var fmt =
+            (opts && opts.format) ||
+            function (v) {
+              return Math.round(v).toLocaleString();
+            };
+          if (reduced || dur <= 0) {
+            el.textContent = fmt(target);
+            return;
+          }
+          var t0 = performance.now();
+          function ease(t) {
+            return 1 - Math.pow(1 - t, 3);
+          } /* ≈ standard 曲线的收尾感 */
+          function tick(now) {
+            var p = Math.min(1, (now - t0) / dur);
+            el.textContent = fmt(from + (target - from) * ease(p));
+            if (p < 1) requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        };
+
+        /* 原型演示辅助:data-fm-count 声明式初始化 */
+        document.querySelectorAll("[data-fm-count]").forEach(function (el) {
+          var v = parseFloat(el.getAttribute("data-fm-count"));
+          if (!isNaN(v)) window.fmCountTo(el, v);
+        });
+      })();
+    </script>
+  </body>
 </html>

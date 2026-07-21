@@ -478,7 +478,10 @@ export function createVmActingBridge(
       const cmd =
         `cd '${escapedCwd}' && ` +
         `find . -type f | grep -E '${globToRegex(pattern)}' | sort`;
-      const res = await runtime.exec(vm, cmd, { cwd, timeoutMs: commandTimeoutMs });
+      const res = await runtime.exec(vm, cmd, {
+        cwd,
+        timeoutMs: commandTimeoutMs,
+      });
       const out =
         res.code === 0
           ? res.stdout.trim()
@@ -503,7 +506,7 @@ export function createVmActingBridge(
           include: {
             type: "string",
             description:
-              'Optional glob pattern to restrict which files are searched, ' +
+              "Optional glob pattern to restrict which files are searched, " +
               'e.g. "*.ts" or "src/**".',
           },
           cwd: {
@@ -528,10 +531,15 @@ export function createVmActingBridge(
       const include = stringArg(args.include);
       // Use `grep -rn` (recursive with line numbers). Include filter is expressed
       // via `--include` when provided.
-      const includeFlag = include ? `--include='${include.replace(/'/g, `'\\''`)}' ` : "";
+      const includeFlag = include
+        ? `--include='${include.replace(/'/g, `'\\''`)}' `
+        : "";
       const escapedPattern = pattern.replace(/'/g, `'\\''`);
       const cmd = `grep -rn ${ignoreCase}${includeFlag}'${escapedPattern}' . 2>/dev/null | head -200`;
-      const res = await runtime.exec(vm, cmd, { cwd, timeoutMs: commandTimeoutMs });
+      const res = await runtime.exec(vm, cmd, {
+        cwd,
+        timeoutMs: commandTimeoutMs,
+      });
       const out =
         res.code === 0
           ? res.stdout.trim() || "(no matches)"
@@ -576,7 +584,10 @@ function globToRegex(glob: string): string {
         regex += "\\{";
         i++;
       } else {
-        const alts = glob.slice(i + 1, end).split(",").map(globToRegex);
+        const alts = glob
+          .slice(i + 1, end)
+          .split(",")
+          .map(globToRegex);
         regex += `(${alts.join("|")})`;
         i = end + 1;
       }

@@ -1,4 +1,5 @@
 import { useT } from "@agent-native/core/client/i18n";
+import { formatDate as formatDateLocale } from "locale-kit/format";
 import {
   Area,
   AreaChart,
@@ -11,7 +12,6 @@ import {
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDate as formatDateLocale } from "locale-kit/format";
 import {
   chartAxisStroke,
   chartGridStroke,

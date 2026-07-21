@@ -104,10 +104,10 @@ reaches these actions as MCP tools) authors a DAG, runs it, monitors it by
   nodes' verdict); it goes through the normal `workflowRun` dispatch path, so
   the existing claude-code-node concurrency gate
   (`server/queue/claude-code-admit.ts`) applies automatically. `mergeReviewGet({
-  workspaceId })` reads the latest review run's live verdict/summary/findings
+workspaceId })` reads the latest review run's live verdict/summary/findings
   plus any recorded human override and returns the computed
   `{ canMerge, source, reason }` gate. `mergeReviewOverride` (`agentTool:
-  false` — human/UI-only, never agent-callable) records an explicit "I saw the
+false` — human/UI-only, never agent-callable) records an explicit "I saw the
   findings, merge anyway" reason; it is pinned to the specific review run it
   overrides, so a later NEW review for the same workspace is never silently
   covered by a stale override. Prefer calling `mergeReviewStart` yourself when

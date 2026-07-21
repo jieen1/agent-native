@@ -184,7 +184,8 @@ export function useChatModels({
         // unconfigured engine and get stuck there (CORE-PATCHES.md #2).
         const findDefaultGroup = () =>
           groups.find(
-            (group) => group.configured && group.models.includes(nextDefaultModel),
+            (group) =>
+              group.configured && group.models.includes(nextDefaultModel),
           ) ??
           groups.find((group) => group.configured) ??
           groups.find((group) => group.models.includes(nextDefaultModel)) ??

@@ -1,3 +1,4 @@
+import { IconCertificate, IconEye, IconFileText } from "@tabler/icons-react";
 /**
  * "产物" — durable outputs a stage produced (test evidence, briefs, reports,
  * …), one `artifact-row` per item. Matches the prototype's dedicated 产物
@@ -15,11 +16,6 @@
  * react-query (same shape as RunEvidenceList/CurrentRunPanel).
  */
 import { useState } from "react";
-import {
-  IconCertificate,
-  IconEye,
-  IconFileText,
-} from "@tabler/icons-react";
 
 import { ArtifactBadge } from "@/components/ArtifactBadge";
 import { fmtDateTime } from "@/components/tracker-format";
@@ -164,7 +160,10 @@ export interface ArtifactsSectionProps {
 }
 
 /** Prop-driven rendering — pure enough to unit test without react-query. */
-export function ArtifactsSection({ artifacts, isLoading }: ArtifactsSectionProps) {
+export function ArtifactsSection({
+  artifacts,
+  isLoading,
+}: ArtifactsSectionProps) {
   const [selected, setSelected] = useState<WorkItemArtifact | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -178,7 +177,10 @@ export function ArtifactsSection({ artifacts, isLoading }: ArtifactsSectionProps
       </div>
       <div className="space-y-2">
         {isLoading ? (
-          <Skeleton className="h-10 w-full rounded-lg" data-testid="artifacts-skeleton" />
+          <Skeleton
+            className="h-10 w-full rounded-lg"
+            data-testid="artifacts-skeleton"
+          />
         ) : artifacts.length === 0 ? (
           <p className="py-1 text-xs text-muted-foreground/60">
             暂无产物 —— 阶段执行产出证据/文档后会展示在这里。

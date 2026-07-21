@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 import { assertWritebackCaller } from "../server/lib/writeback-actor.js";
@@ -38,17 +39,27 @@ export default defineAction({
     "queued/running/returned 之一,并写活动流。绝不写 currentStageName/status。" +
     "典型用途: brain 零交付时把 execState 打回 queued(T-F3-06 async 半边)。",
   schema: z.object({
-    workItemId: z.string().min(1).describe("Work item whose exec_state to migrate"),
-    target: z.enum(TARGET_ENUM).describe("New exec_state — queued|running|returned only"),
+    workItemId: z
+      .string()
+      .min(1)
+      .describe("Work item whose exec_state to migrate"),
+    target: z
+      .enum(TARGET_ENUM)
+      .describe("New exec_state — queued|running|returned only"),
     reason: z
       .string()
       .optional()
-      .describe("Why (e.g. zero-delivery/thread-error) — written to the activity payload"),
+      .describe(
+        "Why (e.g. zero-delivery/thread-error) — written to the activity payload",
+      ),
   }),
   http: { method: "POST" },
   run: async (args, ctx) => {
     // Actor check FIRST — a rejected call must leave zero trace (T-F9-05).
-    assertWritebackCaller({ caller: ctx?.caller, userEmail: getRequestUserEmail() });
+    assertWritebackCaller({
+      caller: ctx?.caller,
+      userEmail: getRequestUserEmail(),
+    });
 
     const db = getDb();
     // SDLC-072 安全热修(与 SDLC-032/033 同类): 工作项查询必须带 ownerScope() 守卫。
@@ -60,12 +71,18 @@ export default defineAction({
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found");
 
-    const currentExecState = (item as { execState?: string | null }).execState ?? null;
+    const currentExecState =
+      (item as { execState?: string | null }).execState ?? null;
 
     if (currentExecState === null) {
       const err = new Error(
@@ -90,7 +107,8 @@ export default defineAction({
     // The zero-delivery failure path (→queued) gets its own named event so
     // S10's "回写:最近成功/失败计数" and the work item's own activity feed can
     // tell "brain never delivered" apart from an ordinary in-flight update.
-    const eventType = args.target === "queued" ? "dispatch.failed" : "writeback.exec-state";
+    const eventType =
+      args.target === "queued" ? "dispatch.failed" : "writeback.exec-state";
 
     await db.insert(schema.activities).values({
       id: `act_wbexec_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,

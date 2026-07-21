@@ -42,12 +42,7 @@ describe("<ArtifactsSection> — 产物 (docs/sdlc-product-design/prototypes/s4-
   });
 
   it("renders name, agent/human badge, version chip, and the content reference inline", () => {
-    render(
-      <ArtifactsSection
-        artifacts={[artifact()]}
-        isLoading={false}
-      />,
-    );
+    render(<ArtifactsSection artifacts={[artifact()]} isLoading={false} />);
     expect(screen.getByText("复现测试证据")).toBeTruthy();
     expect(screen.getByText("智能体")).toBeTruthy();
     expect(screen.getByText("v1")).toBeTruthy();
@@ -87,9 +82,7 @@ describe("<ArtifactsSection> — 产物 (docs/sdlc-product-design/prototypes/s4-
   });
 
   it("opens a detail dialog with kind/stage/time when the eye button is clicked", () => {
-    render(
-      <ArtifactsSection artifacts={[artifact()]} isLoading={false} />,
-    );
+    render(<ArtifactsSection artifacts={[artifact()]} isLoading={false} />);
     fireEvent.click(screen.getByTitle("查看详情"));
     // Dialog content duplicates the name in its title — assert the
     // dialog-only fields instead of the (already-asserted) shared name.
@@ -100,7 +93,10 @@ describe("<ArtifactsSection> — 产物 (docs/sdlc-product-design/prototypes/s4-
   it("counts artifacts in the section heading", () => {
     render(
       <ArtifactsSection
-        artifacts={[artifact(), artifact({ id: "art_2", name: "brief:PAY-203" })]}
+        artifacts={[
+          artifact(),
+          artifact({ id: "art_2", name: "brief:PAY-203" }),
+        ]}
         isLoading={false}
       />,
     );

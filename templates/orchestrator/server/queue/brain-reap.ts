@@ -39,8 +39,9 @@
 // against that flip by requiring a TERMINAL thread status PLUS the grace age, and
 // never releases a thread that is itself `running`.
 
-import { getDbExec } from "../db/index.js";
 import { isPostgres } from "@agent-native/core/db";
+
+import { getDbExec } from "../db/index.js";
 
 /** How often the brain driver tick runs the reap sweep. */
 export const BRAIN_REAP_TICK_MS = 30_000;

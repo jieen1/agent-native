@@ -16,6 +16,7 @@
  */
 
 import { useSyncExternalStore } from "react";
+
 import { resolveActiveLocale } from "./server-locale.js";
 import { getLocaleKitState } from "./state.js";
 

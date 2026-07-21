@@ -1,4 +1,5 @@
 import { useT } from "@agent-native/core/client/i18n";
+import { formatCurrency as formatCurrencyLocale } from "locale-kit/format";
 import {
   Area,
   AreaChart,
@@ -10,7 +11,6 @@ import {
 } from "recharts";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency as formatCurrencyLocale } from "locale-kit/format";
 import {
   chartAxisStroke,
   chartGridStroke,

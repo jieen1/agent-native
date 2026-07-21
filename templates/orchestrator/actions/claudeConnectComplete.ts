@@ -1,5 +1,6 @@
 import { defineAction } from "@agent-native/core";
 import { z } from "zod";
+
 import { completeLogin } from "../server/claude-login.js";
 
 // Finish the managed Claude Code subscription login: exchange the pasted
@@ -17,7 +18,9 @@ export default defineAction({
     sessionId: z.string().describe("The sessionId returned by claudeConnect."),
     code: z
       .string()
-      .describe("The authorization code shown by the OAuth callback (may be `code#state`)."),
+      .describe(
+        "The authorization code shown by the OAuth callback (may be `code#state`).",
+      ),
   }),
   run: async ({ sessionId, code }) => {
     return await completeLogin(sessionId, code);

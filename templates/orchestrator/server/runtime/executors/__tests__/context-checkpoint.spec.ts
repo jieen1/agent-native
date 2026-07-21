@@ -47,7 +47,11 @@ import {
 function toolUse(name: string, input: unknown, seq: number): RuntimeExecStep {
   return { seq, type: "tool_use", name, input };
 }
-function toolResult(name: string, result: string, seq: number): RuntimeExecStep {
+function toolResult(
+  name: string,
+  result: string,
+  seq: number,
+): RuntimeExecStep {
   return { seq, type: "tool_result", name, result };
 }
 function textStep(text: string, seq: number): RuntimeExecStep {

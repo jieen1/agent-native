@@ -40,24 +40,24 @@
 
 下表是本规划承诺覆盖的全部文本面。**"完成"= 下表所有"纳入"项在 zh/en 下均正确。**
 
-| # | 文本面 | 位置 | 量级 | 机制 | 阶段 | 纳入 |
-|---|---|---|---|---|---|---|
-| 1 | core 共享 chrome（聊天壳/composer/设置面板） | `packages/core/src/client` | ~900–1000 | 构建期插件包 `t()` | P2–P3 | ✅ |
-| 2 | 15 模板自有 UI（JSX/placeholder/aria/title/toast） | `templates/*/app` `*/components` | ~2500–3000 | 构建期插件包 `t()` | P4 | ✅ |
-| 3 | Action 成功/摘要消息（`message`/`summary`） | `templates/*/actions` | ~649 | 插件包 `t()`（server env） | P5 | ✅ |
-| 4 | Action 错误/throw 文案 | `templates/*/actions` | ~150 | 插件包 `t()` | P5 | ✅ |
-| 5 | Onboarding 步骤文案 | `packages/core/src/onboarding/default-steps.ts` | ~5 步 | 插件（server env，请求 locale） | P6 | ✅ |
-| 6 | 系统事务邮件（邀请/验证/改密） | `packages/core/src/server/email-templates.ts` | 3 封 | 插件 + 收件人 locale | P6 | ✅ |
-| 7 | 通知渠道文案 | `packages/core/src/notifications/channels.ts` | 少量 | 插件 | P6 | ✅ |
-| 8 | Agent 回复语言（让 agent 用中文答） | 模板 `AGENTS.md` + 运行时 locale | 指令 | 模板自有指令注入 | P7 | ✅ |
-| 9 | 日期/数字/货币格式 | 54 处 `en-US` + analytics `$` | 中 | locale-aware 格式化工具 | P8 | ✅ |
-| 10 | `<html lang>` | 15 × `templates/*/app/root.tsx` | 15 | 模板 root 读 cookie | P1/P6 | ✅ |
-| 11 | shadcn 原语 `sr-only`（Close/More 等） | `templates/*/components/ui` | ~10/模板 | 插件包 `t()` | P4 | ✅ |
-| — | **以下明确不纳入（见 §3 理由）** | | | | | |
-| 12 | Skill 文档 `SKILL.md` | `.agents/skills`、`templates/*/.agents` | 329 | — | — | ❌ |
-| 13 | Action 的 `description:` 工具说明 | `templates/*/actions` | 153 | — | — | ❌ |
-| 14 | Zod `.describe()` 参数说明 | `templates/*/actions` | 1963 | — | — | ❌ |
-| 15 | 系统提示英文正文 | `core/src/server/prompts/*` | ~500 行 | — | — | ❌ |
+| #   | 文本面                                             | 位置                                            | 量级       | 机制                            | 阶段  | 纳入 |
+| --- | -------------------------------------------------- | ----------------------------------------------- | ---------- | ------------------------------- | ----- | ---- |
+| 1   | core 共享 chrome（聊天壳/composer/设置面板）       | `packages/core/src/client`                      | ~900–1000  | 构建期插件包 `t()`              | P2–P3 | ✅   |
+| 2   | 15 模板自有 UI（JSX/placeholder/aria/title/toast） | `templates/*/app` `*/components`                | ~2500–3000 | 构建期插件包 `t()`              | P4    | ✅   |
+| 3   | Action 成功/摘要消息（`message`/`summary`）        | `templates/*/actions`                           | ~649       | 插件包 `t()`（server env）      | P5    | ✅   |
+| 4   | Action 错误/throw 文案                             | `templates/*/actions`                           | ~150       | 插件包 `t()`                    | P5    | ✅   |
+| 5   | Onboarding 步骤文案                                | `packages/core/src/onboarding/default-steps.ts` | ~5 步      | 插件（server env，请求 locale） | P6    | ✅   |
+| 6   | 系统事务邮件（邀请/验证/改密）                     | `packages/core/src/server/email-templates.ts`   | 3 封       | 插件 + 收件人 locale            | P6    | ✅   |
+| 7   | 通知渠道文案                                       | `packages/core/src/notifications/channels.ts`   | 少量       | 插件                            | P6    | ✅   |
+| 8   | Agent 回复语言（让 agent 用中文答）                | 模板 `AGENTS.md` + 运行时 locale                | 指令       | 模板自有指令注入                | P7    | ✅   |
+| 9   | 日期/数字/货币格式                                 | 54 处 `en-US` + analytics `$`                   | 中         | locale-aware 格式化工具         | P8    | ✅   |
+| 10  | `<html lang>`                                      | 15 × `templates/*/app/root.tsx`                 | 15         | 模板 root 读 cookie             | P1/P6 | ✅   |
+| 11  | shadcn 原语 `sr-only`（Close/More 等）             | `templates/*/components/ui`                     | ~10/模板   | 插件包 `t()`                    | P4    | ✅   |
+| —   | **以下明确不纳入（见 §3 理由）**                   |                                                 |            |                                 |       |      |
+| 12  | Skill 文档 `SKILL.md`                              | `.agents/skills`、`templates/*/.agents`         | 329        | —                               | —     | ❌   |
+| 13  | Action 的 `description:` 工具说明                  | `templates/*/actions`                           | 153        | —                               | —     | ❌   |
+| 14  | Zod `.describe()` 参数说明                         | `templates/*/actions`                           | 1963       | —                               | —     | ❌   |
+| 15  | 系统提示英文正文                                   | `core/src/server/prompts/*`                     | ~500 行    | —                               | —     | ❌   |
 
 ---
 
@@ -176,9 +176,9 @@ AST 转换（用 `@babel/core` + 自定义 visitor，JSX/TS 成熟），**只包
    （此阶段 catalog 可手填几十条，验证机制）。
 2. `useLocaleSync()`（仿 `packages/core/src/client/appearance.ts`）。
 3. `createChangeLanguageAction()`：写 `application_state.locale` + `u:<email>:locale`
-   + 下发 `Set-Cookie`。
+   - 下发 `Set-Cookie`。
 4. chat 模板接入：`actions/change-language.ts` 注册；`root.tsx` 读 cookie 定 `<html lang>`
-   + provider 初值；侧栏加语言下拉。
+   - provider 初值；侧栏加语言下拉。
 5. 手动把 chat 首页 **10 条**可见串包成 `t()` 做端到端样板。
 
 **验收目标**
@@ -381,16 +381,16 @@ AST 转换（用 `@babel/core` + 自定义 visitor，JSX/TS 成熟），**只包
 
 ## 8. 风险与对策
 
-| 风险 | 对策 |
-|---|---|
-| 插件误包/漏包 | 白名单 + `i18n-ignore` + P9 `--unwrapped` 守卫双向兜底 |
-| 插值/复数 | 统一 `tx()` ICU，禁字符串拼接；守卫检测裸模板串 |
-| SSR 水合闪烁 | cookie 驱动首屏 lang + provider 初值 |
-| agent 改 app 又写死英文 | 更新 `frontend-design`/`self-modifying-code` skill 教用 `t()`；`--unwrapped` 守卫拦截 |
-| server 串够不到 Vite 转换 | 优先插件；极端情况 `pnpm patch` 单点（登记，≤2） |
-| 生产 build 与 dev 行为偏差 | P10 专门对产物做伪语言扫描 |
-| 术语不一致 | 先锁术语表再批译 |
-| 上游更新 core 新增英文串 | 拉取后重跑 `extract` + `--unwrapped`；新串入 catalog，core 仍不改 |
+| 风险                       | 对策                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| 插件误包/漏包              | 白名单 + `i18n-ignore` + P9 `--unwrapped` 守卫双向兜底                                |
+| 插值/复数                  | 统一 `tx()` ICU，禁字符串拼接；守卫检测裸模板串                                       |
+| SSR 水合闪烁               | cookie 驱动首屏 lang + provider 初值                                                  |
+| agent 改 app 又写死英文    | 更新 `frontend-design`/`self-modifying-code` skill 教用 `t()`；`--unwrapped` 守卫拦截 |
+| server 串够不到 Vite 转换  | 优先插件；极端情况 `pnpm patch` 单点（登记，≤2）                                      |
+| 生产 build 与 dev 行为偏差 | P10 专门对产物做伪语言扫描                                                            |
+| 术语不一致                 | 先锁术语表再批译                                                                      |
+| 上游更新 core 新增英文串   | 拉取后重跑 `extract` + `--unwrapped`；新串入 catalog，core 仍不改                     |
 
 ---
 
@@ -408,6 +408,7 @@ AST 转换（用 `@babel/core` + 自定义 visitor，JSX/TS 成熟），**只包
 8. 模板字面量 `` `...${x}` `` → `tx("... {x}", {x})`（ICU 插值）
 
 **已知残留（不归插件，P9 处理 / 有意保留）：**
+
 - `setError("…")` 等任意 setState 字符串实参（经变量间接渲染）—— setState 类调用非目标，P9 视情况手包。
 - 字符串拼接 `"Connect " + name` —— 构建期无法定位，P9 处理。
 - 应用名 / 组织名等**数据/专有名**（`Chat` 应用标题、`Personal` 组织名）—— 有意 passthrough。

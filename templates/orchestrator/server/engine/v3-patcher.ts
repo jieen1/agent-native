@@ -11,10 +11,11 @@
 // and we return { error: "version_conflict" }.
 
 import { eq, and, inArray } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { customAlphabet } from "nanoid";
+
 import { v3Runs, v3Nodes, v3Patches } from "../db/v3-schema.js";
-import type { InferSelectModel } from "drizzle-orm";
 import { validateDag, detectCycle } from "./dag-validator.js";
 import type {
   V3Dag,
@@ -125,9 +126,7 @@ export type ApplyPatchResult =
 // Internal sentinel thrown inside the transaction to signal known failure kinds
 // without losing the structured error info through Drizzle's rollback path.
 class PatchError extends Error {
-  constructor(
-    public readonly result: ApplyPatchResult & { success: false },
-  ) {
+  constructor(public readonly result: ApplyPatchResult & { success: false }) {
     super(result.error);
     this.name = "PatchError";
   }
@@ -264,9 +263,7 @@ export class V3Patcher {
         const updated = await (tx as any)
           .update(v3Runs)
           .set({ dag: newDag, dagVersion: newVersion })
-          .where(
-            and(eq(v3Runs.id, runId), eq(v3Runs.dagVersion, dagVersion)),
-          )
+          .where(and(eq(v3Runs.id, runId), eq(v3Runs.dagVersion, dagVersion)))
           .returning({ id: v3Runs.id });
 
         if (!updated || updated.length === 0) {
@@ -301,9 +298,7 @@ export class V3Patcher {
     nodeRows: NodeRow[],
   ): string[] {
     const readySet = new Set(
-      nodeRows
-        .filter((r) => r.status === "ready")
-        .map((r) => r.nodeIdInDag),
+      nodeRows.filter((r) => r.status === "ready").map((r) => r.nodeIdInDag),
     );
 
     const demote: string[] = [];
@@ -351,7 +346,13 @@ export class V3Patcher {
     nodeRows: NodeRow[],
   ):
     | { ok: true }
-    | { ok: false; error: string; nodeId?: string; nodeStatus?: string; errors?: string[] } {
+    | {
+        ok: false;
+        error: string;
+        nodeId?: string;
+        nodeStatus?: string;
+        errors?: string[];
+      } {
     switch (mutation.kind) {
       case "modify_node":
         return this.applyModifyNode(dag, mutation, nodeRows);
@@ -383,7 +384,9 @@ export class V3Patcher {
     dag: V3Dag,
     mutation: ModifyNodeMutation,
     nodeRows: NodeRow[],
-  ): { ok: true } | { ok: false; error: string; nodeId?: string; nodeStatus?: string } {
+  ):
+    | { ok: true }
+    | { ok: false; error: string; nodeId?: string; nodeStatus?: string } {
     const node = dag.nodes.find((n) => n.id === mutation.nodeIdInDag);
     if (!node) {
       return {
@@ -399,7 +402,9 @@ export class V3Patcher {
     }
 
     // G11: check current status from v3_nodes rows
-    const nodeRow = nodeRows.find((r) => r.nodeIdInDag === mutation.nodeIdInDag);
+    const nodeRow = nodeRows.find(
+      (r) => r.nodeIdInDag === mutation.nodeIdInDag,
+    );
     if (nodeRow && IMMUTABLE_STATUSES.has(nodeRow.status)) {
       return {
         ok: false,
@@ -464,9 +469,7 @@ export class V3Patcher {
       };
     }
 
-    const rows = nodeRows.filter(
-      (r) => r.nodeIdInDag === mutation.nodeIdInDag,
-    );
+    const rows = nodeRows.filter((r) => r.nodeIdInDag === mutation.nodeIdInDag);
 
     for (const row of rows) {
       if (!REMOVABLE_STATUSES.has(row.status)) {
@@ -496,7 +499,9 @@ export class V3Patcher {
     dag: V3Dag,
     mutation: ModifyLoopMutation,
     nodeRows: NodeRow[],
-  ): { ok: true } | { ok: false; error: string; nodeId?: string; nodeStatus?: string } {
+  ):
+    | { ok: true }
+    | { ok: false; error: string; nodeId?: string; nodeStatus?: string } {
     const node = dag.nodes.find((n) => n.id === mutation.nodeIdInDag);
     if (!node) {
       return {
@@ -512,7 +517,9 @@ export class V3Patcher {
     }
 
     // G11: check current status from v3_nodes rows
-    const nodeRow = nodeRows.find((r) => r.nodeIdInDag === mutation.nodeIdInDag);
+    const nodeRow = nodeRows.find(
+      (r) => r.nodeIdInDag === mutation.nodeIdInDag,
+    );
     if (nodeRow && IMMUTABLE_STATUSES.has(nodeRow.status)) {
       return {
         ok: false,
@@ -550,9 +557,7 @@ export class V3Patcher {
     );
 
     const newNodes = mutation.nodes;
-    const newIdMap = new Map(
-      newNodes.map((n) => [n.id, n]),
-    );
+    const newIdMap = new Map(newNodes.map((n) => [n.id, n]));
 
     for (const row of activeRows) {
       const replacement = newIdMap.get(row.nodeIdInDag);
@@ -628,9 +633,7 @@ export async function applyPatch(
 
 // detectCycle is used internally via validateDag, but we re-export the
 // adjacency builder for callers that need a raw cycle check.
-export function buildAdjacency(
-  nodes: V3Node[],
-): Map<string, string[]> {
+export function buildAdjacency(nodes: V3Node[]): Map<string, string[]> {
   const adjacency = new Map<string, string[]>();
   for (const node of nodes) {
     const deps = "deps" in node ? (node as any).deps : undefined;

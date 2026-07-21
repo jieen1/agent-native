@@ -5,6 +5,10 @@
  */
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
+
+import enJson from "./catalogs/en.json";
+import zhJson from "./catalogs/zh.json";
+import { readLocaleCookie } from "./cookie.js";
 import {
   isPseudoLocaleRequested,
   PSEUDO_LOCALE,
@@ -13,10 +17,7 @@ import {
   useLocale,
   type Locale,
 } from "./runtime.js";
-import { readLocaleCookie } from "./cookie.js";
 import { useLocaleSync } from "./sync.js";
-import enJson from "./catalogs/en.json";
-import zhJson from "./catalogs/zh.json";
 
 interface I18nProviderProps {
   /** Server-resolved initial locale (e.g. from the request cookie). */

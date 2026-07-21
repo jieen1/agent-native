@@ -1,7 +1,9 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { eq } from "drizzle-orm";
+
 import { getDb, schema } from "./db/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

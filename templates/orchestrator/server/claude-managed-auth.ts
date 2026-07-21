@@ -46,7 +46,10 @@ export function getManagedClaudeStatus(): ManagedClaudeStatus {
     const raw = JSON.parse(
       readFileSync(`${configDir}/.credentials.json`, "utf8"),
     ) as Record<string, unknown>;
-    const o = (raw.claudeAiOauth ?? raw.oauth ?? raw) as Record<string, unknown>;
+    const o = (raw.claudeAiOauth ?? raw.oauth ?? raw) as Record<
+      string,
+      unknown
+    >;
     const expRaw = (o.expiresAt ?? o.expires_at) as number | string | undefined;
     const expMs =
       typeof expRaw === "number"

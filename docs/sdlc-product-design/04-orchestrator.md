@@ -72,6 +72,7 @@ hover 原地替换）。筛选：状态/模板/来源/时间；支持按 tags �
 ```
 
 **NodeInspector**（点击节点）：
+
 - 头：节点 id + 类型图标 + agent 名 + 模型/引擎徽标 + StatusRing +
   attempt 计数。
 - **Attempt 时间线**：每次 spawn 一行（状态环 + 耗时 + token +
@@ -85,6 +86,7 @@ hover 原地替换）。筛选：状态/模板/来源/时间；支持按 tags �
   （等价 tracker 收件箱，双向同步）。
 
 **Patch/Fork**：
+
 - Patch 面板：只允许 frontier 之前未执行的节点（pending/ready），
   DagCanvas 上可编辑区亮色、已执行区锁定灰显；提交=乐观并发
   （expectedDagVersion），冲突时提示刷新。
@@ -97,8 +99,8 @@ hover 原地替换）。筛选：状态/模板/来源/时间；支持按 tags �
 **目标**：工作流族（02 章 §3 九模板）的家。工作流即数据的 UI 化。
 
 - 卡片网格（非裸表）：每卡 = 名称 + 最新版本徽标 + 描述 + **DAG 缩略图**
-  + 适用场景标签（类型映射）+ 统计（近 30 天 run 数/成功率）+ 操作
-  （查看/新建 run/复制为新模板）。
+  - 适用场景标签（类型映射）+ 统计（近 30 天 run 数/成功率）+ 操作
+    （查看/新建 run/复制为新模板）。
 - 种子模板带 `内置` 徽标；`sdlc-*` 族分组置顶。
 - 详情（`/workflows/:name`）：版本链（每版：DAG 预览 diff + 保存者 +
   时间 + 该版 run 统计）；任意两版图级 diff（新增/删除/修改节点着色）。
@@ -156,7 +158,7 @@ hover 原地替换）。筛选：状态/模板/来源/时间；支持按 tags �
   最近一次降级事件时间线）。
 - **模型注册表区（v2.2，自举簇四/SDLC-054）**：登记每个可用模型的
   **真名**（权重身份）+ 别名映射表 + 档位 + 服务端点；spawn/线程遥测
-  一律按别名反查真名归因。注册校验：非 Claude 权重禁止登记 claude-*
+  一律按别名反查真名归因。注册校验：非 Claude 权重禁止登记 claude-\*
   名（假名即拒绝）；同端点新增/移除别名产生变更事件（别名漂移可见——
   曾致应用内 chat 404）。
 - **降级显式化不变量（v2.2，SDLC-049）**：任何"声明开启的能力初始化
@@ -255,19 +257,19 @@ hover 原地替换）。筛选：状态/模板/来源/时间；支持按 tags �
 
 ## 13. 数据模型与 action 增量（orchestrator 侧汇总）
 
-| 对象 | 增量 | 用途 |
-|---|---|---|
-| brain_engines（新表或配置） | id/kind/modelRef/tier/healthProbe/isDefault | 引擎注册表 |
-| brain_threads | + engineId | 线程级引擎选择 |
-| v3_runs | + score(pass|needs-attention) + failureClass(prompt|tool|engine|template|harness) + forkOf | scorecard 与 fork 树 |
-| v3_workflow_templates | + meta(JSON: 适用标签/变更说明/内置标记) | 工作流库卡片 |
-| v3_spawns | + parentSpawnId + lastHeartbeatAt | R4 检查点重试父链；R1 孤儿降级心跳 |
-| v3_spawns 用量采集契约（v2.2） | tokens_input/output **只取流终 usage 事件**（禁止按 chunk 累加——SDLC-051 的平方级膨胀根因）；input 必填；`modelRealName`（经注册表反查）与 `usageSuspect` 布尔（超物理速率/input=0 即置位，不入度量） | 遥测单一事实源（04 §7/§10） |
-| model_registry（新表或配置） | realName/aliases[]/tier/endpoint/服务商；校验拒绝假名 claude-* | 模型身份权威（SDLC-054） |
-| 种子 | 九套工作流模板 JSON（sdlc 族 5 套 + 轻量族 4 套）随应用发布（首启 upsert，带 `内置` 标） | 解决库中无种子 |
-| dag-validator | + `action` 节点类型（引用 action 名 + inputs 映射，reconciler 直接执行无 spawn） | 确定性节点承载（02 §3） |
-| 能力原语 | ciWatch（GitHub REST + 临时 token）、mergePr（顺序锁 + merge-base 断言，无 force 参数） | 承 v1.1 M3 既定交付 |
-| tracker-client（新模块） | run 终态回调 tracker advance/create-work-item；身份取 tags | 回写通道主链路 |
+| 对象                           | 增量                                                                                                                                                                                                  | 用途                                   |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ---- | ------ | -------- | ----------------- | -------------------- |
+| brain_engines（新表或配置）    | id/kind/modelRef/tier/healthProbe/isDefault                                                                                                                                                           | 引擎注册表                             |
+| brain_threads                  | + engineId                                                                                                                                                                                            | 线程级引擎选择                         |
+| v3_runs                        | + score(pass                                                                                                                                                                                          | needs-attention) + failureClass(prompt | tool | engine | template | harness) + forkOf | scorecard 与 fork 树 |
+| v3_workflow_templates          | + meta(JSON: 适用标签/变更说明/内置标记)                                                                                                                                                              | 工作流库卡片                           |
+| v3_spawns                      | + parentSpawnId + lastHeartbeatAt                                                                                                                                                                     | R4 检查点重试父链；R1 孤儿降级心跳     |
+| v3_spawns 用量采集契约（v2.2） | tokens_input/output **只取流终 usage 事件**（禁止按 chunk 累加——SDLC-051 的平方级膨胀根因）；input 必填；`modelRealName`（经注册表反查）与 `usageSuspect` 布尔（超物理速率/input=0 即置位，不入度量） | 遥测单一事实源（04 §7/§10）            |
+| model_registry（新表或配置）   | realName/aliases[]/tier/endpoint/服务商；校验拒绝假名 claude-\*                                                                                                                                       | 模型身份权威（SDLC-054）               |
+| 种子                           | 九套工作流模板 JSON（sdlc 族 5 套 + 轻量族 4 套）随应用发布（首启 upsert，带 `内置` 标）                                                                                                              | 解决库中无种子                         |
+| dag-validator                  | + `action` 节点类型（引用 action 名 + inputs 映射，reconciler 直接执行无 spawn）                                                                                                                      | 确定性节点承载（02 §3）                |
+| 能力原语                       | ciWatch（GitHub REST + 临时 token）、mergePr（顺序锁 + merge-base 断言，无 force 参数）                                                                                                               | 承 v1.1 M3 既定交付                    |
+| tracker-client（新模块）       | run 终态回调 tracker advance/create-work-item；身份取 tags                                                                                                                                            | 回写通道主链路                         |
 
 action 增量：`brainEngineList/Set/Probe`、`nodeRetryFrom(spawnId)`、
 `workspaceCreate` 增 readOnly 档（供 tracker 规划技能深读代码，配套

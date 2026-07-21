@@ -10,10 +10,11 @@
 // server/brain/brain-capability.ts).
 
 import { defineAction } from "@agent-native/core";
-import { z } from "zod";
-import { getV3Db, resolveOwnerEmail } from "../server/db/index.js";
 import { getRequestOrgId } from "@agent-native/core/server/request-context";
+import { z } from "zod";
+
 import { recordRunVerdict } from "../server/brain/run-verdict.js";
+import { getV3Db, resolveOwnerEmail } from "../server/db/index.js";
 
 export default defineAction({
   description:

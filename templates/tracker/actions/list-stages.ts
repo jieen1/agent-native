@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -28,7 +29,12 @@ export default defineAction({
       await db
         .select()
         .from(schema.workItems)
-        .where(and(eq(schema.workItems.id, args.workItemId), ownerScope(schema.workItems)))
+        .where(
+          and(
+            eq(schema.workItems.id, args.workItemId),
+            ownerScope(schema.workItems),
+          ),
+        )
         .limit(1)
     )[0];
     if (!item) throw new Error("Work item not found or not accessible");
@@ -65,8 +71,22 @@ export default defineAction({
     // Parse JSON fields (deliveryItems is a JSON array string; verdict may be null or a JSON object)
     const result = rows.map((row) => ({
       ...row,
-      deliveryItems: (() => { try { return JSON.parse(row.deliveryItems ?? "[]"); } catch { return []; } })(),
-      verdict: row.verdict ? (() => { try { return JSON.parse(row.verdict); } catch { return null; } })() : null,
+      deliveryItems: (() => {
+        try {
+          return JSON.parse(row.deliveryItems ?? "[]");
+        } catch {
+          return [];
+        }
+      })(),
+      verdict: row.verdict
+        ? (() => {
+            try {
+              return JSON.parse(row.verdict);
+            } catch {
+              return null;
+            }
+          })()
+        : null,
     }));
 
     return result;

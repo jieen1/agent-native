@@ -115,7 +115,7 @@
 
 核心逻辑：**判断在人，流程在 tracker，执行在 orchestrator，UI 域与文档域各自沉淀专业产物**。四个应用通过 A2A/MCP 互联，任何一侧都不复制另一侧的数据，只传 id 与有界全文。
 
-<Mermaid id="mmd-00-topology" source={"flowchart TD\n  H[人 · 判断与签核] --> T[Tracker · 流程域驾驶舱]\n  T -->|派发 MCP: brief 全文 + tags 身份| O[Orchestrator · 执行域引擎室]\n  O -->|回写:advance/建单/证据| T\n  O -->|A2A: 原型入库| D[Design · UI 域]\n  O -->|A2A: story 与 changelog 入库| C[Content · 文档域]\n  T -->|UI 评审: 内嵌 Present 视图| D\n  T -.->|深链互通| O"} />
+<Mermaid id="mmd-00-topology" source={"flowchart TD\n H[人 · 判断与签核] --> T[Tracker · 流程域驾驶舱]\n T -->|派发 MCP: brief 全文 + tags 身份| O[Orchestrator · 执行域引擎室]\n O -->|回写:advance/建单/证据| T\n O -->|A2A: 原型入库| D[Design · UI 域]\n O -->|A2A: story 与 changelog 入库| C[Content · 文档域]\n T -->|UI 评审: 内嵌 Present 视图| D\n T -.->|深链互通| O"} />
 
 <table header-row="true">
 <tr>
@@ -159,7 +159,7 @@
 
 旅程分七步呈现，人工介入只出现在前三步的访谈与签核、以及后两步的例外裁决；中间的实施与验证完全自动。与 02 章八相位状态机的对应关系：第 2、3 步（UI 设计、技术设计）同处 designing 相位、各自签核，但技术设计依赖已签核的 ui-spec（顺序在 UI 之后）；第 7 步（交付）覆盖 promoting、storytelling、done 三个相位；其余一一对应。第 5 步的 RED 回环是**相位内修复**：修复单重跑实施与测试节点，sprint 相位停在 verifying 不回退。
 
-<Mermaid id="mmd-00-journey" source={"flowchart LR\n  P1[1 规划 · 人访谈] -->|plan-signoff| P2[2 UI 设计 · 人批注]\n  P2 -->|ui-signoff| P3[3 技术设计 · 人评审]\n  P3 -->|design-signoff| P4[4 实施 · 全自动]\n  P4 --> P5[5 验证 · 全自动]\n  P5 -->|RED: 相位内修复回环 不回退相位| P4\n  P5 -->|GREEN| P6[6 目标审计 gap-analysis]\n  P6 -->|NO_GAPS| P7[7 交付]\n  P6 -.->|3 轮超限: 人裁决| P7"} />
+<Mermaid id="mmd-00-journey" source={"flowchart LR\n P1[1 规划 · 人访谈] -->|plan-signoff| P2[2 UI 设计 · 人批注]\n P2 -->|ui-signoff| P3[3 技术设计 · 人评审]\n P3 -->|design-signoff| P4[4 实施 · 全自动]\n P4 --> P5[5 验证 · 全自动]\n P5 -->|RED: 相位内修复回环 不回退相位| P4\n P5 -->|GREEN| P6[6 目标审计 gap-analysis]\n P6 -->|NO_GAPS| P7[7 交付]\n P6 -.->|3 轮超限: 人裁决| P7"} />
 
 <table header-row="true">
 <tr>
@@ -554,7 +554,7 @@
 
 **既有假设修订**
 
-- **A2 修订**：模型"身份"不可假设——本地 vLLM 曾以 4 个名字（含 2 个 claude-* 假名）服务同一份权重（SDLC-054）。模型真名与别名映射必须由注册表权威登记（04 章），归因与度量只认真名。
+- **A2 修订**：模型"身份"不可假设——本地 vLLM 曾以 4 个名字（含 2 个 claude-\* 假名）服务同一份权重（SDLC-054）。模型真名与别名映射必须由注册表权威登记（04 章），归因与度量只认真名。
 - **A12 修订**：引擎"既有能力保持可用"不等于"行为正确"——spawn 终态传导（SDLC-050）、用量采集（SDLC-051）都需以不变量加告警背书（02 章 R9 与执行器上下文契约），能力存在性不再当作正确性证据。
 - **A18 修订**：时间戳可信，但 **token 用量列在采集契约修复前不得进入任何度量**——现值物理不可能（SDLC-051）。
 

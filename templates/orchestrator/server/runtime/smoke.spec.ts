@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
-import { msbAvailable } from "./wsl-msb.js";
 import { runSmoke } from "./smoke.js";
+import { msbAvailable } from "./wsl-msb.js";
 
 // GATED real-microVM smoke (DESIGN §7.4.2). This boots an actual libkrun
 // microVM via `wsl msb` (~10–30 s), so it is OFF by default — the normal

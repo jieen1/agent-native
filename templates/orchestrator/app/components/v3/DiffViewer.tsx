@@ -1,4 +1,3 @@
-import { useMemo, useState } from "react";
 import {
   IconFileDiff,
   IconChevronRight,
@@ -6,11 +5,13 @@ import {
   IconMinus,
   IconRefresh,
 } from "@tabler/icons-react";
+import { useMemo, useState } from "react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
 import type { V3DiffFile } from "@/hooks/use-v3-workspace";
+import { cn } from "@/lib/utils";
 
 // ── Per-line classification for color coding ─────────────────────────────────
 

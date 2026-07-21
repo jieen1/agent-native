@@ -1,6 +1,9 @@
-import { useState } from "react";
 import { useActionMutation } from "@agent-native/core/client";
+import { IconFolderPlus } from "@tabler/icons-react";
+import { useState } from "react";
 import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -9,10 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { IconFolderPlus } from "@tabler/icons-react";
 
 /** Shape of `workspaceCreate`'s response (see actions/v3-workspace.ts). */
 interface CreateWorkspaceResult {

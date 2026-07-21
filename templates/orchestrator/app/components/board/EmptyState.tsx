@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
 import type { Icon } from "@tabler/icons-react";
+import type { ReactNode } from "react";
+
 import { cn } from "@/lib/utils";
 
 // Shared empty-state (FRONTEND §C3 / §12 — every list has a purposeful empty

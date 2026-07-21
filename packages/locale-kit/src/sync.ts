@@ -9,11 +9,12 @@
  * server-side; this hook is how that write reaches the running UI.
  */
 
-import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { agentNativePath } from "@agent-native/core/client";
-import { getLocale, setLocale, isLocale, type Locale } from "./runtime.js";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+
 import { writeLocaleCookie } from "./cookie.js";
+import { getLocale, setLocale, isLocale, type Locale } from "./runtime.js";
 
 const STORAGE_KEY = "locale";
 

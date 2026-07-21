@@ -28,6 +28,7 @@ This document is the complete design.
 ### Goal
 
 A clean, no-magic project tracking app:
+
 - Track requirements/defects/tasks/incidents through configurable status workflows that humans (or CC via MCP) drive **explicitly**
 - Attach context (comments, file attachments, **design docs as markdown attachments**, **playbooks as instructional markdown attachments**)
 - Dispatch an item to the orchestrator app for AI execution and surface a live activity stream of all orchestrator work tagged for that item
@@ -77,18 +78,18 @@ Standalone agent-native template at `templates/tracker`. Own DB. Own MCP server.
 
 ## 2. Core Concepts (incl. Playbook)
 
-| Concept | Definition |
-|---------|-----------|
-| **Project** | Container of work items. Has key (id prefix, e.g. `PAY` → `PAY-14`). Status scheme overrides, environments, optional default playbook attachment id. |
-| **Work Item** | A unit of work. One of: `requirement`, `defect`, `task`, `incident`. Has business status (per-type scheme) + free-form description + assignee + priority + severity + environment + progress note. |
-| **Status Scheme** | Per type, ordered set of named statuses + allowed transitions + category mapping. Per-project override possible. |
-| **Status Log** | Append-only history of status changes per item. |
-| **Comment** | Free-form markdown comment on an item. Authored by human or CC. Flat list. |
-| **Attachment** | File or markdown content attached to an item. Three `kind`s: `file`, `design-doc`, **`playbook`**. |
-| **Playbook** | A markdown attachment with `kind: playbook`. **Instructional content telling CC how to approach this item / this class of item.** Read by CC at the start of work. Plain natural language; no DSL. May reference which agents/models to prefer, project-specific rules, validation criteria, etc. May exist per-item or per-project (project default). |
-| **Progress Note** | A short free-form string on the work item updated by CC (or human) describing current activity. Distinct from status (status is scheme-bound). |
-| **Link** | Typed relationship between two items: `duplicate-of` / `blocks` / `blocked-by` / `relates-to`. |
-| **Activity Tag** | Convention: when this app dispatches to orchestrator, it tags every orchestrator resource (run/spawn/workspace) with `{source: "tracker", item_id: "<id>"}`. Used to query orchestrator and reassemble the activity stream. |
+| Concept           | Definition                                                                                                                                                                                                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Project**       | Container of work items. Has key (id prefix, e.g. `PAY` → `PAY-14`). Status scheme overrides, environments, optional default playbook attachment id.                                                                                                                                                                                                   |
+| **Work Item**     | A unit of work. One of: `requirement`, `defect`, `task`, `incident`. Has business status (per-type scheme) + free-form description + assignee + priority + severity + environment + progress note.                                                                                                                                                     |
+| **Status Scheme** | Per type, ordered set of named statuses + allowed transitions + category mapping. Per-project override possible.                                                                                                                                                                                                                                       |
+| **Status Log**    | Append-only history of status changes per item.                                                                                                                                                                                                                                                                                                        |
+| **Comment**       | Free-form markdown comment on an item. Authored by human or CC. Flat list.                                                                                                                                                                                                                                                                             |
+| **Attachment**    | File or markdown content attached to an item. Three `kind`s: `file`, `design-doc`, **`playbook`**.                                                                                                                                                                                                                                                     |
+| **Playbook**      | A markdown attachment with `kind: playbook`. **Instructional content telling CC how to approach this item / this class of item.** Read by CC at the start of work. Plain natural language; no DSL. May reference which agents/models to prefer, project-specific rules, validation criteria, etc. May exist per-item or per-project (project default). |
+| **Progress Note** | A short free-form string on the work item updated by CC (or human) describing current activity. Distinct from status (status is scheme-bound).                                                                                                                                                                                                         |
+| **Link**          | Typed relationship between two items: `duplicate-of` / `blocks` / `blocked-by` / `relates-to`.                                                                                                                                                                                                                                                         |
+| **Activity Tag**  | Convention: when this app dispatches to orchestrator, it tags every orchestrator resource (run/spawn/workspace) with `{source: "tracker", item_id: "<id>"}`. Used to query orchestrator and reassemble the activity stream.                                                                                                                            |
 
 ---
 
@@ -189,11 +190,11 @@ work_item_links (
 Per work-item type. Each scheme is `{ stages: [[status...], ...], transitions: [...], categoryMap: {...}, reworkTarget: ... }`. Defaults:
 
 ```yaml
-requirement:  待分析 → 待开发 → 开发中 → 测试中 → 待验收 → 已上线
-defect:       待确认 → 待修复 → 修复中 → 待验证 → 已关闭
-task:         待办 → 进行中 → 已完成
-incident:     新建 → 排查中 → 临时缓解 → 已修复 → 已关闭
-docs:         待写作 → 撰写中 → 评审中 → 定稿
+requirement: 待分析 → 待开发 → 开发中 → 测试中 → 待验收 → 已上线
+defect: 待确认 → 待修复 → 修复中 → 待验证 → 已关闭
+task: 待办 → 进行中 → 已完成
+incident: 新建 → 排查中 → 临时缓解 → 已修复 → 已关闭
+docs: 待写作 → 撰写中 → 评审中 → 定稿
 ```
 
 Each scheme has cancel/reject/reopen back-edges. `transition-status` validates against scheme.
@@ -367,6 +368,7 @@ tracker.get-activity-stream(work_item_id, { since?, limit? })
 Framework A2A client. Discovery via tracker's `agent-native.json` `a2a.connections.orchestrator`. Same workspace = automatic.
 
 Outbound calls:
+
 - `orchestrator.workflow.run({..., tags, inputs:{_playbooks:[...]} })` — dispatch
 - `orchestrator.runs.list({tag_match})` — activity assembly
 - `orchestrator.spawns.list({tag_match})` — activity assembly
@@ -377,6 +379,7 @@ Outbound calls:
 ### 6.2 Playbook injection on dispatch
 
 When `tracker.dispatch-to-orchestrator` is called, tracker:
+
 1. Reads per-item playbooks + project default playbook
 2. Bundles them into `inputs._playbooks: [{name, content_md}, ...]`
 3. Passes to orchestrator with `workflow.run`
@@ -400,6 +403,7 @@ If no playbooks attached, `_playbooks: []`. The agent prompt may have a fallback
 ### 6.3 Tag convention (matches orchestrator §16)
 
 All outbound dispatches AND when CC operates on an item, tags carry:
+
 ```json
 { "source": "tracker", "item_id": "PAY-14", "actor_email": "alice@..." }
 ```
@@ -461,6 +465,7 @@ SSE: when item has any `has_active_dispatch=true`, tab live-updates via orchestr
 ### 7.2 Dispatch panel
 
 Inside Action bar's "Dispatch to orchestrator":
+
 - Pick template (dropdown from `orchestrator.workflow.list`) OR paste ad-hoc DAG (textarea, advanced)
 - Fill inputs per template's input_schema (auto-generated form)
 - Preview attached playbooks ("3 playbooks will be passed to CC: 'QA process v2' (item), 'Backend conventions' (project default), ...")
@@ -470,6 +475,7 @@ Inside Action bar's "Dispatch to orchestrator":
 ### 7.3 Attachments tab — playbook editor
 
 For `kind: playbook`:
+
 - Markdown editor (monaco/codemirror) with live preview
 - Save → `attach-playbook` or `update-attachment`
 - "Make this project default" button → updates `projects.default_playbook_attachment_id`
@@ -492,18 +498,18 @@ For `kind: playbook`:
 
 ## 9. Explicit Non-goals
 
-| Item | Why |
-|------|-----|
-| Backend infers task done | Status moves only by explicit transition action |
-| Watchdog auto-status from orchestrator run completion | Tracker observes runs but never changes status from them; CC may do so explicitly |
-| Auto-comment / auto-progress on dispatch / run events | If CC wants to comment / update progress, CC calls add-comment / set-progress |
-| Tracker dictates CC's workflow steps | **NO.** CC's workflow shape is whatever CC decides per playbook + skills + project agents. Tracker only provides item, playbook, and Activity visibility |
-| Tracker stores orchestrator run/spawn records locally | Orchestrator is source of truth; tracker queries by tag_match on demand |
-| Workflow DAG execution | That's orchestrator's job |
-| Model registry / agent registry | Use framework's |
-| Time tracking / SLA / sprint planning | Future work item type; not v1 |
-| Custom field schema per project | v1: fixed fields; v2 candidate |
-| Bulk import from Jira/GitHub Issues | v1.x candidate; not core |
+| Item                                                  | Why                                                                                                                                                      |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend infers task done                              | Status moves only by explicit transition action                                                                                                          |
+| Watchdog auto-status from orchestrator run completion | Tracker observes runs but never changes status from them; CC may do so explicitly                                                                        |
+| Auto-comment / auto-progress on dispatch / run events | If CC wants to comment / update progress, CC calls add-comment / set-progress                                                                            |
+| Tracker dictates CC's workflow steps                  | **NO.** CC's workflow shape is whatever CC decides per playbook + skills + project agents. Tracker only provides item, playbook, and Activity visibility |
+| Tracker stores orchestrator run/spawn records locally | Orchestrator is source of truth; tracker queries by tag_match on demand                                                                                  |
+| Workflow DAG execution                                | That's orchestrator's job                                                                                                                                |
+| Model registry / agent registry                       | Use framework's                                                                                                                                          |
+| Time tracking / SLA / sprint planning                 | Future work item type; not v1                                                                                                                            |
+| Custom field schema per project                       | v1: fixed fields; v2 candidate                                                                                                                           |
+| Bulk import from Jira/GitHub Issues                   | v1.x candidate; not core                                                                                                                                 |
 
 ---
 

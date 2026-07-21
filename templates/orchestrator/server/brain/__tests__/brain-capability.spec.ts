@@ -4,6 +4,7 @@
 // code changes). Pure functions only; no DB/process access.
 
 import { describe, it, expect } from "vitest";
+
 import {
   DEFAULT_BRAIN_CAPABILITY,
   NO_DIRECT_WRITE_PROMPT_CLAUSE,

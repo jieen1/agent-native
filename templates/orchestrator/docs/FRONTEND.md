@@ -7,6 +7,7 @@ Action names are the §10 surface; data shapes are the §9 model. UI ⟂ data pa
 is mandatory (everything here is an action the agent can also call).
 
 Hard UX rules (from the repo CLAUDE.md, non-negotiable):
+
 - shadcn/ui primitives only (no hand-rolled dropdown/popover/modal).
 - Tabler icons; no emoji as first-party icons.
 - **No browser `alert`/`confirm`/`prompt`** — shadcn `Dialog`/`AlertDialog`.
@@ -27,6 +28,7 @@ it. All of it is already scaffolded in the template (`app/lib/i18n.ts`,
 hooks) — extend, don't reinvent.
 
 ### C1. i18n (grounded in `app/lib/i18n.ts`)
+
 - Stack: `i18next` + `react-i18next`. `Lang = "en" | "zh"`; persisted to localStorage
   `orchestrator.lang` (`readStoredLang`/`persistLang`); topbar toggle flips + persists,
   **no reload**.
@@ -41,6 +43,7 @@ hooks) — extend, don't reinvent.
   not hand-formatted.
 
 ### C2. Theme (light/dark — grounded in `app/global.css`)
+
 - Semantic HSL tokens in `:root` + `.dark` (`--background`, `--foreground`,
   `--primary`, `--muted`, `--muted-foreground`, `--border`, `--destructive`,
   `--accent`, …). Components use Tailwind token classes (`bg-background`,
@@ -53,23 +56,24 @@ hooks) — extend, don't reinvent.
   per surface.
 
 ### C3. Component standards (which shadcn primitive for what — all already in `components/ui/`)
-| UI need | Primitive(s) | Notes |
-|---|---|---|
-| Data list / table | `table` + `pagination` + `scroll-area` | wrap in one `<DataTable>` (sort/filter/empty); virtualize long lists |
-| Kanban board | `card` + `scroll-area` + a dnd lib | column = scroll-area; card = shared `<WorkItemCard>` |
-| Form dialog | `dialog` + `form` + `input/textarea/select/checkbox/switch` | zod-validated; inline errors |
-| Destructive confirm | `alert-dialog` | the ONLY click-blocking spinner; never native `confirm` |
-| Row/card actions menu | `dropdown-menu` (`⋯`) · `context-menu` (right-click) | |
-| Pick one value | `select` · searchable → `command` | model picker + ⌘K palette = `command` |
-| Side detail panel | `sheet` (right) · `drawer` (bottom, mobile) | node inspector diff, item drawer |
-| Inline overlay | `popover` | capacity popover, filter menus |
-| Tabbed content | `tabs` | item console bottom tabs, settings tabs |
-| Toast | `sonner` (project standard) | success/error; `toaster`/`use-toast` are legacy |
-| Loading | `skeleton` (lists/cards/canvas) · `spinner` (destructive only) | never a full-page spinner |
-| Status/meta chips | `badge` | via shared `<StatusBadge>`/`<ExecBadge>`/`<SeverityChip>` |
-| Tooltip | `tooltip` | blocked reason, badge meaning |
-| Progress | `progress` | token budget, node done/total |
-| App nav | `sidebar` | the 6-entry rail |
+
+| UI need               | Primitive(s)                                                   | Notes                                                                |
+| --------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Data list / table     | `table` + `pagination` + `scroll-area`                         | wrap in one `<DataTable>` (sort/filter/empty); virtualize long lists |
+| Kanban board          | `card` + `scroll-area` + a dnd lib                             | column = scroll-area; card = shared `<WorkItemCard>`                 |
+| Form dialog           | `dialog` + `form` + `input/textarea/select/checkbox/switch`    | zod-validated; inline errors                                         |
+| Destructive confirm   | `alert-dialog`                                                 | the ONLY click-blocking spinner; never native `confirm`              |
+| Row/card actions menu | `dropdown-menu` (`⋯`) · `context-menu` (right-click)           |                                                                      |
+| Pick one value        | `select` · searchable → `command`                              | model picker + ⌘K palette = `command`                                |
+| Side detail panel     | `sheet` (right) · `drawer` (bottom, mobile)                    | node inspector diff, item drawer                                     |
+| Inline overlay        | `popover`                                                      | capacity popover, filter menus                                       |
+| Tabbed content        | `tabs`                                                         | item console bottom tabs, settings tabs                              |
+| Toast                 | `sonner` (project standard)                                    | success/error; `toaster`/`use-toast` are legacy                      |
+| Loading               | `skeleton` (lists/cards/canvas) · `spinner` (destructive only) | never a full-page spinner                                            |
+| Status/meta chips     | `badge`                                                        | via shared `<StatusBadge>`/`<ExecBadge>`/`<SeverityChip>`            |
+| Tooltip               | `tooltip`                                                      | blocked reason, badge meaning                                        |
+| Progress              | `progress`                                                     | token budget, node done/total                                        |
+| App nav               | `sidebar`                                                      | the 6-entry rail                                                     |
 
 **Build these shared composites ONCE** (every page composes them, never re-rolls):
 `<WorkItemCard>`, `<StatusBadge>`, `<ExecBadge>`, `<SeverityChip>`, `<EnvTag>`,
@@ -78,6 +82,7 @@ hooks) — extend, don't reinvent.
 is then one file, not N pages.
 
 ### C4. Data & state (no hand-rolled fetch — repo rule)
+
 - Reads: `useActionQuery(name, args)`; writes: `useActionMutation(name)` — both from
   `@agent-native/core/client` (already used in `app/hooks/use-orchestrator.ts`). A
   button with no action → **add the action first** (§11).
@@ -89,6 +94,7 @@ is then one file, not N pages.
   so the agent's `view-screen` knows the screen (DESIGN §2a/context-awareness).
 
 ### C5. Icons / composer / a11y
+
 - **Icons:** Tabler (`@tabler/icons-react`) only; a shared icon map (type/status/exec)
   so a `bug` icon is the same everywhere. No emoji as first-party icons.
 - **Agent composer:** the chat sidebar is `AgentComposerFrame` + `PromptComposer`
@@ -146,17 +152,17 @@ the selected `nodeRunId`. `view-screen` reports this back to the agent.
 
 ## 1. Page inventory + route map
 
-| # | Page | Route | Replaces (v1.5) | Primary job |
-|---|------|-------|-----------------|-------------|
-| 1 | Board (PM kanban) | `/` | `_index.tsx` (task board) | manage items by status + watch the queue |
-| 2 | Projects | `/projects` | — (new) | list/create projects |
-| 3 | Project detail | `/projects/:id` | — (new) | one project's board + config |
-| 4 | Work-item / Run console | `/items/:id` | `tasks.$id.tsx` | run + watch + steer one item |
-| 5 | Workflows (templates) | `/workflows` | `workflows._index.tsx` | template catalog |
-| 6 | Workflow editor | `/workflows/:id` | `workflows.$id.tsx` (JSON box) | build/edit a DAG |
-| 7 | Node library | `/library` | — (new) | reusable gate/analysis nodes |
-| 8 | Runs (global activity) | `/runs` | — (new) | cross-item run history/log |
-| 9 | Settings / Runtime | `/settings` | `settings.tsx` | engines, vLLM, claude, concurrency |
+| #   | Page                    | Route            | Replaces (v1.5)                | Primary job                              |
+| --- | ----------------------- | ---------------- | ------------------------------ | ---------------------------------------- |
+| 1   | Board (PM kanban)       | `/`              | `_index.tsx` (task board)      | manage items by status + watch the queue |
+| 2   | Projects                | `/projects`      | — (new)                        | list/create projects                     |
+| 3   | Project detail          | `/projects/:id`  | — (new)                        | one project's board + config             |
+| 4   | Work-item / Run console | `/items/:id`     | `tasks.$id.tsx`                | run + watch + steer one item             |
+| 5   | Workflows (templates)   | `/workflows`     | `workflows._index.tsx`         | template catalog                         |
+| 6   | Workflow editor         | `/workflows/:id` | `workflows.$id.tsx` (JSON box) | build/edit a DAG                         |
+| 7   | Node library            | `/library`       | — (new)                        | reusable gate/analysis nodes             |
+| 8   | Runs (global activity)  | `/runs`          | — (new)                        | cross-item run history/log               |
+| 9   | Settings / Runtime      | `/settings`      | `settings.tsx`                 | engines, vLLM, claude, concurrency       |
 
 ---
 
@@ -169,22 +175,25 @@ requirements/bugs/incidents/tasks through their real stages (待开发 · 测试
 view** watches the AI fleet.
 
 **Two views (toggle, top-left):**
+
 - **Board (by status)** — default. PM kanban.
 - **Queue (by execState)** — `idle · queued · running · paused · failed` lanes for
   watching what the orchestrator is running now (the §6.4 fleet).
 
 **Board layout.** A kanban whose columns come from the **status scheme** of the
 current filter (DESIGN §6.2a, `project.status_schemes`):
+
 - **All types** → 4 columns by `statusCategory`: `待处理 · 进行中 · 已完成 · 已取消`
   (`已取消` collapsed), with the specific stage as a sub-label on each card.
   (`completed` ≠ `cancelled` so shipped vs killed never share a bucket.)
 - **One type filtered** (e.g. bug) → full pipeline columns for that type
   (`待确认 · 待修复 · 修复中 · 待评审 · … · 待发布 · 已关闭`), grouped under category
   headers.
-A filter bar above (project, type, priority, assignee, `blocked` toggle, `severity`,
-`environment`, search).
+  A filter bar above (project, type, priority, assignee, `blocked` toggle, `severity`,
+  `environment`, search).
 
 **What each card shows** (one `work_items` row, `list-work-items`):
+
 - `key` (`PAY-14`) + title + type badge + priority pill + project color stripe
 - assignee avatar; current stage sub-label (when grouped by category)
 - **`blocked` flag** — red "阻塞" chip + reason tooltip when `blocked=true`
@@ -231,12 +240,14 @@ Empty column → muted placeholder; empty board → "Create your first work item
 **List `/projects`.** Grid of project cards: name, `key`, repo-linked icon
 (present iff `repo` set), open-work-items count, default-workflow name. Source
 `list-projects`.
+
 - `+ New project` → **D3** → `create-project`.
 - card click → `/projects/:id`.
 
 **Detail `/projects/:id`.** Header strip (name · key · repo remote link · default
 workflow) + a project-scoped copy of the Board (page 2, filtered to this project).
 Source `get-project` + `list-work-items({projectId})`.
+
 - `Project settings` gear → **D3 (edit mode)** → `update-project` (repo remote /
   default branch / workingDir / default workflow / environments / status-scheme).
   (Sharing/members deferred — owner-scoped for now, DESIGN §12.)
@@ -270,6 +281,7 @@ dynamically-added fanout children appear live with a `dynamic` glyph. Click a no
 → selects it (writes `application_state.nodeRunId`) → fills region (b).
 
 **(b) Right: node inspector.** Source `node-get(runId, nodeRunId)`:
+
 - title, type, `engine`/`model`, executor (vllm/remote/claude), `effort`
 - timings (started/ended/duration), `tokens_spent`, `attempts`
 - input artifact (id + summary, expandable) and output artifact (typed JSON if
@@ -286,6 +298,7 @@ dynamically-added fanout children appear live with a `dynamic` glyph. Click a no
   | `Open sub-run` | `navigate` to the sub-agent run | for `@app`/nested |
 
 **(c) Bottom tabs.**
+
 - **Overview** — run summary: counts by status, started/elapsed, budget remaining,
   deliverable. Source `run-get`.
 - **Steps timeline** — every NodeRun as a row (status, model, duration, tokens),
@@ -306,6 +319,7 @@ started → canvas shows the static template greyed with a big `Run`. Cancelled 
 
 **List.** Template cards: name, node count, `version`, last-used, "used by N
 items". Source `list-templates`.
+
 - `+ New workflow` → blank editor (page 6).
 - `Promote from run…` → **D9**: pick a successful `workflow_run` →
   `promote-run-to-template(runId)` → new template card.
@@ -321,8 +335,9 @@ items". Source `list-templates`.
 **3-pane layout.**
 
 **Left — Palette.** Two tabs:
+
 - **Nodes**: drag a primitive type onto canvas (`agent · tool · parallel · fanout ·
-  join · branch · loop · subworkflow · human · end`; `start` auto-present).
+join · branch · loop · subworkflow · human · end`; `start` auto-present).
 - **Library**: drag a pre-built node_def (`code-review`, `run-tests`, `git-commit`,
   `git-push`, `open-pr`). Source `list-node-defs`. Dropped library nodes show a
   lock glyph (config inherited, overridable per-use).
@@ -334,6 +349,7 @@ group frames you drop children into.
 
 **Right — Inspector** (selected node). Fields write into the in-memory graph
 (saved on `Save`):
+
 - title; `assignee` (`local` | `@app` picker)
 - **engine/model picker** — a CUSTOM dropdown fed by `list-runtime-configs` +
   built-in engines (NOT the framework composer picker; §8.5 white-list). Shows
@@ -370,7 +386,7 @@ modes — build it once.
 - **Library:** `@xyflow/react` (add to deps; `pnpm view @xyflow/react version` at
   build). One `<WorkflowCanvas mode="edit"|"run">`.
 - **Custom node types** registered per graph node-type (`agent · tool · parallel ·
-  fanout · join · branch · loop · subworkflow · human · end` + dropped library
+fanout · join · branch · loop · subworkflow · human · end` + dropped library
   nodes), all rendered by the **shared `<NodeCard>`** (C3) — in `run` mode the same
   card is tinted by NodeRun status via the C2 color map. One renderer, two modes.
 - **Container nodes** (`parallel`/`loop`/`fanout`) = React Flow **group/parent
@@ -423,6 +439,7 @@ Filters: status, project, date. Row click → page 4 for that run.
 ## 9. Settings / Runtime (`/settings`) — extends the shipped v1.5 page
 
 Tabbed (the Runtime tab already ships):
+
 - **Runtime** (built v1.5, extend): vLLM/OpenAI-compatible endpoint table
   (`list-runtime-configs`; `+ Add endpoint` → form → `save-runtime-config`;
   `Activate` → `activate-runtime`; `Test` → `test-runtime-config` (the missing
@@ -443,16 +460,16 @@ Tabbed (the Runtime tab already ships):
 
 ## 10. Dialog catalog (shadcn `Dialog`/`AlertDialog` — never native)
 
-| ID | Title | Trigger | Fields | Submit action | Notes |
-|----|-------|---------|--------|---------------|-------|
-| **D1** | New work item | Board / project / editor | project ▾, type, title, description, priority, **workflow ▾ (optional — blank = orchestrator auto-builds the DAG, DESIGN §6.3)** | `create-work-item` | card at the type's first todo stage, `exec_state=idle` |
-| **D2** | Enqueue to orchestrator | Board "Enqueue…/Assign" | multiselect idle items, workflow ▾, concurrencyDegree | `enqueue-work-item` ×N + `set-concurrency` | bulk; sets `exec_state→queued`, business status unchanged |
-| **D3** | New / edit project | Projects | name, key, repo {remote, defaultBranch, workingDir}, default workflow, `environments` list, status-scheme (JSON/advanced) | `create-project` / `update-project` | repo optional; sharing UI deferred (owner-scoped for now, §12) |
-| **D4** | Cancel run | run controls (AlertDialog) | confirm text | `run-cancel` | ⚠ destructive: explains cooperative abort + VM teardown |
-| **D5** | Edit & re-run node | node inspector | prompt, model ▾, effort | `node-override` | re-runs that node only |
-| **D7** | New / edit library node | Library | key, kind, (tool→action) / (agent→prompt+model+outputSchema), version | `save-node-def` | versioned |
-| **D8** | Delete confirm | any delete (AlertDialog) | confirm | `delete-*` | ⚠ destructive; lists references if blocked |
-| **D9** | Promote run → template | Workflows | pick successful run | `promote-run-to-template` | distills executed graph |
+| ID     | Title                   | Trigger                    | Fields                                                                                                                           | Submit action                              | Notes                                                          |
+| ------ | ----------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------- |
+| **D1** | New work item           | Board / project / editor   | project ▾, type, title, description, priority, **workflow ▾ (optional — blank = orchestrator auto-builds the DAG, DESIGN §6.3)** | `create-work-item`                         | card at the type's first todo stage, `exec_state=idle`         |
+| **D2** | Enqueue to orchestrator | Board "Enqueue…/Assign"    | multiselect idle items, workflow ▾, concurrencyDegree                                                                            | `enqueue-work-item` ×N + `set-concurrency` | bulk; sets `exec_state→queued`, business status unchanged      |
+| **D3** | New / edit project      | Projects                   | name, key, repo {remote, defaultBranch, workingDir}, default workflow, `environments` list, status-scheme (JSON/advanced)        | `create-project` / `update-project`        | repo optional; sharing UI deferred (owner-scoped for now, §12) |
+| **D4** | Cancel run              | run controls (AlertDialog) | confirm text                                                                                                                     | `run-cancel`                               | ⚠ destructive: explains cooperative abort + VM teardown        |
+| **D5** | Edit & re-run node      | node inspector             | prompt, model ▾, effort                                                                                                          | `node-override`                            | re-runs that node only                                         |
+| **D7** | New / edit library node | Library                    | key, kind, (tool→action) / (agent→prompt+model+outputSchema), version                                                            | `save-node-def`                            | versioned                                                      |
+| **D8** | Delete confirm          | any delete (AlertDialog)   | confirm                                                                                                                          | `delete-*`                                 | ⚠ destructive; lists references if blocked                     |
+| **D9** | Promote run → template  | Workflows                  | pick successful run                                                                                                              | `promote-run-to-template`                  | distills executed graph                                        |
 
 (D6 intentionally removed — model-compare was cut.)
 
@@ -463,16 +480,16 @@ the mutation is in flight; validation inline; on error keep open + show the erro
 
 ## 11. Per-page hook/action map (parity check)
 
-| Page | Reads | Writes |
-|------|-------|--------|
-| Board | `list-work-items`, `queue-status` | `create-work-item`, `transition-work-item` (status/blocked/cancel), `enqueue-work-item`, `set-concurrency`, `run-start/pause/cancel`, `update-work-item` (non-status), `delete-work-item` |
-| Projects | `list-projects`, `get-project`, `list-work-items` | `create-project`, `update-project` |
-| Item/Run | `get-work-item`, `run-get`, `run-graph`, `node-get`, `run-events` | `run-start/pause/resume/cancel`, `run-retry-node`, `node-override` |
-| Workflows | `list-templates` | `save-template`, `promote-run-to-template`, `delete-template` |
-| Editor | `get-template`, `list-runtime-configs`, `list-node-defs` | `save-template` |
-| Library | `list-node-defs` | `save-node-def`, `delete-node-def` |
-| Runs | `list-runs`, `run-get` | (control via item page) |
-| Settings | `list-runtime-configs`, `get-runtime-status` | `save-runtime-config`, `activate-runtime`, `delete-runtime-config`, `test-runtime-config`, `set-concurrency`, `start-claude-code` |
+| Page      | Reads                                                             | Writes                                                                                                                                                                                    |
+| --------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Board     | `list-work-items`, `queue-status`                                 | `create-work-item`, `transition-work-item` (status/blocked/cancel), `enqueue-work-item`, `set-concurrency`, `run-start/pause/cancel`, `update-work-item` (non-status), `delete-work-item` |
+| Projects  | `list-projects`, `get-project`, `list-work-items`                 | `create-project`, `update-project`                                                                                                                                                        |
+| Item/Run  | `get-work-item`, `run-get`, `run-graph`, `node-get`, `run-events` | `run-start/pause/resume/cancel`, `run-retry-node`, `node-override`                                                                                                                        |
+| Workflows | `list-templates`                                                  | `save-template`, `promote-run-to-template`, `delete-template`                                                                                                                             |
+| Editor    | `get-template`, `list-runtime-configs`, `list-node-defs`          | `save-template`                                                                                                                                                                           |
+| Library   | `list-node-defs`                                                  | `save-node-def`, `delete-node-def`                                                                                                                                                        |
+| Runs      | `list-runs`, `run-get`                                            | (control via item page)                                                                                                                                                                   |
+| Settings  | `list-runtime-configs`, `get-runtime-status`                      | `save-runtime-config`, `activate-runtime`, `delete-runtime-config`, `test-runtime-config`, `set-concurrency`, `start-claude-code`                                                         |
 
 Every write above is an existing/§10 action → the agent does the same through MCP.
 If a button needs something with no action, **add the action first** (UI never

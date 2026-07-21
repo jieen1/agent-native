@@ -10,15 +10,17 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import {
   resolveAgentHarness,
   startAgentHarnessRun,
 } from "@agent-native/core/agent/harness";
-import { getV3Db, v3Schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
+
+import { getV3Db, v3Schema } from "../db/index.js";
 import { registerOrchestratorRuntime } from "../register-runtime.js";
-import type { NodeRunnerResult } from "../runtime/node-runner.js";
 import type { RuntimeExecStep } from "../runtime/executors/types.js";
+import type { NodeRunnerResult } from "../runtime/node-runner.js";
 
 // ── Runtime Detection ────────────────────────────────────────────────────────
 

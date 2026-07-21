@@ -96,9 +96,9 @@ import {
 } from "@/lib/local-content-source-files";
 import { cn } from "@/lib/utils";
 
-import { VersionHistoryPanel } from "./VersionHistoryPanel";
 // LOCAL CUSTOMIZATION: wide-page toggle (see PageWidthToggle.tsx / LOCAL_CHANGES.md)
 import { PageWidthToggle } from "./PageWidthToggle";
+import { VersionHistoryPanel } from "./VersionHistoryPanel";
 
 type ExportFormat = "pdf" | "markdown" | "html";
 

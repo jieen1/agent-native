@@ -19,9 +19,10 @@
 // driven by the bound run reaching terminal (releaseBrainTaskForThread, called
 // from the reconciler) or the reaper.
 
-import { getDbExec } from "../db/index.js";
 import { isPostgres } from "@agent-native/core/db";
+
 import { newId } from "../../actions/_util.js";
+import { getDbExec } from "../db/index.js";
 import { getBrainConcurrency } from "./brain-concurrency.js";
 
 /** Advisory-lock key for the brain admission critical section (arbitrary const). */
@@ -166,19 +167,17 @@ export async function admitBrainTasks(): Promise<string[]> {
         args: [slots],
       });
 
-      return (promotedRows.rows as Array<Record<string, unknown>>).map(
-        (r) => ({
-          id: String(r.id),
-          threadId: String(r.thread_id),
-          message: (r.message as string | null) ?? null,
-          repo: (r.repo as string | null) ?? null,
-          baseBranch: (r.base_branch as string | null) ?? null,
-          workspaceId: (r.workspace_id as string | null) ?? null,
-          tags: (r.tags as Record<string, unknown> | null) ?? null,
-          ownerEmail: String(r.owner_email ?? "local@localhost"),
-          orgId: (r.org_id as string | null) ?? null,
-        }),
-      );
+      return (promotedRows.rows as Array<Record<string, unknown>>).map((r) => ({
+        id: String(r.id),
+        threadId: String(r.thread_id),
+        message: (r.message as string | null) ?? null,
+        repo: (r.repo as string | null) ?? null,
+        baseBranch: (r.base_branch as string | null) ?? null,
+        workspaceId: (r.workspace_id as string | null) ?? null,
+        tags: (r.tags as Record<string, unknown> | null) ?? null,
+        ownerEmail: String(r.owner_email ?? "local@localhost"),
+        orgId: (r.org_id as string | null) ?? null,
+      }));
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

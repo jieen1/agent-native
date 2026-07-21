@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { legacyRunFallback, shapeWorkItemDetail } from "../get-work-item.js";
 
 function baseItem(overrides: Record<string, unknown> = {}) {
@@ -142,13 +143,31 @@ describe("shapeWorkItemDetail", () => {
 
   it("F8: with `extra`, itemKeyDisplay and runs come from the caller's computed values", () => {
     const runs = [
-      { runId: "run_1", threadId: "bt_1", branch: "orchestrator/x", dispatchedAt: "2026-01-02T00:00:00Z", superseded: false },
-      { runId: null, threadId: "bt_0", branch: null, dispatchedAt: "2026-01-01T00:00:00Z", superseded: true },
+      {
+        runId: "run_1",
+        threadId: "bt_1",
+        branch: "orchestrator/x",
+        dispatchedAt: "2026-01-02T00:00:00Z",
+        superseded: false,
+      },
+      {
+        runId: null,
+        threadId: "bt_0",
+        branch: null,
+        dispatchedAt: "2026-01-01T00:00:00Z",
+        superseded: true,
+      },
     ];
-    const out = shapeWorkItemDetail(baseItem({ itemKey: "T-7" }), null, null, undefined, {
-      itemKeyDisplay: "T-7·ab12",
-      runs,
-    });
+    const out = shapeWorkItemDetail(
+      baseItem({ itemKey: "T-7" }),
+      null,
+      null,
+      undefined,
+      {
+        itemKeyDisplay: "T-7·ab12",
+        runs,
+      },
+    );
     expect(out.itemKeyDisplay).toBe("T-7·ab12");
     expect(out.runs).toEqual(runs);
     // Raw itemKey is untouched — extra only adds the display field, it

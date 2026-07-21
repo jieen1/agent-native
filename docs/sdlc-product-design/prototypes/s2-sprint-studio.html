@@ -1,674 +1,2243 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Foundry · Sprint 规划工作台</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
-<style>
-/* ============ Foundry tokens ============ */
-:root{
-  --background:oklch(1 0 0); --foreground:oklch(.141 .005 285.82);
-  --card:oklch(1 0 0); --muted:oklch(.967 .001 286.38);
-  --muted-foreground:oklch(.552 .016 285.94);
-  --border:oklch(.945 .003 286.32); --input:oklch(.92 .004 286.32);
-  --ring:oklch(.705 .015 286.07);
-  --primary:oklch(.21 .006 285.89); --primary-foreground:oklch(.985 0 0);
-  --brand:oklch(.55 .16 255); --brand-foreground:oklch(.985 0 0);
-  --success:oklch(.55 .16 145); --warning:oklch(.68 .15 85);
-  --info:oklch(.55 .18 250); --destructive:oklch(.577 .245 27.33);
-  --agent:oklch(.55 .14 300); --evidence:oklch(.48 .10 180);
-  --chart-1:oklch(.55 .16 255); --chart-2:oklch(.65 .13 255);
-  --chart-3:oklch(.75 .10 255); --chart-4:oklch(.84 .07 255); --chart-5:oklch(.92 .04 255);
-  --sidebar:oklch(.985 .001 286.38);
-  --radius:10px; --radius-sm:6px; --radius-md:8px; --radius-xl:14px;
-  --panel:oklch(.972 .002 286.35);
-  --font-sans:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
-  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
-}
-.dark{
-  --background:oklch(.18 .005 285.82); --foreground:oklch(.985 0 0);
-  --card:oklch(.21 .006 285.89); --muted:oklch(.274 .006 286.03);
-  --muted-foreground:oklch(.705 .015 286.07);
-  --border:oklch(1 0 0/.08); --input:oklch(1 0 0/.15);
-  --primary:oklch(.92 .004 286.32); --primary-foreground:oklch(.21 .006 285.89);
-  --brand:oklch(.65 .16 255); --success:oklch(.65 .14 145);
-  --warning:oklch(.8 .14 85); --info:oklch(.65 .16 250); --destructive:oklch(.66 .2 27);
-  --agent:oklch(.68 .13 300); --evidence:oklch(.62 .09 180);
-  --chart-1:oklch(.72 .14 255); --chart-2:oklch(.62 .13 255);
-  --chart-3:oklch(.52 .11 255); --chart-4:oklch(.42 .09 255); --chart-5:oklch(.32 .06 255);
-  --sidebar:oklch(.16 .005 285.82);
-  --panel:oklch(.215 .006 285.9);/*--panel-dark-done*/
-}
-/* ============ base ============ */
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{font-family:var(--font-sans);font-size:13px;line-height:1.55;color:var(--foreground);
-  background:var(--background);-webkit-font-smoothing:antialiased;text-autospace:ideograph-alpha ideograph-numeric}
-a{color:inherit;text-decoration:none}
-button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
-.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-thumb{background:oklch(0 0 0/.12);border-radius:3px}
-.dark ::-webkit-scrollbar-thumb{background:oklch(1 0 0/.14)}
-i.ti{font-size:16px;line-height:1;vertical-align:-2px}
-/* ============ 原型导航条 ============ */
-.proto-bar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:2px;
-  padding:4px 10px;background:oklch(.18 .01 260);color:oklch(.8 .01 260);
-  font-size:11px;overflow-x:auto;white-space:nowrap}
-.proto-bar .pb-title{font-weight:600;color:oklch(.98 0 0);margin-right:8px;display:flex;gap:6px;align-items:center}
-.proto-bar a{padding:3px 8px;border-radius:6px;cursor:pointer}
-.proto-bar a:hover{background:oklch(1 0 0/.1)}
-.proto-bar a.active{background:var(--brand);color:var(--brand-foreground)}
-.proto-bar .pb-theme{margin-left:auto;padding:3px 8px;border-radius:6px;display:flex;gap:4px;align-items:center}
-.proto-bar .pb-theme:hover{background:oklch(1 0 0/.1)}
-/* ============ 应用外壳 ============ */
-.app{display:flex;height:calc(100vh - 27px)}
-.sidebar{width:232px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;padding:10px;gap:2px;overflow-y:auto}
-.sb-head{display:flex;align-items:center;gap:8px;padding:6px 8px 10px;font-weight:600;font-size:13px}
-.sb-head .logo{width:22px;height:22px;border-radius:6px;background:var(--brand);color:var(--brand-foreground);
-  display:flex;align-items:center;justify-content:center}
-.sb-search{display:flex;align-items:center;gap:6px;margin:0 4px 8px;padding:5px 8px;border:1px solid var(--border);
-  border-radius:var(--radius-md);color:var(--muted-foreground);font-size:12px;background:var(--card)}
-.sb-search kbd{margin-left:auto}
-.sb-group{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);
-  padding:12px 8px 4px;font-weight:600}
-.sb-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--radius-md);
-  color:var(--foreground);font-size:13px;cursor:pointer}
-.sb-item i{font-size:17px;color:var(--muted-foreground)}
-.sb-item:hover{background:oklch(0 0 0/.045)}
-.dark .sb-item:hover{background:oklch(1 0 0/.06)}
-.sb-item.active{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand);font-weight:500}
-.sb-item.active i{color:var(--brand)}
-.sb-item .count{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
-.sb-item .dot-badge{margin-left:auto;min-width:16px;height:16px;padding:0 5px;border-radius:8px;
-  background:var(--brand);color:var(--brand-foreground);font-size:10px;font-weight:600;
-  display:flex;align-items:center;justify-content:center;font-family:var(--font-mono)}
-.inset{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--background)}
-/* ============ 页头/工具栏 ============ */
-.page-header{display:flex;align-items:center;gap:10px;padding:14px 24px 10px}
-.page-header .ph-icon{width:30px;height:30px;border-radius:8px;background:var(--muted);
-  display:flex;align-items:center;justify-content:center;color:var(--muted-foreground)}
-.page-header h1{font-size:16px;font-weight:600}
-.page-header .ph-count{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground)}
-.page-header .ph-sub{font-size:12px;color:var(--muted-foreground)}
-.page-header .ph-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
-.toolbar{display:flex;align-items:center;gap:8px;padding:6px 24px 10px;border-bottom:1px solid var(--border)}
-.content{flex:1;overflow:auto}
-/* ============ 通用组件 ============ */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-md);
-  font-size:12.5px;font-weight:500;border:1px solid transparent;cursor:pointer;white-space:nowrap}
-.btn-primary{background:var(--primary);color:var(--primary-foreground)}
-.btn-primary:hover{opacity:.9}
-.btn-brand{background:var(--brand);color:var(--brand-foreground)}
-.btn-outline{border-color:var(--border);background:var(--card)}
-.btn-outline:hover{background:var(--muted)}
-.btn-ghost:hover{background:var(--muted)}
-.btn-danger{background:var(--destructive);color:#fff}
-.btn:disabled{opacity:.45;cursor:not-allowed}
-.btn-sm{padding:3px 8px;font-size:12px}
-.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
-  font-size:11.5px;font-weight:500;border:1px solid var(--border);background:var(--card)}
-.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:500}
-.badge.b-success{background:color-mix(in oklch,var(--success) 14%,transparent);color:var(--success)}
-.badge.b-warning{background:color-mix(in oklch,var(--warning) 16%,transparent);color:oklch(.55 .13 85)}
-.dark .badge.b-warning{color:var(--warning)}
-.badge.b-info{background:color-mix(in oklch,var(--info) 14%,transparent);color:var(--info)}
-.badge.b-destructive{background:color-mix(in oklch,var(--destructive) 12%,transparent);color:var(--destructive)}
-.badge.b-agent{background:color-mix(in oklch,var(--agent) 12%,transparent);color:var(--agent)}
-.badge.b-brand{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand)}
-.badge.b-muted{background:var(--muted);color:var(--muted-foreground)}
-.badge.b-evidence{background:color-mix(in oklch,var(--evidence) 12%,transparent);color:var(--evidence)}
-kbd{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border:1px solid var(--border);
-  border-bottom-width:2px;border-radius:4px;background:var(--muted);color:var(--muted-foreground)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}
-.card-pad{padding:14px 16px}
-.section-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
-.group-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);font-weight:600}
-.divider{height:1px;background:var(--border)}
-/* 状态环 */
-.ring{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-block;position:relative}
-.st-icon{width:14px;height:14px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;vertical-align:-2px;color:#fff}
-.st-icon i{font-size:10px;line-height:1;display:block}
-.st-icon.sm{width:12px;height:12px}.st-icon.sm i{font-size:8.5px}
-.st-icon.lg{width:18px;height:18px}.st-icon.lg i{font-size:12.5px}
-.st-icon.ok{background:var(--success)}.st-icon.err{background:var(--destructive)}.st-icon.warn{background:var(--warning)}.st-icon.inf{background:var(--info)}.st-icon.mut{background:var(--muted-foreground)}
-.runbadge .st-icon{width:11px;height:11px}.runbadge .st-icon i{font-size:8px}
-.ring.r-pending{border:1.6px dashed var(--muted-foreground)}
-.ring.r-queued{border:1.6px solid var(--warning)}
-.ring.r-queued::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--warning)}
-.ring.r-running{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 50%,transparent 50% 100%)}
-.ring.r-review{border:1.6px solid var(--info);background:conic-gradient(var(--info) 0 75%,transparent 75% 100%)}
-.ring.r-gate{border:1.6px solid var(--warning)}
-.ring.r-gate::after{content:'';position:absolute;left:5.5px;top:3px;width:1.8px;height:7px;background:var(--warning)}
-.ring.r-skipped{border:1.6px solid var(--muted-foreground);background:linear-gradient(135deg,transparent 45%,var(--muted-foreground) 45%,var(--muted-foreground) 55%,transparent 55%)}
-/* 优先级信号条 */
-.pbars{display:inline-flex;gap:1.5px;align-items:flex-end;height:12px}
-.pbars span{width:3px;border-radius:1px;background:var(--border)}
-.pbars span:nth-child(1){height:4px}.pbars span:nth-child(2){height:6.5px}
-.pbars span:nth-child(3){height:9px}.pbars span:nth-child(4){height:12px}
-.pbars.p0 span{background:var(--destructive)}
-.pbars.p1 span:nth-child(-n+3){background:oklch(.55 .13 85)}
-.pbars.p2 span:nth-child(-n+2){background:var(--info)}
-.pbars.p3 span:nth-child(1){background:var(--muted-foreground)}
-/* 头像 */
-.avatar{width:20px;height:20px;border-radius:50%;background:var(--brand);color:#fff;
-  display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0}
-.avatar.a-agent{border-radius:6px;background:color-mix(in oklch,var(--agent) 15%,transparent);
-  color:var(--agent);border:1px solid color-mix(in oklch,var(--agent) 40%,transparent)}
-.avatar.a-brain{border-radius:6px;background:color-mix(in oklch,var(--brand) 15%,transparent);
-  color:var(--brand);border:1px solid color-mix(in oklch,var(--brand) 40%,transparent)}
-/* Switch(即时生效开关,§4.2) */
-.sw{width:28px;height:16px;border-radius:999px;background:var(--input);position:relative;transition:background .15s;cursor:pointer;flex-shrink:0;display:inline-block}
-.sw::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s;box-shadow:0 1px 2px oklch(0 0 0/.2)}
-.sw.on{background:var(--brand)}
-.sw.on::after{left:14px}
-/* 表格 */
-table.fd{width:100%;border-collapse:collapse;font-size:12.5px}
-table.fd th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
-  color:var(--muted-foreground);font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border)}
-table.fd td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
-table.fd tr:hover td{background:oklch(0 0 0/.02)}
-.dark table.fd tr:hover td{background:oklch(1 0 0/.03)}
-/* 空态 */
-.empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px;color:var(--muted-foreground)}
-.empty .e-icon{width:40px;height:40px;border-radius:50%;background:var(--muted);
-  display:flex;align-items:center;justify-content:center;font-size:20px}
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Foundry · Sprint 规划工作台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css"
+    />
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"
+    ></script>
+    <style>
+      /* ============ Foundry tokens ============ */
+      :root {
+        --background: oklch(1 0 0);
+        --foreground: oklch(0.141 0.005 285.82);
+        --card: oklch(1 0 0);
+        --muted: oklch(0.967 0.001 286.38);
+        --muted-foreground: oklch(0.552 0.016 285.94);
+        --border: oklch(0.945 0.003 286.32);
+        --input: oklch(0.92 0.004 286.32);
+        --ring: oklch(0.705 0.015 286.07);
+        --primary: oklch(0.21 0.006 285.89);
+        --primary-foreground: oklch(0.985 0 0);
+        --brand: oklch(0.55 0.16 255);
+        --brand-foreground: oklch(0.985 0 0);
+        --success: oklch(0.55 0.16 145);
+        --warning: oklch(0.68 0.15 85);
+        --info: oklch(0.55 0.18 250);
+        --destructive: oklch(0.577 0.245 27.33);
+        --agent: oklch(0.55 0.14 300);
+        --evidence: oklch(0.48 0.1 180);
+        --chart-1: oklch(0.55 0.16 255);
+        --chart-2: oklch(0.65 0.13 255);
+        --chart-3: oklch(0.75 0.1 255);
+        --chart-4: oklch(0.84 0.07 255);
+        --chart-5: oklch(0.92 0.04 255);
+        --sidebar: oklch(0.985 0.001 286.38);
+        --radius: 10px;
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --radius-xl: 14px;
+        --panel: oklch(0.972 0.002 286.35);
+        --font-sans:
+          "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+      }
+      .dark {
+        --background: oklch(0.18 0.005 285.82);
+        --foreground: oklch(0.985 0 0);
+        --card: oklch(0.21 0.006 285.89);
+        --muted: oklch(0.274 0.006 286.03);
+        --muted-foreground: oklch(0.705 0.015 286.07);
+        --border: oklch(1 0 0/0.08);
+        --input: oklch(1 0 0/0.15);
+        --primary: oklch(0.92 0.004 286.32);
+        --primary-foreground: oklch(0.21 0.006 285.89);
+        --brand: oklch(0.65 0.16 255);
+        --success: oklch(0.65 0.14 145);
+        --warning: oklch(0.8 0.14 85);
+        --info: oklch(0.65 0.16 250);
+        --destructive: oklch(0.66 0.2 27);
+        --agent: oklch(0.68 0.13 300);
+        --evidence: oklch(0.62 0.09 180);
+        --chart-1: oklch(0.72 0.14 255);
+        --chart-2: oklch(0.62 0.13 255);
+        --chart-3: oklch(0.52 0.11 255);
+        --chart-4: oklch(0.42 0.09 255);
+        --chart-5: oklch(0.32 0.06 255);
+        --sidebar: oklch(0.16 0.005 285.82);
+        --panel: oklch(0.215 0.006 285.9); /*--panel-dark-done*/
+      }
+      /* ============ base ============ */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        font-family: var(--font-sans);
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--foreground);
+        background: var(--background);
+        -webkit-font-smoothing: antialiased;
+        text-autospace: ideograph-alpha ideograph-numeric;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+        background: none;
+        border: none;
+        cursor: pointer;
+      }
+      .mono {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: oklch(0 0 0/0.12);
+        border-radius: 3px;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: oklch(1 0 0/0.14);
+      }
+      i.ti {
+        font-size: 16px;
+        line-height: 1;
+        vertical-align: -2px;
+      }
+      /* ============ 原型导航条 ============ */
+      .proto-bar {
+        position: sticky;
+        top: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 4px 10px;
+        background: oklch(0.18 0.01 260);
+        color: oklch(0.8 0.01 260);
+        font-size: 11px;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .proto-bar .pb-title {
+        font-weight: 600;
+        color: oklch(0.98 0 0);
+        margin-right: 8px;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .proto-bar a {
+        padding: 3px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .proto-bar a:hover {
+        background: oklch(1 0 0/0.1);
+      }
+      .proto-bar a.active {
+        background: var(--brand);
+        color: var(--brand-foreground);
+      }
+      .proto-bar .pb-theme {
+        margin-left: auto;
+        padding: 3px 8px;
+        border-radius: 6px;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+      .proto-bar .pb-theme:hover {
+        background: oklch(1 0 0/0.1);
+      }
+      /* ============ 应用外壳 ============ */
+      .app {
+        display: flex;
+        height: calc(100vh - 27px);
+      }
+      .sidebar {
+        width: 232px;
+        flex-shrink: 0;
+        background: var(--sidebar);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        padding: 10px;
+        gap: 2px;
+        overflow-y: auto;
+      }
+      .sb-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px 10px;
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .sb-head .logo {
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        background: var(--brand);
+        color: var(--brand-foreground);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .sb-search {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 4px 8px;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        color: var(--muted-foreground);
+        font-size: 12px;
+        background: var(--card);
+      }
+      .sb-search kbd {
+        margin-left: auto;
+      }
+      .sb-group {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted-foreground);
+        padding: 12px 8px 4px;
+        font-weight: 600;
+      }
+      .sb-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 8px;
+        border-radius: var(--radius-md);
+        color: var(--foreground);
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .sb-item i {
+        font-size: 17px;
+        color: var(--muted-foreground);
+      }
+      .sb-item:hover {
+        background: oklch(0 0 0/0.045);
+      }
+      .dark .sb-item:hover {
+        background: oklch(1 0 0/0.06);
+      }
+      .sb-item.active {
+        background: color-mix(in oklch, var(--brand) 12%, transparent);
+        color: var(--brand);
+        font-weight: 500;
+      }
+      .sb-item.active i {
+        color: var(--brand);
+      }
+      .sb-item .count {
+        margin-left: auto;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted-foreground);
+      }
+      .sb-item .dot-badge {
+        margin-left: auto;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 5px;
+        border-radius: 8px;
+        background: var(--brand);
+        color: var(--brand-foreground);
+        font-size: 10px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+      }
+      .inset {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--background);
+      }
+      /* ============ 页头/工具栏 ============ */
+      .page-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 24px 10px;
+      }
+      .page-header .ph-icon {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        background: var(--muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted-foreground);
+      }
+      .page-header h1 {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .page-header .ph-count {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--muted-foreground);
+      }
+      .page-header .ph-sub {
+        font-size: 12px;
+        color: var(--muted-foreground);
+      }
+      .page-header .ph-actions {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 24px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .content {
+        flex: 1;
+        overflow: auto;
+      }
+      /* ============ 通用组件 ============ */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 12px;
+        border-radius: var(--radius-md);
+        font-size: 12.5px;
+        font-weight: 500;
+        border: 1px solid transparent;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+      .btn-primary:hover {
+        opacity: 0.9;
+      }
+      .btn-brand {
+        background: var(--brand);
+        color: var(--brand-foreground);
+      }
+      .btn-outline {
+        border-color: var(--border);
+        background: var(--card);
+      }
+      .btn-outline:hover {
+        background: var(--muted);
+      }
+      .btn-ghost:hover {
+        background: var(--muted);
+      }
+      .btn-danger {
+        background: var(--destructive);
+        color: #fff;
+      }
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .btn-sm {
+        padding: 3px 8px;
+        font-size: 12px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11.5px;
+        font-weight: 500;
+        border: 1px solid var(--border);
+        background: var(--card);
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 7px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .badge.b-success {
+        background: color-mix(in oklch, var(--success) 14%, transparent);
+        color: var(--success);
+      }
+      .badge.b-warning {
+        background: color-mix(in oklch, var(--warning) 16%, transparent);
+        color: oklch(0.55 0.13 85);
+      }
+      .dark .badge.b-warning {
+        color: var(--warning);
+      }
+      .badge.b-info {
+        background: color-mix(in oklch, var(--info) 14%, transparent);
+        color: var(--info);
+      }
+      .badge.b-destructive {
+        background: color-mix(in oklch, var(--destructive) 12%, transparent);
+        color: var(--destructive);
+      }
+      .badge.b-agent {
+        background: color-mix(in oklch, var(--agent) 12%, transparent);
+        color: var(--agent);
+      }
+      .badge.b-brand {
+        background: color-mix(in oklch, var(--brand) 12%, transparent);
+        color: var(--brand);
+      }
+      .badge.b-muted {
+        background: var(--muted);
+        color: var(--muted-foreground);
+      }
+      .badge.b-evidence {
+        background: color-mix(in oklch, var(--evidence) 12%, transparent);
+        color: var(--evidence);
+      }
+      kbd {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        padding: 1px 5px;
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        background: var(--muted);
+        color: var(--muted-foreground);
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+      .card-pad {
+        padding: 14px 16px;
+      }
+      .section-title {
+        font-size: 13px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .group-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted-foreground);
+        font-weight: 600;
+      }
+      .divider {
+        height: 1px;
+        background: var(--border);
+      }
+      /* 状态环 */
+      .ring {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        display: inline-block;
+        position: relative;
+      }
+      .st-icon {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        vertical-align: -2px;
+        color: #fff;
+      }
+      .st-icon i {
+        font-size: 10px;
+        line-height: 1;
+        display: block;
+      }
+      .st-icon.sm {
+        width: 12px;
+        height: 12px;
+      }
+      .st-icon.sm i {
+        font-size: 8.5px;
+      }
+      .st-icon.lg {
+        width: 18px;
+        height: 18px;
+      }
+      .st-icon.lg i {
+        font-size: 12.5px;
+      }
+      .st-icon.ok {
+        background: var(--success);
+      }
+      .st-icon.err {
+        background: var(--destructive);
+      }
+      .st-icon.warn {
+        background: var(--warning);
+      }
+      .st-icon.inf {
+        background: var(--info);
+      }
+      .st-icon.mut {
+        background: var(--muted-foreground);
+      }
+      .runbadge .st-icon {
+        width: 11px;
+        height: 11px;
+      }
+      .runbadge .st-icon i {
+        font-size: 8px;
+      }
+      .ring.r-pending {
+        border: 1.6px dashed var(--muted-foreground);
+      }
+      .ring.r-queued {
+        border: 1.6px solid var(--warning);
+      }
+      .ring.r-queued::after {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border-radius: 50%;
+        background: var(--warning);
+      }
+      .ring.r-running {
+        border: 1.6px solid var(--info);
+        background: conic-gradient(var(--info) 0 50%, transparent 50% 100%);
+      }
+      .ring.r-review {
+        border: 1.6px solid var(--info);
+        background: conic-gradient(var(--info) 0 75%, transparent 75% 100%);
+      }
+      .ring.r-gate {
+        border: 1.6px solid var(--warning);
+      }
+      .ring.r-gate::after {
+        content: "";
+        position: absolute;
+        left: 5.5px;
+        top: 3px;
+        width: 1.8px;
+        height: 7px;
+        background: var(--warning);
+      }
+      .ring.r-skipped {
+        border: 1.6px solid var(--muted-foreground);
+        background: linear-gradient(
+          135deg,
+          transparent 45%,
+          var(--muted-foreground) 45%,
+          var(--muted-foreground) 55%,
+          transparent 55%
+        );
+      }
+      /* 优先级信号条 */
+      .pbars {
+        display: inline-flex;
+        gap: 1.5px;
+        align-items: flex-end;
+        height: 12px;
+      }
+      .pbars span {
+        width: 3px;
+        border-radius: 1px;
+        background: var(--border);
+      }
+      .pbars span:nth-child(1) {
+        height: 4px;
+      }
+      .pbars span:nth-child(2) {
+        height: 6.5px;
+      }
+      .pbars span:nth-child(3) {
+        height: 9px;
+      }
+      .pbars span:nth-child(4) {
+        height: 12px;
+      }
+      .pbars.p0 span {
+        background: var(--destructive);
+      }
+      .pbars.p1 span:nth-child(-n + 3) {
+        background: oklch(0.55 0.13 85);
+      }
+      .pbars.p2 span:nth-child(-n + 2) {
+        background: var(--info);
+      }
+      .pbars.p3 span:nth-child(1) {
+        background: var(--muted-foreground);
+      }
+      /* 头像 */
+      .avatar {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--brand);
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .avatar.a-agent {
+        border-radius: 6px;
+        background: color-mix(in oklch, var(--agent) 15%, transparent);
+        color: var(--agent);
+        border: 1px solid color-mix(in oklch, var(--agent) 40%, transparent);
+      }
+      .avatar.a-brain {
+        border-radius: 6px;
+        background: color-mix(in oklch, var(--brand) 15%, transparent);
+        color: var(--brand);
+        border: 1px solid color-mix(in oklch, var(--brand) 40%, transparent);
+      }
+      /* Switch(即时生效开关,§4.2) */
+      .sw {
+        width: 28px;
+        height: 16px;
+        border-radius: 999px;
+        background: var(--input);
+        position: relative;
+        transition: background 0.15s;
+        cursor: pointer;
+        flex-shrink: 0;
+        display: inline-block;
+      }
+      .sw::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #fff;
+        transition: left 0.15s;
+        box-shadow: 0 1px 2px oklch(0 0 0/0.2);
+      }
+      .sw.on {
+        background: var(--brand);
+      }
+      .sw.on::after {
+        left: 14px;
+      }
+      /* 表格 */
+      table.fd {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12.5px;
+      }
+      table.fd th {
+        text-align: left;
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted-foreground);
+        font-weight: 600;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      table.fd td {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+      table.fd tr:hover td {
+        background: oklch(0 0 0/0.02);
+      }
+      .dark table.fd tr:hover td {
+        background: oklch(1 0 0/0.03);
+      }
+      /* 空态 */
+      .empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 40px;
+        color: var(--muted-foreground);
+      }
+      .empty .e-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+      }
 
-/* ============ 本屏：规划工作台 ============ */
-.phase-mini{display:flex;align-items:center;gap:4px;margin-left:14px}
-.phase-mini .pm-step{display:flex;align-items:center;gap:4px}
-.phase-mini .pm-dot{width:7px;height:7px;border-radius:50%;background:var(--border)}
-.phase-mini .pm-step.pm-active .pm-dot{background:var(--info)}
-.phase-mini .pm-step.pm-active .pm-name{color:var(--info);font-weight:600}
-.phase-mini .pm-name{font-size:11px;color:var(--muted-foreground)}
-.phase-mini .pm-sep{width:10px;height:1px;background:var(--border)}
+      /* ============ 本屏：规划工作台 ============ */
+      .phase-mini {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 14px;
+      }
+      .phase-mini .pm-step {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .phase-mini .pm-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--border);
+      }
+      .phase-mini .pm-step.pm-active .pm-dot {
+        background: var(--info);
+      }
+      .phase-mini .pm-step.pm-active .pm-name {
+        color: var(--info);
+        font-weight: 600;
+      }
+      .phase-mini .pm-name {
+        font-size: 11px;
+        color: var(--muted-foreground);
+      }
+      .phase-mini .pm-sep {
+        width: 10px;
+        height: 1px;
+        background: var(--border);
+      }
 
-.studio{flex:1;display:flex;overflow:hidden;border-top:1px solid var(--border)}
-/* 步骤轨 */
-.steps-rail{width:220px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;
-  padding:12px 10px;display:flex;flex-direction:column;gap:1px;background:var(--panel)}
-.step-item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:var(--radius-md);
-  cursor:pointer;position:relative}
-.step-item:hover{background:oklch(0 0 0/.04)}
-.dark .step-item:hover{background:oklch(1 0 0/.05)}
-.step-item .st-no{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);width:12px}
-.step-item .st-name{font-size:12.5px;flex:1}
-.step-item .st-sub{display:block;font-size:10.5px;color:var(--muted-foreground);margin-top:1px}
-.step-item.active{background:color-mix(in oklch,var(--brand) 10%,transparent);
-  border:1px solid color-mix(in oklch,var(--brand) 30%,transparent)}
-.step-item.active .st-name{color:var(--brand);font-weight:600}
-.rail-signoffs{margin-top:14px;padding-top:10px;border-top:1px solid var(--border)}
-.signoff-row{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:var(--radius-md);font-size:12px}
-.signoff-row .so-meta{margin-left:auto;font-size:10.5px;color:var(--muted-foreground);font-family:var(--font-mono)}
-/* 产物区 */
-.artifact-area{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0}
-.artifact-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:14px 22px 12px;position:sticky;top:0;
-  background:var(--background);z-index:5;border-bottom:1px solid var(--border)}
-.artifact-head .ah-title{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;white-space:nowrap}
-.artifact-body{padding:16px 22px 90px;display:flex;flex-direction:column;gap:12px;max-width:760px}
-.scenario-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
-.scenario-card .sc-head{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px}
-.scenario-card .sc-title{font-weight:600;font-size:13px;flex:1}
-.scenario-card .sc-row{display:flex;gap:8px;margin-top:7px;font-size:12.5px}
-.scenario-card .sc-label{width:88px;flex-shrink:0;color:var(--muted-foreground);font-size:11px;
-  text-transform:uppercase;letter-spacing:.05em;font-weight:600;padding-top:2px}
-.scenario-card ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
-.scenario-card .sc-foot{display:flex;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);align-items:center}
-.add-card{border:1.5px dashed var(--border);border-radius:var(--radius);padding:14px;display:flex;
-  align-items:center;justify-content:center;gap:7px;color:var(--muted-foreground);cursor:pointer;font-size:12.5px}
-.add-card:hover{color:var(--brand);border-color:color-mix(in oklch,var(--brand) 45%,transparent);
-  background:color-mix(in oklch,var(--brand) 4%,transparent)}
-.quality-bar{position:sticky;bottom:0;margin-top:auto;background:var(--background);
-  border-top:1px solid var(--border);padding:10px 22px;display:flex;gap:14px;align-items:center}
-.quality-bar .qb-item{display:flex;align-items:center;gap:6px;font-size:12px}
-.quality-bar .qb-item i{font-size:15px}
-.quality-bar .qb-ok{color:var(--success)}
-.quality-bar .qb-warn{color:oklch(.55 .13 85)}
-.dark .quality-bar .qb-warn{color:var(--warning)}
-/* 会话区 */
-.chat-rail{width:400px;flex-shrink:0;border-left:1px solid var(--border);background:var(--panel);display:flex;
-  flex-direction:column;overflow:hidden}
-.chat-rail .cr-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
-.chat-scroll{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
-.qa-summary{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:var(--radius-md);
-  background:var(--muted);font-size:12px;cursor:pointer}
-.qa-summary .qa-q{color:var(--muted-foreground)}
-.qa-summary .qa-a{font-weight:500}
-.qa-summary i{color:var(--muted-foreground);font-size:14px;margin-top:2px;flex-shrink:0}
-.interview-card{border:1px solid color-mix(in oklch,var(--brand) 35%,var(--border));border-radius:var(--radius);
-  padding:14px;background:var(--card);box-shadow:0 1px 3px oklch(0 0 0/.04)}
-.interview-card .ic-q{font-size:13.5px;font-weight:600;line-height:1.5;margin-bottom:10px}
-.rec-chip{display:flex;align-items:flex-start;gap:8px;padding:9px 11px;border-radius:var(--radius-md);
-  background:color-mix(in oklch,var(--brand) 10%,transparent);
-  border:1px solid color-mix(in oklch,var(--brand) 40%,transparent);
-  color:var(--brand);font-size:12.5px;font-weight:500;cursor:pointer;line-height:1.5}
-.rec-chip:hover{background:color-mix(in oklch,var(--brand) 16%,transparent)}
-.rec-chip i{margin-top:2px;flex-shrink:0}
-.alt-chips{display:flex;flex-direction:column;gap:6px;margin-top:6px}
-.alt-chip{display:flex;align-items:center;gap:7px;padding:7px 11px;border-radius:var(--radius-md);
-  border:1px solid var(--border);font-size:12.5px;color:var(--foreground);cursor:pointer;background:var(--card)}
-.alt-chip:hover{background:var(--muted)}
-.composer{border-top:1px solid var(--border);padding:12px 16px;display:flex;flex-direction:column;gap:8px}
-.composer .cp-box{border:1px solid var(--input);border-radius:var(--radius);padding:9px 11px;
-  min-height:64px;font-size:12.5px;color:var(--muted-foreground);background:var(--card)}
-.composer .cp-foot{display:flex;align-items:center;gap:8px}
-.composer .cp-foot .btn{margin-left:auto}
-/* 拆分对话框开合：接 fm-overlay-enter/exit（Alpine x-transition 驱动，节奏用 fm 令牌） */
-.fm-dlg-backdrop.fm-overlay-enter{transition-property:opacity;transition-duration:var(--fm-dur-3);transition-timing-function:var(--fm-ease-enter)}
-.fm-dlg-backdrop.fm-overlay-exit{transition-property:opacity;transition-duration:var(--fm-dur-2);transition-timing-function:var(--fm-ease-exit)}
-.fm-op-0{opacity:0}
-.fm-op-1{opacity:1}
-</style>
-<style id="foundry-motion">
-  /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
-  :root {
-    /* 一次性动效时长梯度 */
-    --fm-dur-1: 120ms;   /* 微反馈:hover、图标切换 */
-    --fm-dur-2: 240ms;   /* 小型:按钮/开关状态、Toast、菜单 */
-    --fm-dur-3: 400ms;   /* 中型:对话框 enter、完成打勾、区块 reveal */
-    --fm-dur-4: 700ms;   /* 大型:庆祝时刻、欢迎/空状态插画 */
-    /* 氛围循环档(持续存在感,允许慢) */
-    --fm-ambient-1: 1600ms;  /* 活跃脉动 */
-    --fm-ambient-2: 2500ms;  /* thinking 扫光 */
-    --fm-ambient-3: 3200ms;  /* 描边光束(仅单一 CTA 级场景) */
-    /* 曲线 */
-    --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);   /* 一切常规过渡 */
-    --fm-ease-enter:    cubic-bezier(0.16, 1, 0.3, 1);   /* 进场从容 */
-    --fm-ease-exit:     cubic-bezier(0.7, 0, 0.84, 0);   /* 离场干脆 */
-    --fm-ease-bounce:   cubic-bezier(0.5, 1.5, 0.4, 1);  /* 仅庆祝时刻 */
-    /* 位移与缩放(工具产品克制档) */
-    --fm-shift-1: 4px;
-    --fm-shift-2: 8px;
-    --fm-scale-hover: 1.02;
-    --fm-scale-active: 0.98;
-  }
+      .studio {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+        border-top: 1px solid var(--border);
+      }
+      /* 步骤轨 */
+      .steps-rail {
+        width: 220px;
+        flex-shrink: 0;
+        border-right: 1px solid var(--border);
+        overflow-y: auto;
+        padding: 12px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        background: var(--panel);
+      }
+      .step-item {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 9px;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        position: relative;
+      }
+      .step-item:hover {
+        background: oklch(0 0 0/0.04);
+      }
+      .dark .step-item:hover {
+        background: oklch(1 0 0/0.05);
+      }
+      .step-item .st-no {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        color: var(--muted-foreground);
+        width: 12px;
+      }
+      .step-item .st-name {
+        font-size: 12.5px;
+        flex: 1;
+      }
+      .step-item .st-sub {
+        display: block;
+        font-size: 10.5px;
+        color: var(--muted-foreground);
+        margin-top: 1px;
+      }
+      .step-item.active {
+        background: color-mix(in oklch, var(--brand) 10%, transparent);
+        border: 1px solid color-mix(in oklch, var(--brand) 30%, transparent);
+      }
+      .step-item.active .st-name {
+        color: var(--brand);
+        font-weight: 600;
+      }
+      .rail-signoffs {
+        margin-top: 14px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+      }
+      .signoff-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 9px;
+        border-radius: var(--radius-md);
+        font-size: 12px;
+      }
+      .signoff-row .so-meta {
+        margin-left: auto;
+        font-size: 10.5px;
+        color: var(--muted-foreground);
+        font-family: var(--font-mono);
+      }
+      /* 产物区 */
+      .artifact-area {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .artifact-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 10px;
+        padding: 14px 22px 12px;
+        position: sticky;
+        top: 0;
+        background: var(--background);
+        z-index: 5;
+        border-bottom: 1px solid var(--border);
+      }
+      .artifact-head .ah-title {
+        font-size: 14px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+      }
+      .artifact-body {
+        padding: 16px 22px 90px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-width: 760px;
+      }
+      .scenario-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 14px 16px;
+      }
+      .scenario-card .sc-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .scenario-card .sc-title {
+        font-weight: 600;
+        font-size: 13px;
+        flex: 1;
+      }
+      .scenario-card .sc-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 7px;
+        font-size: 12.5px;
+      }
+      .scenario-card .sc-label {
+        width: 88px;
+        flex-shrink: 0;
+        color: var(--muted-foreground);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+        padding-top: 2px;
+      }
+      .scenario-card ol {
+        margin: 0;
+        padding-left: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .scenario-card .sc-foot {
+        display: flex;
+        gap: 6px;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+        align-items: center;
+      }
+      .add-card {
+        border: 1.5px dashed var(--border);
+        border-radius: var(--radius);
+        padding: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        color: var(--muted-foreground);
+        cursor: pointer;
+        font-size: 12.5px;
+      }
+      .add-card:hover {
+        color: var(--brand);
+        border-color: color-mix(in oklch, var(--brand) 45%, transparent);
+        background: color-mix(in oklch, var(--brand) 4%, transparent);
+      }
+      .quality-bar {
+        position: sticky;
+        bottom: 0;
+        margin-top: auto;
+        background: var(--background);
+        border-top: 1px solid var(--border);
+        padding: 10px 22px;
+        display: flex;
+        gap: 14px;
+        align-items: center;
+      }
+      .quality-bar .qb-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+      }
+      .quality-bar .qb-item i {
+        font-size: 15px;
+      }
+      .quality-bar .qb-ok {
+        color: var(--success);
+      }
+      .quality-bar .qb-warn {
+        color: oklch(0.55 0.13 85);
+      }
+      .dark .quality-bar .qb-warn {
+        color: var(--warning);
+      }
+      /* 会话区 */
+      .chat-rail {
+        width: 400px;
+        flex-shrink: 0;
+        border-left: 1px solid var(--border);
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .chat-rail .cr-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .chat-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .qa-summary {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: var(--radius-md);
+        background: var(--muted);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .qa-summary .qa-q {
+        color: var(--muted-foreground);
+      }
+      .qa-summary .qa-a {
+        font-weight: 500;
+      }
+      .qa-summary i {
+        color: var(--muted-foreground);
+        font-size: 14px;
+        margin-top: 2px;
+        flex-shrink: 0;
+      }
+      .interview-card {
+        border: 1px solid color-mix(in oklch, var(--brand) 35%, var(--border));
+        border-radius: var(--radius);
+        padding: 14px;
+        background: var(--card);
+        box-shadow: 0 1px 3px oklch(0 0 0/0.04);
+      }
+      .interview-card .ic-q {
+        font-size: 13.5px;
+        font-weight: 600;
+        line-height: 1.5;
+        margin-bottom: 10px;
+      }
+      .rec-chip {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 9px 11px;
+        border-radius: var(--radius-md);
+        background: color-mix(in oklch, var(--brand) 10%, transparent);
+        border: 1px solid color-mix(in oklch, var(--brand) 40%, transparent);
+        color: var(--brand);
+        font-size: 12.5px;
+        font-weight: 500;
+        cursor: pointer;
+        line-height: 1.5;
+      }
+      .rec-chip:hover {
+        background: color-mix(in oklch, var(--brand) 16%, transparent);
+      }
+      .rec-chip i {
+        margin-top: 2px;
+        flex-shrink: 0;
+      }
+      .alt-chips {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .alt-chip {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 11px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        font-size: 12.5px;
+        color: var(--foreground);
+        cursor: pointer;
+        background: var(--card);
+      }
+      .alt-chip:hover {
+        background: var(--muted);
+      }
+      .composer {
+        border-top: 1px solid var(--border);
+        padding: 12px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .composer .cp-box {
+        border: 1px solid var(--input);
+        border-radius: var(--radius);
+        padding: 9px 11px;
+        min-height: 64px;
+        font-size: 12.5px;
+        color: var(--muted-foreground);
+        background: var(--card);
+      }
+      .composer .cp-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .composer .cp-foot .btn {
+        margin-left: auto;
+      }
+      /* 拆分对话框开合：接 fm-overlay-enter/exit（Alpine x-transition 驱动，节奏用 fm 令牌） */
+      .fm-dlg-backdrop.fm-overlay-enter {
+        transition-property: opacity;
+        transition-duration: var(--fm-dur-3);
+        transition-timing-function: var(--fm-ease-enter);
+      }
+      .fm-dlg-backdrop.fm-overlay-exit {
+        transition-property: opacity;
+        transition-duration: var(--fm-dur-2);
+        transition-timing-function: var(--fm-ease-exit);
+      }
+      .fm-op-0 {
+        opacity: 0;
+      }
+      .fm-op-1 {
+        opacity: 1;
+      }
+    </style>
+    <style id="foundry-motion">
+      /* ===== Foundry v3 Motion Tokens(multica 实证校准) ===== */
+      :root {
+        /* 一次性动效时长梯度 */
+        --fm-dur-1: 120ms; /* 微反馈:hover、图标切换 */
+        --fm-dur-2: 240ms; /* 小型:按钮/开关状态、Toast、菜单 */
+        --fm-dur-3: 400ms; /* 中型:对话框 enter、完成打勾、区块 reveal */
+        --fm-dur-4: 700ms; /* 大型:庆祝时刻、欢迎/空状态插画 */
+        /* 氛围循环档(持续存在感,允许慢) */
+        --fm-ambient-1: 1600ms; /* 活跃脉动 */
+        --fm-ambient-2: 2500ms; /* thinking 扫光 */
+        --fm-ambient-3: 3200ms; /* 描边光束(仅单一 CTA 级场景) */
+        /* 曲线 */
+        --fm-ease-standard: cubic-bezier(0.4, 0, 0.2, 1); /* 一切常规过渡 */
+        --fm-ease-enter: cubic-bezier(0.16, 1, 0.3, 1); /* 进场从容 */
+        --fm-ease-exit: cubic-bezier(0.7, 0, 0.84, 0); /* 离场干脆 */
+        --fm-ease-bounce: cubic-bezier(0.5, 1.5, 0.4, 1); /* 仅庆祝时刻 */
+        /* 位移与缩放(工具产品克制档) */
+        --fm-shift-1: 4px;
+        --fm-shift-2: 8px;
+        --fm-scale-hover: 1.02;
+        --fm-scale-active: 0.98;
+      }
 
-  /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
-  @keyframes fm-text-shimmer {
-    0%   { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-  .fm-thinking {
-    background-image: linear-gradient(90deg,
-      var(--muted-foreground) 0%, var(--muted-foreground) 35%,
-      var(--foreground) 50%,
-      var(--muted-foreground) 65%, var(--muted-foreground) 100%);
-    background-size: 200% 100%;
-    -webkit-background-clip: text; background-clip: text;
-    color: transparent;
-    animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
-  }
+      /* ===== 模式 1:thinking / streaming 文字扫光(替代 spinner) ===== */
+      @keyframes fm-text-shimmer {
+        0% {
+          background-position: 200% 0;
+        }
+        100% {
+          background-position: -200% 0;
+        }
+      }
+      .fm-thinking {
+        background-image: linear-gradient(
+          90deg,
+          var(--muted-foreground) 0%,
+          var(--muted-foreground) 35%,
+          var(--foreground) 50%,
+          var(--muted-foreground) 65%,
+          var(--muted-foreground) 100%
+        );
+        background-size: 200% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: fm-text-shimmer var(--fm-ambient-2) linear infinite;
+      }
 
-  /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
-  @keyframes fm-impulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent); }
-    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent); }
-  }
-  .fm-live { animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite; }
+      /* ===== 模式 2:活跃态克制脉动(只动色彩与阴影,不缩放) ===== */
+      @keyframes fm-impulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0
+            color-mix(in oklch, var(--agent, var(--primary)) 35%, transparent);
+        }
+        50% {
+          box-shadow: 0 0 0 4px
+            color-mix(in oklch, var(--agent, var(--primary)) 12%, transparent);
+        }
+      }
+      .fm-live {
+        animation: fm-impulse var(--fm-ambient-1) ease-in-out infinite;
+      }
 
-  /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
-  @keyframes fm-complete-badge {
-    0% { transform: scale(0); } 60% { transform: scale(1.12); } 100% { transform: scale(1); }
-  }
-  @keyframes fm-complete-check { to { stroke-dashoffset: 0; } }
-  .fm-complete { animation: fm-complete-badge 500ms var(--fm-ease-bounce) both; }
-  .fm-complete svg path, .fm-complete svg polyline {
-    stroke-dasharray: 48; stroke-dashoffset: 48;
-    animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
-  }
+      /* ===== 模式 3:两段式完成(徽章回弹 → 打勾描边) ===== */
+      @keyframes fm-complete-badge {
+        0% {
+          transform: scale(0);
+        }
+        60% {
+          transform: scale(1.12);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+      @keyframes fm-complete-check {
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+      .fm-complete {
+        animation: fm-complete-badge 500ms var(--fm-ease-bounce) both;
+      }
+      .fm-complete svg path,
+      .fm-complete svg polyline {
+        stroke-dasharray: 48;
+        stroke-dashoffset: 48;
+        animation: fm-complete-check var(--fm-dur-3) ease-out 350ms forwards;
+      }
 
-  /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
-  @keyframes fm-nav-sweep {
-    0% { transform: translateX(-100%); } 100% { transform: translateX(400%); }
-  }
-  .fm-nav-progress {
-    position: fixed; top: 0; left: 0; right: 0; height: 2px;
-    overflow: hidden; pointer-events: none; z-index: 9999; display: none;
-  }
-  .fm-nav-progress[data-active="true"] { display: block; }
-  .fm-nav-progress::before {
-    content: ""; display: block; height: 100%; width: 25%;
-    background: var(--primary);
-    animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
-  }
+      /* ===== 模式 4:导航/加载进度扫条(与真实网络解耦的 pending 提示) ===== */
+      @keyframes fm-nav-sweep {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(400%);
+        }
+      }
+      .fm-nav-progress {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 9999;
+        display: none;
+      }
+      .fm-nav-progress[data-active="true"] {
+        display: block;
+      }
+      .fm-nav-progress::before {
+        content: "";
+        display: block;
+        height: 100%;
+        width: 25%;
+        background: var(--primary);
+        animation: fm-nav-sweep 1400ms var(--fm-ease-standard) infinite;
+      }
 
-  /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
-  [data-fm-reveal] {
-    opacity: 0; transform: translateY(var(--fm-shift-1));
-    transition: opacity var(--fm-dur-3) var(--fm-ease-enter),
-                transform var(--fm-dur-3) var(--fm-ease-enter);
-  }
-  [data-fm-reveal].fm-in { opacity: 1; transform: none; }
-  /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
-  .fm-scroll [data-fm-reveal] { transform: none; }
+      /* ===== 模式 5:低频页入场(纯 opacity 为主,克制位移) ===== */
+      [data-fm-reveal] {
+        opacity: 0;
+        transform: translateY(var(--fm-shift-1));
+        transition:
+          opacity var(--fm-dur-3) var(--fm-ease-enter),
+          transform var(--fm-dur-3) var(--fm-ease-enter);
+      }
+      [data-fm-reveal].fm-in {
+        opacity: 1;
+        transform: none;
+      }
+      /* overflow 容器内只准 opacity(防滚动条闪烁,multica 实证反例) */
+      .fm-scroll [data-fm-reveal] {
+        transform: none;
+      }
 
-  /* ===== 通用交互态统一 ===== */
-  .fm-hover-lift { transition: transform var(--fm-dur-2) var(--fm-ease-standard),
-                               box-shadow var(--fm-dur-2) var(--fm-ease-standard); }
-  .fm-hover-lift:hover  { transform: translateY(calc(var(--fm-shift-1) * -1)); }
-  .fm-hover-lift:active { transform: scale(var(--fm-scale-active)); }
-  .fm-underline {
-    background-image: linear-gradient(currentColor, currentColor);
-    background-size: 0% 1px; background-position: 0 100%; background-repeat: no-repeat;
-    transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
-  }
-  .fm-underline:hover { background-size: 100% 1px; }
-  /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
-  .fm-overlay-enter { animation-duration: var(--fm-dur-3); animation-timing-function: var(--fm-ease-enter); }
-  .fm-overlay-exit  { animation-duration: var(--fm-dur-2); animation-timing-function: var(--fm-ease-exit); }
-  /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
-  [data-fm-gesturing="true"], [data-fm-gesturing="true"] * { transition: none !important; }
+      /* ===== 通用交互态统一 ===== */
+      .fm-hover-lift {
+        transition:
+          transform var(--fm-dur-2) var(--fm-ease-standard),
+          box-shadow var(--fm-dur-2) var(--fm-ease-standard);
+      }
+      .fm-hover-lift:hover {
+        transform: translateY(calc(var(--fm-shift-1) * -1));
+      }
+      .fm-hover-lift:active {
+        transform: scale(var(--fm-scale-active));
+      }
+      .fm-underline {
+        background-image: linear-gradient(currentColor, currentColor);
+        background-size: 0% 1px;
+        background-position: 0 100%;
+        background-repeat: no-repeat;
+        transition: background-size var(--fm-dur-2) var(--fm-ease-standard);
+      }
+      .fm-underline:hover {
+        background-size: 100% 1px;
+      }
+      /* 对话框/浮层节奏统一(配合各屏已有 dialog 实现) */
+      .fm-overlay-enter {
+        animation-duration: var(--fm-dur-3);
+        animation-timing-function: var(--fm-ease-enter);
+      }
+      .fm-overlay-exit {
+        animation-duration: var(--fm-dur-2);
+        animation-timing-function: var(--fm-ease-exit);
+      }
+      /* 手势/拖拽进行中禁过渡(挂在被拖动的容器上) */
+      [data-fm-gesturing="true"],
+      [data-fm-gesturing="true"] * {
+        transition: none !important;
+      }
 
-  /* ===== 全量降级 ===== */
-  @media (prefers-reduced-motion: reduce) {
-    .fm-thinking, .fm-live, .fm-complete, .fm-complete svg path, .fm-complete svg polyline,
-    .fm-nav-progress::before { animation: none !important; }
-    /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
-    .fm-complete svg path, .fm-complete svg polyline { stroke-dashoffset: 0; }
-    .fm-thinking { color: var(--muted-foreground); background: none; }
-    [data-fm-reveal] { opacity: 1; transform: none; transition: none; }
-    .fm-hover-lift, .fm-underline, .fm-overlay-enter, .fm-overlay-exit { transition: none !important; animation: none !important; }
-  }
-</style>
-</head>
-<body>
-<nav class="proto-bar">
-  <span class="pb-title"><i class="ti ti-flame"></i>Foundry · SDLC 原型</span>
-  <a data-screen="index.html">总览</a>
-  <a data-screen="s1-tracker-board.html">看板</a>
-  <a data-screen="s2-sprint-studio.html" class="active">规划工作台</a>
-  <a data-screen="s3-ui-review.html">UI 评审</a>
-  <a data-screen="s4-work-item.html">工作项</a>
-  <a data-screen="s5-inbox.html">收件箱</a>
-  <a data-screen="s6-sprint-cockpit.html">Sprint 驾驶舱</a>
-  <a data-screen="s7-run-detail.html">运行详情</a>
-  <a data-screen="s8-workflow-library.html">工作流库</a>
-  <a data-screen="s9-brain-console.html">Brain</a>
-  <a data-screen="s10-health-insights.html">健康与洞察</a>
-  <button class="pb-theme" onclick="document.documentElement.classList.toggle('dark')">
-    <i class="ti ti-moon"></i>主题</button>
-</nav>
-<div class="app">
-  <aside class="sidebar">
-    <div class="sb-head"><span class="logo"><i class="ti ti-clipboard-list" style="font-size:13px"></i></span>Tracker</div>
-    <div class="sb-search"><i class="ti ti-search"></i>搜索<kbd>⌘K</kbd></div>
-    <a class="sb-item"><i class="ti ti-message-circle"></i>问 Tracker</a>
-    <a class="sb-item" data-screen="s5-inbox.html"><i class="ti ti-inbox"></i>收件箱<span class="dot-badge">3</span></a>
-    <div class="sb-group">工作</div>
-    <a class="sb-item" data-screen="s1-tracker-board.html"><i class="ti ti-layout-kanban"></i>看板</a>
-    <a class="sb-item active" data-screen="s6-sprint-cockpit.html"><i class="ti ti-run"></i>Sprint</a>
-    <a class="sb-item"><i class="ti ti-list-numbers"></i>队列<span class="count">4</span></a>
-    <a class="sb-item"><i class="ti ti-chart-dots"></i>度量</a>
-    <div class="sb-group">项目</div>
-    <a class="sb-item"><i class="ti ti-folder"></i>支付中心<span class="count">PAY</span></a>
-    <div style="margin-top:auto"></div>
-    <div class="divider" style="margin:8px 4px"></div>
-    <a class="sb-item"><i class="ti ti-users"></i>Team</a>
-    <a class="sb-item"><i class="ti ti-settings"></i>设置</a>
-  </aside>
-  <main class="inset">
-    <header class="page-header">
-      <span class="ph-icon"><i class="ti ti-run"></i></span>
-      <h1>Sprint 4 · 商户结算自动化</h1>
-      <span class="badge b-info">planning</span>
-      <div class="phase-mini">
-        <span class="pm-step pm-active"><span class="pm-dot fm-live"></span><span class="pm-name">planning</span></span>
-        <span class="pm-sep"></span><span class="pm-step"><span class="pm-dot"></span></span>
-        <span class="pm-sep"></span><span class="pm-step"><span class="pm-dot"></span></span>
-        <span class="pm-sep"></span><span class="pm-step"><span class="pm-dot"></span></span>
-        <span class="pm-sep"></span><span class="pm-step"><span class="pm-dot"></span></span>
-        <span class="pm-sep"></span><span class="pm-step"><span class="pm-dot"></span></span>
-        <span class="pm-sep"></span><span class="pm-step"><span class="pm-dot"></span></span>
-        <span class="pm-sep"></span><span class="pm-step"><span class="pm-dot"></span><span class="pm-name">done</span></span>
-      </div>
-      <div class="ph-actions">
-        <a class="btn btn-outline btn-sm" data-screen="s6-sprint-cockpit.html"><i class="ti ti-dashboard" style="font-size:14px"></i>驾驶舱</a>
-        <span style="font-size:11px;color:var(--muted-foreground);display:inline-flex;align-items:center;gap:4px"><i class="ti ti-info-circle" style="font-size:13px"></i>缺 test-plan 产物</span>
-        <button class="btn btn-brand" disabled title="缺 test-plan 产物"><i class="ti ti-rubber-stamp" style="font-size:14px"></i>发起 plan-signoff</button>
-      </div>
-    </header>
-
-    <div class="studio">
-      <!-- 步骤轨 -->
-      <nav class="steps-rail">
-        <div class="group-label" style="padding:0 9px 6px">规划步骤</div>
-        <div class="step-item"><span class="st-no mono">1</span>
-          <div style="flex:1"><span class="st-name">头脑风暴</span><span class="badge b-muted" style="margin-left:5px;font-size:9.5px">可选</span></div><span class="st-icon ok"><i class="ti ti-check"></i></span></div>
-        <div class="step-item"><span class="st-no mono">2</span>
-          <div style="flex:1"><span class="st-name">Sprint 规划</span><span class="st-sub">sprint-doc v2 · human</span></div>
-          <span class="st-icon ok"><i class="ti ti-check"></i></span></div>
-        <div class="step-item active"><span class="st-no mono">3</span>
-          <div style="flex:1"><span class="st-name">测试计划</span><span class="st-sub">访谈进行中</span></div>
-          <span class="ring r-running fm-live"></span></div>
-        <div class="step-item"><span class="st-no mono">4</span>
-          <div style="flex:1"><span class="st-name">UI 设计</span><span class="st-sub">含 UI 面 · 已激活</span></div>
-          <span class="ring r-pending"></span></div>
-        <div class="step-item"><span class="st-no mono">5</span>
-          <div style="flex:1"><span class="st-name">技术设计</span></div><span class="ring r-pending"></span></div>
-        <div class="step-item"><span class="st-no mono">6</span>
-          <div style="flex:1"><span class="st-name">对抗评审</span></div><span class="ring r-pending"></span></div>
-        <div class="step-item"><span class="st-no mono">7</span>
-          <div style="flex:1"><span class="st-name">Briefs</span><span class="st-sub">1 个规模告警</span></div>
-          <span class="badge b-warning" style="font-size:10px;padding:1px 6px">规模 12 文件</span></div>
-        <div class="rail-signoffs">
-          <div class="group-label" style="padding:0 9px 6px">签核</div>
-          <div class="signoff-row"><span class="ring r-gate"></span>plan-signoff<span class="so-meta">判据 2/3</span></div>
-          <div class="signoff-row"><span class="ring r-pending"></span>ui-signoff</div>
-          <div class="signoff-row"><span class="ring r-pending"></span>design-signoff</div>
+      /* ===== 全量降级 ===== */
+      @media (prefers-reduced-motion: reduce) {
+        .fm-thinking,
+        .fm-live,
+        .fm-complete,
+        .fm-complete svg path,
+        .fm-complete svg polyline,
+        .fm-nav-progress::before {
+          animation: none !important;
+        }
+        /* 降级下打勾直接呈现:base 规则把 dashoffset 预置为 48,若只停动画勾形将永不可见 */
+        .fm-complete svg path,
+        .fm-complete svg polyline {
+          stroke-dashoffset: 0;
+        }
+        .fm-thinking {
+          color: var(--muted-foreground);
+          background: none;
+        }
+        [data-fm-reveal] {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+        .fm-hover-lift,
+        .fm-underline,
+        .fm-overlay-enter,
+        .fm-overlay-exit {
+          transition: none !important;
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="proto-bar">
+      <span class="pb-title"
+        ><i class="ti ti-flame"></i>Foundry · SDLC 原型</span
+      >
+      <a data-screen="index.html">总览</a>
+      <a data-screen="s1-tracker-board.html">看板</a>
+      <a data-screen="s2-sprint-studio.html" class="active">规划工作台</a>
+      <a data-screen="s3-ui-review.html">UI 评审</a>
+      <a data-screen="s4-work-item.html">工作项</a>
+      <a data-screen="s5-inbox.html">收件箱</a>
+      <a data-screen="s6-sprint-cockpit.html">Sprint 驾驶舱</a>
+      <a data-screen="s7-run-detail.html">运行详情</a>
+      <a data-screen="s8-workflow-library.html">工作流库</a>
+      <a data-screen="s9-brain-console.html">Brain</a>
+      <a data-screen="s10-health-insights.html">健康与洞察</a>
+      <button
+        class="pb-theme"
+        onclick="document.documentElement.classList.toggle('dark')"
+      >
+        <i class="ti ti-moon"></i>主题
+      </button>
+    </nav>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sb-head">
+          <span class="logo"
+            ><i class="ti ti-clipboard-list" style="font-size: 13px"></i></span
+          >Tracker
         </div>
-      </nav>
+        <div class="sb-search">
+          <i class="ti ti-search"></i>搜索<kbd>⌘K</kbd>
+        </div>
+        <a class="sb-item"><i class="ti ti-message-circle"></i>问 Tracker</a>
+        <a class="sb-item" data-screen="s5-inbox.html"
+          ><i class="ti ti-inbox"></i>收件箱<span class="dot-badge">3</span></a
+        >
+        <div class="sb-group">工作</div>
+        <a class="sb-item" data-screen="s1-tracker-board.html"
+          ><i class="ti ti-layout-kanban"></i>看板</a
+        >
+        <a class="sb-item active" data-screen="s6-sprint-cockpit.html"
+          ><i class="ti ti-run"></i>Sprint</a
+        >
+        <a class="sb-item"
+          ><i class="ti ti-list-numbers"></i>队列<span class="count">4</span></a
+        >
+        <a class="sb-item"><i class="ti ti-chart-dots"></i>度量</a>
+        <div class="sb-group">项目</div>
+        <a class="sb-item"
+          ><i class="ti ti-folder"></i>支付中心<span class="count">PAY</span></a
+        >
+        <div style="margin-top: auto"></div>
+        <div class="divider" style="margin: 8px 4px"></div>
+        <a class="sb-item"><i class="ti ti-users"></i>Team</a>
+        <a class="sb-item"><i class="ti ti-settings"></i>设置</a>
+      </aside>
+      <main class="inset">
+        <header class="page-header">
+          <span class="ph-icon"><i class="ti ti-run"></i></span>
+          <h1>Sprint 4 · 商户结算自动化</h1>
+          <span class="badge b-info">planning</span>
+          <div class="phase-mini">
+            <span class="pm-step pm-active"
+              ><span class="pm-dot fm-live"></span
+              ><span class="pm-name">planning</span></span
+            >
+            <span class="pm-sep"></span
+            ><span class="pm-step"><span class="pm-dot"></span></span>
+            <span class="pm-sep"></span
+            ><span class="pm-step"><span class="pm-dot"></span></span>
+            <span class="pm-sep"></span
+            ><span class="pm-step"><span class="pm-dot"></span></span>
+            <span class="pm-sep"></span
+            ><span class="pm-step"><span class="pm-dot"></span></span>
+            <span class="pm-sep"></span
+            ><span class="pm-step"><span class="pm-dot"></span></span>
+            <span class="pm-sep"></span
+            ><span class="pm-step"><span class="pm-dot"></span></span>
+            <span class="pm-sep"></span
+            ><span class="pm-step"
+              ><span class="pm-dot"></span
+              ><span class="pm-name">done</span></span
+            >
+          </div>
+          <div class="ph-actions">
+            <a
+              class="btn btn-outline btn-sm"
+              data-screen="s6-sprint-cockpit.html"
+              ><i class="ti ti-dashboard" style="font-size: 14px"></i>驾驶舱</a
+            >
+            <span
+              style="
+                font-size: 11px;
+                color: var(--muted-foreground);
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+              "
+              ><i class="ti ti-info-circle" style="font-size: 13px"></i>缺
+              test-plan 产物</span
+            >
+            <button class="btn btn-brand" disabled title="缺 test-plan 产物">
+              <i class="ti ti-rubber-stamp" style="font-size: 14px"></i>发起
+              plan-signoff
+            </button>
+          </div>
+        </header>
 
-      <!-- 产物区 -->
-      <section class="artifact-area">
-        <div class="artifact-head">
-          <span class="ah-title"><i class="ti ti-file-text" style="color:var(--muted-foreground)"></i>测试计划</span>
-          <span class="badge b-agent fm-live"><i class="ti ti-robot" style="font-size:12px"></i>agent 起草中</span>
-          <span class="ph-sub">docKey <span class="mono">test-plan</span> · 尚未定稿</span>
-          <div style="margin-left:auto;display:flex;gap:6px">
-            <button class="btn btn-ghost btn-sm" title="不走访谈，直接粘贴/上传现成文档定稿（P12 低摩擦）"><i class="ti ti-upload" style="font-size:14px"></i>手工导入</button>
-            <button class="btn btn-ghost btn-sm" title="查看 agent 实际读到的纯文本版（P11 双表征）"><i class="ti ti-file-text" style="font-size:14px"></i>agent 视图</button>
-            <button class="btn btn-outline btn-sm" title="human 富呈现页（发布管道渲染）"><i class="ti ti-book-2" style="font-size:14px"></i>在 content 打开</button>
-            <button class="btn btn-outline btn-sm"><i class="ti ti-versions" style="font-size:14px"></i>版本链</button>
-            <button class="btn btn-outline btn-sm"><i class="ti ti-file-diff" style="font-size:14px"></i>与上版对比</button>
-          </div>
-        </div>
-        <div class="artifact-body">
-          <!-- 审查一问：覆盖矩阵 -->
-          <div class="scenario-card" style="border-color:color-mix(in oklch,var(--brand) 30%,var(--border))">
-            <div class="sc-head"><i class="ti ti-table" style="color:var(--brand);margin-top:2px"></i>
-              <span class="sc-title">覆盖矩阵 · Goal 指标 vs 场景</span>
-              <span class="badge b-destructive">缺口 G1</span></div>
-            <table class="fd" style="font-size:11.5px">
-              <tr><th>Goal 指标</th><th>S1</th><th>S2</th><th>结论</th></tr>
-              <tr><td>导出与对账单逐行一致</td><td>覆盖</td><td style="background:color-mix(in oklch,var(--success) 10%,transparent)">主覆盖</td><td style="color:var(--success)">已盖住</td></tr>
-              <tr><td>结算单 p95 低于 30s</td><td style="background:color-mix(in oklch,var(--success) 10%,transparent)">主覆盖</td><td>—</td><td style="color:var(--success)">已盖住</td></tr>
-              <tr><td>自助零人工介入</td><td style="background:color-mix(in oklch,var(--warning) 14%,transparent)">部分</td><td>—</td><td style="color:var(--destructive)">缺口 G1：导出失败重试路径</td></tr>
-            </table>
-            <div style="margin-top:8px;font-size:11.5px;color:var(--muted-foreground)"><i class="ti ti-alert-triangle" style="color:var(--destructive);font-size:13px"></i> 批准前须补场景关闭 G1 或显式接受（记入签核理由）——会话区当前问题即 G1 的确认。</div>
-          </div>
-          <!-- 场景 1 -->
-          <div class="scenario-card">
-            <div class="sc-head"><span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>
-              <span class="sc-title">场景 1 · 商户自助导出账单并核对总额</span>
-              <span class="chip"><i class="ti ti-browser-check" style="font-size:13px"></i>chrome-test</span></div>
-            <div class="sc-row"><span class="sc-label">Why</span>
-              <span>这是本 sprint 的主打能力：商户不再依赖运营人工拉数。</span></div>
-            <div class="sc-row"><span class="sc-label">Steps</span>
-              <ol><li>以商户测试账号登录，进入「账单」页</li>
-                  <li>选择上月完整周期，格式 CSV，点击「导出」</li>
-                  <li>下载文件，汇总金额列</li></ol></div>
-            <div class="sc-row"><span class="sc-label">Expected</span>
-              <span>导出文件行数与账单列表一致；金额合计等于页面显示的「本期总额」。</span></div>
-            <div class="sc-foot">
-              <span class="badge b-evidence"><i class="ti ti-certificate" style="font-size:12px"></i>Pass/fail 信号：CSV 合计 == 页面总额（精确到分）</span>
-              <button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--muted-foreground)">
-                <i class="ti ti-message-dots" style="font-size:14px"></i>需修改</button>
+        <div class="studio">
+          <!-- 步骤轨 -->
+          <nav class="steps-rail">
+            <div class="group-label" style="padding: 0 9px 6px">规划步骤</div>
+            <div class="step-item">
+              <span class="st-no mono">1</span>
+              <div style="flex: 1">
+                <span class="st-name">头脑风暴</span
+                ><span
+                  class="badge b-muted"
+                  style="margin-left: 5px; font-size: 9.5px"
+                  >可选</span
+                >
+              </div>
+              <span class="st-icon ok"><i class="ti ti-check"></i></span>
             </div>
-            <div class="sc-row" style="margin-top:9px;padding-top:9px;border-top:1px dashed var(--border);gap:14px;align-items:center">
-              <span class="badge b-agent" style="font-size:9.5px" title="agent 预判，仅供参考；勾选是人的审查记录（tracker 侧持久化）">自评：3/3 通过</span>
-              <label style="display:inline-flex;gap:5px;align-items:center;font-size:11.5px;cursor:pointer"><input type="checkbox" checked style="accent-color:var(--brand)">信号可证伪</label>
-              <label style="display:inline-flex;gap:5px;align-items:center;font-size:11.5px;cursor:pointer"><input type="checkbox" checked style="accent-color:var(--brand)">前置真实非种子</label>
-              <label style="display:inline-flex;gap:5px;align-items:center;font-size:11.5px;cursor:pointer"><input type="checkbox" style="accent-color:var(--brand)">工具真能执行</label>
-              <span style="margin-left:auto;display:inline-flex;gap:5px;align-items:center;font-size:10.5px;color:var(--muted-foreground)"><span class="avatar" style="width:14px;height:14px;font-size:8px">S</span>已勾 2 项 · 10:24</span>
+            <div class="step-item">
+              <span class="st-no mono">2</span>
+              <div style="flex: 1">
+                <span class="st-name">Sprint 规划</span
+                ><span class="st-sub">sprint-doc v2 · human</span>
+              </div>
+              <span class="st-icon ok"><i class="ti ti-check"></i></span>
             </div>
-          </div>
-          <!-- 场景 2 -->
-          <div class="scenario-card">
-            <div class="sc-head"><span class="st-icon ok" style="margin-top:2px"><i class="ti ti-check"></i></span>
-              <span class="sc-title">场景 2 · 结算单金额与对账单一致</span>
-              <span class="chip"><i class="ti ti-terminal-2" style="font-size:13px"></i>curl</span></div>
-            <div class="sc-row"><span class="sc-label">Why</span>
-              <span>结算与对账两模块的跨模块一致性是历史缺陷高发区（见 PAY-203）。</span></div>
-            <div class="sc-row"><span class="sc-label">Steps</span>
-              <ol><li>触发一次自动结算（种子商户 M-1024，上月周期）</li>
-                  <li><span class="mono">GET /api/settlements/latest</span> 与 <span class="mono">GET /api/reconcile/summary</span></li>
-                  <li>对比两接口的 <span class="mono">totalAmount</span> 字段</li></ol></div>
-            <div class="sc-row"><span class="sc-label">Expected</span>
-              <span>两接口 200，金额字段逐分相等，且币种一致。</span></div>
-            <div class="sc-foot">
-              <span class="badge b-evidence"><i class="ti ti-certificate" style="font-size:12px"></i>Pass/fail 信号：两响应体 totalAmount 完全相等</span>
-              <button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--muted-foreground)">
-                <i class="ti ti-message-dots" style="font-size:14px"></i>需修改</button>
+            <div class="step-item active">
+              <span class="st-no mono">3</span>
+              <div style="flex: 1">
+                <span class="st-name">测试计划</span
+                ><span class="st-sub">访谈进行中</span>
+              </div>
+              <span class="ring r-running fm-live"></span>
             </div>
-            <div class="sc-row" style="margin-top:9px;padding-top:9px;border-top:1px dashed var(--border);gap:14px;align-items:center">
-              <span class="badge b-agent" style="font-size:9.5px" title="agent 预判">自评：1 项不过</span>
-              <label style="display:inline-flex;gap:5px;align-items:center;font-size:11.5px;cursor:pointer"><input type="checkbox" checked style="accent-color:var(--brand)">信号可证伪</label>
-              <span style="display:inline-flex;gap:5px;align-items:center;font-size:11.5px;color:var(--destructive)"><input type="checkbox" disabled style="accent-color:var(--destructive)">前置真实非种子——自评：用了种子商户 M-1024</span>
-              <button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:1px 7px;color:var(--destructive);border-color:color-mix(in oklch,var(--destructive) 35%,var(--border))"><i class="ti ti-message-dots" style="font-size:12px"></i>异议·需修改</button>
-              <label style="display:inline-flex;gap:5px;align-items:center;font-size:11.5px;cursor:pointer"><input type="checkbox" checked style="accent-color:var(--brand)">工具真能执行</label>
+            <div class="step-item">
+              <span class="st-no mono">4</span>
+              <div style="flex: 1">
+                <span class="st-name">UI 设计</span
+                ><span class="st-sub">含 UI 面 · 已激活</span>
+              </div>
+              <span class="ring r-pending"></span>
             </div>
-          </div>
-          <div class="add-card"><i class="ti ti-plus"></i>补场景关闭缺口 G1：导出失败重试路径——正在会话区确认（右侧当前问题）</div>
-        </div>
-        <div class="quality-bar">
-          <span class="group-label" style="margin-right:2px">质量门</span>
-          <span class="qb-item qb-ok"><i class="ti ti-check"></i>黑盒（无内部符号名）</span>
-          <span class="qb-item qb-ok"><i class="ti ti-check"></i>每场景有可证伪信号</span>
-          <span class="qb-item qb-warn"><i class="ti ti-alert-triangle"></i>覆盖 3/4 · 缺口 G1（见矩阵红格）</span>
-          <span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)">覆盖未达 4/4，暂不可采纳</span>
-          <button class="btn btn-primary btn-sm" disabled title="覆盖未达 4/4">采纳为 test-plan v1</button>
-        </div>
-        <!-- F5 · Briefs 规模告警（步骤 7 预览,02 §3.10 拆分契约） -->
-        <div x-data="{dlg:false,rows:[{t:'PAY-210a 导出任务表+队列 action',d:'schema/迁移 + export-jobs action(4 文件)'},{t:'PAY-210b 导出执行器与重试',d:'执行器 + 失败重试(5 文件)'},{t:'PAY-210c 导出页与下载入口',d:'页面 + hook(3 文件)'}],chain:true}" style="margin:0 22px 18px">
-          <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid color-mix(in oklch,var(--warning) 40%,var(--border));background:color-mix(in oklch,var(--warning) 12%,transparent);border-radius:var(--radius-md)">
-            <i class="ti ti-alert-triangle" style="color:oklch(.55 .13 85)"></i>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:12.5px">Brief「PAY-210 批量导出」预估涉及 <span class="mono">12</span> 个文件 · 跨生命周期协同 —— 超过单节点阈值（&gt;6）</div>
-              <div style="font-size:11.5px;color:var(--muted-foreground)">M3-D 三次预算耗尽实证:超规模对 vLLM 是确定性失败 · 建议拆分为 ≤6 文件子单</div>
+            <div class="step-item">
+              <span class="st-no mono">5</span>
+              <div style="flex: 1"><span class="st-name">技术设计</span></div>
+              <span class="ring r-pending"></span>
             </div>
-            <button class="btn btn-primary btn-sm" @click="dlg=true"><i class="ti ti-scissors"></i>一键拆分</button>
-            <button class="btn btn-outline btn-sm" title="人工覆盖将记录审计(scale.overridden)">仍然派发</button>
-          </div>
-          <!-- 拆分对话框 -->
-          <div class="fm-dlg-backdrop" x-show="dlg" x-cloak
-            x-transition:enter="fm-overlay-enter" x-transition:enter-start="fm-op-0" x-transition:enter-end="fm-op-1"
-            x-transition:leave="fm-overlay-exit" x-transition:leave-start="fm-op-1" x-transition:leave-end="fm-op-0"
-            style="position:fixed;inset:0;background:oklch(0 0 0/.4);display:flex;align-items:center;justify-content:center;z-index:80" @click.self="dlg=false">
-            <div style="width:560px;margin:auto;max-height:86vh;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);box-shadow:0 18px 50px oklch(0 0 0/.25);padding:18px 20px">
-              <h3 style="font-size:15px;font-weight:600">拆分 <span class="mono">PAY-210</span></h3>
-              <div style="font-size:12px;color:var(--muted-foreground);margin:2px 0 12px">按 signals 文件簇预填 · 每子单 ≤6 文件 · itemKey 由项目序列器分配</div>
-              <template x-for="(r,i) in rows" :key="i">
-                <div style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start">
-                  <input :value="r.t" @input="r.t=$event.target.value" style="flex:1;font:inherit;font-size:12.5px;padding:6px 9px;border:1px solid var(--input);border-radius:var(--radius-md);background:var(--background);color:var(--foreground)">
-                  <input :value="r.d" @input="r.d=$event.target.value" style="flex:1.2;font:inherit;font-size:12px;padding:6px 9px;border:1px solid var(--input);border-radius:var(--radius-md);background:var(--background);color:var(--muted-foreground)">
-                  <button class="btn btn-ghost btn-sm" @click="rows.splice(i,1)" title="删除"><i class="ti ti-trash" style="font-size:14px"></i></button>
-                </div>
-              </template>
-              <button class="btn btn-outline btn-sm" @click="rows.push({t:'',d:''})" style="margin-bottom:12px"><i class="ti ti-plus"></i>添加子单</button>
-              <label style="display:flex;gap:8px;align-items:center;font-size:12px;margin-bottom:14px;cursor:pointer" @click="chain=!chain">
-                <span class="sw" :class="chain&&'on'"></span>子单按顺序 blocked-by 链接
-              </label>
-              <div style="display:flex;gap:8px;justify-content:flex-end">
-                <button class="btn btn-outline" @click="dlg=false">取消</button>
-                <button class="btn btn-primary" :disabled="rows.length<2 || rows.some(r=>!r.t.trim())" :title="rows.length<2?'至少 2 个子单':(rows.some(r=>!r.t.trim())?'子单标题不能为空':'')"><i class="ti ti-scissors"></i>确认拆分（<span x-text="rows.length"></span> 子单）</button>
+            <div class="step-item">
+              <span class="st-no mono">6</span>
+              <div style="flex: 1"><span class="st-name">对抗评审</span></div>
+              <span class="ring r-pending"></span>
+            </div>
+            <div class="step-item">
+              <span class="st-no mono">7</span>
+              <div style="flex: 1">
+                <span class="st-name">Briefs</span
+                ><span class="st-sub">1 个规模告警</span>
+              </div>
+              <span
+                class="badge b-warning"
+                style="font-size: 10px; padding: 1px 6px"
+                >规模 12 文件</span
+              >
+            </div>
+            <div class="rail-signoffs">
+              <div class="group-label" style="padding: 0 9px 6px">签核</div>
+              <div class="signoff-row">
+                <span class="ring r-gate"></span>plan-signoff<span
+                  class="so-meta"
+                  >判据 2/3</span
+                >
+              </div>
+              <div class="signoff-row">
+                <span class="ring r-pending"></span>ui-signoff
+              </div>
+              <div class="signoff-row">
+                <span class="ring r-pending"></span>design-signoff
               </div>
             </div>
-          </div>
-        </div>
-      </section>
+          </nav>
 
-      <!-- 会话区 -->
-      <aside class="chat-rail">
-        <div class="cr-head">
-          <span class="avatar a-agent"><i class="ti ti-robot" style="font-size:11px"></i></span>
-          <span style="font-weight:600;font-size:12.5px">/sprint-test-plan</span>
-          <span class="fm-thinking" style="font-size:11.5px;margin-left:auto">访谈中 · 问题 3/5</span>
-        </div>
-        <div class="chat-scroll">
-          <div class="qa-summary"><i class="ti ti-chevron-right"></i>
-            <div><div class="qa-q">本 sprint 是否涉及跨模块流程？</div>
-              <div class="qa-a">涉及——结算与对账两模块，需要集成场景</div></div></div>
-          <div class="qa-summary"><i class="ti ti-chevron-right"></i>
-            <div><div class="qa-q">主打能力的真实验证入口是什么？</div>
-              <div class="qa-a">商户账单页的导出按钮（真实账号 + 非种子数据）</div></div></div>
-          <div class="interview-card">
-            <div class="ic-q">导出失败的场景需要单独的集成场景吗？</div>
-            <div class="rec-chip"><i class="ti ti-sparkles"></i>
-              建议：需要——导出失败要有明确的用户可见错误与重试入口，否则商户只会看到静默失败</div>
-            <div class="alt-chips">
-              <div class="alt-chip"><i class="ti ti-circle" style="font-size:13px;color:var(--muted-foreground)"></i>
-                不需要，失败路径由单元测试覆盖即可</div>
-              <div class="alt-chip"><i class="ti ti-circle" style="font-size:13px;color:var(--muted-foreground)"></i>
-                合并进场景 1，作为其失败分支步骤</div>
+          <!-- 产物区 -->
+          <section class="artifact-area">
+            <div class="artifact-head">
+              <span class="ah-title"
+                ><i
+                  class="ti ti-file-text"
+                  style="color: var(--muted-foreground)"
+                ></i
+                >测试计划</span
+              >
+              <span class="badge b-agent fm-live"
+                ><i class="ti ti-robot" style="font-size: 12px"></i>agent
+                起草中</span
+              >
+              <span class="ph-sub"
+                >docKey <span class="mono">test-plan</span> · 尚未定稿</span
+              >
+              <div style="margin-left: auto; display: flex; gap: 6px">
+                <button
+                  class="btn btn-ghost btn-sm"
+                  title="不走访谈，直接粘贴/上传现成文档定稿（P12 低摩擦）"
+                >
+                  <i class="ti ti-upload" style="font-size: 14px"></i>手工导入
+                </button>
+                <button
+                  class="btn btn-ghost btn-sm"
+                  title="查看 agent 实际读到的纯文本版（P11 双表征）"
+                >
+                  <i class="ti ti-file-text" style="font-size: 14px"></i>agent
+                  视图
+                </button>
+                <button
+                  class="btn btn-outline btn-sm"
+                  title="human 富呈现页（发布管道渲染）"
+                >
+                  <i class="ti ti-book-2" style="font-size: 14px"></i>在 content
+                  打开
+                </button>
+                <button class="btn btn-outline btn-sm">
+                  <i class="ti ti-versions" style="font-size: 14px"></i>版本链
+                </button>
+                <button class="btn btn-outline btn-sm">
+                  <i class="ti ti-file-diff" style="font-size: 14px"></i
+                  >与上版对比
+                </button>
+              </div>
             </div>
-          </div>
+            <div class="artifact-body">
+              <!-- 审查一问：覆盖矩阵 -->
+              <div
+                class="scenario-card"
+                style="
+                  border-color: color-mix(
+                    in oklch,
+                    var(--brand) 30%,
+                    var(--border)
+                  );
+                "
+              >
+                <div class="sc-head">
+                  <i
+                    class="ti ti-table"
+                    style="color: var(--brand); margin-top: 2px"
+                  ></i>
+                  <span class="sc-title">覆盖矩阵 · Goal 指标 vs 场景</span>
+                  <span class="badge b-destructive">缺口 G1</span>
+                </div>
+                <table class="fd" style="font-size: 11.5px">
+                  <tr>
+                    <th>Goal 指标</th>
+                    <th>S1</th>
+                    <th>S2</th>
+                    <th>结论</th>
+                  </tr>
+                  <tr>
+                    <td>导出与对账单逐行一致</td>
+                    <td>覆盖</td>
+                    <td
+                      style="
+                        background: color-mix(
+                          in oklch,
+                          var(--success) 10%,
+                          transparent
+                        );
+                      "
+                    >
+                      主覆盖
+                    </td>
+                    <td style="color: var(--success)">已盖住</td>
+                  </tr>
+                  <tr>
+                    <td>结算单 p95 低于 30s</td>
+                    <td
+                      style="
+                        background: color-mix(
+                          in oklch,
+                          var(--success) 10%,
+                          transparent
+                        );
+                      "
+                    >
+                      主覆盖
+                    </td>
+                    <td>—</td>
+                    <td style="color: var(--success)">已盖住</td>
+                  </tr>
+                  <tr>
+                    <td>自助零人工介入</td>
+                    <td
+                      style="
+                        background: color-mix(
+                          in oklch,
+                          var(--warning) 14%,
+                          transparent
+                        );
+                      "
+                    >
+                      部分
+                    </td>
+                    <td>—</td>
+                    <td style="color: var(--destructive)">
+                      缺口 G1：导出失败重试路径
+                    </td>
+                  </tr>
+                </table>
+                <div
+                  style="
+                    margin-top: 8px;
+                    font-size: 11.5px;
+                    color: var(--muted-foreground);
+                  "
+                >
+                  <i
+                    class="ti ti-alert-triangle"
+                    style="color: var(--destructive); font-size: 13px"
+                  ></i>
+                  批准前须补场景关闭 G1
+                  或显式接受（记入签核理由）——会话区当前问题即 G1 的确认。
+                </div>
+              </div>
+              <!-- 场景 1 -->
+              <div class="scenario-card">
+                <div class="sc-head">
+                  <span class="st-icon ok" style="margin-top: 2px"
+                    ><i class="ti ti-check"></i
+                  ></span>
+                  <span class="sc-title"
+                    >场景 1 · 商户自助导出账单并核对总额</span
+                  >
+                  <span class="chip"
+                    ><i class="ti ti-browser-check" style="font-size: 13px"></i
+                    >chrome-test</span
+                  >
+                </div>
+                <div class="sc-row">
+                  <span class="sc-label">Why</span>
+                  <span
+                    >这是本 sprint 的主打能力：商户不再依赖运营人工拉数。</span
+                  >
+                </div>
+                <div class="sc-row">
+                  <span class="sc-label">Steps</span>
+                  <ol>
+                    <li>以商户测试账号登录，进入「账单」页</li>
+                    <li>选择上月完整周期，格式 CSV，点击「导出」</li>
+                    <li>下载文件，汇总金额列</li>
+                  </ol>
+                </div>
+                <div class="sc-row">
+                  <span class="sc-label">Expected</span>
+                  <span
+                    >导出文件行数与账单列表一致；金额合计等于页面显示的「本期总额」。</span
+                  >
+                </div>
+                <div class="sc-foot">
+                  <span class="badge b-evidence"
+                    ><i class="ti ti-certificate" style="font-size: 12px"></i
+                    >Pass/fail 信号：CSV 合计 == 页面总额（精确到分）</span
+                  >
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    style="margin-left: auto; color: var(--muted-foreground)"
+                  >
+                    <i class="ti ti-message-dots" style="font-size: 14px"></i
+                    >需修改
+                  </button>
+                </div>
+                <div
+                  class="sc-row"
+                  style="
+                    margin-top: 9px;
+                    padding-top: 9px;
+                    border-top: 1px dashed var(--border);
+                    gap: 14px;
+                    align-items: center;
+                  "
+                >
+                  <span
+                    class="badge b-agent"
+                    style="font-size: 9.5px"
+                    title="agent 预判，仅供参考；勾选是人的审查记录（tracker 侧持久化）"
+                    >自评：3/3 通过</span
+                  >
+                  <label
+                    style="
+                      display: inline-flex;
+                      gap: 5px;
+                      align-items: center;
+                      font-size: 11.5px;
+                      cursor: pointer;
+                    "
+                    ><input
+                      type="checkbox"
+                      checked
+                      style="accent-color: var(--brand)"
+                    />信号可证伪</label
+                  >
+                  <label
+                    style="
+                      display: inline-flex;
+                      gap: 5px;
+                      align-items: center;
+                      font-size: 11.5px;
+                      cursor: pointer;
+                    "
+                    ><input
+                      type="checkbox"
+                      checked
+                      style="accent-color: var(--brand)"
+                    />前置真实非种子</label
+                  >
+                  <label
+                    style="
+                      display: inline-flex;
+                      gap: 5px;
+                      align-items: center;
+                      font-size: 11.5px;
+                      cursor: pointer;
+                    "
+                    ><input
+                      type="checkbox"
+                      style="accent-color: var(--brand)"
+                    />工具真能执行</label
+                  >
+                  <span
+                    style="
+                      margin-left: auto;
+                      display: inline-flex;
+                      gap: 5px;
+                      align-items: center;
+                      font-size: 10.5px;
+                      color: var(--muted-foreground);
+                    "
+                    ><span
+                      class="avatar"
+                      style="width: 14px; height: 14px; font-size: 8px"
+                      >S</span
+                    >已勾 2 项 · 10:24</span
+                  >
+                </div>
+              </div>
+              <!-- 场景 2 -->
+              <div class="scenario-card">
+                <div class="sc-head">
+                  <span class="st-icon ok" style="margin-top: 2px"
+                    ><i class="ti ti-check"></i
+                  ></span>
+                  <span class="sc-title">场景 2 · 结算单金额与对账单一致</span>
+                  <span class="chip"
+                    ><i class="ti ti-terminal-2" style="font-size: 13px"></i
+                    >curl</span
+                  >
+                </div>
+                <div class="sc-row">
+                  <span class="sc-label">Why</span>
+                  <span
+                    >结算与对账两模块的跨模块一致性是历史缺陷高发区（见
+                    PAY-203）。</span
+                  >
+                </div>
+                <div class="sc-row">
+                  <span class="sc-label">Steps</span>
+                  <ol>
+                    <li>触发一次自动结算（种子商户 M-1024，上月周期）</li>
+                    <li>
+                      <span class="mono">GET /api/settlements/latest</span> 与
+                      <span class="mono">GET /api/reconcile/summary</span>
+                    </li>
+                    <li>
+                      对比两接口的 <span class="mono">totalAmount</span> 字段
+                    </li>
+                  </ol>
+                </div>
+                <div class="sc-row">
+                  <span class="sc-label">Expected</span>
+                  <span>两接口 200，金额字段逐分相等，且币种一致。</span>
+                </div>
+                <div class="sc-foot">
+                  <span class="badge b-evidence"
+                    ><i class="ti ti-certificate" style="font-size: 12px"></i
+                    >Pass/fail 信号：两响应体 totalAmount 完全相等</span
+                  >
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    style="margin-left: auto; color: var(--muted-foreground)"
+                  >
+                    <i class="ti ti-message-dots" style="font-size: 14px"></i
+                    >需修改
+                  </button>
+                </div>
+                <div
+                  class="sc-row"
+                  style="
+                    margin-top: 9px;
+                    padding-top: 9px;
+                    border-top: 1px dashed var(--border);
+                    gap: 14px;
+                    align-items: center;
+                  "
+                >
+                  <span
+                    class="badge b-agent"
+                    style="font-size: 9.5px"
+                    title="agent 预判"
+                    >自评：1 项不过</span
+                  >
+                  <label
+                    style="
+                      display: inline-flex;
+                      gap: 5px;
+                      align-items: center;
+                      font-size: 11.5px;
+                      cursor: pointer;
+                    "
+                    ><input
+                      type="checkbox"
+                      checked
+                      style="accent-color: var(--brand)"
+                    />信号可证伪</label
+                  >
+                  <span
+                    style="
+                      display: inline-flex;
+                      gap: 5px;
+                      align-items: center;
+                      font-size: 11.5px;
+                      color: var(--destructive);
+                    "
+                    ><input
+                      type="checkbox"
+                      disabled
+                      style="accent-color: var(--destructive)"
+                    />前置真实非种子——自评：用了种子商户 M-1024</span
+                  >
+                  <button
+                    class="btn btn-outline btn-sm"
+                    style="
+                      font-size: 10.5px;
+                      padding: 1px 7px;
+                      color: var(--destructive);
+                      border-color: color-mix(
+                        in oklch,
+                        var(--destructive) 35%,
+                        var(--border)
+                      );
+                    "
+                  >
+                    <i class="ti ti-message-dots" style="font-size: 12px"></i
+                    >异议·需修改
+                  </button>
+                  <label
+                    style="
+                      display: inline-flex;
+                      gap: 5px;
+                      align-items: center;
+                      font-size: 11.5px;
+                      cursor: pointer;
+                    "
+                    ><input
+                      type="checkbox"
+                      checked
+                      style="accent-color: var(--brand)"
+                    />工具真能执行</label
+                  >
+                </div>
+              </div>
+              <div class="add-card">
+                <i class="ti ti-plus"></i>补场景关闭缺口
+                G1：导出失败重试路径——正在会话区确认（右侧当前问题）
+              </div>
+            </div>
+            <div class="quality-bar">
+              <span class="group-label" style="margin-right: 2px">质量门</span>
+              <span class="qb-item qb-ok"
+                ><i class="ti ti-check"></i>黑盒（无内部符号名）</span
+              >
+              <span class="qb-item qb-ok"
+                ><i class="ti ti-check"></i>每场景有可证伪信号</span
+              >
+              <span class="qb-item qb-warn"
+                ><i class="ti ti-alert-triangle"></i>覆盖 3/4 · 缺口
+                G1（见矩阵红格）</span
+              >
+              <span
+                style="
+                  margin-left: auto;
+                  font-size: 11px;
+                  color: var(--muted-foreground);
+                "
+                >覆盖未达 4/4，暂不可采纳</span
+              >
+              <button
+                class="btn btn-primary btn-sm"
+                disabled
+                title="覆盖未达 4/4"
+              >
+                采纳为 test-plan v1
+              </button>
+            </div>
+            <!-- F5 · Briefs 规模告警（步骤 7 预览,02 §3.10 拆分契约） -->
+            <div
+              x-data="{dlg:false,rows:[{t:'PAY-210a 导出任务表+队列 action',d:'schema/迁移 + export-jobs action(4 文件)'},{t:'PAY-210b 导出执行器与重试',d:'执行器 + 失败重试(5 文件)'},{t:'PAY-210c 导出页与下载入口',d:'页面 + hook(3 文件)'}],chain:true}"
+              style="margin: 0 22px 18px"
+            >
+              <div
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  padding: 10px 14px;
+                  border: 1px solid
+                    color-mix(in oklch, var(--warning) 40%, var(--border));
+                  background: color-mix(
+                    in oklch,
+                    var(--warning) 12%,
+                    transparent
+                  );
+                  border-radius: var(--radius-md);
+                "
+              >
+                <i
+                  class="ti ti-alert-triangle"
+                  style="color: oklch(0.55 0.13 85)"
+                ></i>
+                <div style="flex: 1; min-width: 0">
+                  <div style="font-weight: 600; font-size: 12.5px">
+                    Brief「PAY-210 批量导出」预估涉及
+                    <span class="mono">12</span> 个文件 · 跨生命周期协同 ——
+                    超过单节点阈值（&gt;6）
+                  </div>
+                  <div
+                    style="font-size: 11.5px; color: var(--muted-foreground)"
+                  >
+                    M3-D 三次预算耗尽实证:超规模对 vLLM 是确定性失败 ·
+                    建议拆分为 ≤6 文件子单
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm" @click="dlg=true">
+                  <i class="ti ti-scissors"></i>一键拆分
+                </button>
+                <button
+                  class="btn btn-outline btn-sm"
+                  title="人工覆盖将记录审计(scale.overridden)"
+                >
+                  仍然派发
+                </button>
+              </div>
+              <!-- 拆分对话框 -->
+              <div
+                class="fm-dlg-backdrop"
+                x-show="dlg"
+                x-cloak
+                x-transition:enter="fm-overlay-enter"
+                x-transition:enter-start="fm-op-0"
+                x-transition:enter-end="fm-op-1"
+                x-transition:leave="fm-overlay-exit"
+                x-transition:leave-start="fm-op-1"
+                x-transition:leave-end="fm-op-0"
+                style="
+                  position: fixed;
+                  inset: 0;
+                  background: oklch(0 0 0/0.4);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  z-index: 80;
+                "
+                @click.self="dlg=false"
+              >
+                <div
+                  style="
+                    width: 560px;
+                    margin: auto;
+                    max-height: 86vh;
+                    overflow-y: auto;
+                    background: var(--card);
+                    border: 1px solid var(--border);
+                    border-radius: var(--radius-xl);
+                    box-shadow: 0 18px 50px oklch(0 0 0/0.25);
+                    padding: 18px 20px;
+                  "
+                >
+                  <h3 style="font-size: 15px; font-weight: 600">
+                    拆分 <span class="mono">PAY-210</span>
+                  </h3>
+                  <div
+                    style="
+                      font-size: 12px;
+                      color: var(--muted-foreground);
+                      margin: 2px 0 12px;
+                    "
+                  >
+                    按 signals 文件簇预填 · 每子单 ≤6 文件 · itemKey
+                    由项目序列器分配
+                  </div>
+                  <template x-for="(r,i) in rows" :key="i">
+                    <div
+                      style="
+                        display: flex;
+                        gap: 8px;
+                        margin-bottom: 8px;
+                        align-items: flex-start;
+                      "
+                    >
+                      <input
+                        :value="r.t"
+                        @input="r.t=$event.target.value"
+                        style="
+                          flex: 1;
+                          font: inherit;
+                          font-size: 12.5px;
+                          padding: 6px 9px;
+                          border: 1px solid var(--input);
+                          border-radius: var(--radius-md);
+                          background: var(--background);
+                          color: var(--foreground);
+                        "
+                      />
+                      <input
+                        :value="r.d"
+                        @input="r.d=$event.target.value"
+                        style="
+                          flex: 1.2;
+                          font: inherit;
+                          font-size: 12px;
+                          padding: 6px 9px;
+                          border: 1px solid var(--input);
+                          border-radius: var(--radius-md);
+                          background: var(--background);
+                          color: var(--muted-foreground);
+                        "
+                      />
+                      <button
+                        class="btn btn-ghost btn-sm"
+                        @click="rows.splice(i,1)"
+                        title="删除"
+                      >
+                        <i class="ti ti-trash" style="font-size: 14px"></i>
+                      </button>
+                    </div>
+                  </template>
+                  <button
+                    class="btn btn-outline btn-sm"
+                    @click="rows.push({t:'',d:''})"
+                    style="margin-bottom: 12px"
+                  >
+                    <i class="ti ti-plus"></i>添加子单
+                  </button>
+                  <label
+                    style="
+                      display: flex;
+                      gap: 8px;
+                      align-items: center;
+                      font-size: 12px;
+                      margin-bottom: 14px;
+                      cursor: pointer;
+                    "
+                    @click="chain=!chain"
+                  >
+                    <span class="sw" :class="chain&&'on'"></span>子单按顺序
+                    blocked-by 链接
+                  </label>
+                  <div
+                    style="display: flex; gap: 8px; justify-content: flex-end"
+                  >
+                    <button class="btn btn-outline" @click="dlg=false">
+                      取消
+                    </button>
+                    <button
+                      class="btn btn-primary"
+                      :disabled="rows.length<2 || rows.some(r=>!r.t.trim())"
+                      :title="rows.length<2?'至少 2 个子单':(rows.some(r=>!r.t.trim())?'子单标题不能为空':'')"
+                    >
+                      <i class="ti ti-scissors"></i>确认拆分（<span
+                        x-text="rows.length"
+                      ></span>
+                      子单）
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 会话区 -->
+          <aside class="chat-rail">
+            <div class="cr-head">
+              <span class="avatar a-agent"
+                ><i class="ti ti-robot" style="font-size: 11px"></i
+              ></span>
+              <span style="font-weight: 600; font-size: 12.5px"
+                >/sprint-test-plan</span
+              >
+              <span
+                class="fm-thinking"
+                style="font-size: 11.5px; margin-left: auto"
+                >访谈中 · 问题 3/5</span
+              >
+            </div>
+            <div class="chat-scroll">
+              <div class="qa-summary">
+                <i class="ti ti-chevron-right"></i>
+                <div>
+                  <div class="qa-q">本 sprint 是否涉及跨模块流程？</div>
+                  <div class="qa-a">涉及——结算与对账两模块，需要集成场景</div>
+                </div>
+              </div>
+              <div class="qa-summary">
+                <i class="ti ti-chevron-right"></i>
+                <div>
+                  <div class="qa-q">主打能力的真实验证入口是什么？</div>
+                  <div class="qa-a">
+                    商户账单页的导出按钮（真实账号 + 非种子数据）
+                  </div>
+                </div>
+              </div>
+              <div class="interview-card">
+                <div class="ic-q">导出失败的场景需要单独的集成场景吗？</div>
+                <div class="rec-chip">
+                  <i class="ti ti-sparkles"></i>
+                  建议：需要——导出失败要有明确的用户可见错误与重试入口，否则商户只会看到静默失败
+                </div>
+                <div class="alt-chips">
+                  <div class="alt-chip">
+                    <i
+                      class="ti ti-circle"
+                      style="font-size: 13px; color: var(--muted-foreground)"
+                    ></i>
+                    不需要，失败路径由单元测试覆盖即可
+                  </div>
+                  <div class="alt-chip">
+                    <i
+                      class="ti ti-circle"
+                      style="font-size: 13px; color: var(--muted-foreground)"
+                    ></i>
+                    合并进场景 1，作为其失败分支步骤
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="composer">
+              <div class="cp-box">回答或直接采纳推荐…</div>
+              <div class="cp-foot">
+                <button
+                  class="btn btn-ghost btn-sm"
+                  style="color: var(--muted-foreground)"
+                >
+                  <i class="ti ti-microphone" style="font-size: 14px"></i>
+                </button>
+                <span style="font-size: 11px; color: var(--muted-foreground)"
+                  >回车换行 · <kbd>⌘Enter</kbd> 发送</span
+                >
+                <button class="btn btn-primary btn-sm">
+                  <i class="ti ti-send" style="font-size: 13px"></i>发送
+                </button>
+              </div>
+            </div>
+          </aside>
         </div>
-        <div class="composer">
-          <div class="cp-box">回答或直接采纳推荐…</div>
-          <div class="cp-foot">
-            <button class="btn btn-ghost btn-sm" style="color:var(--muted-foreground)"><i class="ti ti-microphone" style="font-size:14px"></i></button>
-            <span style="font-size:11px;color:var(--muted-foreground)">回车换行 · <kbd>⌘Enter</kbd> 发送</span>
-            <button class="btn btn-primary btn-sm"><i class="ti ti-send" style="font-size:13px"></i>发送</button>
-          </div>
-        </div>
-      </aside>
+      </main>
     </div>
-  </main>
-</div>
-<script id="foundry-motion-js">
-  /* Foundry v3 motion runtime(零依赖) */
-  (function () {
-    var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    <script id="foundry-motion-js">
+      /* Foundry v3 motion runtime(零依赖) */
+      (function () {
+        var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    /* 低频页入场:一次性触发 */
-    if (!reduced && 'IntersectionObserver' in window) {
-      var io = new IntersectionObserver(function (es) {
-        es.forEach(function (e) {
-          if (e.isIntersecting) { e.target.classList.add('fm-in'); io.unobserve(e.target); }
+        /* 低频页入场:一次性触发 */
+        if (!reduced && "IntersectionObserver" in window) {
+          var io = new IntersectionObserver(
+            function (es) {
+              es.forEach(function (e) {
+                if (e.isIntersecting) {
+                  e.target.classList.add("fm-in");
+                  io.unobserve(e.target);
+                }
+              });
+            },
+            { threshold: 0.15 },
+          );
+          document.querySelectorAll("[data-fm-reveal]").forEach(function (el) {
+            io.observe(el);
+          });
+        } else {
+          document.querySelectorAll("[data-fm-reveal]").forEach(function (el) {
+            el.classList.add("fm-in");
+          });
+        }
+
+        /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
+        window.fmCountTo = function (el, target, opts) {
+          var dur = (opts && opts.duration) || 400;
+          var from =
+            parseFloat((el.textContent || "0").replace(/[^0-9.-]/g, "")) || 0;
+          var fmt =
+            (opts && opts.format) ||
+            function (v) {
+              return Math.round(v).toLocaleString();
+            };
+          if (reduced || dur <= 0) {
+            el.textContent = fmt(target);
+            return;
+          }
+          var t0 = performance.now();
+          function ease(t) {
+            return 1 - Math.pow(1 - t, 3);
+          } /* ≈ standard 曲线的收尾感 */
+          function tick(now) {
+            var p = Math.min(1, (now - t0) / dur);
+            el.textContent = fmt(from + (target - from) * ease(p));
+            if (p < 1) requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        };
+
+        /* 原型演示辅助:data-fm-count 声明式初始化 */
+        document.querySelectorAll("[data-fm-count]").forEach(function (el) {
+          var v = parseFloat(el.getAttribute("data-fm-count"));
+          if (!isNaN(v)) window.fmCountTo(el, v);
         });
-      }, { threshold: 0.15 });
-      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { io.observe(el); });
-    } else {
-      document.querySelectorAll('[data-fm-reveal]').forEach(function (el) { el.classList.add('fm-in'); });
-    }
-
-    /* 数字计数动画:fmCountTo(el, target) —— rAF 插值,reduced 直接落值 */
-    window.fmCountTo = function (el, target, opts) {
-      var dur = (opts && opts.duration) || 400;
-      var from = parseFloat((el.textContent || '0').replace(/[^0-9.-]/g, '')) || 0;
-      var fmt = (opts && opts.format) || function (v) { return Math.round(v).toLocaleString(); };
-      if (reduced || dur <= 0) { el.textContent = fmt(target); return; }
-      var t0 = performance.now();
-      function ease(t) { return 1 - Math.pow(1 - t, 3); } /* ≈ standard 曲线的收尾感 */
-      function tick(now) {
-        var p = Math.min(1, (now - t0) / dur);
-        el.textContent = fmt(from + (target - from) * ease(p));
-        if (p < 1) requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
-    };
-
-    /* 原型演示辅助:data-fm-count 声明式初始化 */
-    document.querySelectorAll('[data-fm-count]').forEach(function (el) {
-      var v = parseFloat(el.getAttribute('data-fm-count'));
-      if (!isNaN(v)) window.fmCountTo(el, v);
-    });
-  })();
-</script>
-</body>
+      })();
+    </script>
+  </body>
 </html>

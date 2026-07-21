@@ -1,6 +1,7 @@
 import { useParams } from "react-router";
-import { APP_TITLE } from "@/lib/app-config";
+
 import { WorkflowEditor } from "@/components/v3/WorkflowEditor";
+import { APP_TITLE } from "@/lib/app-config";
 
 export function meta() {
   return [{ title: `${APP_TITLE} — 工作流编辑` }];

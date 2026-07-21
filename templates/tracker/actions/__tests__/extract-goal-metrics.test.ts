@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import {
   extractSuccessMetricsSection,
   parseSuccessMetrics,
@@ -96,9 +97,7 @@ describe("parseSuccessMetrics", () => {
 
 describe("assertArtifactFound", () => {
   it("throws when artifact is undefined", () => {
-    expect(() =>
-      assertArtifactFound(undefined, "spr_123"),
-    ).toThrow(
+    expect(() => assertArtifactFound(undefined, "spr_123")).toThrow(
       "未找到 sprint spr_123 的 sprint-doc 产物（docKey=sprint-doc）",
     );
   });

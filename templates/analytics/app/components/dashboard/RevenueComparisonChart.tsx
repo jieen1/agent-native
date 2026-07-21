@@ -1,5 +1,9 @@
 import { useT } from "@agent-native/core/client/i18n";
 import {
+  formatCurrency as formatCurrencyLocale,
+  formatDate as formatDateLocale,
+} from "locale-kit/format";
+import {
   Bar,
   CartesianGrid,
   ComposedChart,
@@ -14,10 +18,6 @@ import {
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  formatCurrency as formatCurrencyLocale,
-  formatDate as formatDateLocale,
-} from "locale-kit/format";
 import { chartAxisStroke, chartGridStroke } from "@/lib/chart-theme";
 
 interface RevenueComparisonChartProps {

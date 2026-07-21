@@ -16,11 +16,7 @@
     {
       "name": "chat",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": [
-        "--filter",
-        "chat",
-        "dev"
-      ],
+      "runtimeArgs": ["--filter", "chat", "dev"],
       "port": 8080
     },
     {
@@ -56,11 +52,7 @@
     {
       "name": "dev",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": [
-        "dev:lazy",
-        "--",
-        "--all"
-      ],
+      "runtimeArgs": ["dev:lazy", "--", "--all"],
       "port": 8080
     },
     {
@@ -96,25 +88,13 @@
     {
       "name": "forms",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": [
-        "--filter",
-        "forms",
-        "exec",
-        "agent-native",
-        "dev"
-      ],
+      "runtimeArgs": ["--filter", "forms", "exec", "agent-native", "dev"],
       "port": 8080
     },
     {
       "name": "plan",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": [
-        "--filter",
-        "plan",
-        "exec",
-        "agent-native",
-        "dev"
-      ],
+      "runtimeArgs": ["--filter", "plan", "exec", "agent-native", "dev"],
       "port": 8080
     },
     {
@@ -180,11 +160,7 @@
     {
       "name": "docs",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": [
-        "--filter",
-        "@agent-native/docs",
-        "dev"
-      ],
+      "runtimeArgs": ["--filter", "@agent-native/docs", "dev"],
       "port": 3000,
       "autoPort": true
     },

@@ -35,4 +35,4 @@
 - 新增英文 UI 串:插件自动包裹 + 抽取;`pnpm --filter locale-kit i18n:extract` 更新 en.json,补译 zh.json。
 - CI 门禁:`pnpm run guard:i18n`(已入 `pnpm guards`)—— 缺译或应包未包则失败。
 - 拉取上游后:重跑 extract + `guard:i18n` 收新串;core 仍不改。
-</content>
+  </content>

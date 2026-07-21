@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+
 import {
   assertWritebackCaller,
   isWritebackCaller,
@@ -34,27 +35,37 @@ describe("writebackActorEmail", () => {
 
 describe("isWritebackCaller", () => {
   it("true only when BOTH caller==='mcp' AND userEmail matches the sentinel", () => {
-    expect(isWritebackCaller({ caller: "mcp", userEmail: writebackActorEmail() })).toBe(true);
+    expect(
+      isWritebackCaller({ caller: "mcp", userEmail: writebackActorEmail() }),
+    ).toBe(true);
   });
 
   it("false when caller is 'tool' (normal in-app agent loop) even with the right email", () => {
-    expect(isWritebackCaller({ caller: "tool", userEmail: writebackActorEmail() })).toBe(false);
+    expect(
+      isWritebackCaller({ caller: "tool", userEmail: writebackActorEmail() }),
+    ).toBe(false);
   });
 
   it("false when caller is 'frontend'/'http'/'cli' even with the right email (a human/script surface, not cross-app MCP)", () => {
     for (const caller of ["frontend", "http", "cli"]) {
-      expect(isWritebackCaller({ caller, userEmail: writebackActorEmail() })).toBe(false);
+      expect(
+        isWritebackCaller({ caller, userEmail: writebackActorEmail() }),
+      ).toBe(false);
     }
   });
 
   it("false when caller==='mcp' but the email is a normal human/agent identity (T-F9-05: no free ride via the mcp surface alone)", () => {
-    expect(isWritebackCaller({ caller: "mcp", userEmail: "someone@example.com" })).toBe(false);
+    expect(
+      isWritebackCaller({ caller: "mcp", userEmail: "someone@example.com" }),
+    ).toBe(false);
   });
 
   it("false when there is no ctx / no userEmail at all", () => {
     expect(isWritebackCaller(undefined)).toBe(false);
     expect(isWritebackCaller(null)).toBe(false);
-    expect(isWritebackCaller({ caller: "mcp", userEmail: undefined })).toBe(false);
+    expect(isWritebackCaller({ caller: "mcp", userEmail: undefined })).toBe(
+      false,
+    );
     expect(isWritebackCaller({ caller: "mcp", userEmail: null })).toBe(false);
   });
 });
@@ -62,13 +73,19 @@ describe("isWritebackCaller", () => {
 describe("assertWritebackCaller", () => {
   it("does not throw for a genuine writeback caller", () => {
     expect(() =>
-      assertWritebackCaller({ caller: "mcp", userEmail: writebackActorEmail() }),
+      assertWritebackCaller({
+        caller: "mcp",
+        userEmail: writebackActorEmail(),
+      }),
     ).not.toThrow();
   });
 
   it("throws a structured WritebackGuardError (code='actor-denied') for anyone else", () => {
     try {
-      assertWritebackCaller({ caller: "tool", userEmail: "agent-acting-as@example.com" });
+      assertWritebackCaller({
+        caller: "tool",
+        userEmail: "agent-acting-as@example.com",
+      });
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(WritebackGuardError);

@@ -20,7 +20,11 @@
     "readback": ["runsList", "spawnList", "workspaceList"],
     "tagConvention": {
       "note": "Pass an opaque `tags` map on brain-send / workflowRun / workspaceCreate, then reassemble activity with runsList / spawnList / workspaceList using `tagMatch` (v3-DESIGN §16).",
-      "example": { "source": "tracker", "item_id": "PAY-14", "actor_email": "alice@example.com" }
+      "example": {
+        "source": "tracker",
+        "item_id": "PAY-14",
+        "actor_email": "alice@example.com"
+      }
     }
   }
 }

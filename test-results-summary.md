@@ -3,16 +3,16 @@
 **Date:** 2026-06-23
 **Status:** 1 FAILURE, 1 INFRASTRUCTURE ERROR
 
-| Metric          | Value |
-|-----------------|-------|
-| Test Files      | 34    |
-| Passed          | 30    |
-| Failed          | 2     |
-| Skipped         | 2     |
-| Total Tests     | 390   |
-| Tests Passed    | 386   |
-| Tests Failed    | 1     |
-| Tests Skipped   | 3     |
+| Metric        | Value |
+| ------------- | ----- |
+| Test Files    | 34    |
+| Passed        | 30    |
+| Failed        | 2     |
+| Skipped       | 2     |
+| Total Tests   | 390   |
+| Tests Passed  | 386   |
+| Tests Failed  | 1     |
+| Tests Skipped | 3     |
 
 ---
 

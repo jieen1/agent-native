@@ -8,8 +8,8 @@
 // Requires WSL2 + microsandbox (`msb`) on the host. Skips (exit 0) with a clear
 // message if msb is not present, so CI on a non-KVM box does not fail.
 
-import { msbAvailable } from "./wsl-msb.js";
 import { runSmoke } from "./smoke.js";
+import { msbAvailable } from "./wsl-msb.js";
 
 async function main(): Promise<void> {
   if (!(await msbAvailable())) {

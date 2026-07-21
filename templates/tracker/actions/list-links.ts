@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -21,29 +22,26 @@ export default defineAction({
     const db = getDb();
 
     // Fetch all links where the work item is either the source or target.
-    const links = (
-      await db
-        .select()
-        .from(schema.links)
-        .where(
-          and(
-            ownerScope(schema.links),
-            or(
-              eq(schema.links.fromItemId, args.workItemId),
-              eq(schema.links.toItemId, args.workItemId)
-            )
-          )
-        )
-        .limit(500)
-    ) as any[];
+    const links = (await db
+      .select()
+      .from(schema.links)
+      .where(
+        and(
+          ownerScope(schema.links),
+          or(
+            eq(schema.links.fromItemId, args.workItemId),
+            eq(schema.links.toItemId, args.workItemId),
+          ),
+        ),
+      )
+      .limit(500)) as any[];
 
     // For each link, join the other item to get its title.
     const result = await Promise.all(
       links.map(async (link) => {
         const otherItemId =
           link.fromItemId === args.workItemId ? link.toItemId : link.fromItemId;
-        const direction =
-          link.fromItemId === args.workItemId ? "from" : "to";
+        const direction = link.fromItemId === args.workItemId ? "from" : "to";
 
         const otherItem = await db
           .select({ title: schema.workItems.title })
@@ -60,7 +58,7 @@ export default defineAction({
           otherItemTitle: otherItem[0]?.title ?? "",
           direction,
         };
-      })
+      }),
     );
 
     return result;

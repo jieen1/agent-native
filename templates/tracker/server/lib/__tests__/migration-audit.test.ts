@@ -43,7 +43,9 @@ export const artifactReviews = table("tracker_artifact_reviews", { id: text("id"
 `;
     const result = auditMigrations(schemaWithExtra, FULL_MIGRATIONS);
     expect(result.missing).toEqual(["tracker_artifact_reviews"]);
-    expect(result.tables.find((t) => t.name === "tracker_artifact_reviews")).toEqual({
+    expect(
+      result.tables.find((t) => t.name === "tracker_artifact_reviews"),
+    ).toEqual({
       name: "tracker_artifact_reviews",
       hasCreate: false,
     });
@@ -56,7 +58,9 @@ CREATE TABLE IF NOT EXISTS tracker_migrations (version INTEGER PRIMARY KEY);
     const result = auditMigrations(FULL_SCHEMA, migrationsWithExtra);
     expect(result.missing).toEqual([]);
     // The bookkeeping table is not reported at all (audit only walks schema→migrations).
-    expect(result.tables.some((t) => t.name === "tracker_migrations")).toBe(false);
+    expect(result.tables.some((t) => t.name === "tracker_migrations")).toBe(
+      false,
+    );
   });
 
   it("④ 列级 diff 对账:新增列有对应 ADD COLUMN → missing 为空;缺失 → missing 命中该列", () => {
@@ -111,6 +115,9 @@ diff --git a/templates/tracker/server/plugins/db.ts b/templates/tracker/server/p
 +  // just a comment, not a column
 +  risk: text("risk").notNull().default("medium"),
 `);
-    expect(extractDiffAddedColumns(added).sort()).toEqual(["risk", "split_parent_id"]);
+    expect(extractDiffAddedColumns(added).sort()).toEqual([
+      "risk",
+      "split_parent_id",
+    ]);
   });
 });

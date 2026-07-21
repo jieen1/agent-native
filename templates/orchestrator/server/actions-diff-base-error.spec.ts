@@ -103,8 +103,8 @@ vi.mock("./db/index.js", async () => {
   };
 });
 
-import { workspaceDiff } from "../actions/v3-workspace.js";
 import { runSummary } from "../actions/v3-run-summary.js";
+import { workspaceDiff } from "../actions/v3-workspace.js";
 import {
   localWorkspaceDiff,
   localWorkspaceDiffStats,

@@ -2,6 +2,7 @@ import { defineAction } from "@agent-native/core";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
 import { eq, and, asc } from "drizzle-orm";
 import { z } from "zod";
+
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
 
@@ -18,7 +19,12 @@ export default defineAction({
     const rows = await db
       .select()
       .from(schema.comments)
-      .where(and(eq(schema.comments.workItemId, args.workItemId), ownerScope(schema.comments)))
+      .where(
+        and(
+          eq(schema.comments.workItemId, args.workItemId),
+          ownerScope(schema.comments),
+        ),
+      )
       .orderBy(asc(schema.comments.createdAt));
 
     return rows.map((r) => ({

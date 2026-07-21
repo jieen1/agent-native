@@ -62,14 +62,15 @@ async function main() {
   if (!execute) {
     log("re-run with --execute to actually reclaim these workspaces.");
     for (const r of rows) {
-      log(`  would destroy ${r.id} state=${r.state} owner=${r.owner_email ?? r.owner_kind + ":" + r.owner_id} created=${r.created_at}`);
+      log(
+        `  would destroy ${r.id} state=${r.state} owner=${r.owner_email ?? r.owner_kind + ":" + r.owner_id} created=${r.created_at}`,
+      );
     }
     process.exit(0);
   }
 
-  const { destroyLocalWorkspace } = await import(
-    "../server/v3-workspace-local.js"
-  );
+  const { destroyLocalWorkspace } =
+    await import("../server/v3-workspace-local.js");
 
   let ok = 0;
   let failed = 0;

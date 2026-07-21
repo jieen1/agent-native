@@ -12,8 +12,9 @@
 // surfaced so the user sees the claude node's credential source).
 
 import { resolveSecret } from "@agent-native/core/server";
-import { getClaudeCodeAuthStatus } from "../claude-code-status.js";
+
 import { writeAudit } from "../audit/write-audit.js";
+import { getClaudeCodeAuthStatus } from "../claude-code-status.js";
 
 /** A credential key the runtime mounts, with its presence + which nodes use it. */
 export interface CredentialKey {

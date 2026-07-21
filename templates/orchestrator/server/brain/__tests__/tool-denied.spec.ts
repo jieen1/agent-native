@@ -4,6 +4,7 @@
 // 只覆盖 defineAction 面,harness 工具拒绝原本无处落——此 sink 补上缺口。
 
 import { describe, it, expect } from "vitest";
+
 import { spawnEvents, v3Events } from "../../db/v3-schema.js";
 import {
   BRAIN_SPAWN_KEY_PREFIX,
