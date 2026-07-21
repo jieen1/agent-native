@@ -11,7 +11,12 @@ describe("org switcher app links", () => {
   it("lists the default app suite with Dispatch pinned", () => {
     const apps = defaultOrgAppLinks();
 
-    expect(apps).toHaveLength(13);
+    // 14: every core:true template with a prodUrl. Was stale at 13 because
+    // "orchestrator" was missing from TEMPLATES entirely (fixed alongside
+    // guard:template-list — see templates-meta.ts) even though it's a real
+    // core template (packages/shared-app-config/templates.ts already listed
+    // it as hidden:false with a prodUrl).
+    expect(apps).toHaveLength(14);
     expect(apps[0]).toMatchObject({
       id: "dispatch",
       name: "Dispatch",
