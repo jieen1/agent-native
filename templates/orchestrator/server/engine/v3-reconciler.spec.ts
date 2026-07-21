@@ -121,8 +121,18 @@ vi.mock("../queue/claude-code-admit.js", () => ({
   })),
 }));
 
+// ── Mock v3-workspace-local.js (SDLC-083 bypassed-merge sweep) ──────────────
+// `sweepBypassedMerges` reuses `ciWatch`'s real `gh pr view` call to confirm a
+// workspace's PR state; mocked here the same way `onRunTerminal` is mocked
+// above, so tests control the "GitHub says MERGED" signal directly instead of
+// shelling out to a real `gh` binary.
+vi.mock("../v3-workspace-local.js", () => ({
+  ciWatch: vi.fn(),
+}));
+
 import { admitClaudeCodeNode } from "../queue/claude-code-admit.js";
 import { onRunTerminal } from "../tracker-client.js";
+import { ciWatch } from "../v3-workspace-local.js";
 import { evaluateExpression } from "./expression-parser.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -200,6 +210,16 @@ interface MockSpawnRow {
   error: string | null;
   ownerEmail: string;
   orgId: string | null;
+  // SDLC-083: links a spawn to the workspace it ran in — sweepBypassedMerges
+  // resolves a workspace's associated run(s) through this column.
+  workspaceId: string | null;
+}
+
+// SDLC-083 bypassed-merge sweep — v3_workspaces rows.
+interface MockWorkspaceRow {
+  id: string;
+  branch: string | null;
+  hostPath: string | null;
 }
 
 // ── Table detection helpers ──────────────────────────────────────────────────
@@ -243,6 +263,14 @@ function isSpawnsTable(table: unknown): boolean {
     "renderedPrompt" in (table as object)
   );
 }
+// v3_workspaces — "hostPath" is unique to it (SDLC-083 bypassed-merge sweep).
+function isWorkspacesTable(table: unknown): boolean {
+  return (
+    table !== null &&
+    typeof table === "object" &&
+    "hostPath" in (table as object)
+  );
+}
 
 // ── Mock DB Builder ──────────────────────────────────────────────────────────
 
@@ -259,6 +287,7 @@ function createMockDb(
   initialArtifacts: MockArtifactRow[] = [],
   initialEvents: MockEventRow[] = [],
   initialSpawns: MockSpawnRow[] = [],
+  initialWorkspaces: MockWorkspaceRow[] = [],
 ) {
   const runs = new Map<string, MockRunRow>();
   runs.set(initialRun.id, { ...initialRun });
@@ -266,6 +295,9 @@ function createMockDb(
   const artifacts: MockArtifactRow[] = [...initialArtifacts];
   const events: MockEventRow[] = [...initialEvents];
   const spawns: MockSpawnRow[] = initialSpawns.map((s) => ({ ...s }));
+  const workspaces: MockWorkspaceRow[] = initialWorkspaces.map((w) => ({
+    ...w,
+  }));
 
   // Give the raw-SQL CAS mock (hoisted.mockExecute, see above) a view onto
   // these SAME node rows so a claim actually observed by this.db.select()
@@ -296,6 +328,8 @@ function createMockDb(
                 result = [...events];
               } else if (isSpawnsTable(table)) {
                 result = [...spawns];
+              } else if (isWorkspacesTable(table)) {
+                result = [...workspaces];
               } else {
                 // Aggregate query (select({ count: ... })) or unknown table — return empty
                 result = [];
@@ -390,7 +424,7 @@ function createMockDb(
     },
   } as unknown as PostgresJsDatabase;
 
-  return { db, runs, nodes, events, artifacts, spawns };
+  return { db, runs, nodes, events, artifacts, spawns, workspaces };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -466,6 +500,18 @@ function makeSpawn(overrides: Partial<MockSpawnRow> = {}): MockSpawnRow {
     error: null,
     ownerEmail: "local@localhost",
     orgId: null,
+    workspaceId: null,
+    ...overrides,
+  };
+}
+
+function makeWorkspace(
+  overrides: Partial<MockWorkspaceRow> = {},
+): MockWorkspaceRow {
+  return {
+    id: "ws-1",
+    branch: "orchestrator/run-1",
+    hostPath: "/workspaces/ws-1",
     ...overrides,
   };
 }
@@ -2394,6 +2440,166 @@ describe("V3Reconciler", () => {
     // filter-blind, not that the real query is correct. That real-SQL
     // behavior is exercised against genuine Postgres in
     // v3-writeback-outbox-sweep.pg.spec.ts instead.
+  });
+
+  // SDLC-083: a human merging a run's PR directly on GitHub (`gh pr merge`)
+  // instead of through `workspaceMergePr` never drives that run's v3_nodes to
+  // a reconciler-observed terminal state, so `finalizeRun` is never called
+  // and the tracker work item is stuck at its dispatched stage forever even
+  // though the code is really merged (confirmed live: work item SDLC-046 /
+  // PR #32). `sweepBypassedMerges` closes the gap by asking GitHub directly
+  // (via `ciWatch`, mocked here) whether a non-terminal run's workspace
+  // branch has a genuinely `state:"MERGED"` PR, and — only then — finalizes
+  // the run through the EXISTING `finalizeRun` path unchanged.
+  describe("SDLC-083 — sweepBypassedMerges (bypassed-merge writeback sweep)", () => {
+    beforeEach(() => {
+      vi.mocked(onRunTerminal).mockReset();
+      vi.mocked(ciWatch).mockReset();
+    });
+
+    it("finalizes a non-terminal run via the real finalizeRun path when GitHub confirms the PR was genuinely merged", async () => {
+      vi.mocked(onRunTerminal).mockResolvedValue(undefined);
+      vi.mocked(ciWatch).mockResolvedValue({
+        state: "none",
+        prUrl: "https://github.com/acme/repo/pull/32",
+        prState: "MERGED",
+        checks: [],
+        summary: "merged directly on GitHub",
+      });
+
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs } = createMockDb(
+        makeRun({
+          id: "run-1",
+          status: "running", // never reached the reconciler's OWN terminal detection
+          tags: { item_id: "wi-bypass", org_id: "org-bypass" },
+          dag: { nodes: [] },
+        }),
+        [
+          makeNode({
+            id: "n-a",
+            nodeIdInDag: "a",
+            runId: "run-1",
+            status: "done",
+            outputArtifactId: "artifact-1",
+          }),
+        ],
+        [
+          makeArtifact({
+            id: "artifact-1",
+            textContent:
+              "Committed. Opened https://github.com/acme/repo/pull/32 from orchestrator/run-1.",
+          }),
+        ],
+        [],
+        [makeSpawn({ id: "spawn-1", nodeId: "n-a", workspaceId: "ws-1" })],
+        [makeWorkspace({ id: "ws-1", branch: "orchestrator/run-1" })],
+      );
+
+      // BEFORE the sweep: nothing has advanced yet.
+      expect(runs.get("run-1")!.status).toBe("running");
+      expect(runs.get("run-1")!.writebackStatus).toBeNull();
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      const result = await reconciler.sweepBypassedMerges();
+
+      // AFTER the sweep: the run is finalized through the real path.
+      expect(result).toEqual({ checked: 1, finalized: 1 });
+      expect(runs.get("run-1")!.status).toBe("done");
+      expect(runs.get("run-1")!.writebackStatus).not.toBeNull();
+
+      await vi.waitFor(() => {
+        expect(onRunTerminal).toHaveBeenCalledWith({
+          kind: "delivered",
+          workItemId: "wi-bypass",
+          orgId: "org-bypass",
+          runId: "run-1",
+          branch: "orchestrator/run-1",
+        });
+      });
+    });
+
+    it("leaves a non-terminal run untouched when the workspace's PR is NOT merged (no false-positive advancement)", async () => {
+      vi.mocked(onRunTerminal).mockResolvedValue(undefined);
+      vi.mocked(ciWatch).mockResolvedValue({
+        state: "pending",
+        prUrl: "https://github.com/acme/repo/pull/33",
+        prState: "OPEN",
+        checks: [],
+        summary: "still open",
+      });
+
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs } = createMockDb(
+        makeRun({
+          id: "run-2",
+          status: "running",
+          tags: { item_id: "wi-untouched", org_id: "org-untouched" },
+          dag: { nodes: [] },
+        }),
+        [
+          makeNode({
+            id: "n-b",
+            nodeIdInDag: "a",
+            runId: "run-2",
+            status: "done",
+          }),
+        ],
+        [],
+        [],
+        [makeSpawn({ id: "spawn-2", nodeId: "n-b", workspaceId: "ws-2" })],
+        [makeWorkspace({ id: "ws-2", branch: "orchestrator/run-2" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      const result = await reconciler.sweepBypassedMerges();
+
+      expect(result).toEqual({ checked: 1, finalized: 0 });
+      expect(runs.get("run-2")!.status).toBe("running");
+      expect(runs.get("run-2")!.writebackStatus).toBeNull();
+      expect(onRunTerminal).not.toHaveBeenCalled();
+    });
+
+    it("never re-checks GitHub for a workspace whose run already reached a terminal state", async () => {
+      vi.mocked(ciWatch).mockResolvedValue({
+        state: "none",
+        prUrl: "https://github.com/acme/repo/pull/34",
+        prState: "MERGED",
+        checks: [],
+        summary: "merged",
+      });
+
+      const V3Reconciler = await getReconciler();
+      const dispatcher = makeDispatcher();
+      const { db, runs } = createMockDb(
+        makeRun({
+          id: "run-3",
+          status: "done",
+          tags: { item_id: "wi-already-done" },
+        }),
+        [
+          makeNode({
+            id: "n-c",
+            nodeIdInDag: "a",
+            runId: "run-3",
+            status: "done",
+          }),
+        ],
+        [],
+        [],
+        [makeSpawn({ id: "spawn-3", nodeId: "n-c", workspaceId: "ws-3" })],
+        [makeWorkspace({ id: "ws-3", branch: "orchestrator/run-3" })],
+      );
+
+      const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1, 1]);
+      const result = await reconciler.sweepBypassedMerges();
+
+      expect(result).toEqual({ checked: 0, finalized: 0 });
+      expect(ciWatch).not.toHaveBeenCalled();
+      expect(runs.get("run-3")!.status).toBe("done");
+    });
   });
 
   // ── F10 — R9 spawn→node conduction invariant (SDLC-050) ──────────────────

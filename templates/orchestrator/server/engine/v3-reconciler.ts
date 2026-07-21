@@ -22,7 +22,7 @@
 //          transient/schema-violation before failing.
 //   G20 — honor on_failure:"continue" before declaring run failed.
 
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { eq, and, inArray, isNotNull, sql } from "drizzle-orm";
 import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
@@ -34,6 +34,7 @@ import {
   v3Events,
   v3Artifacts,
   v3WorkflowTemplates,
+  v3Workspaces,
   brainThreads,
 } from "../db/v3-schema.js";
 import type { V3RunLimits } from "../db/v3-schema.js";
@@ -46,6 +47,7 @@ import {
   buildTemplateDeviation,
   type WritebackOutcome,
 } from "../tracker-client.js";
+import { ciWatch } from "../v3-workspace-local.js";
 import { nodeTargetsClaudeCode } from "./dag-validator.js";
 import { evaluateExpression } from "./expression-parser.js";
 import type { ExpressionContext } from "./expression-parser.js";
@@ -2317,6 +2319,129 @@ export class V3Reconciler {
     }
 
     return { processed: pending.length, succeeded };
+  }
+
+  /**
+   * SDLC-083: bypassed-merge writeback sweep.
+   *
+   * `finalizeRun` only ever runs from this reconciler's own terminal
+   * detection (all nodes reach done/failed/skipped — see `_tickLocked`). If a
+   * human merges a run's PR directly on GitHub (`gh pr merge`) instead of
+   * going through `workspaceMergePr` (server/v3-workspace-local.ts's
+   * `mergePr`), the run's `v3_nodes` never reach a reconciler-observed
+   * terminal state, so `finalizeRun` is never called and the tracker work
+   * item is stuck at its dispatched stage forever even though the real code
+   * already merged to main (confirmed live: work item SDLC-046 / PR #32).
+   *
+   * This sweep closes that gap WITHOUT touching the terminal-detection path
+   * itself: for every host-native workspace with a run that is not yet
+   * terminal, it asks GitHub directly (via `ciWatch`'s existing `gh pr view`
+   * call — the exact helper `workspaceMergePr`'s own `mergePr` already
+   * shells out through) whether that workspace's branch has a genuinely
+   * `state:"MERGED"` PR. Only real, verified merged-PR evidence ever
+   * triggers a finalize — an unmerged or already-terminal run is left alone.
+   * On a positive match it calls the EXISTING `finalizeRun(runId, "done",
+   * nodes)` with the run's REAL node rows, unchanged — reusing
+   * `classifyWritebackOutcome`'s own branch/artifact detection and the full
+   * outbox/delivery path exactly as a normal terminal run would.
+   *
+   * Called from the same periodic sweep tick that already drains the
+   * writeback outbox (server/queue/v3-writeback-outbox-sweep.ts) — no new
+   * scheduler.
+   */
+  public async sweepBypassedMerges(
+    batchSize: number = 25,
+  ): Promise<{ checked: number; finalized: number }> {
+    const workspaces = await this.db
+      .select({ id: v3Workspaces.id, branch: v3Workspaces.branch })
+      .from(v3Workspaces)
+      .where(isNotNull(v3Workspaces.hostPath))
+      .limit(batchSize);
+
+    if (workspaces.length === 0) return { checked: 0, finalized: 0 };
+    const workspaceIds = workspaces.map((w) => w.id);
+
+    // Resolve each workspace's associated run(s) via v3_spawns → v3_nodes —
+    // the same join actions/v3-run-summary.ts's diff-stats resolution uses
+    // in reverse (there is no direct workspace_id FK on v3_runs).
+    const spawnRows = await this.db
+      .select({ nodeId: v3Spawns.nodeId, workspaceId: v3Spawns.workspaceId })
+      .from(v3Spawns)
+      .where(inArray(v3Spawns.workspaceId, workspaceIds));
+
+    const nodeIds = [
+      ...new Set(
+        spawnRows
+          .map((s) => s.nodeId)
+          .filter((id): id is string => typeof id === "string" && !!id),
+      ),
+    ];
+    const nodeRows = nodeIds.length
+      ? await this.db
+          .select({ id: v3Nodes.id, runId: v3Nodes.runId })
+          .from(v3Nodes)
+          .where(inArray(v3Nodes.id, nodeIds))
+      : [];
+    const runIdByNodeId = new Map(nodeRows.map((n) => [n.id, n.runId]));
+
+    const runIdsByWorkspace = new Map<string, Set<string>>();
+    for (const s of spawnRows) {
+      if (!s.workspaceId || !s.nodeId) continue;
+      const runId = runIdByNodeId.get(s.nodeId);
+      if (!runId) continue;
+      if (!runIdsByWorkspace.has(s.workspaceId)) {
+        runIdsByWorkspace.set(s.workspaceId, new Set());
+      }
+      runIdsByWorkspace.get(s.workspaceId)!.add(runId);
+    }
+
+    const allRunIds = [
+      ...new Set([...runIdsByWorkspace.values()].flatMap((s) => [...s])),
+    ];
+    const runRows = allRunIds.length
+      ? await this.db
+          .select({ id: v3Runs.id, status: v3Runs.status })
+          .from(v3Runs)
+          .where(inArray(v3Runs.id, allRunIds))
+      : [];
+    const runStatusById = new Map(runRows.map((r) => [r.id, r.status]));
+    const terminalRunStatuses = new Set(["done", "failed", "cancelled"]);
+
+    let checked = 0;
+    let finalized = 0;
+
+    for (const ws of workspaces) {
+      const candidateRunIds = [...(runIdsByWorkspace.get(ws.id) ?? [])].filter(
+        (runId) => {
+          const status = runStatusById.get(runId);
+          return status != null && !terminalRunStatuses.has(status);
+        },
+      );
+      if (candidateRunIds.length === 0) continue;
+      checked++;
+
+      let prState: string | null;
+      try {
+        const ci = await ciWatch({ id: ws.id, branch: ws.branch ?? undefined });
+        prState = ci.prState;
+      } catch {
+        // Can't verify (workspace destroyed, gh unavailable, no branch) —
+        // never force-advance without real evidence.
+        continue;
+      }
+      if (prState !== "MERGED") continue;
+
+      for (const runId of candidateRunIds) {
+        const nodes = await this.db
+          .select()
+          .from(v3Nodes)
+          .where(eq(v3Nodes.runId, runId));
+        await this.finalizeRun(runId, "done", nodes);
+        finalized++;
+      }
+    }
+
+    return { checked, finalized };
   }
 
   /**
