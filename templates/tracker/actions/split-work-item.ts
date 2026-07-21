@@ -3,12 +3,13 @@ import {
   getRequestOrgId,
   getRequestUserEmail,
 } from "@agent-native/core/server/request-context";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { ownerScope } from "../server/lib/access.js";
+import { allocateItemKey } from "../server/lib/item-key-sequencer.js";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
@@ -99,12 +100,13 @@ export default defineAction({
 
     const chainBlockedBy = args.chainBlockedBy ?? true;
 
-    // Project key + running sequence number for itemKey generation.
-    //
-    // F8 未合并前暂沿现状计数(与 create-work-item.ts / decompose-epic.ts 同
-    // 一 count(*)-based 生成法)——文档标注消费点:F8 合并后这里改为
-    // `UPDATE tracker_project_seq … RETURNING next_seq` 单点原子分配
-    // (docs/sdlc-impl-f5-f10.md §1D)。
+    // Project key, for itemKey generation. F8: the actual number comes from
+    // the single project-level sequencer (allocateItemKey) — NOT a
+    // count(*)-based `seq` local to this action (that raced with concurrent
+    // create-work-item/decompose-epic calls on the same project and could
+    // also collide with existing items whenever any item in the project had
+    // been deleted, since count(*) undercounts the true max issued number —
+    // see server/lib/item-key-sequencer.ts).
     const project = (
       await db
         .select({ key: schema.projects.key })
@@ -112,19 +114,16 @@ export default defineAction({
         .where(eq(schema.projects.id, parent.projectId))
         .limit(1)
     )[0];
-    const countResult = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(schema.workItems)
-      .where(eq(schema.workItems.projectId, parent.projectId));
-    let seq = (Number(countResult[0]?.count) || 0) + 1;
 
     const now = new Date().toISOString();
     const created: { id: string; itemKey: string; title: string }[] = [];
 
     for (const child of args.children) {
       const id = nanoid();
-      const itemKey = `${project?.key ?? "ITEM"}-${String(seq).padStart(3, "0")}`;
-      seq++;
+      const itemKey = await allocateItemKey(
+        parent.projectId,
+        project?.key ?? "ITEM",
+      );
       // Split children pick up mid-lifecycle at 实施 — the parent brief
       // already passed brainstorm/sprint-plan/test-plan/design (it only got
       // flagged for scale at the Briefs step, per the S2 workflow), so

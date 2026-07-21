@@ -18,6 +18,13 @@
 //            "existing project -> next_seq = current max" can only be proven
 //            for real against Postgres.
 //
+//   Phase 4  (added alongside the split-work-item.ts fix for SDLC-033) — the
+//            same real-Postgres concurrency proof, but shaped like
+//            split-work-item's actual call pattern: several actors each doing
+//            a SEQUENTIAL for-loop of multiple awaited allocateItemKey calls,
+//            racing against several single-allocation actors, all against the
+//            SAME project_id.
+//
 // This is a standalone runtime script (calls process.exit), NOT a vitest
 // suite — its filename intentionally lacks `.test`/`.spec` so vitest never
 // collects it, and it lives under scripts/ which the template tsconfig's
@@ -124,6 +131,16 @@ async function phase1() {
 // reset ONLY the v27 bookkeeping row + its two tables, insert genuine legacy
 // rows, then re-run — this time only v27 is pending, so its backfill
 // INSERT...SELECT runs against real pre-existing data.
+//
+// KNOWN PRE-EXISTING LIMITATION (unrelated to the split-work-item fix this
+// file's Phase 4 was added for): this trick assumed v27 was the newest
+// migration. Migrations have since grown to v31, and the runner only applies
+// versions above the current high-water mark — so deleting v27's bookkeeping
+// row here no longer causes it to be re-applied (confirmed empirically: the
+// second runMigrations() call below is a no-op for v27, and the subsequent
+// SELECT against tracker_project_seq throws `relation does not exist`).
+// Phase 1/3/4 do not depend on Phase 2 and were independently re-verified
+// against a fresh Postgres database.
 async function phase2() {
   log("=== PHASE 2: existing-db migration backfill (T-F8-06 tier B) ===");
   // getDbExec()'s pooled connection is a module-level singleton (only reset
@@ -223,10 +240,71 @@ async function phase3() {
   }
 }
 
+// PHASE 4 — F8 follow-up: split-work-item.ts used to bypass allocateItemKey
+// entirely with its own local `count(*)` (SDLC-033's root cause — see
+// server/lib/item-key-sequencer.ts and actions/split-work-item.ts). Now that
+// it routes through the same sequencer, this phase proves the shape
+// split-work-item actually uses — one action run doing a SEQUENTIAL for-loop
+// of several awaited allocateItemKey calls (one per child) — stays collision-
+// free even when several such "split" actors and several single
+// "create-work-item" actors all race concurrently against the SAME
+// project_id on real Postgres.
+async function phase4() {
+  log(
+    "=== PHASE 4: split-work-item-shaped concurrent multi-allocation, real Postgres ===",
+  );
+  process.env.DATABASE_URL = legacyUrl;
+  const { allocateItemKey } =
+    await import("../server/lib/item-key-sequencer.js");
+
+  const projectId = "split-shaped-proj";
+  const projectKey = "SPL";
+
+  // 5 "split" actors, each sequentially allocating 3 children (mirrors
+  // split-work-item's for-loop of awaited allocateItemKey calls), plus 10
+  // "create-work-item" actors each allocating exactly 1 — all fired at once.
+  const splitActor = async () => {
+    const keys: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      keys.push(await allocateItemKey(projectId, projectKey));
+    }
+    return keys;
+  };
+  const createActor = async () => [
+    await allocateItemKey(projectId, projectKey),
+  ];
+
+  const actors = [
+    ...Array.from({ length: 5 }, () => splitActor()),
+    ...Array.from({ length: 10 }, () => createActor()),
+  ];
+  const results = (await Promise.all(actors)).flat();
+  const expectedCount = 5 * 3 + 10 * 1;
+
+  assertTrue(
+    results.length === expectedCount,
+    `phase4: got ${results.length} itemKeys total, expected ${expectedCount}`,
+  );
+  const unique = new Set(results);
+  assertTrue(
+    unique.size === expectedCount,
+    `phase4: ${expectedCount} concurrent allocations across split-shaped and single-shaped callers -> all unique (got ${unique.size} unique of ${results.length}; sample=${JSON.stringify(results.slice(0, 5))})`,
+  );
+  const nums = results
+    .map((r) => parseInt(r.split("-")[1]!, 10))
+    .sort((a, b) => a - b);
+  const expectedNums = Array.from({ length: expectedCount }, (_, i) => i + 1);
+  assertTrue(
+    JSON.stringify(nums) === JSON.stringify(expectedNums),
+    `phase4: numbers are exactly 1..${expectedCount} contiguous, no gaps/dupes (got ${JSON.stringify(nums)})`,
+  );
+}
+
 async function main() {
   await phase1();
   await phase2();
   await phase3();
+  await phase4();
   console.log(
     `\n[f8-pg-verify] ${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`,
   );
