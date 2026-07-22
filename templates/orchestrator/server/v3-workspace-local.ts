@@ -1744,6 +1744,7 @@ export async function commitAndPush(
   const isLocalRemote =
     !/^https:\/\//.test(remote) || !/github\.com/.test(remote);
   if (opts.createMr && isLocalRemote) {
+    await recordLastPush(opts.id, result);
     return result;
   }
   if (opts.createMr) {
@@ -1759,7 +1760,39 @@ export async function commitAndPush(
     if (prUrl) result.prUrl = prUrl;
   }
 
+  await recordLastPush(opts.id, result);
   return result;
+}
+
+/**
+ * Durably record a REAL, verified push outcome on the workspace row itself —
+ * see v3-schema.ts's v3Workspaces docblock for why this exists. Called ONLY
+ * after `git push` has actually returned exit code 0 above (this function
+ * throws before reaching here on any failure), so `result` is ground truth,
+ * never an agent's self-reported summary. Best-effort: a write failure here
+ * must never fail a push that already genuinely succeeded.
+ */
+async function recordLastPush(
+  workspaceId: string,
+  result: CommitAndPushResult,
+): Promise<void> {
+  try {
+    const db = getV3Db();
+    await db
+      .update(v3Schema.v3Workspaces)
+      .set({
+        lastPushSha: result.sha,
+        lastPushBranch: result.branch,
+        lastPushPrUrl: result.prUrl ?? null,
+        lastPushedAt: new Date(),
+      })
+      .where(eq(v3Schema.v3Workspaces.id, workspaceId));
+  } catch (err) {
+    console.warn(
+      `[v3-workspace-local] recordLastPush failed for ${workspaceId}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
 }
 
 // ── PR / MR opener ───────────────────────────────────────────────────────────

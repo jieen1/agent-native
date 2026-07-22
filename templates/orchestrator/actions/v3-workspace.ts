@@ -637,6 +637,27 @@ export const workspaceCommitPush = defineAction({
       remoteUrl: ws.repoUrl ?? undefined,
     });
 
+    // F9 delivery-detection fix (2026-07-22): record the REAL, verified push
+    // outcome on the workspace row — see v3-schema.ts's v3Workspaces docblock.
+    // Only on a genuine pushResult.pushed===true (a real git exit 0), never
+    // inferred from an agent's own summary text.
+    if (pushResult.pushed) {
+      await getV3Db()
+        .update(v3Schema.v3Workspaces)
+        .set({
+          lastPushSha: commitResult.sha ?? null,
+          lastPushBranch: branch,
+          lastPushedAt: new Date(),
+        })
+        .where(eq(v3Schema.v3Workspaces.id, args.workspaceId))
+        .catch((err) => {
+          console.warn(
+            `[v3-workspace] recordLastPush failed for ${args.workspaceId}: ` +
+              (err instanceof Error ? err.message : String(err)),
+          );
+        });
+    }
+
     return {
       workspaceId: args.workspaceId,
       sha: commitResult.sha ?? null,

@@ -361,6 +361,19 @@ export const v3Workspaces = pgTable(
     baseSha: text("base_sha"),
     readyAt: timestamp("ready_at", { withTimezone: true }),
     readyReport: jsonb("ready_report"),
+    // Additive (2026-07-22, F9 delivery-detection fix): the REAL, verified
+    // outcome of the most recent successful commitAndPush/workspaceCommitPush
+    // call — written by that code path itself from actual git command exit
+    // codes, never inferred from an agent's own summary text. Writeback
+    // classification (v3-reconciler.ts classifyWritebackOutcome) reads these
+    // as ground truth instead of regex-scanning node output artifacts, which
+    // could previously mark a run "delivered" purely because the agent's
+    // prose happened to mention a branch-shaped string, regardless of
+    // whether a push ever actually succeeded.
+    lastPushSha: text("last_push_sha"),
+    lastPushBranch: text("last_push_branch"),
+    lastPushPrUrl: text("last_push_pr_url"),
+    lastPushedAt: timestamp("last_pushed_at", { withTimezone: true }),
     ...ownableColumns(),
   },
   (t) => [

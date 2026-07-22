@@ -1187,6 +1187,21 @@ CREATE INDEX IF NOT EXISTS idx_v3_merge_overrides_workspace ON v3_merge_override
 )`,
     },
   },
+  {
+    // F9 delivery-detection fix (dogfood audit 2026-07-22): the real, verified
+    // outcome of the most recent successful commitAndPush/workspaceCommitPush
+    // call, written by that code path itself from actual git command exit
+    // codes — see v3-schema.ts's v3Workspaces docblock for the full
+    // rationale. Additive columns on the existing v3_workspaces table.
+    version: 9,
+    name: "v3-workspaces-last-push-columns",
+    sql: {
+      postgres: `ALTER TABLE v3_workspaces ADD COLUMN IF NOT EXISTS last_push_sha text;
+ALTER TABLE v3_workspaces ADD COLUMN IF NOT EXISTS last_push_branch text;
+ALTER TABLE v3_workspaces ADD COLUMN IF NOT EXISTS last_push_pr_url text;
+ALTER TABLE v3_workspaces ADD COLUMN IF NOT EXISTS last_pushed_at timestamp with time zone`,
+    },
+  },
 ];
 
 const migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" });
