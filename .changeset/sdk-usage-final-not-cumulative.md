@@ -10,5 +10,4 @@ behave this way), so summing each chunk quadratically inflated recorded output
 tokens — a real 4-minute spawn on a local 27B model logged ~1.3M output tokens
 (~5200 tok/s), which is physically impossible. Any app relying on
 `runAgentLoop`'s returned token usage for cost/throughput accounting now gets
-the correct final totals, and `inputTokens` is populated instead of staying at
-0.
+the correct final totals, and `inputTokens` is populated instead of staying at 0.
