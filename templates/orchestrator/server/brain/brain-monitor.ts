@@ -24,6 +24,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getManagedClaudeStatus } from "../claude-managed-auth.js";
 import { getV3Db, v3Schema } from "../db/index.js";
 import { getBrainMonitorDefaultIntervalSeconds } from "../orchestration-defaults.js";
+import { getBrainRuntimeSelection } from "./brain-runtime.js";
 
 /**
  * Default periodic drift-check cadence (seconds) when a thread leaves it
@@ -96,13 +97,43 @@ export async function setMonitorIntervalSec(
  * PERIODIC_CHECK message and stamp last_wake_at. Returns the thread ids woken
  * (for logging / tests). Best-effort throughout.
  */
+/**
+ * Can a brain turn actually run right now? True when CC is logged in OR a
+ * valid (`kind: "runtime"`) engine override is configured. Bug fixed
+ * 2026-07-22: `monitorSweepOnce` used to gate purely on the managed Claude
+ * Code OAuth login (`getManagedClaudeStatus().loggedIn`), so the ENTIRE
+ * periodic drift-check backstop silently no-op'd for every brain turn
+ * whenever a `runtime:<id>` override (e.g. Aliyun) was configured — exactly
+ * startBrainTurn's OWN "useSdkBrain"/runtimeOverride fallback path
+ * (resolveBrainEngineChoice), which the old check never consulted. Combined
+ * with maybeWakeOrchestratorOnNode (v3-reconciler.ts)'s overlap-guard — which
+ * SKIPS an event-driven wake when the thread is already mid-turn and writes
+ * a one-time "already woken" marker so it never retries that same node — a
+ * brain thread that missed its event-driven wake for any reason had NO
+ * remaining backstop at all: a node/run could finish real, correct work and
+ * the owning brain thread would simply never be told to review + commit it,
+ * with no error and no retry. This now mirrors the SAME resolution
+ * startBrainTurn itself trusts via getBrainRuntimeSelection, so the backstop
+ * is never disabled by a choice of engine startBrainTurn would happily have
+ * run anyway. The BRAIN_MODEL_KEY setting this resolves is a single global
+ * admin-level value (see getBrainRuntimeSelection's own docblock) — the
+ * ownerEmail argument only resolves per-row secrets we don't need here, so a
+ * placeholder is safe.
+ */
+export async function canBrainEngineRunNow(): Promise<boolean> {
+  if (getManagedClaudeStatus().loggedIn) return true;
+  const runtimeSelection = await getBrainRuntimeSelection(
+    "local@localhost",
+  ).catch(() => null);
+  return runtimeSelection?.kind === "runtime";
+}
+
 export async function monitorSweepOnce(): Promise<string[]> {
   const db = getV3Db();
 
-  // Don't bother (and don't error-spam) when the managed CC login is missing —
-  // startBrainTurn would just throw. Event/terminal wakes hit the same guard.
-  const login = getManagedClaudeStatus();
-  if (!login.loggedIn) return [];
+  // Don't bother (and don't error-spam) when no brain engine can actually run
+  // a turn right now — see canBrainEngineRunNow's docblock.
+  if (!(await canBrainEngineRunNow())) return [];
 
   // Active brain-monitored runs: non-terminal v3_runs whose tags carry a
   // brainThreadId beacon. Join the thread row for interval + last_wake + status.

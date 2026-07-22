@@ -1,14 +1,18 @@
 // S9 Brain console "监控节奏" card's inline edit (04 §6) — unit test for
-// setMonitorIntervalSec. Only this function is covered here; monitorSweepOnce
-// / stampBrainWake are exercised indirectly elsewhere and pull in heavier
-// dependencies (getManagedClaudeStatus, a dynamic import of brain-session.js)
-// out of scope for this addition.
+// setMonitorIntervalSec. monitorSweepOnce itself is exercised indirectly
+// elsewhere and pulls in heavier dependencies out of scope for this addition
+// — but canBrainEngineRunNow (its "can a turn run at all" gate) is a small,
+// independently mockable decision worth covering directly (2026-07-22 fix).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const hoisted = vi.hoisted(() => {
   const updates: Array<{ set: Record<string, unknown>; where: unknown }> = [];
-  return { updates };
+  return {
+    updates,
+    loggedIn: false,
+    runtimeSelection: null as { kind: string } | null,
+  };
 });
 
 vi.mock("../db/index.js", async (importOriginal) => {
@@ -28,7 +32,49 @@ vi.mock("../db/index.js", async (importOriginal) => {
   };
 });
 
-import { setMonitorIntervalSec } from "./brain-monitor.js";
+vi.mock("../claude-managed-auth.js", () => ({
+  getManagedClaudeStatus: () => ({ loggedIn: hoisted.loggedIn }),
+}));
+
+vi.mock("./brain-runtime.js", () => ({
+  getBrainRuntimeSelection: async () => hoisted.runtimeSelection,
+}));
+
+import {
+  setMonitorIntervalSec,
+  canBrainEngineRunNow,
+} from "./brain-monitor.js";
+
+describe("canBrainEngineRunNow", () => {
+  beforeEach(() => {
+    hoisted.loggedIn = false;
+    hoisted.runtimeSelection = null;
+  });
+
+  it("is true when Claude Code is logged in, regardless of runtime selection", async () => {
+    hoisted.loggedIn = true;
+    hoisted.runtimeSelection = null;
+    expect(await canBrainEngineRunNow()).toBe(true);
+  });
+
+  it("REGRESSION (2026-07-22): is true when NOT logged in but a valid runtime override (e.g. Aliyun) is configured — previously this silently disabled the entire periodic backstop", async () => {
+    hoisted.loggedIn = false;
+    hoisted.runtimeSelection = { kind: "runtime" };
+    expect(await canBrainEngineRunNow()).toBe(true);
+  });
+
+  it("is false when not logged in and no runtime override is configured", async () => {
+    hoisted.loggedIn = false;
+    hoisted.runtimeSelection = null;
+    expect(await canBrainEngineRunNow()).toBe(false);
+  });
+
+  it("is false when not logged in and the saved runtime override is unresolved (deleted row / wrong kind)", async () => {
+    hoisted.loggedIn = false;
+    hoisted.runtimeSelection = { kind: "runtime-unresolved" };
+    expect(await canBrainEngineRunNow()).toBe(false);
+  });
+});
 
 describe("setMonitorIntervalSec", () => {
   beforeEach(() => {
