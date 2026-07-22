@@ -111,6 +111,7 @@ import {
   buildBrainMcpServers,
 } from "./brain-mcp-config.js";
 import { getBrainModel } from "./brain-model.js";
+import { resolveBrainRunbookPrompt } from "./brain-prompt.js";
 import {
   getBrainRuntimeSelection,
   type BrainRuntimeSelection,
@@ -918,10 +919,11 @@ async function runBrainHarnessTurn(opts: {
     // `createSession(params)` that reads `params._meta.systemPrompt` — so a
     // resumed turn gets the brain prompt as a real system prompt too, not
     // just a fresh one.
+    const runbook = await resolveBrainRunbookPrompt(BRAIN_PROMPT);
     const systemPromptAppend =
       phase === "review"
-        ? `${BRAIN_PROMPT}\n\n${REVIEW_PHASE_PROMPT_ADDENDUM}`
-        : BRAIN_PROMPT;
+        ? `${runbook}\n\n${REVIEW_PHASE_PROMPT_ADDENDUM}`
+        : runbook;
     const metadata: Record<string, unknown> = {
       systemPrompt: {
         type: "preset",
@@ -1256,6 +1258,7 @@ async function streamBrainChild(opts: {
   const capabilityProfile = await loadBrainCapabilityProfile();
   const allowedTools = resolveBrainAllowedTools(phase, capabilityProfile);
 
+  const runbook = await resolveBrainRunbookPrompt(BRAIN_PROMPT);
   const argv = buildBrainArgv({
     message: opts.message,
     brainModel,
@@ -1263,8 +1266,8 @@ async function streamBrainChild(opts: {
     allowedTools,
     systemPrompt:
       phase === "review"
-        ? `${BRAIN_PROMPT}\n\n${REVIEW_PHASE_PROMPT_ADDENDUM}`
-        : BRAIN_PROMPT,
+        ? `${runbook}\n\n${REVIEW_PHASE_PROMPT_ADDENDUM}`
+        : runbook,
     resumeSessionId: opts.resumeSessionId,
   });
 
