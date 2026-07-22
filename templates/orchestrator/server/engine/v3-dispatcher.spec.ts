@@ -1132,6 +1132,179 @@ describe("model_override threading onto Node.modelOverride (task #89)", () => {
   });
 });
 
+describe("agentConfig.systemPrompt threading onto Node.systemPromptOverride", () => {
+  // Root cause: loadAgent() genuinely resolves agent_defs.system_prompt (the
+  // Agents page's editor — agents._index.tsx), and v3-dispatcher.ts's own
+  // v3Input.system_prompt is documented as "channel input 1" — but the
+  // adapter (v3ToNodeRunnerInput) never copied it onto the Node the executor
+  // actually receives, and Node had no field to carry it even if it had.
+  // Every worker node ran on engine-loop.ts's one hardcoded generic persona
+  // regardless of what was configured per agent_defs row. This proves
+  // spawn() now threads it through onto Node.systemPromptOverride.
+
+  function createDagMockDb(dag: unknown) {
+    const artifacts: Array<Record<string, unknown>> = [];
+    const spawnsById = new Map<string, Record<string, unknown>>();
+    const events: Array<Record<string, unknown>> = [];
+    const runRow = { id: "run-1", dag };
+
+    const db = {
+      select: () => ({
+        from: (table: unknown) => ({
+          where: async () => (table === v3Runs ? [runRow] : []),
+        }),
+      }),
+      update: () => ({ set: () => ({ where: async () => ({}) }) }),
+      insert: (table: unknown) => ({
+        values: (row: Record<string, unknown>) => {
+          let recorded = false;
+          const commit = async () => {
+            if (!recorded) {
+              recorded = true;
+              if (table === v3Events) events.push(row);
+              else if (row.kind && row.textContent !== undefined)
+                artifacts.push(row);
+              else if (row.renderedPrompt !== undefined) {
+                spawnsById.set(String(row.id), {
+                  ...(spawnsById.get(String(row.id)) ?? {}),
+                  ...row,
+                });
+              }
+            }
+            return {};
+          };
+          return {
+            onConflictDoNothing: () => commit(),
+            onConflictDoUpdate: () => commit(),
+            then: (
+              resolve: (v: unknown) => void,
+              reject: (e: unknown) => void,
+            ) => commit().then(resolve, reject),
+          };
+        },
+      }),
+    } as unknown as PostgresJsDatabase;
+
+    return { db, artifacts, spawnsById, events };
+  }
+
+  function makeNodeRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: "node-dev",
+      runId: "run-1",
+      nodeIdInDag: "dev",
+      type: "agent",
+      status: "running",
+      iteration: 0,
+      fanoutIndex: 0,
+      currentSpawnId: null,
+      outputArtifactId: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      ownerEmail: "local@localhost",
+      orgId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(renderTemplate).mockImplementation(
+      (template: string) => template,
+    );
+  });
+
+  it("a non-empty agent_defs.system_prompt survives onto Node.systemPromptOverride", async () => {
+    vi.mocked(loadAgent).mockResolvedValue({
+      name: "dev-agent",
+      description: "",
+      runtime: "none" as const,
+      engine: "vllm",
+      model: "qwen3.6",
+      tools: [],
+      systemPrompt: "You are the dev agent. Follow the team's TDD conventions.",
+    });
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+
+    const runSpy = vi
+      .spyOn(hoisted.MockNodeRunner.prototype, "run")
+      .mockResolvedValue({
+        output: "done",
+        tokensSpent: 1,
+        toolCallCount: 0,
+        model: "qwen3.6",
+        vmName: null,
+        durationMs: 1,
+        attempts: 1,
+      } as any);
+
+    const dag = {
+      nodes: [
+        { id: "dev", type: "agent", agent: "dev-agent", prompt: "do work" },
+      ],
+    };
+    const mockDb = createDagMockDb(dag);
+    const executor: RuntimeExecutor = {
+      kind: "test",
+      run: vi.fn().mockResolvedValue({} as any),
+    };
+    const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+    await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+    const calls = runSpy.mock.calls as unknown as Array<
+      [{ node: Record<string, unknown> }]
+    >;
+    const capturedNode = calls[calls.length - 1][0].node;
+    expect(capturedNode.systemPromptOverride).toBe(
+      "You are the dev agent. Follow the team's TDD conventions.",
+    );
+  });
+
+  it("an empty agent_defs.system_prompt leaves Node.systemPromptOverride unset (no empty-string override)", async () => {
+    vi.mocked(loadAgent).mockResolvedValue({
+      name: "vllm",
+      description: "",
+      runtime: "none" as const,
+      engine: "vllm",
+      model: "qwen3.6",
+      tools: [],
+      systemPrompt: "",
+    });
+    const { V3Dispatcher } = await import("./v3-dispatcher.js");
+
+    const runSpy = vi
+      .spyOn(hoisted.MockNodeRunner.prototype, "run")
+      .mockResolvedValue({
+        output: "done",
+        tokensSpent: 1,
+        toolCallCount: 0,
+        model: "qwen3.6",
+        vmName: null,
+        durationMs: 1,
+        attempts: 1,
+      } as any);
+
+    const dag = {
+      nodes: [{ id: "dev", type: "agent", agent: "vllm", prompt: "do work" }],
+    };
+    const mockDb = createDagMockDb(dag);
+    const executor: RuntimeExecutor = {
+      kind: "test",
+      run: vi.fn().mockResolvedValue({} as any),
+    };
+    const dispatcher = new V3Dispatcher(mockDb.db, executor);
+
+    await dispatcher.spawn(makeNodeRow() as any, "run-1");
+
+    const calls = runSpy.mock.calls as unknown as Array<
+      [{ node: Record<string, unknown> }]
+    >;
+    const capturedNode = calls[calls.length - 1][0].node;
+    expect(capturedNode.systemPromptOverride).toBeUndefined();
+  });
+});
+
 describe("F7 usage capture + suspect flagging", () => {
   function makeMockNodeRunnerResult(result: Record<string, unknown>) {
     vi.spyOn(hoisted.MockNodeRunner.prototype, "run").mockImplementation(

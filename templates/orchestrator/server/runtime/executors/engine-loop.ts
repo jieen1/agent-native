@@ -76,6 +76,41 @@ export { DEFAULT_WORKDIR };
  * append the `item` value for fanout children (that IS part of the channel
  * contract — it is the per-item slot the author writes `{{item}}` for).
  */
+/**
+ * The operational system prompt every vLLM/RemoteApi-routed node runs on —
+ * the concrete instruction that makes the model actually USE its tools
+ * instead of just describing a change. Load-bearing and always present.
+ */
+export const OPERATIONAL_SYSTEM_PROMPT =
+  "You are a coding agent operating inside an isolated microVM workspace. " +
+  "You have bash, read, edit, and write tools that act on files inside the " +
+  "workspace. Always use the tools to make real changes; never claim a " +
+  "change you did not perform with a tool.";
+
+/**
+ * Build the system prompt for one node: `ctx.node.systemPromptOverride` — the
+ * resolved agent's own `agent_defs.system_prompt`, editable on the Agents
+ * page (`agents._index.tsx`) — PREPENDED when configured, so a per-agent
+ * persona/spec genuinely reaches the model instead of every worker node
+ * running on {@link OPERATIONAL_SYSTEM_PROMPT} alone regardless of which
+ * agent_defs row it was dispatched as. The operational text stays present
+ * unconditionally — it is never replaced, only ever led by the persona.
+ */
+export function buildSystemPrompt(ctx: RuntimeExecCtx): string {
+  const configuredPersona = ctx.node.systemPromptOverride?.trim();
+  return configuredPersona
+    ? `${configuredPersona}\n\n${OPERATIONAL_SYSTEM_PROMPT}`
+    : OPERATIONAL_SYSTEM_PROMPT;
+}
+
+/** Build the user-turn instruction from the node prompt + resolved deps/item.
+ *
+ * DESIGN §6.5 / I7: the backend does NOT auto-dump deps into the prompt.
+ * The only data that crosses into the spawn is the rendered prompt string
+ * (already interpolated by the dispatcher via renderTemplate). We only
+ * append the `item` value for fanout children (that IS part of the channel
+ * contract — it is the per-item slot the author writes `{{item}}` for).
+ */
 export function buildPrompt(ctx: RuntimeExecCtx): string {
   const lines: string[] = [];
   lines.push(ctx.node.prompt ?? ctx.node.title ?? "Complete the task.");
@@ -397,11 +432,7 @@ export async function runEngineLoopInVm(args: {
     }
   };
 
-  const systemPrompt =
-    "You are a coding agent operating inside an isolated microVM workspace. " +
-    "You have bash, read, edit, and write tools that act on files inside the " +
-    "workspace. Always use the tools to make real changes; never claim a " +
-    "change you did not perform with a tool.";
+  const systemPrompt = buildSystemPrompt(ctx);
 
   // The mutable message array the loop owns. `runAgentLoopDirectWithSoftTimeout`
   // appends its continuation nudges to THIS array in place across resume rounds,

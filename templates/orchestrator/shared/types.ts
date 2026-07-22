@@ -156,6 +156,16 @@ export interface Node {
    * `model_override`.
    */
   modelOverride?: string;
+  /**
+   * The resolved DAG-node agent's own `agent_defs.system_prompt` (persona /
+   * standing instructions — e.g. the "dev"/"qa" agent editable from the
+   * Agents page, `agents._index.tsx`), threaded in by v3-dispatcher.ts's
+   * `spawn()` when non-empty. Distinct from `prompt`, which is the per-task
+   * instruction rendered from `dagNode.prompt` (channel input 2) — this is
+   * channel input 1, carried through so an executor can actually use it
+   * instead of a single hardcoded generic persona for every agent.
+   */
+  systemPromptOverride?: string;
   /** Reasoning-effort hint (§1.6). */
   effort?: NodeEffort;
   /** Instruction template; supports {{deps.<id>.output}} refs. */
