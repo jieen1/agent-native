@@ -18,7 +18,7 @@ import { eq, sql } from "drizzle-orm";
 import { deriveContextWindow } from "../../actions/brain-usage.js";
 import { getV3Db, v3Schema } from "../db/index.js";
 import { mintBrainToken } from "./brain-mcp-config.js";
-import { BRAIN_PROMPT } from "./brain-prompt.js";
+import { BRAIN_PROMPT, resolveBrainRunbookPrompt } from "./brain-prompt.js";
 
 const MCP_URL = "http://localhost:3002/_agent-native/mcp";
 const MAX_STEPS = 50;
@@ -497,6 +497,11 @@ export async function runSdkBrainTurn(
     .where(eq(v3Schema.brainThreads.id, threadId))
     .catch(() => {});
 
+  // Resolved once per turn (not per step) — the Skills page's "大脑运行手册"
+  // override rarely changes mid-turn, and a hosted-override lookup on every
+  // agentic-loop step would be a pointless repeated DB read.
+  const runbook = await resolveBrainRunbookPrompt(BRAIN_PROMPT);
+
   // Run the agentic loop.
   let step = 0;
   let currentMessages = [...messages];
@@ -549,7 +554,7 @@ export async function runSdkBrainTurn(
     try {
       result = await generateText({
         model,
-        system: BRAIN_PROMPT,
+        system: runbook,
         messages: currentMessages,
         tools,
         maxTokens: 8192,

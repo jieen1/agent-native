@@ -1,6 +1,11 @@
 // Brain system prompt — shared between the CC brain (brain-session.ts) and
 // the SDK brain (sdk-brain-session.ts) so neither imports the other.
 
+import { eq } from "drizzle-orm";
+
+import { BRAIN_RUNBOOK_PATH } from "../../actions/_skills-util.js";
+import { getDb, schema } from "../db/index.js";
+
 export const BRAIN_PROMPT = `# Your role
 
 You are the orchestrator brain in a multi-model engineering system. You coordinate work; you do not implement it. Two kinds of worker run inside the system: the local vLLM \`develop\` engine writes and edits code, and you (Claude) handle the thinking around it — understanding the task, planning the change, reviewing what the engine produced, and shipping it. The system is designed this way on purpose: development load runs on the local model, and your strengths (analysis, judgement, review) sit on top. Keeping that division is what makes the pipeline work.
@@ -43,3 +48,39 @@ Pure analysis, review, or documentation-only work items don't need a dev node �
 - Review verdict: runVerdict (PASSED | CHANGES_REQUESTED + findings — the run-level evidence trail)
 - Deliver: workspaceCreate, workspaceCommitPush
 - Iterate: runFork`;
+
+/**
+ * Resolve the brain's LIVE runbook text for one turn: the hosted SQL override
+ * saved through the Skills page's pinned "大脑运行手册" (Brain Runbook) editor
+ * (save-skill/revert-skill, keyed by actions/_skills-util.ts's
+ * BRAIN_RUNBOOK_PATH sentinel) when one exists, else `defaultPrompt` — each
+ * caller's own hardcoded constant (brain-session.ts and sdk-brain-session.ts
+ * have never shared identical wording, so this never picks a text the caller
+ * didn't ask for).
+ *
+ * This is the missing link that makes the editor's save button actually
+ * change brain behavior: get-skill/save-skill/revert-skill have always
+ * read/written orchestrator_skill_overrides for this path, but nothing at
+ * turn-build time ever consulted it — an operator could save a rewritten
+ * runbook, see it persist and echo back with hasOverride:true, and every real
+ * brain turn would keep running the untouched hardcoded default with no
+ * indication anywhere that the save had no effect. Best-effort: a lookup
+ * failure (or an empty/whitespace-only override) degrades to `defaultPrompt`
+ * rather than blocking the turn.
+ */
+export async function resolveBrainRunbookPrompt(
+  defaultPrompt: string,
+): Promise<string> {
+  try {
+    const db = getDb();
+    const [row] = await db
+      .select({ content: schema.skillOverrides.content })
+      .from(schema.skillOverrides)
+      .where(eq(schema.skillOverrides.path, BRAIN_RUNBOOK_PATH))
+      .limit(1);
+    if (row?.content && row.content.trim() !== "") return row.content;
+  } catch {
+    // Advisory — a DB hiccup must never block a brain turn.
+  }
+  return defaultPrompt;
+}
