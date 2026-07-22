@@ -27,7 +27,8 @@ export function contentBaseUrl(): string {
 export function contentPublicBaseUrl(): string {
   return (
     process.env.CONTENT_PUBLIC_BASE?.replace(/\/$/, "") ||
-    "http://192.168.1.101"
+    process.env.WORKSPACE_GATEWAY_URL?.replace(/\/$/, "") ||
+    "http://localhost"
   );
 }
 

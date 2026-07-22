@@ -6,7 +6,7 @@
 //   event_ttl_days     = 7   (configurable via env V3_EVENT_TTL_DAYS)
 //   archive_after_days = 90  (configurable via env V3_ARCHIVE_AFTER_DAYS)
 
-import { sql, eq, and, or } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { getV3Db, v3Schema } from "../db/index.js";
@@ -33,9 +33,9 @@ export async function cleanupArtifacts(
 ): Promise<{ deletedCount: number }> {
   // Set expires_at on artifacts that still have NULL but belong to a completed run.
   await db.execute(
-    sql.raw(`
+    sql`
     UPDATE v3_artifacts a
-    SET expires_at = r.completed_at + INTERVAL '${ttlDays} days'
+    SET expires_at = r.completed_at + make_interval(days => ${ttlDays})
     FROM v3_runs r
     WHERE a.expires_at IS NULL
       AND a.keep_after_run != 1
@@ -46,17 +46,17 @@ export async function cleanupArtifacts(
       )
       AND r.completed_at IS NOT NULL
       AND r.status IN ('done', 'failed', 'cancelled')
-  `),
+  `,
   );
 
   // Delete expired artifacts that are not kept.
   const result = await db.execute(
-    sql.raw(`
+    sql`
     DELETE FROM v3_artifacts
     WHERE expires_at IS NOT NULL
       AND expires_at < NOW()
       AND keep_after_run != 1
-  `),
+  `,
   );
 
   return { deletedCount: (result as any).rowCount ?? 0 };
@@ -69,10 +69,10 @@ export async function cleanupEvents(
   ttlDays: number = getEventTtlDays(),
 ): Promise<{ deletedCount: number }> {
   const result = await db.execute(
-    sql.raw(`
+    sql`
     DELETE FROM v3_events
-    WHERE ts < NOW() - INTERVAL '${ttlDays} days'
-  `),
+    WHERE ts < NOW() - make_interval(days => ${ttlDays})
+  `,
   );
 
   return { deletedCount: (result as any).rowCount ?? 0 };
@@ -94,46 +94,46 @@ export async function listExpiredRuns(
   archiveAfterDays: number = getArchiveAfterDays(),
 ): Promise<ExpiredRun[]> {
   const runs = await db.execute(
-    sql.raw(`
+    sql`
     SELECT id, status, completed_at
     FROM v3_runs
     WHERE status IN ('done', 'failed', 'cancelled')
       AND archived != 1
       AND completed_at IS NOT NULL
-      AND completed_at < NOW() - INTERVAL '${archiveAfterDays} days'
-  `),
+      AND completed_at < NOW() - make_interval(days => ${archiveAfterDays})
+  `,
   );
 
   const rows = (runs as any).rows ?? [];
-  const ids = rows.map((r: any) => r.id);
+  const ids: string[] = rows.map((r: any) => r.id);
   if (ids.length === 0) return [];
 
   // Gather counts per run.
   const nodeRows = await db.execute(
-    sql.raw(`
+    sql`
     SELECT run_id, count(*)::int AS c FROM v3_nodes
-    WHERE run_id = ANY('{${ids.join(",")}}'::text[])
+    WHERE run_id = ANY(${ids})
     GROUP BY run_id
-  `),
+  `,
   );
 
   const eventRows = await db.execute(
-    sql.raw(`
+    sql`
     SELECT run_id, count(*)::int AS c FROM v3_events
-    WHERE run_id = ANY('{${ids.join(",")}}'::text[])
+    WHERE run_id = ANY(${ids})
     GROUP BY run_id
-  `),
+  `,
   );
 
   const artifactRows = await db.execute(
-    sql.raw(`
+    sql`
     SELECT nr.run_id, count(DISTINCT a.id)::int AS c
     FROM v3_artifacts a
     JOIN v3_spawns sp ON sp.id = a.spawn_id
     JOIN v3_nodes nr ON nr.id = sp.node_id
-    WHERE nr.run_id = ANY('{${ids.join(",")}}'::text[])
+    WHERE nr.run_id = ANY(${ids})
     GROUP BY nr.run_id
-  `),
+  `,
   );
 
   const nodeMap = new Map(
