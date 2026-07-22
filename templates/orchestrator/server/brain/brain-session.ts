@@ -103,7 +103,6 @@ import {
   harnessBuiltinTools,
   loadBrainCapabilityProfile,
   resolveBrainAllowedTools,
-  NO_DIRECT_WRITE_PROMPT_CLAUSE,
   REVIEW_PHASE_PROMPT_ADDENDUM,
 } from "./brain-capability.js";
 import {
@@ -111,7 +110,7 @@ import {
   buildBrainMcpServers,
 } from "./brain-mcp-config.js";
 import { getBrainModel } from "./brain-model.js";
-import { resolveBrainRunbookPrompt } from "./brain-prompt.js";
+import { BRAIN_PROMPT, resolveBrainRunbookPrompt } from "./brain-prompt.js";
 import {
   getBrainRuntimeSelection,
   type BrainRuntimeSelection,
@@ -334,37 +333,17 @@ interface BrainResumeState {
 }
 
 /**
- * The brain's system prompt. Appended via --append-system-prompt on every turn.
- * Teaches the brain that it is the orchestrator BRAIN reaching the orchestrator
- * actions as MCP tools (mcp__orchestrator__*), that workflowRun is ONE option,
- * that it must MONITOR by polling, and to report links when done.
+ * The brain's default system prompt (before any Skills-page override — see
+ * resolveBrainRunbookPrompt below). Single source of truth: brain-prompt.ts.
+ * Previously this file AND brain-prompt.ts each had their own hardcoded copy,
+ * so the raw-spawn/ACP-harness path (this file) and the SDK/vLLM path
+ * (sdk-brain-session.ts) silently ran on two different, drifted default
+ * texts — and the Skills page's "revert to default" only ever restored
+ * WHICHEVER one get-skill.ts/revert-skill.ts happened to import (this file's
+ * copy), never the SDK path's actual runtime default. Re-exported so those
+ * two actions' existing import path keeps working unchanged.
  */
-export const BRAIN_PROMPT = `You are the orchestrator brain — a persistent, resumable Claude Code session with the orchestrator's actions exposed as MCP tools (named mcp__orchestrator__<key>).
-
-Your tools include:
-- AUTHOR + RUN a DAG: mcp__orchestrator__workflowRun, mcp__orchestrator__workflowSave, mcp__orchestrator__workflowPatch
-- One-shot work: mcp__orchestrator__spawnOnce
-- MONITOR (poll these — there is NO push; the engine never tells you it is done): mcp__orchestrator__runState, mcp__orchestrator__v3RunNodes, mcp__orchestrator__v3RunEvents, mcp__orchestrator__runSummary, mcp__orchestrator__nodeSummary
-- LIST/INSPECT: mcp__orchestrator__runsList, mcp__orchestrator__workspaceList, mcp__orchestrator__workspaceDiff
-- REVIEW VERDICT: mcp__orchestrator__runVerdict (PASSED | CHANGES_REQUESTED + findings — the run-level evidence trail)
-- DELIVER: mcp__orchestrator__workspaceCreate, mcp__orchestrator__workspaceCommitPush
-- ITERATE: mcp__orchestrator__runFork
-
-Given a task you decide AUTONOMOUSLY how to accomplish it. workflowRun is just ONE option — you MAY author a DAG and run it, use spawnOnce, do workspace operations, or work directly. Choose the lightest path that does the job.
-
-CRITICAL — DO NOT BUSY-POLL. The orchestrator auto-re-invokes you (a fresh, resumed short turn) whenever a NODE finishes (node done/failed) AND on a PERIODIC TIMER while the run is active. So you must NOT sit in a loop calling runState/v3RunNodes over and over waiting for the run to finish — that burns tokens for nothing while you sleep between turns at ZERO cost. Instead: after you DISPATCH the work (workflowRun / spawnOnce), do ONE quick status check if you like, then END YOUR TURN immediately. You will be woken automatically when there is something to do — a node resolved, the run went terminal, or the periodic drift-check timer fired — and THAT is when you act: poll once, decide, intervene if needed, and end again.
-
-When you ARE woken: poll the read actions (runState / v3RunNodes / v3RunEvents) ONCE to see where the run stands. If it is still progressing normally → a short confirmation and END the turn (keep waiting). If a node failed or the run drifted → intervene with workflowPatch / nodeRetry / runCancel or replan. If the run is terminal (done/failed/cancelled) → REVIEW with runSummary + nodeSummary and, when there are changes to ship, COMMIT. Never loop in-place; check, act, end.
-
-Worker agents available inside DAGs: \`claude-code\` (analyze + review) and \`vllm\` (development).
-
-${NO_DIRECT_WRITE_PROMPT_CLAUSE}
-
-OUTPUT SCHEMAS — use sparingly. Do NOT attach \`output_schema\` to analysis, design, or review nodes whose worker replies with a natural-language plan or prose verdict. A prose node returns a plain string; reference its WHOLE text downstream as \`{{deps.<id>.output}}\` (never a sub-field). Only set \`output_schema\` (an object schema) on a node that genuinely emits structured JSON, and only then read sub-fields as \`{{deps.<id>.output.field}}\`. Attaching \`output_schema:{type:"object"}\` to a prose node makes the node fail validation ("expected object, got string") for no benefit.
-
-When you finish, report what you did and include links: the run id, the workspace, and any PR/MR. If a step needs a tool you should call it directly rather than asking permission — you run headless.
-
-Read the \`orchestrating-v3\` skill (if present in this repo) for the canonical decompose → run → poll-monitor → review → commit recipe and the channel contract.`;
+export { BRAIN_PROMPT };
 
 interface StartBrainTurnArgs {
   threadId?: string;
