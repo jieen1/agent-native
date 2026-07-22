@@ -317,18 +317,28 @@ async function advanceOneItem(
   // Activity log. actorKind is the REAL invoking actor (agent tool-loop
   // calls record as "agent"), not a hardcoded "human" — the activity feed's
   // actor badge must be trustworthy (F3, T-F3-18).
-  await db.insert(schema.activities).values({
-    id: `act_adv_${item.id.slice(0, 6)}_${argsFromStage}_to_${nextStage}_${now.replace(/\D/g, "").slice(0, 14)}`,
-    workItemId: item.id,
-    actorKind,
-    actorName: ownerEmail,
-    eventType: "推进",
-    payload: JSON.stringify({ fromStage: argsFromStage, toStage: nextStage }),
-    createdAt: now,
-    ownerEmail,
-    orgId,
-    visibility: "private",
-  });
+  // HOTFIX: the id above is DETERMINISTIC (item id + from/to stage + `now`).
+  // When the F9 writeback sweep retries a run it can regenerate the same id;
+  // the first attempt's row already exists, so a bare INSERT would throw a
+  // tracker_activities primary-key violation and leave v3_runs.writeback_status
+  // stuck at 'pending' forever. onConflictDoNothing() makes the insert
+  // idempotent — a retried writeback that already wrote this activity is a
+  // no-op, not a failure. (activities PK is `id`, so no explicit target needed.)
+  await db
+    .insert(schema.activities)
+    .values({
+      id: `act_adv_${item.id.slice(0, 6)}_${argsFromStage}_to_${nextStage}_${now.replace(/\D/g, "").slice(0, 14)}`,
+      workItemId: item.id,
+      actorKind,
+      actorName: ownerEmail,
+      eventType: "推进",
+      payload: JSON.stringify({ fromStage: argsFromStage, toStage: nextStage }),
+      createdAt: now,
+      ownerEmail,
+      orgId,
+      visibility: "private",
+    })
+    .onConflictDoNothing();
 
   return { workItemId: item.id, stageName: nextStage };
 }
@@ -406,22 +416,29 @@ export default defineAction({
       // fromStage — that's expected, not an anomaly worth an event each).
       if (result.noop && result.reason === "stage-mismatch") {
         const now = new Date().toISOString();
-        await db.insert(schema.activities).values({
-          id: `act_wbmismatch_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
-          workItemId: item.id,
-          actorKind,
-          actorName: ownerEmail,
-          eventType: "writeback.stage-mismatch",
-          payload: JSON.stringify({
-            expectedFromStage: args.fromStage,
-            actualStage: item.currentStageName,
-            expectedRunId: args.expectedRunId ?? null,
-          }),
-          createdAt: now,
-          ownerEmail,
-          orgId,
-          visibility: "private",
-        });
+        // HOTFIX: deterministic id (item id + `now`) — a retried writeback
+        // replaying the same payload/timestamp regenerates it. Guard the insert
+        // so the retry is a no-op instead of a primary-key conflict that wedges
+        // writeback_status at 'pending'. (activities PK is `id`.)
+        await db
+          .insert(schema.activities)
+          .values({
+            id: `act_wbmismatch_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+            workItemId: item.id,
+            actorKind,
+            actorName: ownerEmail,
+            eventType: "writeback.stage-mismatch",
+            payload: JSON.stringify({
+              expectedFromStage: args.fromStage,
+              actualStage: item.currentStageName,
+              expectedRunId: args.expectedRunId ?? null,
+            }),
+            createdAt: now,
+            ownerEmail,
+            orgId,
+            visibility: "private",
+          })
+          .onConflictDoNothing();
       }
 
       return result;
@@ -514,18 +531,24 @@ export default defineAction({
       } catch (e) {
         const errStr = String(e);
         // Write failure activity (real actor, not hardcoded "human")
-        await db.insert(schema.activities).values({
-          id: `act_adv_fail_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
-          workItemId: item.id,
-          actorKind,
-          actorName: ownerEmail,
-          eventType: "推进失败",
-          payload: JSON.stringify({ error: errStr }),
-          createdAt: now,
-          ownerEmail,
-          orgId,
-          visibility: "private",
-        });
+        // HOTFIX: deterministic id (item id + `now`) — same idempotency guard
+        // as the other activity inserts so a retried sweep doesn't throw a
+        // primary-key conflict here. (activities PK is `id`.)
+        await db
+          .insert(schema.activities)
+          .values({
+            id: `act_adv_fail_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+            workItemId: item.id,
+            actorKind,
+            actorName: ownerEmail,
+            eventType: "推进失败",
+            payload: JSON.stringify({ error: errStr }),
+            createdAt: now,
+            ownerEmail,
+            orgId,
+            visibility: "private",
+          })
+          .onConflictDoNothing();
         cascaded.push({ workItemId: item.id, ok: false, error: errStr });
       }
     }
