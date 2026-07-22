@@ -29,11 +29,17 @@ function todayIso(): string {
 /** Write a pending changelog entry for the release. Deterministic filename
  *  keyed on sprint id so a second call (even if the status guard somehow
  *  raced) never writes a duplicate file. */
-function writeReleaseChangelogEntry(sprintId: string, sprintName: string): void {
+function writeReleaseChangelogEntry(
+  sprintId: string,
+  sprintName: string,
+): void {
   const date = todayIso();
   // Deterministic slug: sprint id is unique, so the filename is unique per
   // sprint and stable across repeated calls.
-  const slug = sprintId.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 40);
+  const slug = sprintId
+    .replace(/[^a-z0-9]+/gi, "-")
+    .toLowerCase()
+    .slice(0, 40);
   const filename = `${date}-sprint-released-${slug}.md`;
   const dir = path.resolve(process.cwd(), "changelog");
   const filePath = path.join(dir, filename);
@@ -105,7 +111,9 @@ export default defineAction({
     await db
       .update(schema.sprints)
       .set({ status: "已发布", updatedAt: now })
-      .where(eq(schema.sprints.id, args.sprintId));
+      .where(
+        and(eq(schema.sprints.id, args.sprintId), ownerScope(schema.sprints)),
+      );
 
     // ── Changelog: write a pending entry (existing mechanism) ──────────────
     let changelogWritten = false;

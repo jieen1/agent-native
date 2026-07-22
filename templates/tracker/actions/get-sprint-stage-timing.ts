@@ -63,7 +63,12 @@ export default defineAction({
         orchestratorRunId: schema.workItems.orchestratorRunId,
       })
       .from(schema.workItems)
-      .where(eq(schema.workItems.sprintId, args.sprintId));
+      .where(
+        and(
+          eq(schema.workItems.sprintId, args.sprintId),
+          ownerScope(schema.workItems),
+        ),
+      );
 
     const items = rawItems as ItemRow[];
     const workItemIds = items.map((i) => i.id);
@@ -97,9 +102,7 @@ export default defineAction({
             }
           }
         } catch (e) {
-          errors[`spawns:${owner}`] = String(
-            (e as Error)?.message ?? e,
-          );
+          errors[`spawns:${owner}`] = String((e as Error)?.message ?? e);
         }
       }),
     );

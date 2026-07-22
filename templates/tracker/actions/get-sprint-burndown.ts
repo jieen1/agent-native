@@ -54,7 +54,12 @@ export default defineAction({
         updatedAt: schema.workItems.updatedAt,
       })
       .from(schema.workItems)
-      .where(eq(schema.workItems.sprintId, args.sprintId));
+      .where(
+        and(
+          eq(schema.workItems.sprintId, args.sprintId),
+          ownerScope(schema.workItems),
+        ),
+      );
 
     const totalItems = items.length;
 

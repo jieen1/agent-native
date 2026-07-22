@@ -17,7 +17,9 @@ const NODES: NodeTimingRow[] = [
   { id: "n-unknown", nodeIdInDag: "promote" },
 ];
 
-function spawn(partial: Partial<SpawnTimingRow> & { id: string }): SpawnTimingRow {
+function spawn(
+  partial: Partial<SpawnTimingRow> & { id: string },
+): SpawnTimingRow {
   return {
     nodeId: null,
     runId: null,

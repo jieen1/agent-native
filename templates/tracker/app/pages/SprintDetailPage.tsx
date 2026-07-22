@@ -1,3 +1,4 @@
+import { formatDurationSec } from "@shared/sprint-timing";
 import type {
   Approval,
   GateKey,
@@ -36,7 +37,6 @@ import { useMemo, useState } from "react";
 import { useParams } from "react-router";
 import { Link } from "react-router";
 
-import { formatDurationSec } from "@shared/sprint-timing";
 import { ActorAvatar } from "@/components/ActorAvatar";
 import { ArtifactBadge, ArtifactViewDialog } from "@/components/ArtifactBadge";
 import { InspectorSection } from "@/components/InspectorSection";
@@ -1522,7 +1522,8 @@ function SprintStageTiming({ sprintId }: { sprintId: string }) {
           </div>
         ) : !data || data.items.length === 0 ? (
           <p className="p-5 text-sm text-muted-foreground">
-            暂无工作项或 orchestrator 数据（尚未派发任何工作项，v3_spawns 无记录）。
+            暂无工作项或 orchestrator 数据（尚未派发任何工作项，v3_spawns
+            无记录）。
           </p>
         ) : (
           <Table>

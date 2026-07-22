@@ -92,7 +92,8 @@ export function classifyNodeStage(
   // qa: "qa", "qa2"
   if (id === "qa" || id === "qa2") return "qa";
   // review: "review1", "reviewfix", "merge_review"
-  if (id === "review1" || id === "reviewfix" || id === "merge_review") return "review";
+  if (id === "review1" || id === "reviewfix" || id === "merge_review")
+    return "review";
   // gate: "gatestack", "gatetests"
   if (id === "gatestack" || id === "gatetests") return "gate";
 
