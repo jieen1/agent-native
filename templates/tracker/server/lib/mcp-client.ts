@@ -18,7 +18,11 @@ export function base64url(input: Buffer | string): string {
  * Claims: { sub, iat, exp (now+3600), catalog_scope:"full" }.
  * If orgId is provided it is included as an additional claim.
  */
-export function makeMcpJwt(secret: string, sub: string, orgId?: string): string {
+export function makeMcpJwt(
+  secret: string,
+  sub: string,
+  orgId?: string,
+): string {
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "HS256", typ: "JWT" };
   const payload: Record<string, unknown> = {
@@ -73,8 +77,19 @@ export interface CallMcpToolOpts {
  * Call an MCP tool over JSON-RPC `tools/call` with HS256 JWT auth.
  * Handles both JSON and SSE (text/event-stream) response formats.
  */
-export async function callMcpTool(opts: CallMcpToolOpts): Promise<McpCallResult> {
-  const { endpoint, toolName, args, secret, sub, label, extraHeaders, unwrapArrayItems } = opts;
+export async function callMcpTool(
+  opts: CallMcpToolOpts,
+): Promise<McpCallResult> {
+  const {
+    endpoint,
+    toolName,
+    args,
+    secret,
+    sub,
+    label,
+    extraHeaders,
+    unwrapArrayItems,
+  } = opts;
   const jwt = makeMcpJwt(secret, sub);
   const body = {
     jsonrpc: "2.0",

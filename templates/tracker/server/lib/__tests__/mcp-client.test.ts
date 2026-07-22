@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -37,13 +38,19 @@ describe("makeMcpJwt", () => {
 
     // Decode header
     const header = JSON.parse(
-      Buffer.from(headerB64!.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(),
+      Buffer.from(
+        headerB64!.replace(/-/g, "+").replace(/_/g, "/"),
+        "base64",
+      ).toString(),
     );
     expect(header).toEqual({ alg: "HS256", typ: "JWT" });
 
     // Decode payload
     const payload = JSON.parse(
-      Buffer.from(payloadB64!.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(),
+      Buffer.from(
+        payloadB64!.replace(/-/g, "+").replace(/_/g, "/"),
+        "base64",
+      ).toString(),
     );
     expect(payload.sub).toBe(sub);
     expect(payload.catalog_scope).toBe("full");
@@ -58,7 +65,10 @@ describe("makeMcpJwt", () => {
     const jwt = makeMcpJwt("secret", "user@test.com", "org-42");
     const [, payloadB64] = jwt.split(".");
     const payload = JSON.parse(
-      Buffer.from(payloadB64!.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(),
+      Buffer.from(
+        payloadB64!.replace(/-/g, "+").replace(/_/g, "/"),
+        "base64",
+      ).toString(),
     );
     expect(payload.orgId).toBe("org-42");
   });

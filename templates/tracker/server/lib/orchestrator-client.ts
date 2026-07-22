@@ -14,11 +14,7 @@
 //  - Headers: Authorization: Bearer <jwt>, Accept: application/json,
 //    text/event-stream (the SDK transport requires both advertised).
 
-import {
-  callMcpTool,
-  makeMcpJwt,
-  type McpCallResult,
-} from "./mcp-client.js";
+import { callMcpTool, makeMcpJwt, type McpCallResult } from "./mcp-client.js";
 
 /**
  * Base URL of the orchestrator, reachable from the tracker container. Prefer the
