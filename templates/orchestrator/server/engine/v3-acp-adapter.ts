@@ -323,6 +323,14 @@ export async function runAcpClaudeCodeWorker(opts: {
   cwd?: string;
   signal?: AbortSignal;
   onStep?: (step: RuntimeExecStep) => void;
+  /**
+   * The resolved agent's own `agent_defs.system_prompt` (Agents page).
+   * Forwarded as the SAME `_meta.systemPrompt` sibling key
+   * runBrainHarnessTurn uses for the brain (brain/brain-session.ts) — see
+   * that file's doc comment for why this is a top-level `_meta` key, not
+   * nested under `claudeCode.options`.
+   */
+  systemPrompt?: string;
 }): Promise<NodeRunnerResult> {
   const startedAt = Date.now();
   registerOrchestratorRuntime();
@@ -333,6 +341,15 @@ export async function runAcpClaudeCodeWorker(opts: {
   // ACP `_meta` on newSession/loadSession (acp-adapter.ts's initialize()).
   // Only include the keys that were actually provided.
   const metadata: Record<string, unknown> = {
+    ...(opts.systemPrompt && opts.systemPrompt.trim() !== ""
+      ? {
+          systemPrompt: {
+            type: "preset",
+            preset: "claude_code",
+            append: opts.systemPrompt,
+          },
+        }
+      : {}),
     claudeCode: {
       options: {
         ...(opts.model ? { model: opts.model } : {}),

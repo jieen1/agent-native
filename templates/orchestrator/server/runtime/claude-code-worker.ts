@@ -56,6 +56,13 @@ export async function runClaudeCodeWorker(opts: {
    * CLI exits. Best-effort: a sink error never aborts the run.
    */
   onStep?: (step: RuntimeExecStep) => void;
+  /**
+   * The resolved agent's own `agent_defs.system_prompt` (Agents page),
+   * threaded via `--append-system-prompt` — mirrors brain-capability.ts's
+   * `buildBrainArgv`. Omitted/empty runs on the CLI's own built-in persona
+   * only, unchanged from before this field existed.
+   */
+  systemPrompt?: string;
 }): Promise<NodeRunnerResult> {
   const startedAt = Date.now();
   const status = getManagedClaudeStatus();
@@ -81,6 +88,9 @@ export async function runClaudeCodeWorker(opts: {
   ];
   if (opts.model && opts.model.trim() !== "") {
     args.push("--model", opts.model);
+  }
+  if (opts.systemPrompt && opts.systemPrompt.trim() !== "") {
+    args.push("--append-system-prompt", opts.systemPrompt);
   }
 
   const cwd = opts.cwd || mkdtempSync(join(tmpdir(), "v3-claude-"));

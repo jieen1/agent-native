@@ -78,6 +78,7 @@ async function runClaudeCodeNode(opts: {
   cwd?: string;
   signal?: AbortSignal;
   onStep?: (step: RuntimeExecStep) => void;
+  systemPrompt?: string;
 }): Promise<NodeRunnerResult> {
   if (isAcpClaudeCodeWorkerEnabled()) {
     try {
@@ -768,6 +769,15 @@ export class V3Dispatcher {
       runnerNode.model = agentConfig.model;
     }
 
+    // Thread the resolved agent's own system prompt (agent_defs.system_prompt,
+    // editable on the Agents page) onto the node — previously loaded into
+    // agentConfig/v3Input.system_prompt but never actually carried past this
+    // point, so every worker node ran on engine-loop.ts's one hardcoded
+    // generic persona regardless of what was configured per agent.
+    if (agentConfig.systemPrompt && agentConfig.systemPrompt.trim() !== "") {
+      runnerNode.systemPromptOverride = agentConfig.systemPrompt;
+    }
+
     // Thread dagNode.retry into the NodeRunner node (G27).
     const dagRetry = agentDagNode?.retry;
     if (dagRetry) {
@@ -891,6 +901,7 @@ export class V3Dispatcher {
           cwd: localWorkspaceDir,
           signal: effectiveSignal,
           onStep,
+          systemPrompt: runnerNode.systemPromptOverride,
         })
       : await this.runner.run(
           {
