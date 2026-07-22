@@ -2084,31 +2084,79 @@ export class V3Reconciler {
       };
     }
 
-    const artifactIds = nodes
-      .map((n) => n.outputArtifactId)
+    // F9 delivery-detection fix (2026-07-22): prefer the REAL, verified push
+    // record recordLastPush() writes on the workspace row itself — from
+    // actual git command exit codes, not an agent's own summary text (see
+    // v3-schema.ts's v3Workspaces docblock). Resolve every workspace this
+    // run's nodes actually spawned into, and trust a durable lastPushBranch
+    // over the text-scan fallback below.
+    const spawnIds = nodes
+      .map((n) => n.currentSpawnId)
       .filter((id): id is string => !!id);
-
-    let texts: Array<string | null> = [];
-    if (artifactIds.length > 0) {
+    let durableBranch: string | null = null;
+    if (spawnIds.length > 0) {
       try {
-        const rows = await this.db
-          .select({
-            textContent: v3Artifacts.textContent,
-            objectContent: v3Artifacts.objectContent,
-          })
-          .from(v3Artifacts)
-          .where(inArray(v3Artifacts.id, artifactIds));
-        texts = rows.map(
-          (r) =>
-            r.textContent ??
-            (r.objectContent ? JSON.stringify(r.objectContent) : null),
-        );
+        const workspaceIds = (
+          await this.db
+            .select({ workspaceId: v3Spawns.workspaceId })
+            .from(v3Spawns)
+            .where(inArray(v3Spawns.id, spawnIds))
+        )
+          .map((r) => r.workspaceId)
+          .filter((id): id is string => !!id);
+        if (workspaceIds.length > 0) {
+          const wsRows = await this.db
+            .select({
+              lastPushBranch: v3Workspaces.lastPushBranch,
+              lastPushedAt: v3Workspaces.lastPushedAt,
+            })
+            .from(v3Workspaces)
+            .where(inArray(v3Workspaces.id, workspaceIds));
+          // Most recent real push across this run's workspace(s) wins.
+          const withPush = wsRows
+            .filter((r) => r.lastPushBranch && r.lastPushedAt)
+            .sort(
+              (a, b) =>
+                new Date(b.lastPushedAt!).getTime() -
+                new Date(a.lastPushedAt!).getTime(),
+            );
+          if (withPush[0]) {
+            durableBranch = withPush[0].lastPushBranch;
+          }
+        }
       } catch {
-        texts = []; // best-effort — never blocks writeback classification
+        durableBranch = null; // best-effort — falls through to the text scan
       }
     }
 
-    const { branch } = extractDeliveryFromArtifactTexts(texts);
+    let branch = durableBranch;
+    if (!branch) {
+      const artifactIds = nodes
+        .map((n) => n.outputArtifactId)
+        .filter((id): id is string => !!id);
+
+      let texts: Array<string | null> = [];
+      if (artifactIds.length > 0) {
+        try {
+          const rows = await this.db
+            .select({
+              textContent: v3Artifacts.textContent,
+              objectContent: v3Artifacts.objectContent,
+            })
+            .from(v3Artifacts)
+            .where(inArray(v3Artifacts.id, artifactIds));
+          texts = rows.map(
+            (r) =>
+              r.textContent ??
+              (r.objectContent ? JSON.stringify(r.objectContent) : null),
+          );
+        } catch {
+          texts = []; // best-effort — never blocks writeback classification
+        }
+      }
+
+      branch = extractDeliveryFromArtifactTexts(texts).branch;
+    }
     if (!branch) {
       return {
         kind: "zero-delivery",
