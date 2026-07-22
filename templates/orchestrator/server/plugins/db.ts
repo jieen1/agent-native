@@ -1,13 +1,90 @@
-import { runMigrations } from "@agent-native/core/db";
+import crypto from "node:crypto";
+
+import { getDbExec, runMigrations } from "@agent-native/core/db";
+
+/** Derive the array-element type straight from `runMigrations`'s own params,
+ *  mirroring tracker's server/plugins/db.ts (F6) so this file never
+ *  re-declares (and risks drifting from) core's `MigrationEntry` shape. */
+type MigrationEntry = Parameters<typeof runMigrations>[0][number];
+
+/** Deterministic content hash for one migration entry's SQL — same recipe as
+ *  tracker's `stableMigrationHash` (F6). A change to either dialect branch
+ *  changes the hash. */
+function stableMigrationHash(entry: MigrationEntry): string {
+  const canonical =
+    typeof entry.sql === "string" ? entry.sql : JSON.stringify(entry.sql);
+  return crypto.createHash("sha256").update(canonical).digest("hex");
+}
+
+/**
+ * F6 hash-collision guard, ported from tracker's `verifyMigrationHashes`
+ * (server/plugins/db.ts) so orchestrator gets the same retroactive
+ * full-table check tracker has had since its v26 — core's `name:`-based
+ * tracking (see `runMigrations`'s doc comment) already makes FORWARD
+ * migrations collision-immune, but it only protects entries that opt in with
+ * a `name`, and doesn't cover already-applied legacy version-only rows. This
+ * runs as an INDEPENDENT verification pass on every boot: for every version
+ * `appliedTable` records as applied, either backfill its hash on first sight
+ * ("first trust") or throw loud if the recorded hash no longer matches this
+ * branch's local SQL for that version — the same signature as the tracker
+ * SDLC-037 bug (two branches picking the same version number for different
+ * DDL) would produce here.
+ */
+async function verifyMigrationHashes(
+  migrations: MigrationEntry[],
+  appliedTable: string,
+  hashTable: string,
+): Promise<void> {
+  const exec = getDbExec();
+  let appliedRows: Array<{ version: number }>;
+  let hashRows: Array<{ version: number; hash: string }>;
+  try {
+    const appliedResult = await exec.execute(
+      `SELECT version FROM ${appliedTable}`,
+    );
+    appliedRows = appliedResult.rows as Array<{ version: number }>;
+    const hashResult = await exec.execute(
+      `SELECT version, hash FROM ${hashTable}`,
+    );
+    hashRows = hashResult.rows as Array<{ version: number; hash: string }>;
+  } catch {
+    // Hash table isn't there yet (e.g. a permission-limited role skipped the
+    // migration that creates it) — nothing to verify against; defer to the
+    // next boot.
+    return;
+  }
+
+  const hashByVersion = new Map(
+    hashRows.map((r) => [Number(r.version), r.hash]),
+  );
+
+  for (const row of appliedRows) {
+    const version = Number(row.version);
+    const entry = migrations.find((m) => m.version === version);
+    if (!entry) continue; // Version not known to this branch's array — not our call.
+
+    const expected = stableMigrationHash(entry);
+    const existingHash = hashByVersion.get(version);
+    if (existingHash == null) {
+      await exec.execute({
+        sql: `INSERT INTO ${hashTable} (version, hash) VALUES (?, ?) ON CONFLICT DO NOTHING`,
+        args: [version, expected],
+      });
+      continue;
+    }
+    if (existingHash !== expected) {
+      throw new Error(`migration-hash-conflict: ${appliedTable} v${version}`);
+    }
+  }
+}
 
 // Dialect-agnostic, additive migrations. ownableColumns() expands to
 // owner_email / org_id / visibility; SQLite needs them added one ALTER at a
 // time, Postgres can batch. Never drop or rename — only add.
-const migrateV2 = runMigrations(
-  [
-    {
-      version: 1,
-      sql: `CREATE TABLE IF NOT EXISTS workflows (
+const V2_MIGRATIONS: MigrationEntry[] = [
+  {
+    version: 1,
+    sql: `CREATE TABLE IF NOT EXISTS workflows (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
@@ -19,10 +96,10 @@ const migrateV2 = runMigrations(
     org_id TEXT,
     visibility TEXT NOT NULL DEFAULT 'private'
   )`,
-    },
-    {
-      version: 2,
-      sql: `CREATE TABLE IF NOT EXISTS tasks (
+  },
+  {
+    version: 2,
+    sql: `CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
@@ -36,10 +113,10 @@ const migrateV2 = runMigrations(
     org_id TEXT,
     visibility TEXT NOT NULL DEFAULT 'private'
   )`,
-    },
-    {
-      version: 3,
-      sql: `CREATE TABLE IF NOT EXISTS step_runs (
+  },
+  {
+    version: 3,
+    sql: `CREATE TABLE IF NOT EXISTS step_runs (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
     step_key TEXT NOT NULL,
@@ -57,11 +134,11 @@ const migrateV2 = runMigrations(
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
-    },
-    {
-      version: 4,
-      sql: {
-        postgres: `CREATE TABLE IF NOT EXISTS task_shares (
+  },
+  {
+    version: 4,
+    sql: {
+      postgres: `CREATE TABLE IF NOT EXISTS task_shares (
   id TEXT PRIMARY KEY,
   resource_id TEXT NOT NULL,
   principal_type TEXT NOT NULL,
@@ -79,7 +156,7 @@ CREATE TABLE IF NOT EXISTS workflow_shares (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (now())
 )`,
-        sqlite: `CREATE TABLE IF NOT EXISTS task_shares (
+      sqlite: `CREATE TABLE IF NOT EXISTS task_shares (
   id TEXT PRIMARY KEY,
   resource_id TEXT NOT NULL,
   principal_type TEXT NOT NULL,
@@ -97,19 +174,19 @@ CREATE TABLE IF NOT EXISTS workflow_shares (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`,
-      },
     },
-    {
-      version: 5,
-      sql: `CREATE INDEX IF NOT EXISTS tasks_owner_org_updated_idx ON tasks (owner_email, org_id, updated_at);
+  },
+  {
+    version: 5,
+    sql: `CREATE INDEX IF NOT EXISTS tasks_owner_org_updated_idx ON tasks (owner_email, org_id, updated_at);
 CREATE INDEX IF NOT EXISTS workflows_owner_org_updated_idx ON workflows (owner_email, org_id, updated_at);
 CREATE INDEX IF NOT EXISTS step_runs_task_idx ON step_runs (task_id, ordering);
 CREATE INDEX IF NOT EXISTS task_shares_resource_idx ON task_shares (resource_id, principal_type, principal_id);
 CREATE INDEX IF NOT EXISTS workflow_shares_resource_idx ON workflow_shares (resource_id, principal_type, principal_id)`,
-    },
-    {
-      version: 6,
-      sql: `CREATE TABLE IF NOT EXISTS runtime_configs (
+  },
+  {
+    version: 6,
+    sql: `CREATE TABLE IF NOT EXISTS runtime_configs (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT 'vllm' CHECK(kind IN ('vllm','openai-compatible','claude-code')),
@@ -121,15 +198,15 @@ CREATE INDEX IF NOT EXISTS workflow_shares_resource_idx ON workflow_shares (reso
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
-    },
-    {
-      version: 7,
-      sql: `CREATE INDEX IF NOT EXISTS runtime_configs_owner_idx ON runtime_configs (owner_email, org_id, updated_at)`,
-    },
-    {
-      // v2 graph engine tables (DESIGN §9) — additive, CREATE-only.
-      version: 8,
-      sql: `CREATE TABLE IF NOT EXISTS workflow_templates (
+  },
+  {
+    version: 7,
+    sql: `CREATE INDEX IF NOT EXISTS runtime_configs_owner_idx ON runtime_configs (owner_email, org_id, updated_at)`,
+  },
+  {
+    // v2 graph engine tables (DESIGN §9) — additive, CREATE-only.
+    version: 8,
+    sql: `CREATE TABLE IF NOT EXISTS workflow_templates (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
@@ -186,13 +263,13 @@ CREATE TABLE IF NOT EXISTS artifacts (
     summary TEXT,
     created_at TEXT NOT NULL
   )`,
-    },
-    {
-      // Shares tables for the two ownable v2 tables (structure only; sharing
-      // UI deferred). Mirrors v4's postgres/sqlite created_at default split.
-      version: 9,
-      sql: {
-        postgres: `CREATE TABLE IF NOT EXISTS workflow_template_shares (
+  },
+  {
+    // Shares tables for the two ownable v2 tables (structure only; sharing
+    // UI deferred). Mirrors v4's postgres/sqlite created_at default split.
+    version: 9,
+    sql: {
+      postgres: `CREATE TABLE IF NOT EXISTS workflow_template_shares (
   id TEXT PRIMARY KEY,
   resource_id TEXT NOT NULL,
   principal_type TEXT NOT NULL,
@@ -210,7 +287,7 @@ CREATE TABLE IF NOT EXISTS workflow_run_shares (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (now())
 )`,
-        sqlite: `CREATE TABLE IF NOT EXISTS workflow_template_shares (
+      sqlite: `CREATE TABLE IF NOT EXISTS workflow_template_shares (
   id TEXT PRIMARY KEY,
   resource_id TEXT NOT NULL,
   principal_type TEXT NOT NULL,
@@ -228,13 +305,13 @@ CREATE TABLE IF NOT EXISTS workflow_run_shares (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`,
-      },
     },
-    {
-      // Indexes. The UNIQUE journal key (run_id,node_id,iteration,fanout_index)
-      // is load-bearing for §1.7 resume — it MUST be UNIQUE.
-      version: 10,
-      sql: `CREATE INDEX IF NOT EXISTS node_runs_run_idx ON node_runs (run_id);
+  },
+  {
+    // Indexes. The UNIQUE journal key (run_id,node_id,iteration,fanout_index)
+    // is load-bearing for §1.7 resume — it MUST be UNIQUE.
+    version: 10,
+    sql: `CREATE INDEX IF NOT EXISTS node_runs_run_idx ON node_runs (run_id);
 CREATE UNIQUE INDEX IF NOT EXISTS node_runs_journal_key_idx ON node_runs (run_id, node_id, iteration, fanout_index);
 CREATE INDEX IF NOT EXISTS workflow_runs_work_item_idx ON workflow_runs (work_item_id);
 CREATE INDEX IF NOT EXISTS artifacts_node_run_idx ON artifacts (node_run_id);
@@ -242,28 +319,28 @@ CREATE INDEX IF NOT EXISTS workflow_templates_owner_org_updated_idx ON workflow_
 CREATE INDEX IF NOT EXISTS workflow_runs_owner_org_idx ON workflow_runs (owner_email, org_id);
 CREATE INDEX IF NOT EXISTS workflow_template_shares_resource_idx ON workflow_template_shares (resource_id, principal_type, principal_id);
 CREATE INDEX IF NOT EXISTS workflow_run_shares_resource_idx ON workflow_run_shares (resource_id, principal_type, principal_id)`,
-    },
-    {
-      // P1b-2: liveness column for stuck-run detection + reap (DESIGN §6.4/§13).
-      // ADDITIVE — a single ALTER ADD COLUMN; never drops or rewrites the table.
-      // The reap loop and the partial index below find stranded `running` rows.
-      version: 11,
-      sql: `ALTER TABLE node_runs ADD COLUMN last_heartbeat TEXT;
+  },
+  {
+    // P1b-2: liveness column for stuck-run detection + reap (DESIGN §6.4/§13).
+    // ADDITIVE — a single ALTER ADD COLUMN; never drops or rewrites the table.
+    // The reap loop and the partial index below find stranded `running` rows.
+    version: 11,
+    sql: `ALTER TABLE node_runs ADD COLUMN last_heartbeat TEXT;
 CREATE INDEX IF NOT EXISTS node_runs_running_heartbeat_idx ON node_runs (status, last_heartbeat)`,
-    },
-    {
-      // P1b-3: soft-delete marker for workflow_templates (DESIGN §10 delete-
-      // template). ADDITIVE — a single ALTER ADD COLUMN; a soft delete keeps any
-      // workflow_runs that referenced the template loadable for observation.
-      version: 12,
-      sql: `ALTER TABLE workflow_templates ADD COLUMN deleted_at TEXT`,
-    },
-    {
-      // P3a: project-management tables (DESIGN §6 / §9) — additive, CREATE-only.
-      // The five PM tables: projects, work_items (six business-status dims +
-      // automation overlay), work_item_links, work_item_status_log, node_defs.
-      version: 13,
-      sql: `CREATE TABLE IF NOT EXISTS projects (
+  },
+  {
+    // P1b-3: soft-delete marker for workflow_templates (DESIGN §10 delete-
+    // template). ADDITIVE — a single ALTER ADD COLUMN; a soft delete keeps any
+    // workflow_runs that referenced the template loadable for observation.
+    version: 12,
+    sql: `ALTER TABLE workflow_templates ADD COLUMN deleted_at TEXT`,
+  },
+  {
+    // P3a: project-management tables (DESIGN §6 / §9) — additive, CREATE-only.
+    // The five PM tables: projects, work_items (six business-status dims +
+    // automation overlay), work_item_links, work_item_status_log, node_defs.
+    version: 13,
+    sql: `CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     key TEXT NOT NULL,
@@ -341,13 +418,13 @@ CREATE TABLE IF NOT EXISTS node_defs (
     org_id TEXT,
     visibility TEXT NOT NULL DEFAULT 'private'
   )`,
-    },
-    {
-      // P3a: shares tables for the three ownable PM tables (structure only;
-      // sharing UI deferred — §9/§12). Mirrors v4/v9 postgres/sqlite split.
-      version: 14,
-      sql: {
-        postgres: `CREATE TABLE IF NOT EXISTS project_shares (
+  },
+  {
+    // P3a: shares tables for the three ownable PM tables (structure only;
+    // sharing UI deferred — §9/§12). Mirrors v4/v9 postgres/sqlite split.
+    version: 14,
+    sql: {
+      postgres: `CREATE TABLE IF NOT EXISTS project_shares (
   id TEXT PRIMARY KEY,
   resource_id TEXT NOT NULL,
   principal_type TEXT NOT NULL,
@@ -374,7 +451,7 @@ CREATE TABLE IF NOT EXISTS node_def_shares (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (now())
 )`,
-        sqlite: `CREATE TABLE IF NOT EXISTS project_shares (
+      sqlite: `CREATE TABLE IF NOT EXISTS project_shares (
   id TEXT PRIMARY KEY,
   resource_id TEXT NOT NULL,
   principal_type TEXT NOT NULL,
@@ -401,13 +478,13 @@ CREATE TABLE IF NOT EXISTS node_def_shares (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`,
-      },
     },
-    {
-      // P3a: indexes (DESIGN §9). The queue-claim hot path work_items(exec_state,
-      // priority); project scoping; the status-log + link lookups; node_defs(key).
-      version: 15,
-      sql: `CREATE INDEX IF NOT EXISTS work_items_exec_priority_idx ON work_items (exec_state, priority);
+  },
+  {
+    // P3a: indexes (DESIGN §9). The queue-claim hot path work_items(exec_state,
+    // priority); project scoping; the status-log + link lookups; node_defs(key).
+    version: 15,
+    sql: `CREATE INDEX IF NOT EXISTS work_items_exec_priority_idx ON work_items (exec_state, priority);
 CREATE INDEX IF NOT EXISTS work_items_project_idx ON work_items (project_id);
 CREATE INDEX IF NOT EXISTS work_items_owner_org_updated_idx ON work_items (owner_email, org_id, updated_at);
 CREATE INDEX IF NOT EXISTS work_item_status_log_item_idx ON work_item_status_log (work_item_id);
@@ -419,29 +496,29 @@ CREATE INDEX IF NOT EXISTS projects_owner_org_updated_idx ON projects (owner_ema
 CREATE INDEX IF NOT EXISTS project_shares_resource_idx ON project_shares (resource_id, principal_type, principal_id);
 CREATE INDEX IF NOT EXISTS work_item_shares_resource_idx ON work_item_shares (resource_id, principal_type, principal_id);
 CREATE INDEX IF NOT EXISTS node_def_shares_resource_idx ON node_def_shares (resource_id, principal_type, principal_id)`,
-    },
-    {
-      // P3c: mark runs whose workflow was resolved via the DYNAMIC decomposition
-      // path (DESIGN §6.3 order 3 — the brain authors the DAG). Additive column,
-      // default 0 so every existing run reads as a resolved-template run.
-      version: 16,
-      sql: `ALTER TABLE workflow_runs ADD COLUMN dynamic_authored INTEGER NOT NULL DEFAULT 0`,
-    },
-    {
-      // P5 §8.3 item4: optional JSON model-list per runtime_config (a single
-      // endpoint can serve several models). Additive; null = use the single
-      // `model`. The schema reads this column, so a fresh DB needs it created.
-      version: 17,
-      sql: `ALTER TABLE runtime_configs ADD COLUMN models TEXT`,
-    },
-    {
-      // P6 §7.4.7: append-only AUDIT LOG. Captures the security/control-relevant
-      // actions — run control (start/pause/resume/cancel/retry/override), every
-      // transition-work-item, and credential resolution — with actor + action +
-      // target + detail + at. CREATE-only, additive; a fresh DB needs this table
-      // or writeAudit fails. Never updated or deleted from app code (append-only).
-      version: 18,
-      sql: `CREATE TABLE IF NOT EXISTS audit_log (
+  },
+  {
+    // P3c: mark runs whose workflow was resolved via the DYNAMIC decomposition
+    // path (DESIGN §6.3 order 3 — the brain authors the DAG). Additive column,
+    // default 0 so every existing run reads as a resolved-template run.
+    version: 16,
+    sql: `ALTER TABLE workflow_runs ADD COLUMN dynamic_authored INTEGER NOT NULL DEFAULT 0`,
+  },
+  {
+    // P5 §8.3 item4: optional JSON model-list per runtime_config (a single
+    // endpoint can serve several models). Additive; null = use the single
+    // `model`. The schema reads this column, so a fresh DB needs it created.
+    version: 17,
+    sql: `ALTER TABLE runtime_configs ADD COLUMN models TEXT`,
+  },
+  {
+    // P6 §7.4.7: append-only AUDIT LOG. Captures the security/control-relevant
+    // actions — run control (start/pause/resume/cancel/retry/override), every
+    // transition-work-item, and credential resolution — with actor + action +
+    // target + detail + at. CREATE-only, additive; a fresh DB needs this table
+    // or writeAudit fails. Never updated or deleted from app code (append-only).
+    version: 18,
+    sql: `CREATE TABLE IF NOT EXISTS audit_log (
     id TEXT PRIMARY KEY,
     actor TEXT NOT NULL,
     action TEXT NOT NULL,
@@ -455,14 +532,14 @@ CREATE INDEX IF NOT EXISTS node_def_shares_resource_idx ON node_def_shares (reso
 CREATE INDEX IF NOT EXISTS audit_log_at_idx ON audit_log (at);
 CREATE INDEX IF NOT EXISTS audit_log_target_idx ON audit_log (target_type, target_id);
 CREATE INDEX IF NOT EXISTS audit_log_owner_idx ON audit_log (owner_email, org_id, at)`,
-    },
-    {
-      // Agent definitions table (DESIGN §7). Worker agent configs — name, engine,
-      // model, tools, system prompt, runtime. `name` is globally unique; used as
-      // the key the DAG nodes reference and the dispatcher resolves. created_at/
-      // updated_at are written by the app layer as ISO strings (no DB now() needed).
-      version: 19,
-      sql: `CREATE TABLE IF NOT EXISTS orchestrator_agent_defs (
+  },
+  {
+    // Agent definitions table (DESIGN §7). Worker agent configs — name, engine,
+    // model, tools, system prompt, runtime. `name` is globally unique; used as
+    // the key the DAG nodes reference and the dispatcher resolves. created_at/
+    // updated_at are written by the app layer as ISO strings (no DB now() needed).
+    version: 19,
+    sql: `CREATE TABLE IF NOT EXISTS orchestrator_agent_defs (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     engine TEXT NOT NULL DEFAULT '',
@@ -480,13 +557,13 @@ CREATE INDEX IF NOT EXISTS audit_log_owner_idx ON audit_log (owner_email, org_id
     visibility TEXT NOT NULL DEFAULT 'private'
   );
 CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_agent_defs_name_idx ON orchestrator_agent_defs (name)`,
-    },
-    {
-      // Agent definition shares table — mirrors the node_def_shares structure
-      // (v14). Postgres uses now(), SQLite uses datetime('now').
-      version: 20,
-      sql: {
-        postgres: `CREATE TABLE IF NOT EXISTS orchestrator_agent_def_shares (
+  },
+  {
+    // Agent definition shares table — mirrors the node_def_shares structure
+    // (v14). Postgres uses now(), SQLite uses datetime('now').
+    version: 20,
+    sql: {
+      postgres: `CREATE TABLE IF NOT EXISTS orchestrator_agent_def_shares (
   id TEXT PRIMARY KEY,
   resource_id TEXT NOT NULL,
   principal_type TEXT NOT NULL,
@@ -496,7 +573,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_agent_defs_name_idx ON orchestrat
   created_at TEXT NOT NULL DEFAULT (now())
 );
 CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchestrator_agent_def_shares (resource_id, principal_type, principal_id)`,
-        sqlite: `CREATE TABLE IF NOT EXISTS orchestrator_agent_def_shares (
+      sqlite: `CREATE TABLE IF NOT EXISTS orchestrator_agent_def_shares (
   id TEXT PRIMARY KEY,
   resource_id TEXT NOT NULL,
   principal_type TEXT NOT NULL,
@@ -506,19 +583,19 @@ CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchest
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchestrator_agent_def_shares (resource_id, principal_type, principal_id)`,
-      },
     },
-    {
-      // Skills / Runbook editor hosted-mode override table (additive,
-      // CREATE-only). One row per overridden skill path
-      // ("skills/<name>/SKILL.md", or the "brain-runbook" sentinel for the
-      // brain's own BRAIN_PROMPT); a row's presence means a hosted override
-      // shadows the file/constant default. `name:` opts this migration into
-      // name-based tracking per the storing-data skill's migration-collision
-      // guidance (parallel branches extending this same list independently).
-      version: 21,
-      name: "orchestrator-skill-overrides-table",
-      sql: `CREATE TABLE IF NOT EXISTS orchestrator_skill_overrides (
+  },
+  {
+    // Skills / Runbook editor hosted-mode override table (additive,
+    // CREATE-only). One row per overridden skill path
+    // ("skills/<name>/SKILL.md", or the "brain-runbook" sentinel for the
+    // brain's own BRAIN_PROMPT); a row's presence means a hosted override
+    // shadows the file/constant default. `name:` opts this migration into
+    // name-based tracking per the storing-data skill's migration-collision
+    // guidance (parallel branches extending this same list independently).
+    version: 21,
+    name: "orchestrator-skill-overrides-table",
+    sql: `CREATE TABLE IF NOT EXISTS orchestrator_skill_overrides (
     id TEXT PRIMARY KEY,
     path TEXT NOT NULL,
     content TEXT NOT NULL,
@@ -526,35 +603,35 @@ CREATE INDEX IF NOT EXISTS orchestrator_agent_def_shares_resource_idx ON orchest
     updated_by TEXT
   );
 CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_skill_overrides_path_idx ON orchestrator_skill_overrides (path)`,
-    },
-    {
-      // F4 capability matrix (docs/sdlc-impl-f1-f4.md §4A / design 02 §5.4).
-      // `kind` distinguishes DAG-worker agent defs (vllm/claude-code, default
-      // 'worker', unchanged behavior) from the orchestrator BRAIN's own
-      // capability-profile row ('brain') so list-agent-defs's default
-      // (worker-only) output — consumed by WorkflowEditor's DAG-node agent
-      // picker — never offers "brain" as a selectable DAG worker.
-      // `capability_profile` is a JSON map of `{ [phase]: { tools: string[],
-      // workspaceAccess } }` that server/brain/brain-capability.ts reads (via
-      // agent-loader.loadAgent("brain")) to assemble the CLI's --allowedTools
-      // per phase (dispatch | review) instead of hardcoding them. Named
-      // (parallel F1-F4 branches extend this same migration list
-      // concurrently — see the storing-data skill's migration-collision
-      // guidance / the version-21 precedent above).
-      version: 22,
-      name: "f4-capability-matrix",
-      sql: `ALTER TABLE orchestrator_agent_defs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'worker';
+  },
+  {
+    // F4 capability matrix (docs/sdlc-impl-f1-f4.md §4A / design 02 §5.4).
+    // `kind` distinguishes DAG-worker agent defs (vllm/claude-code, default
+    // 'worker', unchanged behavior) from the orchestrator BRAIN's own
+    // capability-profile row ('brain') so list-agent-defs's default
+    // (worker-only) output — consumed by WorkflowEditor's DAG-node agent
+    // picker — never offers "brain" as a selectable DAG worker.
+    // `capability_profile` is a JSON map of `{ [phase]: { tools: string[],
+    // workspaceAccess } }` that server/brain/brain-capability.ts reads (via
+    // agent-loader.loadAgent("brain")) to assemble the CLI's --allowedTools
+    // per phase (dispatch | review) instead of hardcoding them. Named
+    // (parallel F1-F4 branches extend this same migration list
+    // concurrently — see the storing-data skill's migration-collision
+    // guidance / the version-21 precedent above).
+    version: 22,
+    name: "f4-capability-matrix",
+    sql: `ALTER TABLE orchestrator_agent_defs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'worker';
 ALTER TABLE orchestrator_agent_defs ADD COLUMN IF NOT EXISTS capability_profile TEXT NOT NULL DEFAULT '{}'`,
-    },
-    {
-      // Deploy runs (ship-it control) — one row per real backup→build→sync→
-      // restart→verify(→rollback) attempt against a configured host target.
-      // No owner_email/org_id/visibility columns: deliberately workspace-wide
-      // shared operator state, same reasoning as orchestrator_skill_overrides
-      // (version 21) above, not a personal ownableColumns() resource.
-      version: 23,
-      name: "orchestrator-deploy-runs-table",
-      sql: `CREATE TABLE IF NOT EXISTS orchestrator_deploy_runs (
+  },
+  {
+    // Deploy runs (ship-it control) — one row per real backup→build→sync→
+    // restart→verify(→rollback) attempt against a configured host target.
+    // No owner_email/org_id/visibility columns: deliberately workspace-wide
+    // shared operator state, same reasoning as orchestrator_skill_overrides
+    // (version 21) above, not a personal ownableColumns() resource.
+    version: 23,
+    name: "orchestrator-deploy-runs-table",
+    sql: `CREATE TABLE IF NOT EXISTS orchestrator_deploy_runs (
     id TEXT PRIMARY KEY,
     target TEXT NOT NULL DEFAULT '101',
     apps TEXT NOT NULL DEFAULT '["orchestrator","tracker"]',
@@ -572,35 +649,50 @@ ALTER TABLE orchestrator_agent_defs ADD COLUMN IF NOT EXISTS capability_profile 
     triggered_by TEXT
   );
 CREATE INDEX IF NOT EXISTS orchestrator_deploy_runs_target_idx ON orchestrator_deploy_runs (target, created_at)`,
-    },
-    {
-      // Fixes a TOCTOU race in trigger-deploy.ts: the action's own
-      // select-active-then-insert check has a window between the check and
-      // the insert where two concurrent triggers can both pass the check and
-      // both insert a 'queued' row for the same target. A partial UNIQUE
-      // index — only over the non-terminal statuses — is the DB-level
-      // backstop: at most one 'queued'/'running' row per target can ever
-      // exist, so the loser of the race gets a real constraint-violation
-      // error from the INSERT itself (which trigger-deploy catches and turns
-      // into the same friendly "already in progress" message), not a silent
-      // second deploy. Standard partial-index syntax (`CREATE UNIQUE INDEX
-      // ... WHERE ...`) is identical on SQLite and Postgres, so this is a
-      // single shared statement like the other unique indexes in this array
-      // (v10's node_runs_journal_key_idx, v19's orchestrator_agent_defs_name_idx,
-      // v21's orchestrator_skill_overrides_path_idx) — no postgres/sqlite
-      // split needed. Safe to add now: orchestrator_deploy_runs is a
-      // brand-new table (v23, this same PR) that has never taken a real
-      // production row yet, so there is no pre-existing duplicate-active-row
-      // data that could make this CREATE UNIQUE INDEX fail on an existing
-      // deployment (mirrors the empirical-safety note on tracker's v29
-      // tracker_exec_queue_work_item_id_key precedent).
-      version: 24,
-      name: "orchestrator-deploy-runs-active-guard",
-      sql: `CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_deploy_runs_active_target_idx ON orchestrator_deploy_runs (target) WHERE status IN ('queued', 'running')`,
-    },
-  ],
-  { table: "orchestrator_migrations" },
-);
+  },
+  {
+    // Fixes a TOCTOU race in trigger-deploy.ts: the action's own
+    // select-active-then-insert check has a window between the check and
+    // the insert where two concurrent triggers can both pass the check and
+    // both insert a 'queued' row for the same target. A partial UNIQUE
+    // index — only over the non-terminal statuses — is the DB-level
+    // backstop: at most one 'queued'/'running' row per target can ever
+    // exist, so the loser of the race gets a real constraint-violation
+    // error from the INSERT itself (which trigger-deploy catches and turns
+    // into the same friendly "already in progress" message), not a silent
+    // second deploy. Standard partial-index syntax (`CREATE UNIQUE INDEX
+    // ... WHERE ...`) is identical on SQLite and Postgres, so this is a
+    // single shared statement like the other unique indexes in this array
+    // (v10's node_runs_journal_key_idx, v19's orchestrator_agent_defs_name_idx,
+    // v21's orchestrator_skill_overrides_path_idx) — no postgres/sqlite
+    // split needed. Safe to add now: orchestrator_deploy_runs is a
+    // brand-new table (v23, this same PR) that has never taken a real
+    // production row yet, so there is no pre-existing duplicate-active-row
+    // data that could make this CREATE UNIQUE INDEX fail on an existing
+    // deployment (mirrors the empirical-safety note on tracker's v29
+    // tracker_exec_queue_work_item_id_key precedent).
+    version: 24,
+    name: "orchestrator-deploy-runs-active-guard",
+    sql: `CREATE UNIQUE INDEX IF NOT EXISTS orchestrator_deploy_runs_active_target_idx ON orchestrator_deploy_runs (target) WHERE status IN ('queued', 'running')`,
+  },
+  {
+    // F6 (dogfood audit 2026-07-22): side table for verifyMigrationHashes'
+    // retroactive collision guard, mirroring tracker's v26
+    // tracker_migration_hashes exactly — see that entry's comment for why
+    // this can't be a column on `orchestrator_migrations` itself (core's
+    // bookkeeping INSERT has no explicit column list).
+    version: 25,
+    name: "orchestrator-migration-hashes-table",
+    sql: `CREATE TABLE IF NOT EXISTS orchestrator_migration_hashes (
+  version INTEGER PRIMARY KEY,
+  hash TEXT NOT NULL
+)`,
+  },
+];
+
+const migrateV2 = runMigrations(V2_MIGRATIONS, {
+  table: "orchestrator_migrations",
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // V3 (DESIGN §3) — folded in from the deleted `server/db/v3-migrations/
@@ -1083,6 +1175,18 @@ CREATE INDEX IF NOT EXISTS idx_v3_runs_writeback_status ON v3_runs USING btree (
 CREATE INDEX IF NOT EXISTS idx_v3_merge_overrides_workspace ON v3_merge_overrides USING btree ("workspace_id")`,
     },
   },
+  {
+    // F6 (dogfood audit 2026-07-22): same retroactive hash-collision guard as
+    // orchestrator-migration-hashes-table above, for the v3_migrations table.
+    version: 8,
+    name: "v3-migration-hashes-table",
+    sql: {
+      postgres: `CREATE TABLE IF NOT EXISTS v3_migration_hashes (
+  version INTEGER PRIMARY KEY,
+  hash TEXT NOT NULL
+)`,
+    },
+  },
 ];
 
 const migrateV3 = runMigrations(V3_MIGRATIONS, { table: "v3_migrations" });
@@ -1092,4 +1196,14 @@ export default async function orchestratorDbPlugin(
 ): Promise<void> {
   await migrateV2(nitroApp);
   await migrateV3(nitroApp);
+  await verifyMigrationHashes(
+    V2_MIGRATIONS,
+    "orchestrator_migrations",
+    "orchestrator_migration_hashes",
+  );
+  await verifyMigrationHashes(
+    V3_MIGRATIONS,
+    "v3_migrations",
+    "v3_migration_hashes",
+  );
 }
