@@ -6,7 +6,7 @@ import {
   IconChevronRight,
   IconGripVertical,
 } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -33,6 +33,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
+import { pickerModelsFor } from "../../../shared/model-list";
 import {
   nextPropertyName,
   parseOutputSchemaProperties,
@@ -53,11 +54,25 @@ export interface AgentOption {
   name: string;
 }
 
+/** A saved runtime_configs row (list-runtime-configs' shape), for the
+ *  per-node engine/model picker. `kind: "claude-code"` rows are never
+ *  offered here — DAG worker nodes may never target the CC subscription
+ *  runtime via engine_override (dag-validator.ts's hard ban). */
+export interface RuntimeConfigOption {
+  id: string;
+  name: string;
+  kind: "vllm" | "openai-compatible" | "claude-code";
+  model: string | null;
+  models: string[];
+}
+
 export interface WorkflowNodeDetailProps {
   node: WorkflowNode | null;
   /** Every other node id in the DAG (never includes the selected node itself). */
   otherNodeIds: string[];
   agents: AgentOption[];
+  /** Saved runtime_configs rows, for the agent node's engine/model picker. */
+  runtimeConfigs: RuntimeConfigOption[];
   errors: string[];
   onChange: (next: WorkflowNode) => void;
   onRenameId: (newId: string) => void;
@@ -555,6 +570,7 @@ export function WorkflowNodeDetail({
   node,
   otherNodeIds,
   agents,
+  runtimeConfigs,
   errors,
   onChange,
   onRenameId,
@@ -602,6 +618,7 @@ export function WorkflowNodeDetail({
             key={node.id}
             node={node}
             agents={agents}
+            runtimeConfigs={runtimeConfigs}
             onChange={onChange}
           />
         ) : null}
@@ -647,15 +664,170 @@ export function WorkflowNodeDetail({
   );
 }
 
+/** One selectable (runtime row, model) combination the picker offers. */
+interface EngineModelOption {
+  value: string;
+  label: string;
+  runtimeId: string;
+  model: string;
+}
+
+/** Expand every saved (non-claude-code) runtime_configs row into one option
+ *  per model it serves (DESIGN §8.3 item4 / §8.5.1 — the ModelPicker the
+ *  schema/helper comments described but whose UI was never built). */
+function buildEngineModelOptions(
+  runtimeConfigs: RuntimeConfigOption[],
+): EngineModelOption[] {
+  const options: EngineModelOption[] = [];
+  for (const rc of runtimeConfigs) {
+    // DAG worker nodes may never target the CC subscription runtime via
+    // engine_override — the same hard ban dag-validator.ts enforces.
+    if (rc.kind === "claude-code") continue;
+    for (const model of pickerModelsFor(rc.model, rc.models)) {
+      options.push({
+        value: `${rc.id}::${model}`,
+        label: `${rc.name} · ${model}`,
+        runtimeId: rc.id,
+        model,
+      });
+    }
+  }
+  return options;
+}
+
+/** Engine/model picker for a DAG agent node's `engine_override`/
+ *  `model_override`. Selecting an option pins the node to that saved
+ *  runtime_configs row + model regardless of which row is currently active
+ *  in Settings (`routing-runtime-executor.ts`'s `selectRuntimeRoute` resolves
+ *  an explicit `engine_override` row id BEFORE falling back to the active
+ *  row) — so different nodes can target different providers at once. Adding
+ *  a 3rd/4th saved provider needs no code change: it just appears here. */
+function EngineModelField({
+  node,
+  runtimeConfigs,
+  onChange,
+}: {
+  node: WorkflowAgentNode;
+  runtimeConfigs: RuntimeConfigOption[];
+  onChange: (next: WorkflowNode) => void;
+}) {
+  const options = useMemo(
+    () => buildEngineModelOptions(runtimeConfigs),
+    [runtimeConfigs],
+  );
+  const matched = options.find(
+    (o) =>
+      o.runtimeId === node.engine_override && o.model === node.model_override,
+  );
+  const hasOverride = !!(node.engine_override || node.model_override);
+  // Custom mode = an override is set but doesn't match any known (row, model)
+  // pair — e.g. a hand-authored DAG using the legacy literal "vllm", or a
+  // row/model that was since renamed or deleted. Preserves editability for
+  // every pre-existing DAG instead of silently clobbering it.
+  const [customMode, setCustomMode] = useState(hasOverride && !matched);
+  useEffect(() => {
+    setCustomMode(hasOverride && !matched);
+    // Only re-derive when the node's own override fields change (e.g. the
+    // user picked a different DAG node) — not on every `options` recompute.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node.engine_override, node.model_override]);
+
+  const selectValue = customMode ? "__custom" : (matched?.value ?? "__default");
+
+  return (
+    <div className="space-y-3">
+      <Field
+        label="运行时 / 模型 (engine_override + model_override)"
+        help="固定该节点使用某个已保存的 provider + 模型，不受 Settings 页面全局激活开关影响；「跟随默认」使用当前激活的 provider。"
+      >
+        <Select
+          value={selectValue}
+          onValueChange={(v) => {
+            if (v === "__default") {
+              setCustomMode(false);
+              onChange({
+                ...node,
+                engine_override: undefined,
+                model_override: undefined,
+              });
+              return;
+            }
+            if (v === "__custom") {
+              setCustomMode(true);
+              return;
+            }
+            setCustomMode(false);
+            const opt = options.find((o) => o.value === v);
+            if (!opt) return;
+            onChange({
+              ...node,
+              engine_override: opt.runtimeId,
+              model_override: opt.model,
+            });
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="跟随默认" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__default">
+              跟随默认（当前激活的 provider）
+            </SelectItem>
+            {options.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+            <SelectItem value="__custom">自定义（高级，直接填写）</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      {customMode ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="引擎覆盖 (engine_override)">
+            <Input
+              value={node.engine_override ?? ""}
+              onChange={(e) =>
+                onChange({
+                  ...node,
+                  engine_override: e.target.value || undefined,
+                })
+              }
+              placeholder="例如 vllm 或 runtime_configs 行 id"
+              className="font-mono text-xs"
+            />
+          </Field>
+          <Field label="模型覆盖 (model_override)">
+            <Input
+              value={node.model_override ?? ""}
+              onChange={(e) =>
+                onChange({
+                  ...node,
+                  model_override: e.target.value || undefined,
+                })
+              }
+              placeholder="例如 qwen3.6"
+              className="font-mono text-xs"
+            />
+          </Field>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ── Per-type field groups ────────────────────────────────────────────────────
 
 function AgentFields({
   node,
   agents,
+  runtimeConfigs,
   onChange,
 }: {
   node: WorkflowAgentNode;
   agents: AgentOption[];
+  runtimeConfigs: RuntimeConfigOption[];
   onChange: (next: WorkflowNode) => void;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -711,34 +883,11 @@ function AgentFields({
             onCommit={(v) => onChange({ ...node, output_schema: v })}
           />
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="引擎覆盖 (engine_override)">
-              <Input
-                value={node.engine_override ?? ""}
-                onChange={(e) =>
-                  onChange({
-                    ...node,
-                    engine_override: e.target.value || undefined,
-                  })
-                }
-                placeholder="例如 vllm"
-                className="font-mono text-xs"
-              />
-            </Field>
-            <Field label="模型覆盖 (model_override)">
-              <Input
-                value={node.model_override ?? ""}
-                onChange={(e) =>
-                  onChange({
-                    ...node,
-                    model_override: e.target.value || undefined,
-                  })
-                }
-                placeholder="例如 qwen3.6"
-                className="font-mono text-xs"
-              />
-            </Field>
-          </div>
+          <EngineModelField
+            node={node}
+            runtimeConfigs={runtimeConfigs}
+            onChange={onChange}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="最大重试次数 (retry.max)">

@@ -98,6 +98,36 @@ async function appendEvent(
   });
 }
 
+/**
+ * SDLC-066: real production data (model=qwen3.8-max-preview via the aliyun
+ * runtime override) shows the brain repeatedly calling real-looking but
+ * uncataloged action names (workspaceGet, runCancel, nodeRetry, spawnCancel,
+ * source-search — some named directly by the brain's own wake-message text,
+ * see agent-chat.ts's connectorCatalog fix) as well as CC-only built-ins
+ * (Read/Grep/Glob, which never exist under this SDK path — only the
+ * mcp__orchestrator__* tools discovered via mcpListTools do). Every such call
+ * previously still reached mcpCallTool, which came back with only the MCP
+ * server's generic `Unknown tool: X` text — nothing telling the model what IS
+ * callable. Observed cost: up to several repeated identical attempts (e.g. 3x
+ * runCancel in one real thread) before the model self-corrected on its own.
+ * Built client-side (the discovered tool set is already in memory) so an
+ * unknown name short-circuits before the network round-trip and always names
+ * the REAL available tools, regardless of what the MCP response would have
+ * said — a safety net for any name gap, cataloged or not.
+ */
+export function unknownToolMessage(
+  name: string,
+  knownToolNames: string[],
+): string {
+  return (
+    `Tool "${name}" does not exist in this session — there is no ` +
+    `Read/Grep/Glob/Bash/Find or other built-in file/shell tool here, only ` +
+    `the tools listed below. Available tools: ${knownToolNames.join(", ")}. ` +
+    `To inspect code, call workspaceCreate first (no run needs to exist yet), ` +
+    `then workspaceFiles / workspaceRead.`
+  );
+}
+
 /** Call the orchestrator MCP endpoint via JSON-RPC to list available tools. */
 async function mcpListTools(
   bearer: string,
@@ -594,12 +624,18 @@ export async function runSdkBrainTurn(
       });
 
       let toolResult: unknown;
-      try {
-        toolResult = await mcpCallTool(bearer, name, args);
-      } catch (err) {
+      if (!Object.prototype.hasOwnProperty.call(tools, name)) {
         toolResult = {
-          error: err instanceof Error ? err.message : String(err),
+          error: unknownToolMessage(name, Object.keys(tools)),
         };
+      } else {
+        try {
+          toolResult = await mcpCallTool(bearer, name, args);
+        } catch (err) {
+          toolResult = {
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
       }
 
       await appendEvent(threadId, ownerEmail, orgId, {
