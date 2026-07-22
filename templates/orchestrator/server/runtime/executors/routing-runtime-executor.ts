@@ -105,6 +105,26 @@ export function selectRuntimeRoute(
   return eligible.find((r) => r.active === 1);
 }
 
+/**
+ * `runtime_configs.active` is physically `bigint` in Postgres (see
+ * `orchestrator_migration_hashes`-adjacent F6 investigation, 2026-07-22):
+ * postgres.js returns bigint columns as JS STRINGS by default, and drizzle's
+ * `integer()` column mapper does not re-coerce them for this partial-select
+ * shape — confirmed empirically against the real driver. Left as `r.active
+ * === 1`, this NEVER matches (`"1" === 1` is false), so `selectRuntimeRoute`
+ * silently treats every owner as having no active row and falls through to
+ * the hardcoded `RemoteApiExecutor`/`OPENAI_BASE_URL` fallback regardless of
+ * what `activate-runtime` set — the exact bug behind "switching to Aliyun in
+ * Settings doesn't change what a DAG dev node actually runs on". Normalize
+ * here, once, so every caller can trust `OwnerRuntimeRow.active` really is a
+ * number.
+ */
+function normalizeActive<T extends { active: unknown }>(
+  row: T,
+): T & { active: number } {
+  return { ...row, active: Number(row.active) };
+}
+
 /** Load every saved runtime_configs row for one owner (production default). */
 async function loadOwnerRuntimeRows(
   ownerEmail: string,
@@ -121,7 +141,7 @@ async function loadOwnerRuntimeRows(
     })
     .from(schema.runtimeConfigs)
     .where(eq(schema.runtimeConfigs.ownerEmail, ownerEmail));
-  return rows as OwnerRuntimeRow[];
+  return rows.map(normalizeActive);
 }
 
 /**
@@ -157,7 +177,7 @@ export async function resolveOwnerRuntimeRow(
       ),
     )
     .limit(1);
-  return row as OwnerRuntimeRow | undefined;
+  return row ? normalizeActive(row) : undefined;
 }
 
 /** {@link resolveRuntimeRowById}'s result — the row plus its real owner. */
@@ -195,7 +215,7 @@ export async function resolveRuntimeRowById(
     .from(schema.runtimeConfigs)
     .where(eq(schema.runtimeConfigs.id, id))
     .limit(1);
-  return row as RuntimeRowWithOwner | undefined;
+  return row ? normalizeActive(row) : undefined;
 }
 
 /**
