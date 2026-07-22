@@ -91,6 +91,23 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
     [agentDefs],
   );
 
+  // Saved runtime_configs rows, for the agent node's engine/model picker
+  // (WorkflowNodeDetail's EngineModelField) — lets a node pin a specific
+  // provider + model regardless of which row is currently active in Settings.
+  const { data: runtimeConfigs = [] } = useActionQuery(
+    "list-runtime-configs" as any,
+    {},
+    undefined,
+  ) as {
+    data?: Array<{
+      id: string;
+      name: string;
+      kind: "vllm" | "openai-compatible" | "claude-code";
+      model: string | null;
+      models: string[];
+    }>;
+  };
+
   // ── Version lineage + diff-vs-previous (r4 doc §4.5 gap #3 — same data/
   // components the library page already renders, s8b-workflow-detail.html
   // §7). Only meaningful once a saved template is loaded — a brand-new
@@ -466,6 +483,7 @@ export function WorkflowEditor({ templateId }: WorkflowEditorProps) {
                   node={selectedNode}
                   otherNodeIds={otherNodeIds}
                   agents={agentOptions}
+                  runtimeConfigs={runtimeConfigs}
                   errors={
                     selectedNode ? (errorsByNode[selectedNode.id] ?? []) : []
                   }
