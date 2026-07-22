@@ -324,18 +324,21 @@ async function advanceOneItem(
   // stuck at 'pending' forever. onConflictDoNothing() makes the insert
   // idempotent — a retried writeback that already wrote this activity is a
   // no-op, not a failure. (activities PK is `id`, so no explicit target needed.)
-  await db.insert(schema.activities).values({
-    id: `act_adv_${item.id.slice(0, 6)}_${argsFromStage}_to_${nextStage}_${now.replace(/\D/g, "").slice(0, 14)}`,
-    workItemId: item.id,
-    actorKind,
-    actorName: ownerEmail,
-    eventType: "推进",
-    payload: JSON.stringify({ fromStage: argsFromStage, toStage: nextStage }),
-    createdAt: now,
-    ownerEmail,
-    orgId,
-    visibility: "private",
-  }).onConflictDoNothing();
+  await db
+    .insert(schema.activities)
+    .values({
+      id: `act_adv_${item.id.slice(0, 6)}_${argsFromStage}_to_${nextStage}_${now.replace(/\D/g, "").slice(0, 14)}`,
+      workItemId: item.id,
+      actorKind,
+      actorName: ownerEmail,
+      eventType: "推进",
+      payload: JSON.stringify({ fromStage: argsFromStage, toStage: nextStage }),
+      createdAt: now,
+      ownerEmail,
+      orgId,
+      visibility: "private",
+    })
+    .onConflictDoNothing();
 
   return { workItemId: item.id, stageName: nextStage };
 }
@@ -417,22 +420,25 @@ export default defineAction({
         // replaying the same payload/timestamp regenerates it. Guard the insert
         // so the retry is a no-op instead of a primary-key conflict that wedges
         // writeback_status at 'pending'. (activities PK is `id`.)
-        await db.insert(schema.activities).values({
-          id: `act_wbmismatch_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
-          workItemId: item.id,
-          actorKind,
-          actorName: ownerEmail,
-          eventType: "writeback.stage-mismatch",
-          payload: JSON.stringify({
-            expectedFromStage: args.fromStage,
-            actualStage: item.currentStageName,
-            expectedRunId: args.expectedRunId ?? null,
-          }),
-          createdAt: now,
-          ownerEmail,
-          orgId,
-          visibility: "private",
-        }).onConflictDoNothing();
+        await db
+          .insert(schema.activities)
+          .values({
+            id: `act_wbmismatch_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+            workItemId: item.id,
+            actorKind,
+            actorName: ownerEmail,
+            eventType: "writeback.stage-mismatch",
+            payload: JSON.stringify({
+              expectedFromStage: args.fromStage,
+              actualStage: item.currentStageName,
+              expectedRunId: args.expectedRunId ?? null,
+            }),
+            createdAt: now,
+            ownerEmail,
+            orgId,
+            visibility: "private",
+          })
+          .onConflictDoNothing();
       }
 
       return result;
@@ -528,18 +534,21 @@ export default defineAction({
         // HOTFIX: deterministic id (item id + `now`) — same idempotency guard
         // as the other activity inserts so a retried sweep doesn't throw a
         // primary-key conflict here. (activities PK is `id`.)
-        await db.insert(schema.activities).values({
-          id: `act_adv_fail_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
-          workItemId: item.id,
-          actorKind,
-          actorName: ownerEmail,
-          eventType: "推进失败",
-          payload: JSON.stringify({ error: errStr }),
-          createdAt: now,
-          ownerEmail,
-          orgId,
-          visibility: "private",
-        }).onConflictDoNothing();
+        await db
+          .insert(schema.activities)
+          .values({
+            id: `act_adv_fail_${item.id.slice(0, 6)}_${now.replace(/\D/g, "").slice(0, 14)}`,
+            workItemId: item.id,
+            actorKind,
+            actorName: ownerEmail,
+            eventType: "推进失败",
+            payload: JSON.stringify({ error: errStr }),
+            createdAt: now,
+            ownerEmail,
+            orgId,
+            visibility: "private",
+          })
+          .onConflictDoNothing();
         cascaded.push({ workItemId: item.id, ok: false, error: errStr });
       }
     }

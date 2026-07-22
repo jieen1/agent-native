@@ -495,9 +495,7 @@ describe("HOTFIX: writeback activity insert is idempotent across a retried write
         expectedRunId: "run_retry",
       } as const;
 
-      const first = await asUser(() =>
-        advanceStage.run(args, ctxFor("mcp")),
-      );
+      const first = await asUser(() => advanceStage.run(args, ctxFor("mcp")));
       expect(first.noop).toBe(true);
       expect(first.reason).toBe("stage-mismatch");
 
