@@ -1210,6 +1210,121 @@ describe("runAgentLoop", () => {
     expect(seenMaxOutputTokens).toBe(8192);
   });
 
+  // Spawn token telemetry must be trustworthy: streaming `usage` is CUMULATIVE
+  // (every chunk reports the running total so far), so the loop must record the
+  // FINAL usage object — never a per-chunk sum (which quadratically inflated
+  // output tokens), and it must capture prompt/input tokens instead of leaving
+  // them hardcoded to 0.
+  function makeUsageEngine(
+    usageEvents: Array<{
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+    }>,
+  ): AgentEngine {
+    return {
+      name: "test",
+      label: "Test",
+      defaultModel: "test-model",
+      supportedModels: ["test-model"],
+      capabilities: {
+        thinking: false,
+        promptCaching: false,
+        vision: false,
+        computerUse: false,
+        parallelToolCalls: false,
+      },
+      async *stream(): AsyncIterable<EngineEvent> {
+        yield { type: "text-delta", text: "working…" };
+        // Emit usage on every chunk, exactly like a provider that reports
+        // cumulative usage per streamed chunk.
+        for (const u of usageEvents) {
+          yield { type: "usage", ...u };
+        }
+        yield {
+          type: "assistant-content",
+          parts: [{ type: "text" as const, text: "done" }],
+        };
+        yield { type: "stop", reason: "end_turn" };
+      },
+    };
+  }
+
+  async function runUsageLoop(engine: AgentEngine) {
+    return runAgentLoop({
+      engine,
+      model: "test-model",
+      systemPrompt: "system",
+      tools: [],
+      messages: [{ role: "user", content: [{ type: "text", text: "go" }] }],
+      actions: {},
+      send: () => {},
+      signal: new AbortController().signal,
+    });
+  }
+
+  it("records the FINAL cumulative usage, not a per-chunk sum (10→20→30 ⇒ 30, not 60)", async () => {
+    const usage = await runUsageLoop(
+      makeUsageEngine([
+        { inputTokens: 100, outputTokens: 10 },
+        { inputTokens: 100, outputTokens: 20 },
+        { inputTokens: 100, outputTokens: 30 },
+      ]),
+    );
+
+    // The bug summed cumulative per-chunk usage (10+20+30 = 60). The fix keeps
+    // only the final total.
+    expect(usage.outputTokens).toBe(30);
+    expect(usage.outputTokens).not.toBe(60);
+  });
+
+  it("records tokens_input from the usage's prompt/input tokens (non-zero)", async () => {
+    const usage = await runUsageLoop(
+      makeUsageEngine([
+        { inputTokens: 1234, outputTokens: 10 },
+        { inputTokens: 1234, outputTokens: 42 },
+      ]),
+    );
+
+    // Previously input tokens were never captured (always 0). They ride along
+    // on the same final cumulative usage object.
+    expect(usage.inputTokens).toBe(1234);
+    expect(usage.inputTokens).not.toBe(0);
+    expect(usage.outputTokens).toBe(42);
+  });
+
+  it("records correctly when usage arrives only on the final chunk", async () => {
+    const usage = await runUsageLoop(
+      makeUsageEngine([{ inputTokens: 55, outputTokens: 7 }]),
+    );
+
+    expect(usage.inputTokens).toBe(55);
+    expect(usage.outputTokens).toBe(7);
+  });
+
+  it("takes the final cumulative cache token counts (not a sum)", async () => {
+    const usage = await runUsageLoop(
+      makeUsageEngine([
+        {
+          inputTokens: 100,
+          outputTokens: 5,
+          cacheReadTokens: 10,
+          cacheWriteTokens: 1,
+        },
+        {
+          inputTokens: 100,
+          outputTokens: 9,
+          cacheReadTokens: 30,
+          cacheWriteTokens: 3,
+        },
+      ]),
+    );
+
+    expect(usage.cacheReadTokens).toBe(30);
+    expect(usage.cacheWriteTokens).toBe(3);
+  });
+
   it("continues internally when a response reaches the output token cap", async () => {
     let streamCalls = 0;
     const seenMessages: any[] = [];

@@ -154,3 +154,103 @@ describe("buildClaudeCommand", () => {
     expect(cmd).toContain("--model 'claude-sonnet-4-6'");
   });
 });
+
+// F7 token-accounting regression tests (04 §7/§13, SDLC-051). Streaming `usage`
+// is CUMULATIVE per chunk, so the input/output split must be the single FINAL
+// value — never a per-chunk sum (which would quadratically inflate it) — and
+// `tokens_input` must be populated (it was hardcoded to 0 before this fix).
+describe("parseClaudeStreamJson — final-cumulative input/output split", () => {
+  const assistant = (
+    usage: Record<string, number> | undefined,
+    text = "chunk",
+  ): string =>
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        model: "claude-sonnet-4-6",
+        content: [{ type: "text", text }],
+        ...(usage ? { usage } : {}),
+      },
+    });
+
+  it("records the FINAL cumulative output (10→20→30 ⇒ 30, NOT the 60 sum)", () => {
+    // Provider streams cumulative output_tokens growing 10 → 20 → 30 across
+    // three chunks (no terminal result event). The split must be the last value.
+    const stream = [
+      assistant({ input_tokens: 100, output_tokens: 10 }),
+      assistant({ input_tokens: 100, output_tokens: 20 }),
+      assistant({ input_tokens: 100, output_tokens: 30 }),
+    ].join("\n");
+    const r = parseClaudeStreamJson(stream);
+    expect(r.tokensOutput).toBe(30); // final cumulative value…
+    expect(r.tokensOutput).not.toBe(60); // …NOT 10+20+30 (the buggy sum)
+    expect(r.tokensInput).toBe(100);
+  });
+
+  it("tokens_input is non-zero when the provider reports prompt_tokens (OpenAI alias)", () => {
+    const stream = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      result: "ok",
+      usage: { prompt_tokens: 500, completion_tokens: 42 },
+    });
+    const r = parseClaudeStreamJson(stream);
+    expect(r.tokensInput).toBe(500); // prompt_tokens → tokens_input (not 0)
+    expect(r.tokensOutput).toBe(42); // completion_tokens → tokens_output
+    expect(r.tokensInput).toBeGreaterThan(0);
+  });
+
+  it("usage only on the FINAL chunk still records correctly (terminal result event)", () => {
+    // Earlier chunks carry NO usage; only the terminal result event does.
+    const stream = [
+      assistant(undefined, "a"),
+      assistant(undefined, "b"),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        result: "done",
+        usage: { input_tokens: 700, output_tokens: 90 },
+      }),
+    ].join("\n");
+    const r = parseClaudeStreamJson(stream);
+    expect(r.tokensInput).toBe(700);
+    expect(r.tokensOutput).toBe(90);
+  });
+
+  it("usage only on the final assistant message (no result event) still records", () => {
+    const stream = [
+      assistant(undefined, "a"),
+      assistant({ input_tokens: 250, output_tokens: 33 }, "b"),
+    ].join("\n");
+    const r = parseClaudeStreamJson(stream);
+    expect(r.sawResult).toBe(false);
+    expect(r.tokensInput).toBe(250);
+    expect(r.tokensOutput).toBe(33);
+  });
+
+  it("prefers the terminal result usage over per-message usage (final wins)", () => {
+    const stream = [
+      assistant({ input_tokens: 100, output_tokens: 10 }),
+      assistant({ input_tokens: 200, output_tokens: 20 }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        result: "done",
+        usage: {
+          input_tokens: 200,
+          output_tokens: 20,
+          cache_read_input_tokens: 50,
+        },
+      }),
+    ].join("\n");
+    const r = parseClaudeStreamJson(stream);
+    expect(r.tokensInput).toBe(200);
+    expect(r.tokensOutput).toBe(20);
+  });
+
+  it("exposes the split on the canonical SAMPLE (input 2500 / output 80)", () => {
+    const r = parseClaudeStreamJson(SAMPLE);
+    expect(r.tokensInput).toBe(2500);
+    expect(r.tokensOutput).toBe(80);
+  });
+});

@@ -102,12 +102,13 @@ export interface RuntimeExecResult {
    * Input/output token SPLIT from the same terminal `AgentLoopUsage` object
    * `tokensSpent` is summed from (04 §7/§13 — F7 telemetry single-source-of-
    * truth). Optional: an executor that has not been migrated to report the
-   * split (e.g. {@link ClaudeCodeExecutor}, which sums a stream-json usage
-   * object into `tokensSpent` only) simply omits these — the dispatcher
-   * (`v3-dispatcher.ts`) treats a missing `tokensInput` as 0 and marks the
-   * spawn `usage_suspect` rather than silently reporting a false 0 as trusted
-   * data (SDLC-051's `tokens_input` "always 0" root cause). NEVER accumulate
-   * these per-chunk — they must come from ONE terminal usage read.
+   * split simply omits these — the dispatcher (`v3-dispatcher.ts`) treats a
+   * missing `tokensInput` as 0 and marks the spawn `usage_suspect` rather than
+   * silently reporting a false 0 as trusted data (SDLC-051's `tokens_input`
+   * "always 0" root cause). The stream-json executors ({@link ClaudeCodeExecutor}
+   * and the host claude-code-worker) now populate these from the FINAL cumulative
+   * usage read. NEVER accumulate these per-chunk — they must come from ONE
+   * terminal usage read.
    */
   tokensInput?: number;
   /** See {@link tokensInput}. */

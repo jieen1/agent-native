@@ -44,6 +44,23 @@ export interface ClaudeStreamStep {
 export interface ClaudeStreamParseResult {
   /** Total tokens (input + output + cache read + cache write). */
   tokensSpent: number;
+  /**
+   * F7 telemetry split (04 §7/§13, SDLC-051): the INPUT component of the spawn's
+   * token usage, persisted to `v3_spawns.tokens_input`. Taken from the FINAL
+   * cumulative usage (the terminal `result` event when present, else the last
+   * non-null per-message usage) — NEVER a sum across chunks. Streaming `usage`
+   * is CUMULATIVE per chunk, so summing would quadratically inflate it; the
+   * correct input count is the single final value. Reads `input_tokens` or the
+   * OpenAI-style `prompt_tokens` alias. 0 only when no usage was ever reported.
+   */
+  tokensInput: number;
+  /**
+   * F7 telemetry split: the OUTPUT component, persisted to
+   * `v3_spawns.tokens_output`. Same FINAL-cumulative semantics as
+   * {@link tokensInput} — the single final `output_tokens`/`completion_tokens`
+   * value, never a per-chunk sum.
+   */
+  tokensOutput: number;
   /** Number of `tool_use` blocks the model emitted (proof of real acting). */
   toolCallCount: number;
   /** The final assistant/result text. */
@@ -68,15 +85,31 @@ export interface ClaudeStreamParseResult {
 interface UsageLike {
   input_tokens?: number;
   output_tokens?: number;
+  /** OpenAI-style alias for `input_tokens` (some gateways report this name). */
+  prompt_tokens?: number;
+  /** OpenAI-style alias for `output_tokens`. */
+  completion_tokens?: number;
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
+}
+
+/** Input component of a usage object: `input_tokens` or its `prompt_tokens` alias. */
+function usageInput(u: UsageLike | undefined | null): number {
+  if (!u) return 0;
+  return u.input_tokens ?? u.prompt_tokens ?? 0;
+}
+
+/** Output component of a usage object: `output_tokens` or its `completion_tokens` alias. */
+function usageOutput(u: UsageLike | undefined | null): number {
+  if (!u) return 0;
+  return u.output_tokens ?? u.completion_tokens ?? 0;
 }
 
 function usageTotal(u: UsageLike | undefined | null): number {
   if (!u) return 0;
   return (
-    (u.input_tokens ?? 0) +
-    (u.output_tokens ?? 0) +
+    usageInput(u) +
+    usageOutput(u) +
     (u.cache_read_input_tokens ?? 0) +
     (u.cache_creation_input_tokens ?? 0)
   );
@@ -160,6 +193,13 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
   let totalCostUsd: number | null = null;
   let resultUsage = 0;
   let summedAssistantUsage = 0;
+  // FINAL-cumulative input/output split (F7). Streaming usage is cumulative per
+  // chunk, so we OVERWRITE (not add) on every usage-bearing event and keep the
+  // last value seen — the terminal `result` event wins when present.
+  let resultInput = 0;
+  let resultOutput = 0;
+  let lastInput = 0;
+  let lastOutput = 0;
   const steps: ClaudeStreamStep[] = [];
 
   for (const line of raw.split(/\r?\n/)) {
@@ -191,6 +231,14 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
           }
         }
         summedAssistantUsage += usageTotal(message.usage as UsageLike);
+        // Track the FINAL cumulative split (overwrite, never sum). Only update
+        // when this message actually carries usage so a usage-less chunk can't
+        // clobber a prior value back to 0.
+        const msgUsage = message.usage as UsageLike | undefined;
+        if (msgUsage) {
+          lastInput = usageInput(msgUsage);
+          lastOutput = usageOutput(msgUsage);
+        }
       }
       // Append this event's steps with running seq (shared extractor).
       for (const s of stepsFromEvent(event)) {
@@ -204,6 +252,8 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
         totalCostUsd = event.total_cost_usd;
       }
       resultUsage = usageTotal(event.usage as UsageLike);
+      resultInput = usageInput(event.usage as UsageLike);
+      resultOutput = usageOutput(event.usage as UsageLike);
     } else if (type === "system") {
       const m = event.model;
       if (typeof m === "string") model = m;
@@ -214,8 +264,16 @@ export function parseClaudeStreamJson(raw: string): ClaudeStreamParseResult {
   const tokensSpent =
     sawResult && resultUsage > 0 ? resultUsage : summedAssistantUsage;
 
+  // The input/output split is the single FINAL cumulative value — prefer the
+  // terminal result event's usage, else the last per-message usage seen. Never
+  // a sum across chunks (that would quadratically inflate a cumulative stream).
+  const tokensInput = resultInput > 0 ? resultInput : lastInput;
+  const tokensOutput = resultOutput > 0 ? resultOutput : lastOutput;
+
   return {
     tokensSpent,
+    tokensInput,
+    tokensOutput,
     toolCallCount,
     finalText,
     model,
