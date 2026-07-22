@@ -454,3 +454,81 @@ describe("T-F9-02b: 阶段起点契约 — fromStage 不符时 no-op + 写 write
     expect(rowAdvance.currentStageName).toBe("测试");
   });
 });
+
+// ============================================================================
+// HOTFIX: writeback-channel tracker_activities inserts must be idempotent.
+//
+// The act_wbmismatch_… id is DETERMINISTIC (item id + a `now` timestamp). When
+// the F9 writeback sweep retries a run it replays the SAME persisted outcome
+// (v3-reconciler.ts `drainWritebackOutbox` → `attemptWritebackDelivery` →
+// `onRunTerminal` → advance-stage), so two attempts that land in the same
+// timestamp bucket regenerate the SAME activity id. Before the fix the second
+// bare INSERT threw a tracker_activities primary-key violation, leaving
+// v3_runs.writeback_status stuck at 'pending' with writeback_attempts climbing
+// forever — even though the activity was already written. The fix adds
+// .onConflictDoNothing() so the retried insert is a no-op, not a failure.
+//
+// This test freezes the clock (faking ONLY Date, so libsql's real timers/
+// promises are untouched) so both calls compute the identical `now` and thus
+// the identical deterministic id, then drives the stage-mismatch branch twice.
+// ============================================================================
+
+describe("HOTFIX: writeback activity insert is idempotent across a retried writeback (deterministic id collision)", () => {
+  it("stage-mismatch writeback replayed twice with a frozen clock → second call does NOT throw and exactly ONE activity row exists", async () => {
+    const id = await insertItem({
+      currentStageName: "待办", // NOT 实施 — drives the writeback.stage-mismatch branch
+      status: "dispatched",
+      orchestratorRunId: "run_retry",
+    });
+
+    // Freeze ONLY Date (toFake: ["Date"]) so both calls compute the same `now`
+    // → the same deterministic act_wbmismatch_ id — without disturbing the
+    // libsql client's real timers/promises.
+    const fixedNow = new Date("2024-05-06T07:08:09.000Z");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(fixedNow);
+    try {
+      const args = {
+        scope: "item",
+        id,
+        fromStage: "实施",
+        expectedRunId: "run_retry",
+      } as const;
+
+      const first = await asUser(() =>
+        advanceStage.run(args, ctxFor("mcp")),
+      );
+      expect(first.noop).toBe(true);
+      expect(first.reason).toBe("stage-mismatch");
+
+      // The replayed retry: identical payload + identical frozen `now` →
+      // identical deterministic activity id. Before the fix this threw a
+      // tracker_activities primary-key conflict; now it must be a no-op.
+      let second: any;
+      await expect(
+        asUser(async () => {
+          second = await advanceStage.run(args, ctxFor("mcp"));
+        }),
+      ).resolves.not.toThrow();
+      expect(second.noop).toBe(true);
+      expect(second.reason).toBe("stage-mismatch");
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Exactly ONE row for the deterministic id — the second insert was a
+    // no-op, not a duplicate (and not a thrown conflict).
+    const activities = await fetchActivities(id);
+    expect(activities).toHaveLength(1);
+    expect(activities[0]!.eventType).toBe("writeback.stage-mismatch");
+    const expectedId = `act_wbmismatch_${id.slice(0, 6)}_${fixedNow
+      .toISOString()
+      .replace(/\D/g, "")
+      .slice(0, 14)}`;
+    expect(activities[0]!.id).toBe(expectedId);
+
+    // Business stage untouched — the mismatch is still a pure no-op.
+    const row = await fetchItem(id);
+    expect(row.currentStageName).toBe("待办");
+  });
+});
