@@ -42,7 +42,7 @@ import {
   IconUser,
   IconX,
 } from "@tabler/icons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 
@@ -1344,6 +1344,7 @@ const COMMIT_RE = /^[0-9a-f]{7,40}$/i;
 
 function GuardedStatusRow({
   item,
+  runs,
 }: {
   item: {
     itemKey?: string;
@@ -1352,6 +1353,7 @@ function GuardedStatusRow({
     execState?: string | null;
     allowedTransitions?: TransitionOption[];
   };
+  runs?: WorkItemRunSummary[];
 }) {
   const [open, setOpen] = useState(false);
   const statusLabel =
@@ -1376,6 +1378,7 @@ function GuardedStatusRow({
       {open ? (
         <GuardedTransitionDialog
           item={item}
+          runs={runs}
           open={open}
           onOpenChange={setOpen}
         />
@@ -1384,8 +1387,9 @@ function GuardedStatusRow({
   );
 }
 
-function GuardedTransitionDialog({
+export function GuardedTransitionDialog({
   item,
+  runs,
   open,
   onOpenChange,
 }: {
@@ -1396,6 +1400,7 @@ function GuardedTransitionDialog({
     execState?: string | null;
     allowedTransitions?: TransitionOption[];
   };
+  runs?: WorkItemRunSummary[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -1416,6 +1421,16 @@ function GuardedTransitionDialog({
   const [deliveryInput, setDeliveryInput] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  // Prefill the run-id field with the most recent REAL run id when the dialog
+  // opens (open false→true) and the item has dispatch history. runs is
+  // newest-first, so runs[0] is the current/most-recent run. The user can
+  // still edit/override afterwards — this only sets the default on open.
+  useEffect(() => {
+    if (open) {
+      setRunId(runs?.[0]?.runId ?? "");
+    }
+  }, [open, runs]);
 
   const selected = options.find((o) => o.target === target);
   const isDone = target === "done";
@@ -1645,6 +1660,47 @@ function GuardedTransitionDialog({
                   placeholder="orchestrator run id"
                   className="font-mono text-xs"
                 />
+                {runId.trim() ? (
+                  <a
+                    href={orchestratorRunHref(runId.trim())}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                  >
+                    <IconExternalLink className="size-3 shrink-0 opacity-60" />
+                    Open run in orchestrator
+                  </a>
+                ) : null}
+                {(runs?.length ?? 0) > 1 ? (
+                  <ul className="space-y-1">
+                    {runs!.slice(0, 5).map((run) =>
+                      run.runId ? (
+                        <li key={run.runId}>
+                          <a
+                            href={orchestratorRunHref(run.runId)}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={() => setRunId(run.runId!)}
+                            className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] hover:bg-muted"
+                          >
+                            <span className="font-mono">
+                              {run.runId.slice(0, 12)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {fmtDateTime(run.dispatchedAt)}
+                            </span>
+                            {run.superseded ? (
+                              <span className="text-muted-foreground/70">
+                                (superseded)
+                              </span>
+                            ) : null}
+                            <IconExternalLink className="ml-auto size-2.5 shrink-0 opacity-60" />
+                          </a>
+                        </li>
+                      ) : null,
+                    )}
+                  </ul>
+                ) : null}
               </div>
 
               {needsLinks || target === "交付" ? (
@@ -2523,6 +2579,7 @@ export function WorkItemDetailPage() {
                     (item as { allowedTransitions?: TransitionOption[] })
                       .allowedTransitions ?? [],
                 }}
+                runs={runs}
               />
 
               <MetaRow icon={IconFlag} label="优先级">
