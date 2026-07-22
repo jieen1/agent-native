@@ -1592,8 +1592,17 @@ export class V3Dispatcher {
     let modelRealName: string | null = null;
     let nameSuspect = false;
     try {
+      // Use the model the EXECUTOR actually resolved and requested
+      // (runnerResult.model, e.g. a matched runtime_configs row's own model
+      // when RoutingRuntimeExecutor routed elsewhere), not agentConfig.model —
+      // the agent-def's static default. The latter never reflects real
+      // per-node routing (found 2026-07-22 while verifying the F6-adjacent
+      // routing fix: every "vllm" agent spawn kept showing model_real_name
+      // "qwen3.6" and usage_suspect=1 even when correctly routed to a
+      // different provider, because this lookup always used the static
+      // default regardless of what actually ran).
       const resolved = await resolveRealName(
-        agentConfig.model,
+        runnerResult.model,
         nodeRow.ownerEmail,
       );
       modelRealName = resolved.realName;
