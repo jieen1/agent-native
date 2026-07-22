@@ -29,7 +29,11 @@ export default defineAction({
       // Parse the additive `models` JSON list (DESIGN §8.3 item4). A malformed
       // value degrades to [] rather than failing the whole list read.
       models: parseModelList(r.models),
-      active: r.active === 1,
+      // `active` is physically bigint in Postgres; postgres.js returns bigint
+      // columns as strings, so a bare `=== 1` never matches in production
+      // (see routing-runtime-executor.ts's `normalizeActive` for the full
+      // root-cause writeup, 2026-07-22). Normalize before comparing.
+      active: Number(r.active) === 1,
     }));
   },
 });
