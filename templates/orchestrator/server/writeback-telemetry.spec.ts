@@ -81,6 +81,7 @@ describe("computeWritebackTelemetry", () => {
     const result = await computeWritebackTelemetry(24);
     expect(result).toEqual({
       writebackFailed: 0,
+      writebackPermanentlyFailed: 0,
       writebackStageMismatch: 0,
       writebackOther: 0,
       windowHours: 24,
@@ -91,6 +92,20 @@ describe("computeWritebackTelemetry", () => {
     hoisted.events.push(makeEvent({ kind: "writeback.failed" }));
     const result = await computeWritebackTelemetry(24);
     expect(result.writebackFailed).toBe(1);
+  });
+
+  // 2026-07-23 incident fix: writeback.permanently-failed is a DISTINCT event
+  // kind from ordinary writeback.failed (see v3-reconciler.ts's
+  // attemptWritebackDelivery) — a gave-up-for-good run must be countable on
+  // its own, not buried inside the ordinary retry-noise count.
+  it("counts writeback.permanently-failed distinctly from ordinary writeback.failed", async () => {
+    hoisted.events.push(
+      makeEvent({ kind: "writeback.failed" }),
+      makeEvent({ kind: "writeback.permanently-failed" }),
+    );
+    const result = await computeWritebackTelemetry(24);
+    expect(result.writebackFailed).toBe(1);
+    expect(result.writebackPermanentlyFailed).toBe(1);
   });
 
   it("counts writeback.stage-mismatch distinctly from failures", async () => {
@@ -119,6 +134,7 @@ describe("computeWritebackTelemetry", () => {
     const result = await computeWritebackTelemetry(24);
     expect(result).toEqual({
       writebackFailed: 2,
+      writebackPermanentlyFailed: 0,
       writebackStageMismatch: 1,
       writebackOther: 1,
       windowHours: 24,

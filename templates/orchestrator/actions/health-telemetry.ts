@@ -120,6 +120,7 @@ export default defineAction({
       configInconsistencyEvents,
       configInconsistencyEventsPending: true,
       writebackFailed: writeback.writebackFailed,
+      writebackPermanentlyFailed: writeback.writebackPermanentlyFailed,
       writebackStageMismatch: writeback.writebackStageMismatch,
       writebackOther: writeback.writebackOther,
       windowHours: writeback.windowHours,
