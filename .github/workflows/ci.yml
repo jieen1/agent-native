@@ -69,7 +69,16 @@ jobs:
     # Cap the run so a hung test fails fast instead of pinning a runner for
     # GitHub's 6h default. Slow DB/integration/e2e specs run in separate jobs
     # below so they can run in parallel instead of serially behind fast tests.
-    timeout-minutes: 20
+    # 2026-07-23 (CI noise audit, SDLC-096): the monorepo's own unit-test
+    # suite (all templates + packages/core, sequentially) has grown past 20
+    # minutes -- confirmed getting CANCELLED at the cap on every recent PR
+    # regardless of whether the tests themselves would have passed, which is
+    # strictly worse for the merge gate than a real pass/fail (a cancelled
+    # run gives no signal at all, and still reads as non-passing). Bumped to
+    # 30 minutes: real headroom for legitimate growth while still catching a
+    # genuinely hung test (which would run far longer than the extra 10 min,
+    # not just marginally over).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
