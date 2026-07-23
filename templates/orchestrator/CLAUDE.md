@@ -88,11 +88,19 @@ reaches these actions as MCP tools) authors a DAG, runs it, monitors it by
   `nodeSummary`.
 - **Workspace / deliver:** `workspaceDiff`, `workspaceCommitPush`,
   `workspaceCiWatch` (real CI status), `workspaceMergePr` (real `gh pr merge`,
-  fails closed on non-green CI/conflicts — no force-merge). A human can also
-  trigger the same merge directly from the run-detail page's "合并到 main"
-  control (`RunMergeControl`) — you don't need to merge PRs the human can see
-  and merge themselves; use `workspaceMergePr` when acting autonomously on
-  their behalf.
+  fails closed on non-green CI/conflicts — no blanket force-merge). A human
+  can also trigger the same merge directly from the run-detail page's
+  "合并到 main" control (`RunMergeControl`) — you don't need to merge PRs the
+  human can see and merge themselves; use `workspaceMergePr` when acting
+  autonomously on their behalf. **SDLC-096 audited override:** `checkOverrides`
+  (an array of `{checkName, reason}`) is the ONLY way past a non-passing check
+  — a narrow, per-call exception for one NAMED, already-concluded failing
+  check (never a still-running one); every other failing check still blocks.
+  Call `workspaceCiWatch` first and independently verify the named check's
+  failure is genuinely pre-existing/unrelated to this diff before using it —
+  the call (including your stated reason) is durably recorded in the audit
+  log, so don't reuse a stale reason for a check that might be failing for a
+  new, real cause this time.
 - **Independent pre-merge review gate (task board #95):** `RunMergeControl`'s
   merge button additionally requires a PASSING mandatory independent review —
   `workspaceMergePr`'s own CI/conflict checks are unchanged, but the UI now
