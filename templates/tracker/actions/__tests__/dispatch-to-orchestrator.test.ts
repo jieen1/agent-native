@@ -332,6 +332,60 @@ describe("T-F3-05: 派发不推进", () => {
 });
 
 // ============================================================================
+// 2026-07-23 incident fix: the run's `tags.org_id` (which becomes the F9
+// writeback channel's JWT `org_id` claim — see orchestrator's
+// tracker-client.ts) MUST be the WORK ITEM's own org, not the dispatching
+// session's ambient org. Root cause of a real production incident: ownerScope
+// (server/lib/access.ts) admits the item lookup above via an OR of
+// ownerEmail-match OR org-match, so a caller whose live session org differs
+// from the item's own org can still find + dispatch it (matched via
+// ownerEmail) — but the writeback sentinel JWT authenticates as a fixed
+// service identity whose `sub` never equals a real user's ownerEmail, so it
+// can ONLY be admitted via the org branch. Tagging the run with the wrong org
+// silently mints a JWT for the WRONG tenant, so every writeback callback for
+// that run permanently 404s ("Work item not found") — confirmed live: 136
+// stuck runs, one at 28,812 retry attempts.
+// ============================================================================
+
+describe("2026-07-23: run tags.org_id must be the item's own org, not the caller's ambient org", () => {
+  it("tags.org_id reflects the ITEM's own org even when the dispatching session's ambient org differs", async () => {
+    // OWNER matches (ownerScope's ownerEmail branch admits the lookup) but
+    // the item's OWN org differs from the dispatching session's ambient
+    // ORG_ID — reproducing the exact real-world mismatch shape.
+    const id = await insertItem({ orgId: "org-item-real" });
+    mockCallOrchestratorTool.mockResolvedValue({
+      data: { threadId: "bt_orgfix", workspaceId: "ws_orgfix" },
+    });
+
+    await asUser(() => dispatchToOrchestrator.run({ workItemId: id }));
+
+    expect(mockCallOrchestratorTool).toHaveBeenCalledTimes(1);
+    const [, , callArgs] = mockCallOrchestratorTool.mock.calls[0]!;
+    expect((callArgs as { tags: Record<string, string> }).tags.org_id).toBe(
+      "org-item-real",
+    );
+    // Sanity: NOT the ambient session org this test dispatched under.
+    expect((callArgs as { tags: Record<string, string> }).tags.org_id).not.toBe(
+      ORG_ID,
+    );
+  });
+
+  it("falls back to the caller's ambient org when the item itself has no org recorded (single-tenant/local mode)", async () => {
+    const id = await insertItem({ orgId: null });
+    mockCallOrchestratorTool.mockResolvedValue({
+      data: { threadId: "bt_fallback", workspaceId: null },
+    });
+
+    await asUser(() => dispatchToOrchestrator.run({ workItemId: id }));
+
+    const [, , callArgs] = mockCallOrchestratorTool.mock.calls[0]!;
+    expect((callArgs as { tags: Record<string, string> }).tags.org_id).toBe(
+      ORG_ID,
+    );
+  });
+});
+
+// ============================================================================
 // T-F3-06 (同步路径半): 派发失败零假进度
 // ============================================================================
 
@@ -442,6 +496,29 @@ describe("T-F3-19: bulk-dispatch 派发不推进", () => {
     expect((row as any).execState).toBeNull();
     expect(row.currentStageName).toBe("待办");
     expect(row.status).toBe("open");
+  });
+
+  // 2026-07-23 incident fix mirror (see the single-dispatch describe block
+  // above for the full root-cause explanation) — "the batch path must not
+  // fork here either" (bulk-dispatch-to-orchestrator.ts's own comment).
+  it("bulk dispatch also tags each run with the ITEM's own org, not the caller's ambient org", async () => {
+    const idA = await insertItem({ orgId: "org-item-a" });
+    const idB = await insertItem({ orgId: "org-item-b" });
+    mockCallOrchestratorTool.mockResolvedValue({
+      data: { threadId: "bt_bulk_org", status: "running", taskId: "task_org" },
+    });
+
+    await asUser(() =>
+      bulkDispatchToOrchestrator.run({ workItemIds: [idA, idB] }),
+    );
+
+    expect(mockCallOrchestratorTool).toHaveBeenCalledTimes(2);
+    const orgsSent = mockCallOrchestratorTool.mock.calls.map(
+      ([, , callArgs]) =>
+        (callArgs as { tags: Record<string, string> }).tags.org_id,
+    );
+    expect(orgsSent.sort()).toEqual(["org-item-a", "org-item-b"]);
+    expect(orgsSent).not.toContain(ORG_ID);
   });
 });
 

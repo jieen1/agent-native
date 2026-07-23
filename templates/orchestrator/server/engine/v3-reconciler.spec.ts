@@ -2432,6 +2432,110 @@ describe("V3Reconciler", () => {
       expect(runs.get("run-1")!.writebackStatus).toBe("done");
     });
 
+    // 2026-07-23 incident fix: an org-id mismatch at dispatch time made
+    // "Work item not found" the PERMANENT outcome for 136 real production
+    // runs (root cause: dispatch-to-orchestrator.ts tagging the run with the
+    // dispatching session's ambient org instead of the item's own real org —
+    // see that file's fix). With no exit, the sweep retried each one anyway
+    // (one run reached 28,812 attempts), flooding v3_events with
+    // "writeback.failed" (98%+ of the whole table) and hammering the
+    // tracker's MCP endpoint continuously. These tests lock in the fix: a
+    // classified-permanent error (or exceeding the attempt cap) must move the
+    // row to a REAL terminal 'failed' state instead of retrying forever.
+    describe("permanent writeback failure — no longer retries forever", () => {
+      it("a classified-permanent error ('Work item not found') moves the row to writebackStatus='failed' and is never retried again", async () => {
+        vi.mocked(onRunTerminal).mockRejectedValue(
+          new Error(
+            "Tracker MCP writeback-exec-state tool error: Error: Work item not found",
+          ),
+        );
+        const V3Reconciler = await getReconciler();
+        const dispatcher = makeDispatcher();
+        const outcome = {
+          kind: "zero-delivery" as const,
+          workItemId: "wi-orphaned",
+          orgId: "wrong-org",
+          runId: "run-1",
+          reason: "run-failed",
+        };
+        const { db, runs, events } = createMockDb(
+          makeRun({
+            status: "failed",
+            writebackStatus: "pending",
+            writebackOutcome: outcome,
+            writebackAttempts: 0,
+          }),
+          [],
+        );
+
+        const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1]);
+        const result = await reconciler.drainWritebackOutbox();
+
+        expect(result).toEqual({ processed: 1, succeeded: 0 });
+        expect(runs.get("run-1")!.writebackStatus).toBe("failed");
+        expect(
+          events.some((e) => e.kind === "writeback.permanently-failed"),
+        ).toBe(true);
+
+        // A SECOND sweep tick must NOT pick this row up again — it no longer
+        // matches the sweep's own 'pending' filter (proven at the real-SQL
+        // level in v3-writeback-outbox-sweep.pg.spec.ts; here we simulate the
+        // WHERE-clause exclusion by asserting the mock never calls
+        // onRunTerminal for it again if drainWritebackOutbox were re-invoked
+        // against a filtered pending set — i.e. the row's status change is
+        // itself the mechanism that stops future drains from selecting it).
+        expect(runs.get("run-1")!.writebackStatus).not.toBe("pending");
+      });
+
+      it("exceeding the attempt cap moves the row to 'failed' even for an unclassified (non-permanent-pattern) error", async () => {
+        vi.mocked(onRunTerminal).mockRejectedValue(new Error("tracker down"));
+        const V3Reconciler = await getReconciler();
+        const dispatcher = makeDispatcher();
+        const outcome = {
+          kind: "zero-delivery" as const,
+          workItemId: "wi-capped",
+          orgId: "org-capped",
+          runId: "run-1",
+          reason: "run-failed",
+        };
+        const { db, runs } = createMockDb(
+          makeRun({
+            status: "failed",
+            writebackStatus: "pending",
+            writebackOutcome: outcome,
+            // Already at the cap boundary — this round's attempts push it over.
+            writebackAttempts: 49,
+          }),
+          [],
+        );
+
+        const reconciler = new V3Reconciler(db, dispatcher, undefined, [1, 1]);
+        const result = await reconciler.drainWritebackOutbox();
+
+        expect(result).toEqual({ processed: 1, succeeded: 0 });
+        expect(runs.get("run-1")!.writebackStatus).toBe("failed");
+        expect(runs.get("run-1")!.writebackAttempts).toBeGreaterThanOrEqual(50);
+      });
+
+      it("V3Reconciler.isPermanentWritebackError classifies known un-retryable messages (case-insensitive)", async () => {
+        const V3Reconciler = await getReconciler();
+        expect(
+          V3Reconciler.isPermanentWritebackError("Work item not found"),
+        ).toBe(true);
+        expect(
+          V3Reconciler.isPermanentWritebackError(
+            "WORK ITEM NOT FOUND OR NOT ACCESSIBLE",
+          ),
+        ).toBe(true);
+        expect(V3Reconciler.isPermanentWritebackError("tracker down")).toBe(
+          false,
+        );
+        expect(
+          V3Reconciler.isPermanentWritebackError("fetch failed: ECONNREFUSED"),
+        ).toBe(false);
+      });
+    });
+
     // Note: "only writebackStatus='pending' rows are drained" (the real SQL
     // WHERE filter) is NOT provable against this mock DB — createMockDb's
     // select().from().where() ignores its filter for EVERY table by design

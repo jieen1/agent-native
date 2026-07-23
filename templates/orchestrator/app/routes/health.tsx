@@ -96,6 +96,7 @@ interface HealthTelemetry {
   configInconsistencyEvents: number;
   configInconsistencyEventsPending: boolean;
   writebackFailed: number;
+  writebackPermanentlyFailed: number;
   writebackStageMismatch: number;
   writebackOther: number;
   windowHours: number;
@@ -474,14 +475,23 @@ function BrainSlotCard() {
 // ── 调度器 card ───────────────────────────────────────────────────────────────
 
 function SchedulerCard({ telemetry }: { telemetry?: HealthTelemetry }) {
-  const ok = telemetry ? telemetry.writebackFailed === 0 : undefined;
+  const permanentlyFailed = telemetry?.writebackPermanentlyFailed ?? 0;
+  const ok = telemetry
+    ? telemetry.writebackFailed === 0 && permanentlyFailed === 0
+    : undefined;
 
   return (
     <HealthCard
       icon={IconSettingsAutomation}
       title="调度器"
       dot={ok === undefined ? "pending" : ok ? "ok" : "warn"}
-      dotTitle={ok ? "回写正常" : "存在回写失败"}
+      dotTitle={
+        ok
+          ? "回写正常"
+          : permanentlyFailed > 0
+            ? "存在回写永久失败,需要人工处理"
+            : "存在回写失败"
+      }
     >
       <p>
         reconciler 心跳{" "}
@@ -520,6 +530,16 @@ function SchedulerCard({ telemetry }: { telemetry?: HealthTelemetry }) {
           (近 {telemetry?.windowHours ?? 24}h)
         </span>
       </p>
+      {permanentlyFailed > 0 ? (
+        <p>
+          回写永久失败{" "}
+          <b className="font-mono text-destructive">{permanentlyFailed}</b>{" "}
+          <DataHint trigger={<span className="italic">需要人工处理</span>}>
+            重试已放弃(判定为不可恢复的错误,或重试次数超过上限)——这些 run
+            不会再自动重试,需要人工核实原因并手动回填。
+          </DataHint>
+        </p>
+      ) : null}
     </HealthCard>
   );
 }

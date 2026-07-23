@@ -35,10 +35,19 @@
 //   - "writeback.failed"          (this app's own event — see v3-reconciler.ts
 //                                  `finalizeRun`'s writeback hook — written
 //                                  after `attemptWithBackoff` exhausts retries)
-// Only "writeback.failed" is THIS app's own event kind (the others are
-// recorded on the tracker side, in the tracker's own activities table, not
-// here) — so in practice this orchestrator-side scan only ever finds
-// "writeback.failed" rows today. The query is written against the full
+//   - "writeback.permanently-failed" (2026-07-23 incident fix: this app's own
+//                                  event, written ONCE when a row is
+//                                  classified permanently un-retryable or
+//                                  exceeds the attempt cap and moves to
+//                                  writebackStatus:'failed' — see
+//                                  v3-reconciler.ts's attemptWritebackDelivery.
+//                                  Distinct from ordinary "writeback.failed"
+//                                  so a genuinely gave-up run is visible on
+//                                  its own, not buried in the retry-noise
+//                                  count.)
+// "writeback.failed" and "writeback.permanently-failed" are THIS app's own
+// event kinds (the others are recorded on the tracker side, in the tracker's
+// own activities table, not here). The query is written against the full
 // "writeback.%" prefix (not a literal-only filter) so it stays correct if a
 // future orchestrator-side writeback event kind is added.
 
@@ -47,9 +56,16 @@ import { and, gte, like } from "drizzle-orm";
 import { getV3Db, v3Schema } from "./db/index.js";
 
 export interface WritebackTelemetry {
-  /** Count of `writeback.failed` events in the window — retries exhausted,
-   * the tracker never got the report (P13: never silent). */
+  /** Count of `writeback.failed` events in the window — ONE retry attempt
+   * failed (still retryable — includes attempts on rows that later succeed
+   * or later permanently fail; NOT the same as writebackPermanentlyFailed). */
   writebackFailed: number;
+  /** Count of `writeback.permanently-failed` events in the window — a run
+   * gave up for good (classified un-retryable, or exceeded the attempt cap)
+   * and needs a HUMAN look (a real bug, a deleted work item, etc.) —
+   * 2026-07-23 incident fix. This is the number that should alarm an
+   * operator; writebackFailed alone is expected retry noise. */
+  writebackPermanentlyFailed: number;
   /** Count of `writeback.stage-mismatch` events in the window — a no-op the
    * tracker recorded for visibility (item wasn't at the expected stage), not
    * a failure. */
@@ -90,16 +106,20 @@ export async function computeWritebackTelemetry(
   }
 
   let writebackFailed = 0;
+  let writebackPermanentlyFailed = 0;
   let writebackStageMismatch = 0;
   let writebackOther = 0;
   for (const row of rows) {
     if (row.kind === "writeback.failed") writebackFailed++;
+    else if (row.kind === "writeback.permanently-failed")
+      writebackPermanentlyFailed++;
     else if (row.kind === "writeback.stage-mismatch") writebackStageMismatch++;
     else writebackOther++;
   }
 
   return {
     writebackFailed,
+    writebackPermanentlyFailed,
     writebackStageMismatch,
     writebackOther,
     windowHours,

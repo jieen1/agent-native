@@ -210,15 +210,32 @@ export default defineAction({
     // channel (out of tracker's scope — server/tracker-client.ts) can mint a
     // correctly-scoped A2A JWT for its callback into the tracker's guarded
     // actions (advance-stage's ownerScope() + this item's own tenant) once the
-    // run reaches a terminal state. org_id is omitted when the caller has no
-    // active org (single-tenant/local mode) — brain-send's tags are
+    // run reaches a terminal state. org_id is omitted when the item has no
+    // org (single-tenant/local mode) — brain-send's tags are
     // Record<string,string>, so a null/undefined orgId must not be forwarded.
+    //
+    // MUST be the ITEM's own org (item.orgId), NOT the dispatching session's
+    // ambient org (the `orgId` local above, from getRequestOrgId()). Root
+    // cause of a real production incident: ownerScope() above (line ~100)
+    // admits this SELECT via an OR of ownerEmail-match OR org-match, so a
+    // caller whose live session org differs from this item's own org can
+    // still find + dispatch it (matched via ownerEmail). The writeback
+    // channel's sentinel JWT, though, authenticates as a fixed service
+    // identity whose `sub` never equals a real user's ownerEmail — it can
+    // ONLY be admitted via the org branch (see tracker-client.ts's
+    // mintWritebackJwt / writeback-exec-state.ts's ownerScope() call). Tagging
+    // the run with the caller's ambient org instead of the item's real org
+    // silently mints a JWT for the WRONG tenant, so every writeback callback
+    // permanently 404s with "Work item not found" — and because the outbox
+    // sweep retries forever (v3-reconciler.ts drainWritebackOutbox has no
+    // permanent-failure exit), this became an unbounded retry storm.
+    const itemOrgId = item.orgId ?? orgId;
     const tags: Record<string, string> = {
       source: "tracker",
       item_id: item.id,
       owner_email: ownerEmail,
     };
-    if (orgId) tags.org_id = orgId;
+    if (itemOrgId) tags.org_id = itemOrgId;
 
     // R4a.3 L1 — deterministic pre-selection routing (design authority:
     // docs/sdlc-product-design/r4-workflow-families-planning-skills.md §4.4

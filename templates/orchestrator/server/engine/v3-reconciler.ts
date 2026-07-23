@@ -2229,6 +2229,43 @@ export class V3Reconciler {
   }
 
   /**
+   * F9-followup incident fix (2026-07-23): a genuinely un-retryable writeback
+   * failure must not be retried forever. Confirmed in production — an org-id
+   * mismatch at dispatch time (see dispatch-to-orchestrator.ts's matching
+   * fix) made `Work item not found` the permanent, unrecoverable outcome for
+   * 136 runs; with no exit, the sweep (every 60s) retried each one anyway,
+   * one run reaching 28,812 attempts, generating ~172k `writeback.failed`
+   * events (98%+ of the whole v3_events table) and hammering the tracker's
+   * MCP endpoint at ~100 req/min continuously. These substrings identify an
+   * error that retrying can NEVER fix (the identity/data is wrong, not the
+   * network) — distinct from a transient tracker-down/network blip, which
+   * must keep retrying via the existing uncapped path.
+   */
+  private static readonly PERMANENT_WRITEBACK_ERROR_INDICATORS = [
+    "work item not found",
+    "not found or not accessible",
+  ];
+
+  /**
+   * Backstop cap even for an error that doesn't match a known-permanent
+   * pattern above — no single row may retry indefinitely. Chosen generously
+   * (a genuinely transient tracker outage lasting through 50 sweep ticks at
+   * the default 60s interval is ~50 minutes, well past any real incident
+   * this system has seen) so this only ever fires as a true backstop, not a
+   * routine timeout.
+   */
+  private static readonly MAX_WRITEBACK_ATTEMPTS = 50;
+
+  /** True when `message` matches a known permanent (never-succeeding-on-retry)
+   * writeback failure. Pure — no IO, unit-testable in isolation. */
+  static isPermanentWritebackError(message: string): boolean {
+    const lower = message.toLowerCase();
+    return V3Reconciler.PERMANENT_WRITEBACK_ERROR_INDICATORS.some((s) =>
+      lower.includes(s),
+    );
+  }
+
+  /**
    * F9-followup: ONE attempt (with `attemptWithBackoff`'s own internal
    * retries) to deliver a terminal run's outcome to the tracker over the
    * deterministic writeback channel (`tracker-client.ts`). Called from BOTH:
@@ -2237,13 +2274,17 @@ export class V3Reconciler {
    * this is the ONE place delivery + outbox-status bookkeeping happens; the
    * sweep never reimplements it.
    *
-   * On exhaustion, records `v3_events kind="writeback.failed"` (P13: a
-   * writeback failure must never be silent) — this shows up in the S10
-   * health page's "调度器" card via `computeWritebackTelemetry`
-   * (`writeback-telemetry.ts`). The outbox row is left `writebackStatus:
-   * 'pending'` (never a third "gave up" state) so the NEXT sweep tick retries
-   * it — no permanent silent loss across a crash/redeploy or a still-down
-   * tracker. Returns whether delivery succeeded (for the sweep's own count).
+   * On EVERY failed attempt, records `v3_events kind="writeback.failed"`
+   * (P13: a writeback failure must never be silent) — shows up in the S10
+   * health page's "调度器" card via `computeWritebackTelemetry`. When the
+   * failure is classified permanent (or attempts exceed the cap), the outbox
+   * row moves to `writebackStatus: 'failed'` (a REAL terminal state — not
+   * retried again) and an ADDITIONAL, distinct `writeback.permanently-failed`
+   * event fires so the failure is surfaced prominently, not just counted
+   * alongside ordinary retryable failures — "never silent" is not the same
+   * promise as "retry forever" (see this method's incident-fix doc above).
+   * Every OTHER failure still leaves the row `pending` for the next sweep
+   * tick, exactly as before. Returns whether delivery succeeded.
    */
   private async attemptWritebackDelivery(
     runId: string,
@@ -2264,11 +2305,12 @@ export class V3Reconciler {
       result.error instanceof Error
         ? result.error.message
         : String(result.error);
-    await this.markWritebackOutboxFailedAttempt(
-      runId,
-      result.attempts,
-      message,
-    ).catch(() => {});
+    const { permanentlyFailed, totalAttempts } =
+      await this.markWritebackOutboxFailedAttempt(
+        runId,
+        result.attempts,
+        message,
+      ).catch(() => ({ permanentlyFailed: false, totalAttempts: 0 }));
 
     await this.writeEvent(runId, "writeback.failed", {
       workItemId: outcome.workItemId,
@@ -2278,6 +2320,16 @@ export class V3Reconciler {
       attempts: result.attempts,
       error: message,
     });
+
+    if (permanentlyFailed) {
+      await this.writeEvent(runId, "writeback.permanently-failed", {
+        workItemId: outcome.workItemId,
+        runStatus: status,
+        outcome: outcome.kind,
+        totalAttempts,
+        error: message,
+      });
+    }
     return false;
   }
 
@@ -2292,17 +2344,21 @@ export class V3Reconciler {
       .where(and(eq(v3Runs.id, runId), eq(v3Runs.writebackStatus, "pending")));
   }
 
-  /** F9-followup: record a failed delivery attempt and leave the row
-   * `pending` (retryable is the ONLY failure state — see the module doc on
-   * `drainWritebackOutbox`). The attempts read-then-write has a small benign
-   * race under concurrent failures (fast path + sweep at once) — worst case
-   * under-counts the observability counter by one; the row's `pending` status
-   * (what actually guarantees eventual delivery) is unaffected either way. */
+  /** F9-followup: record a failed delivery attempt. Leaves the row `pending`
+   * (retryable) UNLESS the failure is classified permanent or attempts have
+   * exceeded the cap (see `isPermanentWritebackError`/`MAX_WRITEBACK_ATTEMPTS`
+   * and this class's incident-fix doc on `attemptWritebackDelivery`) — those
+   * two cases move the row to a REAL terminal `'failed'` state so the sweep
+   * stops retrying it. The attempts read-then-write has a small benign race
+   * under concurrent failures (fast path + sweep at once) — worst case
+   * under-counts the observability counter by one; the row's status update
+   * (guarded on the current status still being `'pending'`) is unaffected
+   * either way. */
   private async markWritebackOutboxFailedAttempt(
     runId: string,
     attemptsThisRound: number,
     message: string,
-  ): Promise<void> {
+  ): Promise<{ permanentlyFailed: boolean; totalAttempts: number }> {
     const [row] = await this.db
       .select({ writebackAttempts: v3Runs.writebackAttempts })
       .from(v3Runs)
@@ -2310,14 +2366,20 @@ export class V3Reconciler {
       .limit(1);
     const totalAttempts = (row?.writebackAttempts ?? 0) + attemptsThisRound;
 
+    const permanentlyFailed =
+      V3Reconciler.isPermanentWritebackError(message) ||
+      totalAttempts >= V3Reconciler.MAX_WRITEBACK_ATTEMPTS;
+
     await this.db
       .update(v3Runs)
       .set({
-        writebackStatus: "pending",
+        writebackStatus: permanentlyFailed ? "failed" : "pending",
         writebackAttempts: totalAttempts,
         writebackLastError: message,
       })
       .where(and(eq(v3Runs.id, runId), eq(v3Runs.writebackStatus, "pending")));
+
+    return { permanentlyFailed, totalAttempts };
   }
 
   /**
@@ -2330,9 +2392,11 @@ export class V3Reconciler {
    * chance to run (crash before finalizeRun's fire-and-forget started), never
    * finished (crash mid-backoff — the exact gap this fix closes), or
    * genuinely failed (tracker was down) — and retries delivery via the SAME
-   * `attemptWritebackDelivery` the fast path uses. A row is NEVER left
-   * permanently stuck: every sweep tick retries every pending row again,
-   * uncapped (see markWritebackOutboxFailedAttempt's doc comment).
+   * `attemptWritebackDelivery` the fast path uses. A row retries on every
+   * sweep tick until it either succeeds OR is classified permanently failed
+   * / exceeds the attempt cap (see markWritebackOutboxFailedAttempt's doc
+   * comment) — at which point it moves to `writebackStatus: 'failed'` and
+   * this WHERE clause naturally stops selecting it.
    */
   public async drainWritebackOutbox(
     batchSize: number = 25,

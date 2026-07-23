@@ -266,13 +266,19 @@ export default defineAction({
       // F9: same tags enrichment as the single-item dispatch path (see
       // dispatch-to-orchestrator.ts) — the batch path must not fork here
       // either, or batch-dispatched items would never get a correctly-scoped
-      // writeback callback.
+      // writeback callback. MUST be the ITEM's own org (item.orgId), not the
+      // caller's ambient session org — see dispatch-to-orchestrator.ts's
+      // matching comment for the full root-cause explanation (a real
+      // production incident: the writeback sentinel JWT can only be admitted
+      // via ownerScope()'s org branch, so the wrong org here permanently
+      // 404s every writeback callback for this item).
+      const itemOrgId = item.orgId ?? orgId;
       const tags: Record<string, string> = {
         source: "tracker",
         item_id: item.id,
         owner_email: ownerEmail,
       };
-      if (orgId) tags.org_id = orgId;
+      if (itemOrgId) tags.org_id = itemOrgId;
       const requirement = item.description?.trim() || item.title;
       const message =
         `Work item ${item.id} (${project.key}) — "${item.title}".\n\n` +
