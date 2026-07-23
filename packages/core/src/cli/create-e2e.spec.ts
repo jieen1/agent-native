@@ -191,15 +191,32 @@ describe("standalone scaffold — chat template", { timeout: 180_000 }, () => {
     expect(pkg.description).toBe("Workspace app for Test App.");
   });
 
-  it("resolves all workspace:* deps for standalone install", async () => {
+  it("resolves all workspace:* deps for standalone install, except vendored packages", async () => {
     await createApp("test-app", { template: "chat" });
     const pkg = readPkg(path.join(tmpDir, "test-app"));
     const deps = allDeps(pkg);
+    // 2026-07-23 fix (CI noise audit / SDLC-096): locale-kit is a private,
+    // never-published workspace:* package every template needs
+    // (actions/change-language.ts). It is intentionally LEFT as
+    // workspace:* — scaffoldRequiredPackages vendors it into
+    // packages/locale-kit and pnpm-workspace.yaml's `packages` glob links
+    // it locally. Rewriting it to a registry version (the old, buggy
+    // behavior this test used to lock) would make pnpm try to fetch an
+    // unrelated public npm package of the same name, or fail outright.
     for (const [key, val] of Object.entries(deps)) {
+      if (key === "locale-kit") {
+        expect(val, "locale-kit should stay workspace:* (vendored)").toBe(
+          "workspace:*",
+        );
+        continue;
+      }
       expect(val, `${key} should not be workspace:*`).not.toMatch(
         /^workspace:/,
       );
     }
+    expect(
+      fs.existsSync(path.join(tmpDir, "test-app", "packages", "locale-kit")),
+    ).toBe(true);
   });
 
   it("resolves all catalog: refs to actual versions", async () => {
@@ -610,7 +627,13 @@ describe("workspace scaffold — required packages", { timeout: 60000 }, () => {
       expect(workspaceYaml).toContain(".tgz");
       expect(workspaceYaml).toContain('"@agent-native/recap-cli": "file://');
       expect(workspaceYaml).toContain("/packages/recap-cli");
-      expect(workspaceYaml).not.toContain("packages:");
+      // 2026-07-23 fix (CI noise audit / SDLC-096): a `packages:` section is
+      // now expected here — scaffoldRequiredPackages vendors locale-kit into
+      // packages/locale-kit, so this scaffold must declare itself as a
+      // (app root + packages/*) pnpm workspace for that vendored copy to
+      // link (see postProcessStandalone's willVendorRequiredPackages option).
+      expect(workspaceYaml).toContain("packages:");
+      expect(workspaceYaml).toContain("- packages/*");
     } finally {
       if (previous === undefined) {
         delete process.env.AGENT_NATIVE_CREATE_USE_LOCAL_CORE;

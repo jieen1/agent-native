@@ -72,6 +72,17 @@ describe("engineToolsToAnthropic", () => {
     expect(inputSchema).toHaveProperty("allOf");
   });
 
+  // Stale assertion fixed 2026-07-23 (CI noise audit, SDLC-096): the
+  // narrowing behavior under test here (db-exec's Anthropic-facing schema
+  // collapses to statements-only, dropping sql/args) is real and is its OWN
+  // dedicated, hardcoded case in normalizeAnthropicInputSchema
+  // (translate-anthropic.ts) -- independent of whether the RAW schema has a
+  // top-level oneOf, so that part of this test still holds. What was stale
+  // is the two trailing assertions on `inputSchema` itself (the RAW,
+  // pre-translation schema): CORE-PATCHES.md #3 already made
+  // dbExecToolParameters() never emit a top-level oneOf (or the `sql`
+  // property being present alongside it in that combinator) in the first
+  // place, so asserting the raw schema "has" oneOf no longer matches reality.
   it("narrows db-exec to statements for Anthropic compatibility", () => {
     const inputSchema = dbExecToolParameters() as EngineTool["inputSchema"];
     const result = engineToolsToAnthropic([
@@ -107,7 +118,11 @@ describe("engineToolsToAnthropic", () => {
     expect(
       validate({ sql: "UPDATE notes SET title = ?", statements: "[]" }),
     ).toBe(false);
-    expect(inputSchema).toHaveProperty("oneOf");
+    // The raw (pre-translation) schema has no top-level combinator at all
+    // (CORE-PATCHES.md #3) -- db-exec's Anthropic-facing narrowing above is
+    // unconditional (keyed on tool name), not conditional on oneOf being
+    // present, so this is independently true regardless.
+    expect(inputSchema).not.toHaveProperty("oneOf");
     expect(inputSchema.properties).toHaveProperty("sql");
   });
 });

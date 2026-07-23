@@ -102,13 +102,21 @@ describe("shared coding tools", () => {
     ).resolves.toContain("raw database write tools are disabled");
   });
 
-  it("uses an exclusive db-exec schema when write mode is explicit", async () => {
+  // Stale assertion fixed 2026-07-23 (CI noise audit, SDLC-096): a top-level
+  // `oneOf` was deliberately removed from this schema (CORE-PATCHES.md #3 —
+  // the Anthropic Messages API rejects any tool whose input_schema carries a
+  // top-level oneOf/allOf/anyOf). The sql/statements exclusivity is real and
+  // enforced at run() time (scripts/db/exec.ts), just not schema-expressible.
+  it("uses a db-exec schema with no top-level combinator (Anthropic tool schema constraint)", async () => {
     const registry = await createDevScriptRegistry({ databaseTools: "write" });
 
-    expect(registry["db-exec"]?.tool.parameters).toMatchObject({
+    const schema = registry["db-exec"]?.tool.parameters;
+    expect(schema).not.toHaveProperty("oneOf");
+    expect(schema).toMatchObject({
       additionalProperties: false,
-      oneOf: [{ required: ["sql"] }, { required: ["statements"] }],
     });
+    expect(schema?.properties?.sql).toBeDefined();
+    expect(schema?.properties?.statements).toBeDefined();
   });
 
   it("can disable raw database tools without removing coding tools", async () => {

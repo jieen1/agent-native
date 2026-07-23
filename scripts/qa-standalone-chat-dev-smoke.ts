@@ -153,6 +153,14 @@ function installApp(): void {
   run("pnpm", ["install"], { cwd: appDir });
 }
 
+// locale-kit is intentionally left as workspace:* for a standalone scaffold
+// (2026-07-23 fix, CI noise audit / SDLC-096): it's a private, never-
+// published package every template needs (actions/change-language.ts),
+// vendored into packages/locale-kit via scaffoldRequiredPackages rather than
+// resolved to a registry version — see create.ts's
+// `willVendorRequiredPackages` option and vendorablePackageNames().
+const VENDORED_WORKSPACE_DEP_EXCEPTIONS = new Set(["locale-kit"]);
+
 function assertStandalonePackageJson(): void {
   const pkg = JSON.parse(
     fs.readFileSync(path.join(appDir, "package.json"), "utf8"),
@@ -164,6 +172,13 @@ function assertStandalonePackageJson(): void {
   ] as const) {
     for (const [name, value] of Object.entries(pkg[depType] ?? {})) {
       if (typeof value !== "string") continue;
+      if (VENDORED_WORKSPACE_DEP_EXCEPTIONS.has(name)) {
+        assert.ok(
+          value === "workspace:*",
+          `${depType}.${name} is a vendored package and should stay workspace:* (got ${value})`,
+        );
+        continue;
+      }
       assert.ok(
         !value.startsWith("workspace:"),
         `${depType}.${name} must not be workspace:*`,
@@ -174,6 +189,10 @@ function assertStandalonePackageJson(): void {
       );
     }
   }
+  assert.ok(
+    fs.existsSync(path.join(appDir, "packages", "locale-kit", "package.json")),
+    "packages/locale-kit must be vendored into the standalone scaffold",
+  );
 }
 
 function tryFreePort(targetPort: number): void {

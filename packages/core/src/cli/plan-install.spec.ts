@@ -173,12 +173,24 @@ describe(
     );
 
     it(
-      "resolves every dependency to a real version (no workspace:* or bare catalog: left)",
+      "resolves every dependency to a real version (no workspace:* or bare catalog: left), except vendored packages",
       async () => {
         await createApp("plan", { template: "plan" });
         const pkg = readPkg(path.join(tmpDir, "plan"));
         const deps = allDeps(pkg);
+        // 2026-07-23 fix (CI noise audit / SDLC-096): locale-kit is a
+        // private, never-published workspace:* package every template
+        // needs (actions/change-language.ts). It is intentionally LEFT as
+        // workspace:* and vendored into packages/locale-kit instead of
+        // being rewritten to a registry version (which would make pnpm
+        // fetch an unrelated public npm package of the same name).
         for (const [key, val] of Object.entries(deps)) {
+          if (key === "locale-kit") {
+            expect(val, "locale-kit should stay workspace:* (vendored)").toBe(
+              "workspace:*",
+            );
+            continue;
+          }
           expect(val, `${key} must not be workspace:*`).not.toMatch(
             /^workspace:/,
           );
