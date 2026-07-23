@@ -26,6 +26,7 @@
 
 import type { ActionEntry } from "@agent-native/core/server";
 
+import { isToolCommandAllowed } from "../lib/v3-network.js";
 import type { NodeRuntime, VmHandle } from "./node-runtime.js";
 import { scrubSecretsFromLog } from "./vm-creds.js";
 
@@ -224,6 +225,18 @@ export function createVmActingBridge(
     run: async (args: Record<string, unknown>): Promise<string> => {
       const command = stringArg(args.command);
       if (command === "") return "Error: command is required.";
+      // P4-B (Codex review 2026-07-23): this is the actual reachable bash
+      // execution point for every real dev-engine node — in the default
+      // deployment (no msb bridge configured) `runtime` is NoneRuntime with
+      // `hostDir` pointed at the real shared workspace checkout, so `command`
+      // runs unrestricted on the HOST via `spawn(cmd, {shell:true})`
+      // (none-runtime.ts). `isToolCommandAllowed` was defined but never
+      // invoked from any caller; wire it here so the DISABLED_COMMANDS
+      // red line (sudo, mount, dd, iptables, package managers, …) is
+      // actually enforced instead of existing as validation-only dead code.
+      if (!isToolCommandAllowed(command)) {
+        return `Error: command rejected by the sandbox command policy: ${command}`;
+      }
       const cwd = resolveVmPath(workdir, stringArg(args.cwd) || ".");
       const requested = Number(args.timeoutMs);
       const timeoutMs =
