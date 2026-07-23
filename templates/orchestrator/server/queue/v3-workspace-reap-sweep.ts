@@ -31,7 +31,16 @@
 //   3. the grace period has elapsed since the LATEST such run's completedAt,
 //      falling back to the workspace's own createdAt when it has no runs at
 //      all — long enough that a human/brain can still inspect a
-//      just-finished workspace, short enough to actually bound disk growth.
+//      just-finished workspace, short enough to actually bound disk growth,
+//      AND
+//   4. no `brain_threads` row still references it with a non-terminal wake
+//      status ('running'|'idle' — only 'done'|'error' are terminal). A
+//      workspace can be held by an active brain THREAD with zero v3_spawns
+//      rows (analysis phase, no DAG dispatched yet) or between a run going
+//      terminal and the brain's own slow review/commit turn — condition 2
+//      alone cannot see this (Codex review 2026-07-23: this sweep's own
+//      addition of automatic rm -rf introduced a new risk of deleting a
+//      workspace out from under a live brain session).
 
 import { isPostgres } from "@agent-native/core/db";
 import { sql } from "drizzle-orm";
@@ -104,6 +113,19 @@ export async function reapStaleWorkspacesOnce(): Promise<string[]> {
       LEFT JOIN v3_runs r ON r.id = n.run_id
       WHERE w.host_path IS NOT NULL
         AND w.state IN ('ready', 'error', 'failed', 'destroying')
+        -- Codex review 2026-07-23 (new risk introduced by this sweep itself):
+        -- a workspace held by an active brain THREAD (analysis phase, no DAG
+        -- spawned yet; or a run just went terminal but the brain's own
+        -- review/commit turn is still slow) has no v3_spawns row yet, so the
+        -- join above alone would let it fall through the active-run check and
+        -- get rm -rf'd out from under the brain mid-session. brain_threads.status
+        -- is 'running'|'idle'|'done'|'error' — 'idle' still means alive
+        -- (between turns, will wake again), so only done/error are terminal.
+        AND NOT EXISTS (
+          SELECT 1 FROM brain_threads bt
+          WHERE bt.workspace_id = w.id
+            AND bt.status NOT IN ('done', 'error')
+        )
       GROUP BY w.id, w.created_at
     `)) as unknown as WorkspaceReapCandidateRow[];
   } catch (err) {
