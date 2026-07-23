@@ -24,6 +24,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 let mockIsConfigured = true;
 let mockRows: Array<Record<string, unknown>> = [];
 let mockExecuteImpl: (() => Promise<unknown>) | null = null;
+let lastExecutedQuery: unknown = null;
 const destroyLocalWorkspaceMock = vi.fn(async (_id: string) => {});
 
 vi.mock("@agent-native/core/db", () => ({
@@ -32,8 +33,10 @@ vi.mock("@agent-native/core/db", () => ({
 
 vi.mock("../../db/index.js", () => ({
   getV3Db: () => ({
-    execute: () =>
-      mockExecuteImpl ? mockExecuteImpl() : Promise.resolve(mockRows),
+    execute: (query: unknown) => {
+      lastExecutedQuery = query;
+      return mockExecuteImpl ? mockExecuteImpl() : Promise.resolve(mockRows);
+    },
   }),
 }));
 
@@ -60,8 +63,27 @@ describe("reapStaleWorkspacesOnce", () => {
     mockIsConfigured = true;
     mockRows = [];
     mockExecuteImpl = null;
+    lastExecutedQuery = null;
     destroyLocalWorkspaceMock.mockClear();
     vi.spyOn(Date, "now").mockReturnValue(NOW);
+  });
+
+  // Codex review 2026-07-23: this sweep's automatic rm -rf introduced a new
+  // risk — a workspace held by an active brain THREAD (no v3_spawns row yet,
+  // e.g. analysis phase, or a slow post-run review/commit turn) could be
+  // reclaimed out from under a live session because the v3_spawns join alone
+  // never sees it. The real exclusion lives in the SQL itself (a real
+  // Postgres query, mocked here), so this asserts the query text actually
+  // carries the brain_threads guard rather than re-deriving it in JS.
+  it("candidate query excludes workspaces referenced by a non-terminal brain_threads row", async () => {
+    await reapStaleWorkspacesOnce();
+    const queryText = JSON.stringify(
+      (lastExecutedQuery as { queryChunks?: unknown })?.queryChunks ??
+        lastExecutedQuery,
+    );
+    expect(queryText).toContain("brain_threads");
+    expect(queryText).toContain("bt.workspace_id = w.id");
+    expect(queryText).toMatch(/bt\.status NOT IN \('done', ?'error'\)/);
   });
 
   it("no-ops when V3 Postgres isn't configured", async () => {
