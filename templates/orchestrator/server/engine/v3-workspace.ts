@@ -18,11 +18,7 @@ import {
   toWslPath,
 } from "../runtime/microsandbox-runtime.js";
 import { resolveEgress } from "../runtime/networking.js";
-import type {
-  MountSpec,
-  VmHandle,
-  TeardownPolicy,
-} from "../runtime/node-runtime.js";
+import type { MountSpec, VmHandle } from "../runtime/node-runtime.js";
 import { mountVmCredentials, VM_HOME } from "../runtime/vm-creds.js";
 import { WorkspaceNotReadyError } from "../v3-workspace-provision.js";
 
@@ -314,62 +310,6 @@ async function assertMicrovmBaselineBestEffort(
     baseSha: sha,
     detail: `merge-base(${branchName}, HEAD)=${sha}`,
   };
-}
-
-/**
- * Destroy a V3 workspace: teardown the VM and mark the workspace row destroyed.
- * If `keepAfterRun` is recorded on the workspace tags, skip teardown and only
- * mark the row as destroyed (the VM stays alive for inspection).
- */
-export async function destroyWorkspace(
-  workspaceId: string,
-): Promise<V3Workspace> {
-  const db = getV3Db();
-  const runtime = getRuntime();
-
-  const workspace = await getWorkspace(workspaceId);
-
-  if (workspace.state === "destroyed") {
-    return workspace;
-  }
-
-  // Check keep_after_run tag.
-  const keepAfterRun =
-    workspace.tags && typeof workspace.tags === "object"
-      ? (workspace.tags as Record<string, unknown>).keep_after_run === "true"
-      : false;
-
-  let policy: TeardownPolicy = "destroy";
-  if (keepAfterRun && workspace.vmName) {
-    // VM stays, only the row is marked destroyed.
-    policy = "keep";
-  }
-
-  try {
-    if (workspace.vmName) {
-      // Find the spec for this VM — we need a VmHandle. Reconstruct a minimal
-      // handle from the workspace row so teardown can address the sandbox by name.
-      const vm: VmHandle = {
-        name: workspace.vmName,
-        spec: { kind: "microvm", onFailure: "recreate" },
-        meta: {},
-      };
-      await runtime.teardown(vm, policy);
-    }
-  } catch (err: unknown) {
-    // Teardown failure is non-fatal for the row update.
-  }
-
-  // Always mark the row as destroyed.
-  await db
-    .update(v3Schema.v3Workspaces)
-    .set({
-      state: "destroyed",
-      destroyedAt: new Date(),
-    })
-    .where(eq(v3Schema.v3Workspaces.id, workspaceId));
-
-  return getWorkspace(workspaceId);
 }
 
 /**

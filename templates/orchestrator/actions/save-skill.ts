@@ -29,7 +29,7 @@ import { newId, nowIso } from "./_util.js";
 //     a row in the additive orchestrator_skill_overrides table instead.
 export default defineAction({
   description:
-    'Save one skill doc\'s editable content by `path` ("skills/<name>/SKILL.md", or "brain-runbook" for the orchestrator brain\'s own runbook). Writes the real file in Local File Mode; otherwise upserts a hosted SQL override that shadows the file/constant default.',
+    'Save one skill doc\'s editable content by `path` ("skills/<name>/SKILL.md", or "brain-runbook" for the orchestrator brain\'s own runbook). Writes the real file in Local File Mode; otherwise upserts a hosted SQL override that shadows the file/constant default for THIS EDITOR\'s own read-back (get-skill). Only "brain-runbook" is actually read at runtime (resolveBrainRunbookPrompt) — a hosted-mode override for any other skill path has no other consumer; see get-skill\'s `runtimeConsumed` field.',
   schema: z.object({
     path: z.string().min(1),
     content: z.string(),

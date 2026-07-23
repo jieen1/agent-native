@@ -12,7 +12,7 @@
 //  - Headers: Authorization: Bearer <jwt>, Accept: application/json,
 //    text/event-stream (the SDK transport requires both advertised).
 
-import { callMcpTool, makeMcpJwt, type McpCallResult } from "./mcp-client.js";
+import { callMcpTool, type McpCallResult } from "./mcp-client.js";
 
 /**
  * Base URL of the content app, reachable from the tracker container. Override with
@@ -41,18 +41,6 @@ export function contentDocumentUrl(
 
 function mcpEndpoint(): string {
   return `${contentBaseUrl()}/content/_agent-native/mcp`;
-}
-
-/** Mint an HS256 JWT for the content app MCP endpoint (no extra deps). */
-export function mintContentJwt(actorEmail: string): string {
-  const secret = process.env.A2A_SECRET;
-  if (!secret) {
-    throw new Error(
-      "A2A_SECRET is not set — the tracker container must share the same " +
-        "A2A_SECRET as the content app to dispatch over MCP.",
-    );
-  }
-  return makeMcpJwt(secret, actorEmail);
 }
 
 export type { McpCallResult };
