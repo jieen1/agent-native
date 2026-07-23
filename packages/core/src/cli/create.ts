@@ -41,6 +41,26 @@ const MINIMUM_RELEASE_AGE_EXCLUDES = [
   "typescript",
   "typescript-7",
 ];
+/**
+ * Names of private, never-published workspace:* packages that get vendored
+ * into `packages/<name>` for BOTH scaffold paths (2026-07-23 fix, CI noise
+ * audit / SDLC-096) — must never be blindly rewritten to a registry version
+ * before vendoring runs, or pnpm would try to fetch a same-named public
+ * package (or fail outright) instead of linking the local copy. Always
+ * includes "locale-kit" (every template needs it; see scaffoldRequiredPackages)
+ * plus every template's own `requiredPackages` (scheduling, pinpoint, ...).
+ */
+function vendorablePackageNames(): Set<string> {
+  const names = new Set<string>(["locale-kit"]);
+  for (const templateName of allTemplateNames()) {
+    const meta = getTemplate(templateName);
+    if (meta?.requiredPackages) {
+      for (const p of meta.requiredPackages) names.add(p);
+    }
+  }
+  return names;
+}
+
 const FIRST_PARTY_TARBALL_SYMLINK_EXCLUDES = [
   "*/CLAUDE.md",
   "*/.claude/skills",
@@ -738,7 +758,24 @@ async function createStandaloneApp(
   try {
     await scaffoldAppTemplate(targetDir, template);
     s.message(`Setting up ${name}…`);
-    postProcessStandalone(name, targetDir, template);
+    postProcessStandalone(name, targetDir, template, {
+      willVendorRequiredPackages: true,
+    });
+    // Vendor locale-kit (2026-07-23 fix, CI noise audit / SDLC-096): every
+    // template's actions/change-language.ts imports "locale-kit/action", but
+    // locale-kit is a private, never-published workspace:* package — the
+    // rewrite loop in postProcessStandalone turns any OTHER workspace:* dep
+    // into "latest", which for locale-kit means pnpm either fails to resolve
+    // it or (worse) silently installs an unrelated public npm package of the
+    // same name. Vendoring it into packages/locale-kit and making this
+    // scaffold a (single-app + locale-kit) pnpm workspace mirrors the exact
+    // mechanism already proven for template-specific required packages
+    // (scheduling, pinpoint, ...), just applied universally since every
+    // template needs it. Kept as a SEPARATE step after postProcessStandalone
+    // (rather than folded into it) so the unrelated sync-builder-starter-
+    // manifest.ts snapshot path — which calls postProcessStandalone directly
+    // and has no use for a vendored package — is unaffected.
+    await scaffoldRequiredPackages([template], targetDir);
     s.stop("App created!");
   } catch (err: any) {
     s.stop("Failed to create app.");
@@ -948,7 +985,14 @@ async function scaffoldRequiredPackages(
   templateNames: string[],
   workspaceRoot: string,
 ): Promise<void> {
-  const needed = new Set<string>();
+  // locale-kit is universally required (2026-07-23 fix, CI noise audit /
+  // SDLC-096): every template's actions/change-language.ts imports
+  // "locale-kit/action", but it is a private, never-published workspace:*
+  // package — unlike template-specific required packages (scheduling,
+  // pinpoint, ...), it isn't opted into via any template's `requiredPackages`
+  // metadata, so it was never vendored for EITHER scaffold path. Added here
+  // (not per-template metadata) since literally every template needs it.
+  const needed = new Set<string>(["locale-kit"]);
   for (const t of templateNames) {
     const meta = getTemplate(t);
     if (meta?.requiredPackages) {
@@ -970,12 +1014,20 @@ async function scaffoldRequiredPackages(
     }
 
     // The copied package may have published framework packages as workspace:*
-    // deps. Convert them to published ranges because these package-backed
-    // modules are npm dependencies, not scaffolded workspace members.
+    // deps, and `catalog:` deps (2026-07-23 fix, CI noise audit / SDLC-096:
+    // locale-kit's devDependencies use catalog: for react/vite/@types/*,
+    // which only resolves inside a pnpm workspace with a `catalog:` section
+    // in pnpm-workspace.yaml — a scaffolded app's own workspace file has no
+    // such section, so `pnpm install` failed with
+    // ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_SPEC before this fix). Convert
+    // both to concrete versions because these package-backed modules are
+    // npm dependencies (or, for catalog: entries, pinned versions), not
+    // scaffolded workspace members with their own catalog.
     const pkgJsonPath = path.join(targetDir, "package.json");
     if (fs.existsSync(pkgJsonPath)) {
       try {
         const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+        const catalog = loadCatalog();
         for (const depType of [
           "dependencies",
           "devDependencies",
@@ -997,6 +1049,9 @@ async function scaffoldRequiredPackages(
               key === "@agent-native/toolkit"
             ) {
               deps[key] = getToolkitDependencyVersion();
+            }
+            if (typeof val === "string" && val === "catalog:") {
+              deps[key] = catalog[key] ?? "latest";
             }
           }
         }
@@ -1039,6 +1094,21 @@ function postProcessStandalone(
   name: string,
   targetDir: string,
   templateName?: string,
+  options?: {
+    /**
+     * When true (the real `create` command's scaffold flow), leave
+     * vendorable private packages (locale-kit, scheduling, ...) as
+     * workspace:* instead of rewriting to "latest" — the caller is expected
+     * to follow up with `scaffoldRequiredPackages` so the workspace:* ref
+     * actually resolves to a local, vendored copy (2026-07-23 fix, CI noise
+     * audit / SDLC-096). Defaults to false so callers that only need a
+     * clean, standalone-shaped SNAPSHOT and never vendor anything (e.g.
+     * sync-builder-starter-manifest.ts's manifest generator, which has its
+     * own test asserting zero leftover "workspace:" or "catalog:" refs)
+     * keep their exact prior behavior unchanged.
+     */
+    willVendorRequiredPackages?: boolean;
+  },
 ): void {
   const appTitle = appTitleForScaffold(name);
   replacePlaceholders(targetDir, name, appTitle);
@@ -1067,6 +1137,9 @@ function postProcessStandalone(
   // catalog: references only resolve inside a pnpm workspace with a catalog
   // defined in pnpm-workspace.yaml — standalone scaffolds don't have one.
   const catalog = loadCatalog();
+  const vendorablePackages = options?.willVendorRequiredPackages
+    ? vendorablePackageNames()
+    : new Set<string>();
   const pkgPath = path.join(targetDir, "package.json");
   if (fs.existsSync(pkgPath)) {
     try {
@@ -1086,6 +1159,14 @@ function postProcessStandalone(
             deps[key] = getCoreDependencyVersion();
           } else if (key === "@agent-native/toolkit") {
             deps[key] = getToolkitDependencyVersion();
+          } else if (vendorablePackages.has(key)) {
+            // Left as workspace:* — scaffoldRequiredPackages (called right
+            // after postProcessStandalone) vendors this into
+            // packages/<name> and the pnpm-workspace.yaml `packages` glob
+            // added below links it locally. Rewriting to "latest" here
+            // (the fallback below) would make pnpm try to fetch a
+            // same-named PUBLIC npm package instead — wrong and, for a
+            // private name like "locale-kit", a real supply-chain risk.
           } else if (typeof val === "string" && val.startsWith("workspace:")) {
             deps[key] = "latest";
           } else if (typeof val === "string" && val === "catalog:") {
@@ -1155,6 +1236,20 @@ function postProcessStandalone(
       "minimumReleaseAgeExclude",
       MINIMUM_RELEASE_AGE_EXCLUDES,
     );
+    // `packages:` (2026-07-23 fix, CI noise audit / SDLC-096): only when the
+    // caller will actually vendor required packages afterward
+    // (scaffoldRequiredPackages copies locale-kit et al. into
+    // packages/<name> right after this function returns) — this scaffold
+    // must declare itself as a (app root + packages/*) pnpm workspace for
+    // that vendored copy to link, or the app's own workspace:* dependency on
+    // it would be unresolvable. Skipped for callers that only want a clean
+    // snapshot and never vendor anything (see the options doc comment above).
+    if (options?.willVendorRequiredPackages) {
+      updated = mergeWorkspaceYamlListItems(updated, "packages", [
+        ".",
+        "packages/*",
+      ]);
+    }
     if (updated !== existing) {
       fs.writeFileSync(wsPath, updated);
     }
