@@ -703,14 +703,41 @@ export const workspaceMergePr = defineAction({
     "before merging (via `gh pr merge`). Serializes concurrent merges onto the " +
     "same base branch with a Postgres advisory lock. Returns { merged: false, " +
     "reason } instead of throwing when the merge cannot proceed safely (e.g. " +
-    "'ci_not_green', 'rebase_needed: ...') — there is no force-merge override; " +
-    "on rebase_needed the caller should re-run the pipeline, not just retry.",
+    "'ci_not_green', 'rebase_needed: ...') — there is no blanket force-merge. " +
+    "On rebase_needed the caller should re-run the pipeline, not just retry. " +
+    "SDLC-096: `checkOverrides` is the ONLY way past a non-passing check — a " +
+    "narrow, per-call, reasoned exception for one NAMED currently-failing " +
+    "check (never a still-running one); every other failing check still " +
+    "blocks. Use only after independently verifying via workspaceCiWatch that " +
+    "the named check's failure is pre-existing/unrelated to this PR's diff — " +
+    "this call (including the override reasons) is durably recorded in the " +
+    "audit log.",
   schema: z.object({
     workspaceId: z.string(),
     branch: z.string().optional(),
     baseBranch: z.string().optional(),
     mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
+    checkOverrides: z
+      .array(
+        z.object({
+          checkName: z.string().min(1),
+          reason: z.string().min(1),
+        }),
+      )
+      .optional(),
   }),
+  audit: {
+    target: (args) => ({ type: "v3_workspace", id: args.workspaceId }),
+    summary: (args) =>
+      args.checkOverrides && args.checkOverrides.length > 0
+        ? `Merged PR for workspace ${args.workspaceId} with ${args.checkOverrides.length} check(s) overridden: ${args.checkOverrides
+            .map(
+              (o: { checkName: string; reason: string }) =>
+                `${o.checkName} (${o.reason})`,
+            )
+            .join("; ")}`
+        : `Merged PR for workspace ${args.workspaceId}`,
+  },
   run: async (args) => {
     const ws = await assertWorkspaceExists(args.workspaceId);
     if (ws.state !== "ready" && ws.state !== "busy") {
@@ -723,6 +750,7 @@ export const workspaceMergePr = defineAction({
       branch: args.branch,
       baseBranch: args.baseBranch,
       mergeMethod: args.mergeMethod,
+      checkOverrides: args.checkOverrides,
     });
     return { workspaceId: args.workspaceId, ...result };
   },

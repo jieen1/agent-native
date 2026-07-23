@@ -2060,6 +2060,23 @@ export async function ciWatch(opts: CiWatchOptions): Promise<CiWatchResult> {
 
 // ── Merge PR ─────────────────────────────────────────────────────────────────
 
+/**
+ * An explicit, audited exception for ONE specific CI check that is currently
+ * failing for a confirmed pre-existing/unrelated reason (SDLC-096 fix,
+ * 2026-07-23). This is deliberately per-merge-call, never a standing config
+ * toggle: the caller must name the exact check and state why, every time —
+ * so a future genuinely-new failure under the same check name is NOT silently
+ * covered by stale reasoning, and the framework's automatic action-audit log
+ * (see the `audit-log` skill) durably records who/when/which-checks/why for
+ * every merge that used one.
+ */
+export interface MergeCheckOverride {
+  /** Exact CI check name as reported by `statusCheckRollup` (e.g. "Fast tests"). */
+  checkName: string;
+  /** Why this specific check's current failure is known-unrelated. Required — an empty/missing reason is not a valid override. */
+  reason: string;
+}
+
 export interface MergePrOptions {
   /** Workspace id whose PR branch is being merged. */
   id: string;
@@ -2067,6 +2084,14 @@ export interface MergePrOptions {
   /** PR base branch; defaults to "main". */
   baseBranch?: string;
   mergeMethod?: "merge" | "squash" | "rebase";
+  /**
+   * Named, reasoned exceptions for specific currently-failing checks (see
+   * {@link MergeCheckOverride}). Every other non-passing check still blocks
+   * exactly as before — this is a narrow, audited carve-out, not a relaxed
+   * default. A `checkName` that isn't actually failing right now is simply a
+   * no-op (does not affect an otherwise-passing check).
+   */
+  checkOverrides?: MergeCheckOverride[];
 }
 
 export interface MergePrResult {
@@ -2075,6 +2100,8 @@ export interface MergePrResult {
   reason?: string;
   sha?: string | null;
   prUrl?: string | null;
+  /** Checks that were failing but excused via a supplied checkOverrides entry. */
+  overriddenChecks?: MergeCheckOverride[];
 }
 
 /**
@@ -2086,6 +2113,16 @@ export interface MergePrResult {
  * "rebase_needed: ..." }` instead of overriding — callers should re-run the
  * full dev→qa→review→gate cycle on the refreshed base, not just retry the
  * merge node.
+ *
+ * `checkOverrides` (SDLC-096 fix) is the ONLY way to merge past a non-passing
+ * check — there is still no blanket force-merge. Each entry excuses exactly
+ * one NAMED check for exactly this call, with a required reason; every other
+ * failing check still blocks. This turns the informal practice this project
+ * had been doing manually (verify a failure is pre-existing/unrelated, then
+ * bypass the sanctioned gate via a raw `gh pr merge` with zero record of that
+ * judgment call) into an explicit, narrow, and durably audited exception —
+ * the framework's automatic per-action audit log captures who/when/which
+ * checks/why for every call that supplies one (see the `audit-log` skill).
  *
  * Lock is TRANSACTION-scoped (`pg_try_advisory_xact_lock`), not session-scoped
  * — same reasoning as the reconciler's tick() lock (v3-reconciler.ts): `db`
@@ -2204,11 +2241,39 @@ export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
         (conclusion != null && !CI_PASSING_CONCLUSIONS.has(conclusion))
       );
     });
-    if (failing.length > 0) {
+
+    // checkOverrides (SDLC-096): only excuses a check that is COMPLETE and
+    // non-passing right now — never one that's still running (an override is
+    // a judgment that a specific, already-observed failure is pre-existing/
+    // unrelated; there is nothing to judge yet on a check still in flight).
+    // Matching is by exact name (case-insensitive, trimmed) so a stale or
+    // misspelled override name silently overrides nothing rather than
+    // widening scope.
+    const overridesByName = new Map(
+      (opts.checkOverrides ?? [])
+        .filter((o) => o.reason.trim() !== "")
+        .map((o) => [o.checkName.trim().toLowerCase(), o]),
+    );
+    const overriddenChecks: MergeCheckOverride[] = [];
+    const stillBlocking = failing.filter((c) => {
+      const status = c.status != null ? String(c.status) : null;
+      const stillRunning = status != null && status !== "COMPLETED";
+      if (stillRunning) return true;
+      const name = String(c.name ?? c.context ?? "")
+        .trim()
+        .toLowerCase();
+      const override = overridesByName.get(name);
+      if (!override) return true;
+      overriddenChecks.push(override);
+      return false;
+    });
+
+    if (stillBlocking.length > 0) {
       return {
         merged: false,
-        reason: `ci_not_green: ${failing.length} check(s) not passing`,
+        reason: `ci_not_green: ${stillBlocking.length} check(s) not passing`,
         prUrl: info.url ?? null,
+        ...(overriddenChecks.length > 0 ? { overriddenChecks } : {}),
       };
     }
 
@@ -2235,8 +2300,10 @@ export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
         : method === "rebase"
           ? "--rebase"
           : "--merge";
-    // No force/admin-override flag by design — a merge that gh refuses stays
-    // unmerged and is reported back, never overridden.
+    // Still no force/admin-override flag to `gh pr merge` itself — a merge gh
+    // refuses (real conflicts, branch protection, etc.) stays unmerged and is
+    // reported back, never overridden. checkOverrides only ever narrows OUR
+    // OWN pre-merge CI-gate check above; it never touches this call.
     const mergeRes = await gh(
       ["pr", "merge", branch, methodFlag, "--delete-branch=false"],
       { cwd: dir, env },
@@ -2246,6 +2313,7 @@ export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
         merged: false,
         reason: `gh pr merge failed: ${redact(`${mergeRes.stdout}\n${mergeRes.stderr}`.trim(), token)}`,
         prUrl: info.url ?? null,
+        ...(overriddenChecks.length > 0 ? { overriddenChecks } : {}),
       };
     }
 
@@ -2260,6 +2328,7 @@ export async function mergePr(opts: MergePrOptions): Promise<MergePrResult> {
       merged: true,
       sha: head?.stdout?.trim() ?? null,
       prUrl: info.url ?? null,
+      ...(overriddenChecks.length > 0 ? { overriddenChecks } : {}),
     };
   });
 }
