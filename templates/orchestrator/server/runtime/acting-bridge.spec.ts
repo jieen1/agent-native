@@ -159,4 +159,17 @@ describe("createVmActingBridge", () => {
     expect(fail).toContain("[exit code: 1]");
     expect(fail).toContain("boom");
   });
+
+  // P4-B (Codex review 2026-07-23): isToolCommandAllowed existed in
+  // v3-network.ts but nothing ever called it, so a disabled command ran
+  // unfiltered through this exact bash tool. Proves the wiring end-to-end
+  // (not just the standalone validator) — the runtime's `exec` must never
+  // even be invoked for a rejected command.
+  it("bash → rejects a disabled command before it ever reaches runtime.exec", async () => {
+    const { runtime, vm, execLog } = fakeRuntime();
+    const bridge = createVmActingBridge({ runtime, vm, workdir: "/work" });
+    const result = await bridge.bash.run({ command: "sudo rm -rf /" });
+    expect(result).toContain("rejected by the sandbox command policy");
+    expect(execLog).toEqual([]);
+  });
 });

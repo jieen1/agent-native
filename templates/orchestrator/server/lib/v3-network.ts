@@ -173,10 +173,22 @@ export function isNetworkAllowed(url: string): boolean {
 /**
  * Check whether a bash command is permitted inside the sandbox.
  *
- * The check parses the base command (first token, stripped of flags) and
- * rejects it if it appears in DISABLED_COMMANDS.  It also rejects commands
- * that contain obvious injection patterns (pipes to shell, redirects to
- * device files, background chains with ampersands).
+ * The check parses EVERY whitespace-separated token (not just the first) and
+ * rejects the command if any token is a disabled binary — this alone catches
+ * chained/piped attempts too (`foo && sudo rm -rf /`, `foo | sudo tee ...`)
+ * without needing a bespoke pattern per shell operator. It additionally
+ * rejects a small set of full-command patterns a per-token scan cannot
+ * express (a multi-word phrase like "rm -rf /" can never equal a single
+ * token, so DISABLED_COMMANDS alone would never catch it).
+ *
+ * Earlier revision (pre 2026-07-23) additionally rejected bare `;`
+ * chaining, `$(...)`/backtick command substitution, and `||` OR-chains.
+ * Those are routine, benign shell constructs used constantly in real dev/
+ * build workflows (e.g. `git commit -m "$(cat <<'EOF' ...)"`, `for f in
+ * $(git diff --name-only); do ...`, `mkdir -p x || true`) and were never
+ * actually exercised against real traffic before being wired into the live
+ * execution path — removed to avoid false-positive rejections of normal
+ * commands once this function started being enforced instead of dead code.
  *
  * This is a **validation function** — it provides best-effort detection.
  * It is NOT a complete sandbox enforcement layer.
@@ -189,19 +201,12 @@ export function isToolCommandAllowed(command: string): boolean {
   // Reject empty after trim
   if (trimmed.length === 0) return false;
 
-  // Obvious injection / escape patterns
-  const injectionPatterns = [
-    /;\s*\w+/, // command chaining with semicolon
-    /\|\s*(sudo|su)/, // pipe to privilege escalation
-    />\s*\/dev\//, // redirect to device
-    /2>&1\s*;/, // suppress errors before chain
-    /\$\(/, // command substitution
-    /`[^`]+`/, // backtick command substitution
-    /&&\s*(sudo|su|rm)/, // AND-chain to dangerous cmd
-    /\|\|/, // OR-chain (too easy to hide a bad cmd)
+  // Full-command dangerous patterns a single-token scan cannot express.
+  const dangerousPatterns = [
+    />\s*\/dev\/(?!null\b)/, // redirect to a device file (except harmless /dev/null)
+    /\brm\s+(?:-\w*r\w*f\w*|-\w*f\w*r\w*|--recursive\s+--force|--force\s+--recursive)\s+\/(?:\*|\s|$)/i, // rm -rf / (and -fr, --recursive --force, trailing /*)
   ];
-
-  if (injectionPatterns.some((re) => re.test(trimmed))) return false;
+  if (dangerousPatterns.some((re) => re.test(trimmed))) return false;
 
   // Extract the base command (first word, strip leading flags like `sudo`)
   const tokens = trimmed.split(/\s+/);
@@ -210,7 +215,8 @@ export function isToolCommandAllowed(command: string): boolean {
   // Check against disabled list
   if (DISABLED_COMMANDS.includes(baseCommand)) return false;
 
-  // Also check if any token is a disabled command (catches `git sudo push`)
+  // Also check if any token is a disabled command (catches `git sudo push`,
+  // and chained/piped forms like `foo && sudo ...` or `foo | sudo ...`).
   for (const token of tokens) {
     const clean = token.toLowerCase();
     // Skip flags, paths, quoted strings, arguments
