@@ -51,13 +51,24 @@ export type NodeEffort = "low" | "medium" | "high";
 /**
  * A small, safe condition evaluated against run state — never `eval`
  * (DESIGN §3.5). Used on `branch` out-edges and as a `loop` stop predicate.
+ *
+ * NOT CURRENTLY EVALUATED (Codex review 2026-07-23): `server/engine/
+ * conditions.ts`'s `evalCondition` — the only function that reads this type
+ * — has zero callers anywhere (legacy v2 or current V3). Setting `when` on
+ * an edge or `condition` on a loop node is parsed/validated but has NO
+ * effect on dispatch; every edge runs as if unconditional. See that file's
+ * header comment before relying on this for a real branch.
  */
 export type Condition =
   | { kind: "jsonpath"; path: string; op: string; value: unknown }
   | { kind: "status"; node: string; equals: string }
   | { kind: "agent"; prompt: string };
 
-/** A directed edge in the base graph (DESIGN §3.3). `when` gates a branch. */
+/**
+ * A directed edge in the base graph (DESIGN §3.3). `when` gates a branch —
+ * see the {@link Condition} doc comment: not currently evaluated by any
+ * dispatcher, so this has no real effect yet.
+ */
 export interface Edge {
   id: string;
   from: string;

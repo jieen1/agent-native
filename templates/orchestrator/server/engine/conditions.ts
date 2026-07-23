@@ -2,6 +2,20 @@
 // no RNG — the engine's only "thinking" is an explicit `agent` condition (not
 // used by the P1 echo path; treated as false here and resolved by an executor
 // in P2). Branch edge `when` and loop stop predicates flow through here.
+//
+// STATUS (Codex review 2026-07-23): confirmed by a repo-wide search that
+// `evalCondition` has ZERO callers anywhere — not the legacy v2 graph
+// executor, not the current V3 dispatcher (server/engine/v3-dispatcher.ts).
+// A DAG template's `Edge.when` / a loop node's `condition` field
+// (shared/types.ts) is parsed and validated (`parseCondition`) but never
+// actually EVALUATED by any run: no template author or agent-authored DAG
+// gets a real conditional branch today, no matter what `when` it writes —
+// every outgoing edge is currently treated as unconditional. The current
+// seed SDLC templates don't use `when` in practice, so this has not yet
+// produced a visibly wrong run, but it is a real correctness trap: DO NOT
+// author a DAG template relying on `when` to gate a branch until this is
+// wired into a dispatcher's node-readiness/edge-traversal decision (or the
+// field is removed from the schema) — right now it is silently a no-op.
 
 import type { Condition } from "../../shared/types.js";
 import { readPath } from "./jsonpath.js";
