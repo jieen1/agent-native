@@ -100,6 +100,8 @@ interface HealthTelemetry {
   writebackStageMismatch: number;
   writebackOther: number;
   windowHours: number;
+  dbHealthy: boolean;
+  dbHealthMessage: string;
 }
 
 interface PoolStatusData {
@@ -476,8 +478,9 @@ function BrainSlotCard() {
 
 function SchedulerCard({ telemetry }: { telemetry?: HealthTelemetry }) {
   const permanentlyFailed = telemetry?.writebackPermanentlyFailed ?? 0;
+  const dbHealthy = telemetry?.dbHealthy ?? true;
   const ok = telemetry
-    ? telemetry.writebackFailed === 0 && permanentlyFailed === 0
+    ? telemetry.writebackFailed === 0 && permanentlyFailed === 0 && dbHealthy
     : undefined;
 
   return (
@@ -486,11 +489,13 @@ function SchedulerCard({ telemetry }: { telemetry?: HealthTelemetry }) {
       title="调度器"
       dot={ok === undefined ? "pending" : ok ? "ok" : "warn"}
       dotTitle={
-        ok
-          ? "回写正常"
-          : permanentlyFailed > 0
-            ? "存在回写永久失败,需要人工处理"
-            : "存在回写失败"
+        !dbHealthy
+          ? "数据库连接异常"
+          : ok
+            ? "回写正常"
+            : permanentlyFailed > 0
+              ? "存在回写永久失败,需要人工处理"
+              : "存在回写失败"
       }
     >
       <p>
@@ -537,6 +542,14 @@ function SchedulerCard({ telemetry }: { telemetry?: HealthTelemetry }) {
           <DataHint trigger={<span className="italic">需要人工处理</span>}>
             重试已放弃(判定为不可恢复的错误,或重试次数超过上限)——这些 run
             不会再自动重试,需要人工核实原因并手动回填。
+          </DataHint>
+        </p>
+      ) : null}
+      {!dbHealthy ? (
+        <p>
+          数据库 <b className="font-mono text-destructive">连接异常</b>{" "}
+          <DataHint trigger={<span className="italic">详情</span>}>
+            {telemetry?.dbHealthMessage || "Postgres 健康探测失败。"}
           </DataHint>
         </p>
       ) : null}

@@ -39,6 +39,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getV3Db, v3Schema, resolveOwnerEmail } from "../server/db/index.js";
+import { checkPostgresHealth } from "../server/lib/v3-error-recovery.js";
 import { computeWritebackTelemetry } from "../server/writeback-telemetry.js";
 
 async function countEventKind(
@@ -111,6 +112,24 @@ export default defineAction({
 
     const writeback = await computeWritebackTelemetry(args.windowHours ?? 24);
 
+    // P4-D (Codex review 2026-07-23): checkPostgresHealth() was a correctly
+    // implemented probe with zero callers anywhere in the app. Run it here,
+    // isolated in its own try/catch, so an unexpected throw from the probe
+    // itself can never take down the rest of this action's response (the
+    // probe already has its own internal error handling for the connection-
+    // failure cases it expects; this guards only against a genuinely
+    // unexpected exception).
+    let dbHealthy = true;
+    let dbHealthMessage = "";
+    try {
+      const dbHealth = await checkPostgresHealth();
+      dbHealthy = dbHealth.healthy;
+      dbHealthMessage = dbHealth.message;
+    } catch (err: unknown) {
+      dbHealthy = false;
+      dbHealthMessage = `db health probe threw: ${err instanceof Error ? err.message : String(err)}`;
+    }
+
     return {
       suspectSpawns,
       aliasDriftEvents,
@@ -124,6 +143,8 @@ export default defineAction({
       writebackStageMismatch: writeback.writebackStageMismatch,
       writebackOther: writeback.writebackOther,
       windowHours: writeback.windowHours,
+      dbHealthy,
+      dbHealthMessage,
     };
   },
 });
