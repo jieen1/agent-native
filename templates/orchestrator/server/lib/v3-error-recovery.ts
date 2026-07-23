@@ -3,6 +3,27 @@
  *
  * Provides health probes for Postgres and microsandbox (msb), classifies
  * shim exit codes, and retries Postgres connections with exponential backoff.
+ *
+ * Wiring status (Codex review 2026-07-23 found this whole module had zero
+ * callers and zero tests, the same "mechanism correct, nothing triggers it"
+ * shape found repeatedly elsewhere this session):
+ *  - `checkPostgresHealth` is now wired into `actions/health-telemetry.ts`
+ *    (surfaced on the S10 health page's 调度器 card).
+ *  - `checkMsbHealth` is DELIBERATELY left unwired: the msb/microsandbox
+ *    backend has never actually run in this deployment (confirmed: no
+ *    /dev/kvm, msb never installed, no bridge service) — every real
+ *    workspace node runs via NoneRuntime instead (see
+ *    server/engine/v3-dispatcher.ts's `localWorkspaceDir` DEFAULT path).
+ *    Wiring a health check for a backend that is never selected would only
+ *    ever report a permanently-red, uninformative status. Revisit once/if
+ *    the still-open microVM-vs-Docker-isolation decision lands on a backend
+ *    that's actually deployed.
+ *  - `classifyShimExitCode`/`reconnectWithRetry` remain reusable, tested
+ *    (see v3-error-recovery.spec.ts) utilities without a call site yet —
+ *    retrofitting them into existing spawn-exit handling / DB call sites is
+ *    a broader, riskier change (could alter retry/timing semantics on
+ *    write paths) than this pass's scope; left as available primitives
+ *    rather than force-fit somewhere without a concrete driving need.
  */
 
 import { execSync, execFileSync, spawnSync } from "node:child_process";
