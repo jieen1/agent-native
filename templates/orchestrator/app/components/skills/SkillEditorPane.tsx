@@ -5,6 +5,11 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MarkdownSourceEditor } from "./MarkdownSourceEditor";
@@ -20,6 +25,9 @@ interface SkillDetail {
   hasOverride: boolean;
   updatedAt: string | null;
   updatedBy: string | null;
+  /** True only for "brain-runbook" — the one skill actually read at runtime. */
+  runtimeConsumed: boolean;
+  localFileMode: boolean;
 }
 
 function formatRelativeTimeZh(iso: string | null): string | null {
@@ -165,6 +173,19 @@ export function SkillEditorPane({ path, onMutated }: SkillEditorPaneProps) {
         <div className="flex flex-wrap items-center gap-4">
           {data.category ? (
             <Badge variant="secondary">{data.category}</Badge>
+          ) : null}
+          {!data.runtimeConsumed && !data.localFileMode ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="cursor-help">
+                  仅编辑器
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                保存仅更新此编辑器的回显内容，不写入磁盘文件，也不会被 brain
+                或任何 agent 读取——只有「Runbook」这一项会在运行时生效。
+              </TooltipContent>
+            </Tooltip>
           ) : null}
           {relativeTime ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

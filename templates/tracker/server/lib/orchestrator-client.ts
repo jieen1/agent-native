@@ -14,7 +14,7 @@
 //  - Headers: Authorization: Bearer <jwt>, Accept: application/json,
 //    text/event-stream (the SDK transport requires both advertised).
 
-import { callMcpTool, makeMcpJwt, type McpCallResult } from "./mcp-client.js";
+import { callMcpTool, type McpCallResult } from "./mcp-client.js";
 
 /**
  * Base URL of the orchestrator, reachable from the tracker container. Prefer the
@@ -30,18 +30,6 @@ export function orchestratorBaseUrl(): string {
 
 function mcpEndpoint(): string {
   return `${orchestratorBaseUrl()}/orchestrator/_agent-native/mcp`;
-}
-
-/** Mint an HS256 JWT for the orchestrator MCP endpoint (no extra deps). */
-export function mintOrchestratorJwt(actorEmail: string): string {
-  const secret = process.env.A2A_SECRET;
-  if (!secret) {
-    throw new Error(
-      "A2A_SECRET is not set — the tracker container must share the same " +
-        "A2A_SECRET as the orchestrator to dispatch over MCP.",
-    );
-  }
-  return makeMcpJwt(secret, actorEmail);
 }
 
 export type { McpCallResult };

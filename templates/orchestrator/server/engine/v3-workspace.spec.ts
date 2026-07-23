@@ -1,7 +1,16 @@
 // V3 Workspace Adapter Unit Tests
 //
-// Tests workspace lifecycle: createWorkspace, destroyWorkspace, getWorkspace.
+// Tests workspace lifecycle: createWorkspace, getWorkspace.
 // Mocks MicrosandboxRuntime, git-wrapper, vm-creds, networking, and DB.
+//
+// destroyWorkspace was removed 2026-07-23 (Codex review): a dead, never-
+// called parallel implementation of destroyLocalWorkspace (the one actually
+// wired into the reap sweep) that only marked the SQL row destroyed without
+// rm -rf'ing the real host checkout used by the confirmed-live NoneRuntime/
+// hostDir architecture -- if ever mistakenly called instead of
+// destroyLocalWorkspace, it would leak disk permanently (the reap sweep's
+// candidate query excludes 'destroyed' rows, so nothing would ever revisit
+// them). See v3-workspace-local.ts for the real destroy path.
 
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -326,82 +335,6 @@ describe("V3 Workspace Adapter", () => {
         (rows[0] as unknown as { readyAt?: Date }).readyAt,
       ).toBeUndefined();
       expect(teardown).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("destroyWorkspace", () => {
-    it("destroyWorkspace updates state", async () => {
-      const { workspaces, db } = createMockDb();
-
-      // Seed a workspace
-      const wsId = "ws-123";
-      workspaces.set(wsId, {
-        id: wsId,
-        ownerKind: "run",
-        ownerId: "run-1",
-        tags: null,
-        vmName: "test-vm-001",
-        repoUrl: "https://github.com/test/repo.git",
-        branch: "main",
-        state: "ready",
-        createdAt: new Date(),
-        destroyedAt: null,
-        createdBy: "run:run-1",
-        ownerEmail: "local@localhost",
-        orgId: null,
-      });
-
-      hoisted.getV3Db.mockReturnValue(db);
-
-      vi.spyOn(MicrosandboxRuntime.prototype, "teardown").mockImplementation(
-        async () => {},
-      );
-
-      vi.resetModules();
-      const { destroyWorkspace } = await import("./v3-workspace.js");
-
-      const result = await destroyWorkspace(wsId);
-      expect(result.state).toBe("destroyed");
-      expect(result.destroyedAt).toBeDefined();
-
-      // Verify teardown was called
-      expect(MicrosandboxRuntime.prototype.teardown).toHaveBeenCalledTimes(1);
-    });
-
-    it("destroyWorkspace is idempotent on already-destroyed workspace", async () => {
-      const { workspaces, db } = createMockDb();
-
-      const wsId = "ws-456";
-      workspaces.set(wsId, {
-        id: wsId,
-        ownerKind: "run",
-        ownerId: "run-1",
-        tags: null,
-        vmName: "test-vm-002",
-        repoUrl: "https://github.com/test/repo.git",
-        branch: "main",
-        state: "destroyed",
-        createdAt: new Date(),
-        destroyedAt: new Date(),
-        createdBy: "run:run-1",
-        ownerEmail: "local@localhost",
-        orgId: null,
-      });
-
-      hoisted.getV3Db.mockReturnValue(db);
-
-      vi.spyOn(MicrosandboxRuntime.prototype, "teardown").mockImplementation(
-        async () => {},
-      );
-
-      vi.resetModules();
-      const { destroyWorkspace } = await import("./v3-workspace.js");
-
-      const result = await destroyWorkspace(wsId);
-
-      expect(result.state).toBe("destroyed");
-      // Teardown should NOT be called because already destroyed
-      expect(MicrosandboxRuntime.prototype.teardown).not.toHaveBeenCalled();
     });
   });
 

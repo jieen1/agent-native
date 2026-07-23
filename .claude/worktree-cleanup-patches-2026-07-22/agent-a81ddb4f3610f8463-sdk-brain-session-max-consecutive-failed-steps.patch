@@ -1,0 +1,343 @@
+.../server/brain/sdk-brain-session.spec.ts         | 239 ++++++++++++++++++++-
+ .../orchestrator/server/brain/sdk-brain-session.ts | 117 ++++++++--
+ 2 files changed, 331 insertions(+), 25 deletions(-)
+
+--- Changes ---
+
+templates/orchestrator/server/brain/sdk-brain-session.spec.ts
+  @@ -69,11 +69,25 @@ vi.mock("./brain-mcp-config.js", () => ({
+  -const mockGenerateText = vi.fn(async (..._args: unknown[]) => ({
+  -  text: "ok",
+  -  toolCalls: [],
+  -  finishReason: "stop",
+  -}));
+  +
+  +/** Mirrors sdk-brain-session.ts's own local `generateText` result shape. */
+  +interface MockGenerateTextResult {
+  +  text: string;
+  +  toolCalls: Array<{
+  +    toolCallId: string;
+  +    toolName: string;
+  +    input: Record<string, unknown>;
+  +  }>;
+  +  finishReason: string;
+  +}
+  +
+  +const mockGenerateText = vi.fn(
+  +  async (..._args: unknown[]): Promise<MockGenerateTextResult> => ({
+  +    text: "ok",
+  +    toolCalls: [],
+  +    finishReason: "stop",
+  +  }),
+  +);
+   
+   vi.mock("ai", () => ({
+     generateText: (...args: unknown[]) => mockGenerateText(...args),
+  @@ -97,7 +111,10 @@ vi.mock("@ai-sdk/openai", () => ({
+  -  const body = JSON.parse(init.body) as { method: string };
+  +  const body = JSON.parse(init.body) as {
+  +    method: string;
+  +    params?: { name?: string; arguments?: Record<string, unknown> };
+  +  };
+     if (body.method === "tools/list") {
+       return {
+         ok: true,
+  @@ -109,6 +126,37 @@ const mockFetch = vi.fn(async (_url: string, init: { body: string }) => {
+  +  if (body.method === "tools/call") {
+  +    const name = body.params?.name ?? "";
+  +    if (name === "noop") {
+  +      return {
+  +        ok: true,
+  +        headers: { get: () => "application/json" },
+  +        json: async () => ({
+  +          result: {
+  +            content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
+  +          },
+  +        }),
+  +      } as unknown as Response;
+  +    }
+  +    // Mirrors packages/core/src/mcp/build-server.ts's REAL response shape for
+  +    // a tool name outside the curated connectorCatalog: `isError: true` with
+  +    // an "Unknown tool: <name>" text content block — not a JSON-RPC-level
+  +    // `error`, and NOT the Claude-Code/ACP path's `[tool.denied] "<name>"
+  +    // attempted outside the dispatch-phase tool face (allowed: ...)` text,
+  +    // which lives only in brain-session.ts/tool-denied.ts and is never
+  +    // reachable from this SDK code path.
+  +    return {
+  +      ok: true,
+  +      headers: { get: () => "application/json" },
+  +      json: async () => ({
+  +        result: {
+  +          content: [{ type: "text", text: `Unknown tool: ${name}` }],
+  +          isError: true,
+  +        },
+  +      }),
+  +    } as unknown as Response;
+  +  }
+     throw new Error(`unexpected fetch call in test: ${body.method}`);
+   });
+   
+  @@ -246,3 +294,182 @@ describe("runSdkBrainTurn — runtimeOverride", () => {
+  +
+  +// SDLC core-infrastructure fix: the orchestrator brain's dispatch-phase
+  +// tool-face gate (`isToolAllowedForPhase` / `resolveBrainAllowedTools` /
+  +// `maybeLogToolDenied` — brain-capability.ts + tool-denied.ts) is wired ONLY
+  +// into brain-session.ts's two Claude-Code-family paths (raw-spawn
+  +// `streamBrainChild` and the ACP `runBrainHarnessTurn`) — never into this
+  +// file's `runSdkBrainTurn`. That gate's own header comment says as much: it
+  +// is built for "the brain's `claude` child (raw-spawn AND the gated
+  +// ACP-harness path)". A `runtime:<id>` override (vLLM/Aliyun/any
+  +// OpenAI-compatible endpoint) always dispatches through `runSdkBrainTurn`
+  +// (see brain-session.ts's `resolveBrainEngineChoice`), so that phase-gate
+  +// text can never appear on this path in the first place — there is nothing
+  +// to "skip". What this path DOES need, and lacked before this change, is its
+  +// own corrective feedback + runaway-loop guard for a model that calls a tool
+  +// name outside its real (curated connectorCatalog) tool set.
+  +describe("runSdkBrainTurn — tool-call correctness (no spurious ACP-style denial + corrective feedback)", () => {
+  +  beforeEach(() => {
+  +    hoisted.state.events.length = 0;
+  +    openaiCalls.length = 0;
+  +    openaiModelCalls.length = 0;
+  +    mockGenerateText.mockClear();
+  +    mockFetch.mockClear();
+  +    vi.stubGlobal("fetch", mockFetch);
+  +  });
+  +
+  +  afterEach(() => {
+  +    vi.unstubAllGlobals();
+  +  });
+  +
+  +  it("a tool_use for a tool that IS in the real MCP catalog succeeds cleanly — never spuriously denied", async () => {
+  +    mockGenerateText
+  +      .mockImplementationOnce(async () => ({
+  +        text: "",
+  +        toolCalls: [{ toolCallId: "tc1", toolName: "noop", input: {} }],
+  +        finishReason: "tool-calls",
+  +      }))
+  +      .mockImplementationOnce(async () => ({
+  +        text: "done",
+  +        toolCalls: [],
+  +        finishReason: "stop",
+  +      }));
+  +
+  +    const result = await runSdkBrainTurn({
+  +      threadId: "thread-real-tool",
+  +      ownerEmail: "owner@example.com",
+  +      orgId: null,
+  +      message: "hello",
+  +    });
+  +
+  +    expect(result).toEqual({ ok: true });
+  +    expect(mockGenerateText).toHaveBeenCalledTimes(2);
+  +
+  +    const toolResultEvent = hoisted.state.events.find(
+  +      (e) => e.type === "tool_result",
+  +    );
+  +    expect(toolResultEvent).toBeDefined();
+  +    expect(toolResultEvent?.toolResult).toEqual({ ok: true });
+  +    expect(hoisted.state.events.filter((e) => e.type === "error")).toHaveLength(
+  +      0,
+  +    );
+  +  });
+  +
+  +  it("a hallucinated tool name outside the real catalog gets corrective feedback listing the real tools, NOT an ACP-style phase-gate denial", async () => {
+  +    mockGenerateText
+  +      .mockImplementationOnce(async () => ({
+  +        text: "",
+  +        toolCalls: [{ toolCallId: "tc1", toolName: "Read File", input: {} }],
+  +        finishReason: "tool-calls",
+  +      }))
+  +      .mockImplementationOnce(async () => ({
+  +        text: "understood, using a real tool now",
+  +        toolCalls: [],
+  +        finishReason: "stop",
+  +      }));
+  +
+  +    const result = await runSdkBrainTurn({
+  +      threadId: "thread-hallucinated",
+  +      ownerEmail: "owner@example.com",
+  +      orgId: null,
+  +      message: "hello",
+  +    });
+  +
+  +    expect(result).toEqual({ ok: true });
+  +
+  +    const toolResultEvent = hoisted.state.events.find(
+  +      (e) => e.type === "tool_result" && e.toolName === "Read File",
+  +    );
+  +    expect(toolResultEvent).toBeDefined();
+  +    const errText =
+  +      (toolResultEvent?.toolResult as { error?: string })?.error ?? "";
+  +    expect(errText).toContain("Unknown tool: Read File");
+  +    expect(errText).toContain("Your ONLY real callable tools are");
+  +    expect(errText).toContain("noop");
+  +
+  +    // Must NOT read like the Claude-Code/ACP raw-spawn or harness path's own
+  +    // phase-gate denial (brain-capability.ts / tool-denied.ts) — this path
+  +    // has no phase, no allowedTools list, and writes no spawn_events row.
+  +    expect(errText).not.toContain("dispatch-phase tool face");
+  +    expect(errText).not.toContain("review-phase tool face");
+  +    expect(errText).not.toContain("[tool.denied]");
+  ... (79 lines truncated)
+  +233 -6
+
+templates/orchestrator/server/brain/sdk-brain-session.ts
+  @@ -21,6 +21,15 @@ import { BRAIN_PROMPT } from "./brain-prompt.js";
+  +/**
+  + * A "step" here is one full generateText round: every tool call it made
+  + * either succeeded or failed. This many CONSECUTIVE steps where every tool
+  + * call failed (typically a hallucinated tool name outside the real MCP
+  + * catalog — see `resolveMcpToolResult`'s corrective feedback below) ends the
+  + * turn early instead of silently spending the rest of MAX_STEPS on a blind
+  + * guessing loop that burns real API quota with zero progress.
+  + */
+  +const MAX_CONSECUTIVE_FAILED_STEPS = 3;
+   const VLLM_BASE_URL =
+     process.env.OPENAI_BASE_URL?.trim() || "http://192.168.1.250:9000/v1";
+   const VLLM_MODEL = process.env.OPENAI_MODEL?.trim() || "claude-sonnet-4-6";
+  @@ -153,6 +162,42 @@ async function mcpListTools(
+  +/** Shape of the JSON-RPC `result` field for a tools/call response. */
+  +interface McpToolCallResult {
+  +  content?: Array<{ type: string; text?: string }>;
+  +  isError?: boolean;
+  +}
+  +
+  +/**
+  + * Turn one tools/call JSON-RPC `result` into the value fed back to the model,
+  + * or THROW when the MCP server flagged it `isError` (e.g. build-server.ts's
+  + * `Unknown tool: <name>` for a hallucinated/unlisted tool name, or a
+  + * forbidden-scope tool) instead of silently returning that text as if it were
+  + * a successful result — the caller's catch block is what attaches the
+  + * corrective "your real callable tools are: ..." feedback.
+  + */
+  +function resolveMcpToolResult(
+  +  result: McpToolCallResult,
+  +  name: string,
+  +): unknown {
+  +  const content = result.content ?? [];
+  +  const text =
+  +    content.length === 1 && content[0].type === "text"
+  +      ? (content[0].text ?? "")
+  +      : null;
+  +  if (result.isError) {
+  +    throw new Error(text || `MCP tool ${name} failed with no detail`);
+  +  }
+  +  if (text != null) {
+  +    try {
+  +      return JSON.parse(text);
+  +    } catch {
+  +      return text;
+  +    }
+  +  }
+  +  return content;
+  +}
+  +
+   /** Call a single orchestrator MCP tool. */
+   async function mcpCallTool(
+     bearer: string,
+  @@ -184,34 +229,31 @@ async function mcpCallTool(
+  -      if (line.startsWith("data: ")) {
+  -        try {
+  -          const evt = JSON.parse(line.slice(6));
+  -          if (evt?.result !== undefined) return evt.result;
+  -        } catch {
+  -          // skip
+  -        }
+  +      if (!line.startsWith("data: ")) continue;
+  +      let evt: { result?: McpToolCallResult; error?: { message: string } };
+  +      try {
+  +        evt = JSON.parse(line.slice(6));
+  +      } catch {
+  +        continue; // skip non-JSON lines
+  +      }
+  +      if (evt?.error) {
+  +        throw new Error(`MCP tool ${name} error: ${evt.error.message}`);
+  +      }
+  +      if (evt?.result !== undefined) {
+  +        return resolveMcpToolResult(evt.result, name);
+         }
+       }
+       throw new Error(`No result in SSE response for tool ${name}`);
+     }
+   
+     const data = (await resp.json()) as {
+  -    result?: { content?: Array<{ type: string; text?: string }> };
+  +    result?: McpToolCallResult;
+       error?: { message: string };
+     };
+  -  if (data.error)
+  +  if (data.error) {
+       throw new Error(`MCP tool ${name} error: ${data.error.message}`);
+  -  // MCP result: array of content items, extract text
+  -  const content = data.result?.content ?? [];
+  -  if (content.length === 1 && content[0].type === "text") {
+  -    try {
+  -      return JSON.parse(content[0].text ?? "null");
+  -    } catch {
+  -      return content[0].text;
+  -    }
+     }
+  -  return content;
+  +  return resolveMcpToolResult(data.result ?? {}, name);
+   }
+   
+   /**
+  @@ -446,6 +488,9 @@ export async function runSdkBrainTurn(
+  +  // Consecutive steps where EVERY tool call in the step failed — see
+  +  // MAX_CONSECUTIVE_FAILED_STEPS.
+  +  let consecutiveFailedSteps = 0;
+     let currentMessages = [...messages];
+   
+     while (step < MAX_STEPS) {
+  @@ -532,6 +577,9 @@ export async function runSdkBrainTurn(
+  +    let stepHadSuccess = false;
+  +    let stepHadFailure = false;
+  +
+       for (const tc of result.toolCalls) {
+         const useId = tc.toolCallId;
+         const name = tc.toolName;
+  @@ -554,9 +602,21 @@ export async function runSdkBrainTurn(
+  +        stepHadSuccess = true;
+         } catch (err) {
+  +        stepHadFailure = true;
+  +        const rawMsg = err instanceof Error ? err.message : String(err);
+  +        // Corrective feedback: a model that guessed a tool name outside its
+  +        // real MCP catalog (e.g. "Read File", "grep" — names from the
+  +        // Claude-Code-native tool face, not this turn's actual `tools`) gets
+  +        // told the REAL callable names right here, in the SAME tool-result
+  +        // turn, so it can self-correct instead of guessing blindly until
+  +        // MAX_STEPS. Mirrors the corrective intent of the ACP/raw-spawn
+  +        // brain paths' own "(allowed: ...)" denial text in brain-session.ts.
+           toolResult = {
+  -          error: err instanceof Error ? err.message : String(err),
+  +          error: `${rawMsg}. Your ONLY real callable tools are: ${mcpTools
+  +            .map((t) => t.name)
+  +            .join(", ")}. Do not invent tool names outside this list.`,
+           };
+         }
+   
+  @@ -585,6 +645,25 @@ export async function runSdkBrainTurn(
+  +    // A step where EVERY tool call failed resets to zero the moment any call
+  +    // in a later step succeeds; several such steps IN A ROW means the
+  +    // corrective feedback above isn't landing — stop burning real API quota
+  +    // on a blind guessing loop instead of silently exhausting MAX_STEPS.
+  +    consecutiveFailedSteps =
+  +      stepHadFailure && !stepHadSuccess ? consecutiveFailedSteps + 1 : 0;
+  +    if (consecutiveFailedSteps >= MAX_CONSECUTIVE_FAILED_STEPS) {
+  +      const msg =
+  +        `SDK brain: ${consecutiveFailedSteps} consecutive steps with only ` +
+  +        `failing tool calls (no real progress) — ending the turn early ` +
+  +        `instead of exhausting MAX_STEPS. Real callable tools: ` +
+  +        `${mcpTools.map((t) => t.name).join(", ")}.`;
+  +      await appendEvent(threadId, ownerEmail, orgId, {
+  +        type: "error",
+  +        text: msg,
+  +      });
+  +      return { ok: false, error: msg };
+  +    }
+  +
+       if (result.finishReason === "stop" || result.finishReason === "end-turn") {
+         break;
+       }
+  +98 -19
+[full diff: rtk git diff --no-compact]
