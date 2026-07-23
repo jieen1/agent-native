@@ -96,6 +96,18 @@ function packageNameFromInstallSpecifier(specifier: string): string | null {
   return versionIndex === -1 ? trimmed : trimmed.slice(0, versionIndex);
 }
 
+/**
+ * Twin of `canResolvePackage` in `agent/harness/registry.ts` (2026-07-23 ESM
+ * fix, Codex review 2026-07-23 second-order finding): a package that ships
+ * `"type": "module"` with an `"exports"` map defining only an `"import"`
+ * condition has no `"main"` Node's CJS resolver can fall back to, so a bare
+ * `require.resolve(packageName)` throws `ERR_PACKAGE_PATH_NOT_EXPORTED`
+ * regardless of whether the package is actually installed. The harness
+ * registry was fixed for this; this copy-pasted sibling was missed. Falling
+ * back to resolving the package's own `package.json` sidesteps the
+ * import/require distinction entirely while still proving real on-disk
+ * presence.
+ */
 function canResolvePackage(packageName: string): boolean {
   const cached = _packageAvailabilityCache.get(packageName);
   if (cached !== undefined) return cached;
@@ -103,8 +115,20 @@ function canResolvePackage(packageName: string): boolean {
   try {
     require.resolve(packageName);
     available = true;
-  } catch {
-    available = false;
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      (err as NodeJS.ErrnoException).code === "ERR_PACKAGE_PATH_NOT_EXPORTED"
+    ) {
+      try {
+        require.resolve(`${packageName}/package.json`);
+        available = true;
+      } catch {
+        available = false;
+      }
+    } else {
+      available = false;
+    }
   }
   _packageAvailabilityCache.set(packageName, available);
   return available;
