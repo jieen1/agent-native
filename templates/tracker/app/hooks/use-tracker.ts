@@ -503,6 +503,46 @@ export function useSprintArtifact(id: string) {
   };
 }
 
+// M5 度量复盘 — Sprint burndown chart (work items remaining over time).
+export function useSprintBurndown(sprintId: string) {
+  return useActionQuery(
+    "get-sprint-burndown",
+    { sprintId },
+    { enabled: !!sprintId },
+  ) as {
+    data?: import("@shared/types").SprintBurndownResult;
+    isLoading: boolean;
+  };
+}
+
+// M5 度量复盘 — per-work-item stage timing derived from real v3_spawns
+// timestamps (see actions/get-sprint-stage-timing.ts + shared/sprint-timing.ts).
+export function useSprintStageTiming(sprintId: string) {
+  return useActionQuery(
+    "get-sprint-stage-timing",
+    { sprintId },
+    { enabled: !!sprintId },
+  ) as {
+    data?: import("@shared/types").SprintStageTimingResult;
+    isLoading: boolean;
+  };
+}
+
+// M5 度量复盘 — Sprint 发布 (release). Idempotent: the action handler guards
+// on current status, so calling this on an already-released sprint is a no-op.
+export function useReleaseSprint() {
+  const qc = useQueryClient();
+  return useActionMutation("release-sprint", {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action", "list-sprints"] });
+      qc.invalidateQueries({ queryKey: ["action", "get-sprint"] });
+    },
+    onError: (err: unknown) => {
+      toast.error(messageOf(err, "release-sprint", "Failed to release sprint"));
+    },
+  });
+}
+
 export function useCreateSprintArtifact() {
   const qc = useQueryClient();
   return useActionMutation("create-sprint-artifact", {

@@ -22,6 +22,8 @@ const EXACT_GROUP: Record<string, ArtifactGroup> = {
   briefs: "设计",
   "verify-report": "验证",
   story: "验证",
+  "sprint-story": "验证",
+  "sprint-recap": "验证",
   "spike-report": "验证",
 };
 

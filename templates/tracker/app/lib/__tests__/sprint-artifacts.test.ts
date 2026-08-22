@@ -21,6 +21,8 @@ describe("classifyDocKey — S6 产物库三段式分组 (03-tracker.md §5.2 �
   it("classifies verification docs, including the audit-report: prefix family", () => {
     expect(classifyDocKey("verify-report")).toBe("验证");
     expect(classifyDocKey("story")).toBe("验证");
+    expect(classifyDocKey("sprint-story")).toBe("验证");
+    expect(classifyDocKey("sprint-recap")).toBe("验证");
     expect(classifyDocKey("spike-report")).toBe("验证");
     expect(classifyDocKey("audit-report:2")).toBe("验证");
   });
